@@ -179,6 +179,18 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 SSE event payload wrappers deleted
+
+- Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts`
+- `tests/sharedmodule/sse-rust-parity-chat-json-to-sse.blackbox.spec.ts`, `tests/sharedmodule/anthropic-sse-tool-input-no-fallback.spec.ts`, and `tests/sharedmodule/gemini-sse-no-role-fallback.spec.ts` now call `router_hotpath_napi.node` directly for JSON->SSE sequence ownership.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the three deleted wrapper paths and source references as retired.
+- `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` now mark SSE JSON->SSE sequence ordering as direct Rust/NAPI-owned with TS limited to stream IO shell only.
+- Strict audit now reports `prodTsShellCount=91`, `nonNativeFileCount=0`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=8`.
+- Verification passed: focused SSE/residue Jest 220/220, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule `tsc`, root `tsc`, exact source ref scan for deleted wrapper paths, and `git diff --check`.
+
 ### 2026-07-09 zero-production-import conversion facades deleted
 
 - Physically deleted three zero-production-import TS shells after exact source scan proved no production importer and no host bridge/package export reachability:

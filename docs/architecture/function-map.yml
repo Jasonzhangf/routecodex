@@ -4039,7 +4039,7 @@ owners:
     status: active
     summary: "OpenAI Chat SSE/JSON stream projection for chat chunks, usage, reasoning, and tool-call deltas"
     owner_kind: rust_ssot
-    owner_scope: "OpenAI Chat JSON->SSE event sequence projection for chat chunks, usage, reasoning, and tool-call deltas; TS remains native wrapper / stream IO shell"
+    owner_scope: "OpenAI Chat JSON->SSE event sequence projection for chat chunks, usage, reasoning, and tool-call deltas; TS remains stream IO shell only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     canonical_types:
       - ChatCompletionResponse
@@ -4050,7 +4050,6 @@ owners:
       - build_chat_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
@@ -4068,7 +4067,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
+      - "Chat JSON->SSE role/content/reasoning/tool/finish/done ordering is Rust-owned through `build_chat_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint; the old TS event-payload wrapper is deleted."
       - "Chat SSE->JSON event aggregation, usage normalization, tool/function delta accumulation, and incomplete stream detection are Rust-owned through `build_chat_json_from_sse_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
       - "Chat stream projection may preserve stream shape; it must not own provider health, route policy, or Hub tool governance."
 
@@ -4076,7 +4075,7 @@ owners:
     status: active
     summary: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners"
     owner_kind: rust_ssot
-    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Anthropic JSON->SSE sequence, Anthropic SSE->JSON decode, Gemini JSON->SSE sequence, and Gemini SSE->JSON decode are Rust-owned and TS remains native wrapper / stream IO shell"
+    owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Anthropic JSON->SSE sequence, Anthropic SSE->JSON decode, Gemini JSON->SSE sequence, and Gemini SSE->JSON decode are Rust-owned and TS remains stream IO shell only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     canonical_types:
       - AnthropicSseEvent
@@ -4090,8 +4089,6 @@ owners:
       - build_gemini_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
@@ -4110,7 +4107,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners; shared registry/writer must not learn provider-specific branches."
+      - "Anthropic/Gemini stream differences stay inside protocol-specific Rust SSE owners; shared registry/writer must not learn provider-specific branches and the old TS event-payload wrappers are deleted."
       - "Anthropic JSON->SSE message/content/reasoning/tool/stop event ordering is Rust-owned through `build_anthropic_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
       - "Anthropic SSE->JSON event parsing, content aggregation, reasoning projection, tool input materialization, and incomplete stream fail-fast behavior are Rust-owned through `build_anthropic_json_from_sse_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."
       - "Gemini JSON->SSE part/done event ordering and reasoning projection are Rust-owned through `build_gemini_sse_event_sequence_json` and the unified `sse_runtime_dispatch` NAPI entrypoint."

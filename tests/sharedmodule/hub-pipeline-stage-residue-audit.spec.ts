@@ -719,6 +719,41 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('createMapper');
   });
 
+  it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
+    const repoRoot = process.cwd();
+    const retiredPaths = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts',
+    ];
+    const existingRetiredPaths = retiredPaths.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
+    const sourceRoots = [
+      path.join(repoRoot, 'src'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src'),
+    ];
+    const references: string[] = [];
+
+    for (const root of sourceRoots) {
+      for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
+        const relativePath = path.relative(repoRoot, fullPath).split(path.sep).join('/');
+        if (retiredPaths.includes(relativePath)) {
+          continue;
+        }
+        const source = fs.readFileSync(fullPath, 'utf8');
+        for (const retiredPath of retiredPaths) {
+          const withoutExtension = retiredPath.replace(/\.ts$/, '');
+          const basename = path.basename(withoutExtension);
+          if (source.includes(withoutExtension) || source.includes(basename)) {
+            references.push(`${relativePath} -> ${basename}`);
+          }
+        }
+      }
+    }
+
+    expect(existingRetiredPaths).toEqual([]);
+    expect(references).toEqual([]);
+  });
+
   it('standardized bridge must not export zero-consumer option type shells', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts'),

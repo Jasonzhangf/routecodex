@@ -1,12 +1,29 @@
 import { describe, expect, it } from '@jest/globals';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
-import { buildGeminiSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-gemini-sse-event-payload.js';
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+const buildGeminiSseEventSequenceJson = nativeBinding.buildGeminiSseEventSequenceJson as (inputJson: string) => unknown;
 
 type GeminiResponse = {
   candidates?: unknown[];
 };
 
 describe('gemini SSE no-fallback boundary', () => {
+  function directNativeGeminiEvents(input: { response: unknown }): unknown[] {
+    const raw = buildGeminiSseEventSequenceJson(JSON.stringify(input));
+    if (typeof raw === 'object' && raw !== null && 'message' in raw) {
+      throw new Error(String((raw as { message: unknown }).message));
+    }
+    if (typeof raw === 'string' && raw.startsWith('Error: ')) {
+      throw new Error(raw);
+    }
+    return JSON.parse(String(raw));
+  }
+
   it('emits explicit Gemini data events for valid content parts', async () => {
     const response: GeminiResponse = {
       candidates: [
@@ -20,7 +37,7 @@ describe('gemini SSE no-fallback boundary', () => {
       ]
     };
 
-    const events = buildGeminiSseEventSequenceWithNative({response});
+    const events = directNativeGeminiEvents({response});
 
     expect(events.every((event) => !Object.prototype.hasOwnProperty.call(event as object, 'sequenceNumber'))).toBe(true);
     expect(events.every((event) => !Object.prototype.hasOwnProperty.call(event as object, 'timestamp'))).toBe(true);
@@ -57,7 +74,7 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini candidate: missing role');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini candidate: missing role');
   });
 
   it('throws when response candidates are missing instead of emitting an empty done event', async () => {
@@ -66,7 +83,7 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini response: missing candidates');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini response: missing candidates');
   });
 
   it('throws when a candidate is null instead of coercing it into an empty object', async () => {
@@ -75,7 +92,7 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini candidate at index 0');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini candidate at index 0');
   });
 
   it('throws when candidate parts are missing instead of emitting only a done event', async () => {
@@ -91,7 +108,7 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini candidate: missing parts');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini candidate: missing parts');
   });
 
   it('throws when a candidate content part is null instead of silently dropping it', async () => {
@@ -107,7 +124,7 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini candidate part at index 0');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini candidate part at index 0');
   });
 
   it('throws when a candidate content part is scalar instead of emitting it as a part', async () => {
@@ -123,6 +140,6 @@ describe('gemini SSE no-fallback boundary', () => {
     };
 
 
-    expect(() => buildGeminiSseEventSequenceWithNative({ response })).toThrow('Invalid Gemini candidate part at index 0');
+    expect(() => directNativeGeminiEvents({ response })).toThrow('Invalid Gemini candidate part at index 0');
   });
 });

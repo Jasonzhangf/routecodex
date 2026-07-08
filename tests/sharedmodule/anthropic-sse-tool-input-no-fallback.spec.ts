@@ -1,16 +1,19 @@
 import { describe, expect, it } from '@jest/globals';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
-import { buildAnthropicSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-anthropic-sse-event-payload.js';
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+const buildAnthropicSseEventSequenceJson = nativeBinding.buildAnthropicSseEventSequenceJson as (inputJson: string) => unknown;
 
 type AnthropicMessageResponse = Record<string, unknown> & {
   content?: unknown[];
 };
 
 describe('anthropic SSE tool input no-fallback boundary', () => {
-  it('throws on unserializable tool input instead of stringifying a fallback value', async () => {
-    const cyclic: Record<string, unknown> = { command: 'pwd' };
-    cyclic.self = cyclic;
-
+  it('returns the Rust fail-fast error for missing tool input instead of synthesizing a fallback value', async () => {
     const response: AnthropicMessageResponse = {
       id: 'msg_anthropic_tool_input_no_fallback',
       type: 'message',
@@ -20,17 +23,21 @@ describe('anthropic SSE tool input no-fallback boundary', () => {
         {
           type: 'tool_use',
           id: 'toolu_1',
-          name: 'exec_command',
-          input: cyclic
+          name: 'exec_command'
         }
       ],
       stop_reason: 'tool_use'
     };
 
-    
-    expect(() => buildAnthropicSseEventSequenceWithNative({
+    const raw = buildAnthropicSseEventSequenceJson(JSON.stringify({
       response,
-      requestId: 'req_anthropic_tool_input_no_fallback'
-    })).toThrow('json stringify failed');
+      request_id: 'req_anthropic_tool_input_no_fallback'
+    }));
+
+    const nativeError = raw as { message?: unknown; code?: unknown };
+    expect(String(nativeError.message)).toContain('Invalid Anthropic tool_use block: missing input');
+    expect(nativeError.code).toBe('GenericFailure');
+    expect(String(nativeError.message)).not.toContain('partial_json');
+    expect(String(nativeError.message)).not.toContain('null');
   });
 });

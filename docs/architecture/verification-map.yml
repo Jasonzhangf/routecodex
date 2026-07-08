@@ -2368,7 +2368,6 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
     contract:
@@ -2383,7 +2382,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Chat JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."
+      - "Chat JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch and direct Rust NAPI tests; the old TS event-payload wrapper must stay deleted."
       - "Chat SSE->JSON decode aggregation must stay native/Rust-owned; focused parity must prove incomplete streams fail fast without TS converter ownership."
       - "Chat stream projection preserves stream shape; provider health, route policy, and Hub tool governance remain outside SSE."
 
@@ -2391,8 +2390,6 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_sse_event_payload.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs
@@ -2407,7 +2404,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Anthropic/Gemini stream differences stay inside protocol-specific SSE owners."
+      - "Anthropic/Gemini stream differences stay inside protocol-specific Rust SSE owners; old TS event-payload wrappers must stay deleted."
       - "Anthropic JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."
       - "Anthropic SSE->JSON decode aggregation and malformed stream fail-fast behavior must stay native/Rust-owned without TS converter ownership."
       - "Gemini JSON->SSE sequence ordering must stay native/Rust-owned through unified dispatch."

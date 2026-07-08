@@ -1,29 +1,37 @@
 import { describe, expect, it } from '@jest/globals';
 import path from "path";
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 
-import { buildChatSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-chat-sse-event-payload.js';
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+const buildChatSseEventSequenceJson = nativeBinding.buildChatSseEventSequenceJson as (inputJson: string) => unknown;
 
 type ChatCompletionResponse = Record<string, unknown> & {
   model: string;
 };
 
-async function collectEvents(response: ChatCompletionResponse): Promise<any[]> {
-  return buildChatSseEventSequenceWithNative({ response, requestId: 'req_chat_sse_parity', config: { enableTimestampGeneration: false, includeSequenceNumbers: true, chunkDelayMs: 0, reasoningMode: 'channel' } });
-}
-
 function nativeEvents(response: ChatCompletionResponse): any[] {
-  return buildChatSseEventSequenceWithNative({
+  const raw = buildChatSseEventSequenceJson(JSON.stringify({
     response,
     model: response.model,
-    requestId: 'req_chat_sse_parity',
+    request_id: 'req_chat_sse_parity',
     config: {
       enableTimestampGeneration: false,
       includeSequenceNumbers: true,
       chunkDelayMs: 0,
       reasoningMode: 'channel'
-    }
-  });
+    },
+  }));
+  if (typeof raw === 'object' && raw !== null && 'message' in raw) {
+    throw new Error(String((raw as { message: unknown }).message));
+  }
+  if (typeof raw === 'string' && raw.startsWith('Error: ')) {
+    throw new Error(raw);
+  }
+  return JSON.parse(String(raw));
 }
 
 function parsePayloads(events: any[]): unknown[] {
@@ -61,11 +69,10 @@ describe('chat JSON to SSE Rust parity boundary', () => {
       usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 }
     };
 
-    const tsEvents = await collectEvents(response);
     const rustEvents = nativeEvents(response);
+    const payloads = parsePayloads(rustEvents) as any[];
 
-    expect(parsePayloads(tsEvents)).toEqual(parsePayloads(rustEvents));
-    expect(tsEvents.map((event) => event.event)).toEqual([
+    expect(rustEvents.map((event) => event.event)).toEqual([
       'chat_chunk',
       'chat_chunk',
       'chat_chunk',
@@ -74,8 +81,32 @@ describe('chat JSON to SSE Rust parity boundary', () => {
       'chat_chunk',
       'chat.done'
     ]);
-    expect(JSON.stringify(tsEvents)).not.toContain('metadata');
-    expect(JSON.stringify(tsEvents)).not.toContain('__rt');
+    expect(payloads[0].choices[0].delta).toEqual({ role: 'assistant' });
+    expect(payloads[1].choices[0].delta).toEqual({
+      reasoning: 'private plan',
+      reasoning_content: 'private plan'
+    });
+    expect(payloads[2].choices[0].delta).toEqual({ content: 'visible answer' });
+    expect(payloads[3].choices[0].delta.tool_calls[0]).toEqual({
+      function: {
+        arguments: '',
+        name: 'get_weather'
+      },
+      id: 'call_weather',
+      index: 0,
+      type: 'function'
+    });
+    expect(payloads[4].choices[0].delta.tool_calls[0]).toEqual({
+      function: {
+        arguments: '{"city":"SF"}'
+      },
+      index: 0
+    });
+    expect(payloads[5].choices[0].finish_reason).toBe('tool_calls');
+    expect(payloads[5].usage).toEqual({ prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 });
+    expect(payloads[6]).toBe('[DONE]');
+    expect(JSON.stringify(rustEvents)).not.toContain('metadata');
+    expect(JSON.stringify(rustEvents)).not.toContain('__rt');
   });
 
   it('fails missing finish_reason instead of synthesizing terminal success', async () => {
@@ -92,16 +123,13 @@ describe('chat JSON to SSE Rust parity boundary', () => {
       ]
     } as unknown as ChatCompletionResponse;
 
-    await expect(collectEvents(response)).rejects.toThrow('missing finish_reason');
     expect(() => nativeEvents(response)).toThrow('missing finish_reason');
   });
 
-  it('keeps chat native sequence wrapper as the only owner', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts'),
-      'utf8'
-    );
-    expect(source).toContain('buildChatSseEventSequenceWithNative');
-    expect(source).toContain('buildChatSseStreamWithNativeFrames');
+  it('keeps chat SSE projection on the Rust NAPI owner without the retired TS wrapper', () => {
+    expect(typeof buildChatSseEventSequenceJson).toBe('function');
+    expect(fs.existsSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts')
+    )).toBe(false);
   });
 });
