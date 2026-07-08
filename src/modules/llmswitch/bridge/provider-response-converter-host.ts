@@ -1,5 +1,4 @@
-import type { Readable } from 'node:stream';
-import { requireCoreDist } from './module-loader.js';
+import { PassThrough, type Readable } from 'node:stream';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 import {
   recordResponsesResponse,
@@ -11,6 +10,10 @@ type JsonObject = Record<string, unknown>;
 type StageRecorder = { record(stage: string, payload: object): void };
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 type NativeSseRuntimeProtocol = string;
+type NativeSseFramesOutput = {
+  frames: string[];
+  stats?: Record<string, unknown>;
+};
 
 type ProviderResponseRuntimeEffectPlan = {
   servertoolRuntimeActions?: unknown[];
@@ -73,16 +76,6 @@ type RuntimeMetadataModule = {
   ensureRuntimeMetadata?: (carrier: Record<string, unknown>) => JsonObject;
 };
 
-type NativeSseRuntimeModule = {
-  buildReadableFromSseFrames?: (frames: string[]) => Readable;
-  buildSseFramesFromJsonWithNative?: (input: {
-    protocol: string;
-    response: unknown;
-    requestId: string;
-    model: string;
-  }) => { frames: string[] };
-};
-
 type NativeRespSemanticsModule = {
   resolveProviderResponseContextHelpersWithNative?: (input: {
     context: AdapterContext;
@@ -114,114 +107,128 @@ type NativeRespSemanticsModule = {
   }) => Record<string, unknown>;
 };
 
-type MetadataCenterRuntimeControlWriterModule = {
-  applyNativeRuntimeControlWritePlan?: (args: {
-    metadata: Record<string, unknown>;
-    runtimeControl: Record<string, unknown>;
-    writer: { module: string; symbol: string; stage: string };
-    reason: string;
-  }) => void;
-  projectNativeMetadataWritePlanToRuntimeControlWritePlan?: (plan: unknown) => {
-    runtimeControl?: Record<string, unknown>;
-  };
-  readBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
-  readContinuationContextFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
-  readRequestTruthFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
-  readRuntimeControlFromBoundMetadataCenter?: (target: Record<string, unknown>) => unknown;
+type RuntimeControlWriter = { module: string; symbol: string; stage: string };
+type MetadataCenterLike = {
+  writeRuntimeControl?: (
+    key: string,
+    value: unknown,
+    writtenBy: RuntimeControlWriter,
+    reason?: string,
+  ) => void;
+  readRuntimeControl?: () => Record<string, unknown>;
+  readRequestTruth?: () => Record<string, unknown>;
+  readContinuationContext?: () => Record<string, unknown>;
+  readProviderObservation?: () => Record<string, unknown>;
 };
 
-function requireModuleFn<TModule extends object, TFunction extends Function>(
-  module: TModule,
-  name: keyof TModule,
-  label: string
-): TFunction {
-  const fn = module[name];
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
+
+function requireNativeBindingFunction(capability: string): (...args: string[]) => unknown {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding[capability];
   if (typeof fn !== 'function') {
-    throw new Error(`[provider-response-converter-host] ${label}.${String(name)} not available`);
+    throw new Error(`[provider-response-converter-host] ${capability} not available`);
   }
-  return fn as unknown as TFunction;
+  return fn as (...args: string[]) => unknown;
 }
 
-function requireCoreModuleFn<TModule extends object, TFunction extends (...args: any[]) => any>(
-  subpath: string,
-  name: keyof TModule,
-  label: string
-): TFunction {
-  return ((...args: Parameters<TFunction>): ReturnType<TFunction> => {
-    const module = requireCoreDist<TModule>(subpath);
-    const fn = requireModuleFn<TModule, TFunction>(module, name, label);
-    return fn(...args) as ReturnType<TFunction>;
-  }) as TFunction;
+function callNativeJsonObject<T>(capability: string, input: unknown): T {
+  const fn = requireNativeBindingFunction(capability);
+  const raw = fn(JSON.stringify(input ?? null));
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error(`[provider-response-converter-host] ${capability} returned empty result`);
+  }
+  return JSON.parse(raw) as T;
 }
 
-const executeHubPipelineWithNative = requireCoreModuleFn<
-  NativeHubPipelineProtocolModule,
-  NonNullable<NativeHubPipelineProtocolModule['executeHubPipelineWithNative']>
->('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'executeHubPipelineWithNative', 'native protocol');
-const buildProviderResponseMetadataSnapshotWithNative = requireCoreModuleFn<
-  NativeHubPipelineProtocolModule,
-  NonNullable<NativeHubPipelineProtocolModule['buildProviderResponseMetadataSnapshotWithNative']>
->('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'buildProviderResponseMetadataSnapshotWithNative', 'native protocol');
-const normalizeProviderResponseEffectPlanWithNative = requireCoreModuleFn<
-  NativeHubPipelineProtocolModule,
-  NonNullable<NativeHubPipelineProtocolModule['normalizeProviderResponseEffectPlanWithNative']>
->('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'normalizeProviderResponseEffectPlanWithNative', 'native protocol');
-const resolveProviderProtocolWithNative = requireCoreModuleFn<
-  NativeHubPipelineProtocolModule,
-  NonNullable<NativeHubPipelineProtocolModule['resolveProviderProtocolWithNative']>
->('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'resolveProviderProtocolWithNative', 'native protocol');
-const publishResponsesRecordPlanWithNative = requireCoreModuleFn<
-  NativeSharedSemanticsModule,
-  NonNullable<NativeSharedSemanticsModule['publishResponsesRecordPlanWithNative']>
->('native/router-hotpath/native-shared-conversion-semantics', 'publishResponsesRecordPlanWithNative', 'native shared semantics');
-const ensureRuntimeMetadata = requireCoreModuleFn<
-  RuntimeMetadataModule,
-  NonNullable<RuntimeMetadataModule['ensureRuntimeMetadata']>
->('conversion/runtime-metadata', 'ensureRuntimeMetadata', 'runtime metadata');
-const buildReadableFromSseFrames = requireCoreModuleFn<
-  NativeSseRuntimeModule,
-  NonNullable<NativeSseRuntimeModule['buildReadableFromSseFrames']>
->('native/router-hotpath/native-sse-runtime', 'buildReadableFromSseFrames', 'native sse runtime');
-const buildSseFramesFromJsonWithNative = requireCoreModuleFn<
-  NativeSseRuntimeModule,
-  NonNullable<NativeSseRuntimeModule['buildSseFramesFromJsonWithNative']>
->('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
-const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn<
-  NativeRespSemanticsModule,
-  NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>
->('native/router-hotpath/native-hub-pipeline-resp-semantics', 'buildProviderSseStreamReadErrorDescriptorWithNative', 'native resp semantics');
-const materializeProviderResponseSsePayloadWithNative = requireCoreModuleFn<
-  NativeRespSemanticsModule,
-  NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>
->('native/router-hotpath/native-hub-pipeline-resp-semantics', 'materializeProviderResponseSsePayloadWithNative', 'native resp semantics');
-const applyNativeRuntimeControlWritePlan = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['applyNativeRuntimeControlWritePlan']>
->('conversion/hub/metadata-center-runtime-control-writer', 'applyNativeRuntimeControlWritePlan', 'metadata writer');
-const projectNativeMetadataWritePlanToRuntimeControlWritePlan = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['projectNativeMetadataWritePlanToRuntimeControlWritePlan']>
->('conversion/hub/metadata-center-runtime-control-writer', 'projectNativeMetadataWritePlanToRuntimeControlWritePlan', 'metadata writer');
-const readBoundMetadataCenter = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['readBoundMetadataCenter']>
->('conversion/hub/metadata-center-runtime-control-writer', 'readBoundMetadataCenter', 'metadata writer');
-const readContinuationContextFromBoundMetadataCenter = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['readContinuationContextFromBoundMetadataCenter']>
->('conversion/hub/metadata-center-runtime-control-writer', 'readContinuationContextFromBoundMetadataCenter', 'metadata writer');
-const readRequestTruthFromBoundMetadataCenter = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['readRequestTruthFromBoundMetadataCenter']>
->('conversion/hub/metadata-center-runtime-control-writer', 'readRequestTruthFromBoundMetadataCenter', 'metadata writer');
-const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn<
-  MetadataCenterRuntimeControlWriterModule,
-  NonNullable<MetadataCenterRuntimeControlWriterModule['readRuntimeControlFromBoundMetadataCenter']>
->('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
-const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn<
-  NativeRespSemanticsModule,
-  NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>
->('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
+function executeHubPipelineWithNative(
+  input: Parameters<NonNullable<NativeHubPipelineProtocolModule['executeHubPipelineWithNative']>>[0]
+): ReturnType<NonNullable<NativeHubPipelineProtocolModule['executeHubPipelineWithNative']>> {
+  return callNativeJsonObject('executeHubPipelineJson', input);
+}
+
+function buildProviderResponseMetadataSnapshotWithNative(
+  input: Parameters<NonNullable<NativeHubPipelineProtocolModule['buildProviderResponseMetadataSnapshotWithNative']>>[0]
+): ReturnType<NonNullable<NativeHubPipelineProtocolModule['buildProviderResponseMetadataSnapshotWithNative']>> {
+  return callNativeJsonObject('buildProviderResponseMetadataSnapshotJson', input);
+}
+
+function normalizeProviderResponseEffectPlanWithNative(
+  input: Parameters<NonNullable<NativeHubPipelineProtocolModule['normalizeProviderResponseEffectPlanWithNative']>>[0]
+): ReturnType<NonNullable<NativeHubPipelineProtocolModule['normalizeProviderResponseEffectPlanWithNative']>> {
+  return callNativeJsonObject('normalizeProviderResponseEffectPlanJson', input);
+}
+
+function resolveProviderProtocolWithNative(
+  input: Parameters<NonNullable<NativeHubPipelineProtocolModule['resolveProviderProtocolWithNative']>>[0]
+): ReturnType<NonNullable<NativeHubPipelineProtocolModule['resolveProviderProtocolWithNative']>> {
+  return callNativeJsonObject('resolveProviderProtocolJson', input);
+}
+
+function publishResponsesRecordPlanWithNative(
+  args: Parameters<NonNullable<NativeSharedSemanticsModule['publishResponsesRecordPlanWithNative']>>[0]
+): ReturnType<NonNullable<NativeSharedSemanticsModule['publishResponsesRecordPlanWithNative']>> {
+  const fn = requireNativeBindingFunction('publishResponsesRecordPlanJson');
+  const raw = fn(
+    String(args.requestId ?? ''),
+    JSON.stringify(args.response ?? null),
+    JSON.stringify(args.context ?? null),
+    JSON.stringify(args.runtimeStateWrite ?? null),
+    String(args.entryEndpoint ?? '')
+  );
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error('[provider-response-converter-host] publishResponsesRecordPlanJson returned empty result');
+  }
+  return JSON.parse(raw) as ReturnType<NonNullable<NativeSharedSemanticsModule['publishResponsesRecordPlanWithNative']>>;
+}
+
+function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObject {
+  const nextCarrier = callNativeJsonObject<Record<string, unknown>>('ensureRuntimeMetadataJson', carrier);
+  const directCenter = Reflect.get(carrier, METADATA_CENTER_SYMBOL);
+  const rustSnapshot = Reflect.get(carrier, RUST_SNAPSHOT_SYMBOL);
+  Object.assign(carrier, nextCarrier);
+  if (directCenter !== undefined) {
+    Reflect.set(carrier, METADATA_CENTER_SYMBOL, directCenter);
+  }
+  if (rustSnapshot !== undefined) {
+    Reflect.set(carrier, RUST_SNAPSHOT_SYMBOL, rustSnapshot);
+  }
+  const existing = carrier.__rt;
+  if (isRecord(existing)) {
+    return existing as JsonObject;
+  }
+  carrier.__rt = {};
+  return carrier.__rt as JsonObject;
+}
+
+function buildProviderSseStreamReadErrorDescriptorWithNative(
+  input: Parameters<NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>>[0]
+): ReturnType<NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>> {
+  return callNativeJsonObject('buildProviderSseStreamReadErrorDescriptorJson', input);
+}
+
+function materializeProviderResponseSsePayloadWithNative(
+  input: Parameters<NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>>[0]
+): ReturnType<NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>> {
+  return callNativeJsonObject('materializeProviderResponseSsePayloadJson', input);
+}
+
+function resolveProviderResponseContextHelpersWithNative(
+  input: Parameters<NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>>[0]
+): ReturnType<NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>> {
+  const fn = requireNativeBindingFunction('resolveProviderResponseContextHelpersJson');
+  const raw = fn(
+    JSON.stringify(input.context ?? {}),
+    JSON.stringify(input.legacyFollowupMarkerRaw ?? null),
+    JSON.stringify(typeof input.entryEndpoint === 'string' ? input.entryEndpoint : null),
+    JSON.stringify(input.toolSurfaceModeRaw ?? null)
+  );
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error('[provider-response-converter-host] resolveProviderResponseContextHelpersJson returned empty result');
+  }
+  return JSON.parse(raw) as ReturnType<NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>>;
+}
 
 function planChatProcessSessionUsageWithNative(input: {
   context: Record<string, unknown>;
@@ -235,12 +242,156 @@ function planChatProcessSessionUsageWithNative(input: {
   return JSON.parse(fn(JSON.stringify(input ?? {}))) as unknown;
 }
 
+function buildSseFramesFromJsonWithNative(input: {
+  protocol: string;
+  response: unknown;
+  requestId: string;
+  model: string;
+}): NativeSseFramesOutput {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding.buildSseFramesFromJsonJson as undefined | ((inputJson: string) => string);
+  if (typeof fn !== 'function') {
+    throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify({
+    protocol: input.protocol,
+    response: input.response,
+    request_id: input.requestId,
+    model: input.model,
+    config: {},
+  }))) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson returned invalid result');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (!Array.isArray(record.frames) || record.frames.some((frame) => typeof frame !== 'string')) {
+    throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson returned invalid frames');
+  }
+  return {
+    frames: record.frames as string[],
+    ...(isRecord(record.stats) ? { stats: record.stats } : {}),
+  };
+}
+
+function buildReadableFromSseFrames(frames: string[]): Readable {
+  const stream = new PassThrough({ objectMode: false });
+  queueMicrotask(() => {
+    try {
+      for (const frame of frames) {
+        if (!stream.writable) {
+          break;
+        }
+        stream.write(frame);
+      }
+      if (stream.writable) {
+        stream.end();
+      }
+    } catch (error) {
+      stream.destroy(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+  return stream;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function readBoundMetadataCenter(target: Record<string, unknown>): MetadataCenterLike | undefined {
+  const directCenter = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (directCenter && typeof directCenter.writeRuntimeControl === 'function') {
+    return directCenter;
+  }
+  const nested = asRecord(target.metadata);
+  if (!nested) {
+    return undefined;
+  }
+  const nestedCenter = Reflect.get(nested, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  return nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function'
+    ? nestedCenter
+    : undefined;
+}
+
+function readRuntimeControlFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const runtimeControl = readBoundMetadataCenter(target)?.readRuntimeControl?.();
+  return isRecord(runtimeControl) ? { ...runtimeControl } : {};
+}
+
+function readRequestTruthFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const requestTruth = readBoundMetadataCenter(target)?.readRequestTruth?.();
+  return isRecord(requestTruth) ? { ...requestTruth } : {};
+}
+
+function readContinuationContextFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const continuationContext = readBoundMetadataCenter(target)?.readContinuationContext?.();
+  return isRecord(continuationContext) ? { ...continuationContext } : {};
+}
+
+function writeMetadataCenterRuntimeControl(args: {
+  target: Record<string, unknown>;
+  center: MetadataCenterLike;
+  key: string;
+  value: unknown;
+  writer: RuntimeControlWriter;
+  reason: string;
+}): void {
+  args.center.writeRuntimeControl?.(args.key, args.value, args.writer, args.reason);
+  const currentSnapshot = asRecord(Reflect.get(args.target, RUST_SNAPSHOT_SYMBOL));
+  const nextSnapshot = currentSnapshot ? { ...currentSnapshot } : {};
+  const runtimeControl = asRecord(nextSnapshot.runtimeControl) ?? {};
+  runtimeControl[args.key] = structuredClone(args.value);
+  nextSnapshot.runtimeControl = runtimeControl;
+  Reflect.set(args.target, RUST_SNAPSHOT_SYMBOL, nextSnapshot);
+}
+
+function applyNativeRuntimeControlWritePlan(args: {
+  metadata: Record<string, unknown>;
+  runtimeControl: Record<string, unknown>;
+  writer: RuntimeControlWriter;
+  reason: string;
+}): void {
+  const directCenter = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  const nestedMetadata = asRecord(args.metadata.metadata);
+  const nestedCenter = nestedMetadata
+    ? Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined
+    : undefined;
+  const bound = directCenter && typeof directCenter.writeRuntimeControl === 'function'
+    ? { target: args.metadata, center: directCenter }
+    : nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function' && nestedMetadata
+      ? { target: nestedMetadata, center: nestedCenter }
+      : undefined;
+  if (!bound) {
+    throw new Error('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
+  }
+  for (const [key, value] of Object.entries(args.runtimeControl)) {
+    if (value === undefined) {
+      continue;
+    }
+    writeMetadataCenterRuntimeControl({
+      target: bound.target,
+      center: bound.center,
+      key,
+      value,
+      writer: args.writer,
+      reason: args.reason,
+    });
+  }
+}
+
+function projectNativeMetadataWritePlanToRuntimeControlWritePlan(plan: unknown): {
+  runtimeControl?: Record<string, unknown>;
+} {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding.projectMetadataWritePlanToRuntimeControlWritePlanJson as undefined | ((inputJson: string) => string);
+  if (typeof fn !== 'function') {
+    throw new Error('[provider-response-converter-host] native metadata writer.projectMetadataWritePlanToRuntimeControlWritePlanJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify({ plan }))) as unknown;
+  return isRecord(parsed) ? parsed as { runtimeControl?: Record<string, unknown> } : {};
 }
 
 function normalizeRecordPayload(payload: unknown): object {

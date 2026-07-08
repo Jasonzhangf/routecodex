@@ -702,7 +702,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(retiredHelperPath)).toBe(false);
     expect(source).toContain('resolveProviderResponseContextSignals');
     expect(source).toContain('resolveProviderResponseContextHelpersWithNative');
-    expect(source).toContain("'native/router-hotpath/native-hub-pipeline-resp-semantics'");
+    expect(source).toContain('resolveProviderResponseContextHelpersJson');
+    expect(source).not.toContain("'native/router-hotpath/native-hub-pipeline-resp-semantics'");
     expect(source).not.toContain('conversion/hub/response/provider-response-helpers');
     expect(findings).toEqual([]);
     expect(source).not.toContain('maybeCommitClockReservationFromContext');

@@ -1,37 +1,76 @@
-import { requireCoreDist } from './module-loader.js';
+import { PassThrough } from 'node:stream';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 import { recordResponsesResponse, finalizeResponsesConversationRequestRetention, } from './responses-conversation-store-host.js';
-function requireModuleFn(module, name, label) {
-    const fn = module[name];
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
+function requireNativeBindingFunction(capability) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding[capability];
     if (typeof fn !== 'function') {
-        throw new Error(`[provider-response-converter-host] ${label}.${String(name)} not available`);
+        throw new Error(`[provider-response-converter-host] ${capability} not available`);
     }
     return fn;
 }
-function requireCoreModuleFn(subpath, name, label) {
-    return (...args) => {
-        const module = requireCoreDist(subpath);
-        const fn = requireModuleFn(module, name, label);
-        return fn(...args);
-    };
+function callNativeJsonObject(capability, input) {
+    const fn = requireNativeBindingFunction(capability);
+    const raw = fn(JSON.stringify(input ?? null));
+    if (typeof raw !== 'string' || !raw) {
+        throw new Error(`[provider-response-converter-host] ${capability} returned empty result`);
+    }
+    return JSON.parse(raw);
 }
-const executeHubPipelineWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'executeHubPipelineWithNative', 'native protocol');
-const buildProviderResponseMetadataSnapshotWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'buildProviderResponseMetadataSnapshotWithNative', 'native protocol');
-const normalizeProviderResponseEffectPlanWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'normalizeProviderResponseEffectPlanWithNative', 'native protocol');
-const resolveProviderProtocolWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'resolveProviderProtocolWithNative', 'native protocol');
-const publishResponsesRecordPlanWithNative = requireCoreModuleFn('native/router-hotpath/native-shared-conversion-semantics', 'publishResponsesRecordPlanWithNative', 'native shared semantics');
-const ensureRuntimeMetadata = requireCoreModuleFn('conversion/runtime-metadata', 'ensureRuntimeMetadata', 'runtime metadata');
-const buildReadableFromSseFrames = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildReadableFromSseFrames', 'native sse runtime');
-const buildSseFramesFromJsonWithNative = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
-const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'buildProviderSseStreamReadErrorDescriptorWithNative', 'native resp semantics');
-const materializeProviderResponseSsePayloadWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'materializeProviderResponseSsePayloadWithNative', 'native resp semantics');
-const applyNativeRuntimeControlWritePlan = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'applyNativeRuntimeControlWritePlan', 'metadata writer');
-const projectNativeMetadataWritePlanToRuntimeControlWritePlan = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'projectNativeMetadataWritePlanToRuntimeControlWritePlan', 'metadata writer');
-const readBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readBoundMetadataCenter', 'metadata writer');
-const readContinuationContextFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readContinuationContextFromBoundMetadataCenter', 'metadata writer');
-const readRequestTruthFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRequestTruthFromBoundMetadataCenter', 'metadata writer');
-const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
-const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
+function executeHubPipelineWithNative(input) {
+    return callNativeJsonObject('executeHubPipelineJson', input);
+}
+function buildProviderResponseMetadataSnapshotWithNative(input) {
+    return callNativeJsonObject('buildProviderResponseMetadataSnapshotJson', input);
+}
+function normalizeProviderResponseEffectPlanWithNative(input) {
+    return callNativeJsonObject('normalizeProviderResponseEffectPlanJson', input);
+}
+function resolveProviderProtocolWithNative(input) {
+    return callNativeJsonObject('resolveProviderProtocolJson', input);
+}
+function publishResponsesRecordPlanWithNative(args) {
+    const fn = requireNativeBindingFunction('publishResponsesRecordPlanJson');
+    const raw = fn(String(args.requestId ?? ''), JSON.stringify(args.response ?? null), JSON.stringify(args.context ?? null), JSON.stringify(args.runtimeStateWrite ?? null), String(args.entryEndpoint ?? ''));
+    if (typeof raw !== 'string' || !raw) {
+        throw new Error('[provider-response-converter-host] publishResponsesRecordPlanJson returned empty result');
+    }
+    return JSON.parse(raw);
+}
+function ensureRuntimeMetadata(carrier) {
+    const nextCarrier = callNativeJsonObject('ensureRuntimeMetadataJson', carrier);
+    const directCenter = Reflect.get(carrier, METADATA_CENTER_SYMBOL);
+    const rustSnapshot = Reflect.get(carrier, RUST_SNAPSHOT_SYMBOL);
+    Object.assign(carrier, nextCarrier);
+    if (directCenter !== undefined) {
+        Reflect.set(carrier, METADATA_CENTER_SYMBOL, directCenter);
+    }
+    if (rustSnapshot !== undefined) {
+        Reflect.set(carrier, RUST_SNAPSHOT_SYMBOL, rustSnapshot);
+    }
+    const existing = carrier.__rt;
+    if (isRecord(existing)) {
+        return existing;
+    }
+    carrier.__rt = {};
+    return carrier.__rt;
+}
+function buildProviderSseStreamReadErrorDescriptorWithNative(input) {
+    return callNativeJsonObject('buildProviderSseStreamReadErrorDescriptorJson', input);
+}
+function materializeProviderResponseSsePayloadWithNative(input) {
+    return callNativeJsonObject('materializeProviderResponseSsePayloadJson', input);
+}
+function resolveProviderResponseContextHelpersWithNative(input) {
+    const fn = requireNativeBindingFunction('resolveProviderResponseContextHelpersJson');
+    const raw = fn(JSON.stringify(input.context ?? {}), JSON.stringify(input.legacyFollowupMarkerRaw ?? null), JSON.stringify(typeof input.entryEndpoint === 'string' ? input.entryEndpoint : null), JSON.stringify(input.toolSurfaceModeRaw ?? null));
+    if (typeof raw !== 'string' || !raw) {
+        throw new Error('[provider-response-converter-host] resolveProviderResponseContextHelpersJson returned empty result');
+    }
+    return JSON.parse(raw);
+}
 function planChatProcessSessionUsageWithNative(input) {
     const binding = getRouterHotpathJsonBindingSync();
     const fn = binding.planChatProcessSessionUsageJson;
@@ -40,11 +79,128 @@ function planChatProcessSessionUsageWithNative(input) {
     }
     return JSON.parse(fn(JSON.stringify(input ?? {})));
 }
+function buildSseFramesFromJsonWithNative(input) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.buildSseFramesFromJsonJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson not available');
+    }
+    const parsed = JSON.parse(fn(JSON.stringify({
+        protocol: input.protocol,
+        response: input.response,
+        request_id: input.requestId,
+        model: input.model,
+        config: {},
+    })));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson returned invalid result');
+    }
+    const record = parsed;
+    if (!Array.isArray(record.frames) || record.frames.some((frame) => typeof frame !== 'string')) {
+        throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson returned invalid frames');
+    }
+    return {
+        frames: record.frames,
+        ...(isRecord(record.stats) ? { stats: record.stats } : {}),
+    };
+}
+function buildReadableFromSseFrames(frames) {
+    const stream = new PassThrough({ objectMode: false });
+    queueMicrotask(() => {
+        try {
+            for (const frame of frames) {
+                if (!stream.writable) {
+                    break;
+                }
+                stream.write(frame);
+            }
+            if (stream.writable) {
+                stream.end();
+            }
+        }
+        catch (error) {
+            stream.destroy(error instanceof Error ? error : new Error(String(error)));
+        }
+    });
+    return stream;
+}
 function isRecord(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 function asRecord(value) {
     return isRecord(value) ? value : undefined;
+}
+function readBoundMetadataCenter(target) {
+    const direct = Reflect.get(target, METADATA_CENTER_SYMBOL);
+    if (direct && typeof direct.writeRuntimeControl === 'function') {
+        return direct;
+    }
+    const nested = asRecord(target.metadata);
+    if (!nested) {
+        return undefined;
+    }
+    const nestedCenter = Reflect.get(nested, METADATA_CENTER_SYMBOL);
+    return nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function'
+        ? nestedCenter
+        : undefined;
+}
+function readRuntimeControlFromBoundMetadataCenter(target) {
+    const runtimeControl = readBoundMetadataCenter(target)?.readRuntimeControl?.();
+    return isRecord(runtimeControl) ? { ...runtimeControl } : {};
+}
+function readRequestTruthFromBoundMetadataCenter(target) {
+    const requestTruth = readBoundMetadataCenter(target)?.readRequestTruth?.();
+    return isRecord(requestTruth) ? { ...requestTruth } : {};
+}
+function readContinuationContextFromBoundMetadataCenter(target) {
+    const continuationContext = readBoundMetadataCenter(target)?.readContinuationContext?.();
+    return isRecord(continuationContext) ? { ...continuationContext } : {};
+}
+function writeMetadataCenterRuntimeControl(args) {
+    args.center.writeRuntimeControl?.(args.key, args.value, args.writer, args.reason);
+    const currentSnapshot = asRecord(Reflect.get(args.target, RUST_SNAPSHOT_SYMBOL));
+    const nextSnapshot = currentSnapshot ? { ...currentSnapshot } : {};
+    const runtimeControl = asRecord(nextSnapshot.runtimeControl) ?? {};
+    runtimeControl[args.key] = structuredClone(args.value);
+    nextSnapshot.runtimeControl = runtimeControl;
+    Reflect.set(args.target, RUST_SNAPSHOT_SYMBOL, nextSnapshot);
+}
+function applyNativeRuntimeControlWritePlan(args) {
+    const directCenter = Reflect.get(args.metadata, METADATA_CENTER_SYMBOL);
+    const nestedMetadata = asRecord(args.metadata.metadata);
+    const nestedCenter = nestedMetadata
+        ? Reflect.get(nestedMetadata, METADATA_CENTER_SYMBOL)
+        : undefined;
+    const bound = directCenter && typeof directCenter.writeRuntimeControl === 'function'
+        ? { target: args.metadata, center: directCenter }
+        : nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function' && nestedMetadata
+            ? { target: nestedMetadata, center: nestedCenter }
+            : undefined;
+    if (!bound) {
+        throw new Error('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
+    }
+    for (const [key, value] of Object.entries(args.runtimeControl)) {
+        if (value === undefined) {
+            continue;
+        }
+        writeMetadataCenterRuntimeControl({
+            target: bound.target,
+            center: bound.center,
+            key,
+            value,
+            writer: args.writer,
+            reason: args.reason,
+        });
+    }
+}
+function projectNativeMetadataWritePlanToRuntimeControlWritePlan(plan) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.projectMetadataWritePlanToRuntimeControlWritePlanJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[provider-response-converter-host] native metadata writer.projectMetadataWritePlanToRuntimeControlWritePlanJson not available');
+    }
+    const parsed = JSON.parse(fn(JSON.stringify({ plan })));
+    return isRecord(parsed) ? parsed : {};
 }
 function normalizeRecordPayload(payload) {
     if (isRecord(payload)) {

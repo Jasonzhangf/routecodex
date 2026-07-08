@@ -179,6 +179,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 provider response and runtime bridge refs direct-native wired
+
+- `src/modules/llmswitch/bridge/runtime-integrations.ts/js` now calls direct native JSON capabilities for SSE decode preload and provider runtime ingress policy; it no longer loads `native/router-hotpath/native-sse-runtime` or `native/router-hotpath/native-provider-runtime-ingress`.
+- `src/modules/llmswitch/bridge/provider-response-converter-host.ts/js` now calls direct Rust JSON capabilities for HubPipeline response execution, metadata snapshot planning, effect-plan normalization, provider protocol resolution, Responses record planning, runtime metadata carrier materialization, metadata write-plan projection, response SSE materialization/error descriptors, SSE frame building, provider response context helpers, and session usage planning.
+- Provider-response host now keeps only host stream construction and MetadataCenter symbol read/write IO locally; response semantics remain Rust/native-owned.
+- The residue gate now requires `resolveProviderResponseContextHelpersJson` direct capability use and forbids the old `native/router-hotpath/native-hub-pipeline-resp-semantics` host subpath.
+- Strict reference audit improved to `shellsWithHostTextRefs=9` and `coreModuleSubpathRefs=26`.
+- Verification passed: focused Jest 242/242, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, JS syntax checks, and `git diff --check`.
+- Remaining work: `snapshot-recorder.ts/js`, `native-exports.ts/js`, and `routing-integrations.ts/js` still hold host bridge shell subpath refs.
+
 ### 2026-07-09 snapshot and routing-state host bridge refs closed
 
 - `src/modules/llmswitch/bridge/runtime-integrations.ts/js` now calls direct native snapshot hook capabilities via `native-exports.ts/js`; the host bridge no longer loads `conversion/snapshot-utils`.

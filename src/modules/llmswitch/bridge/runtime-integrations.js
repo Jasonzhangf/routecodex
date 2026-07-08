@@ -4,8 +4,7 @@
  * Snapshot hooks, responses conversation helpers, native SSE runtime, and
  * provider runtime ingress hooks.
  */
-import { importCoreDist } from "./module-loader.js";
-import { shouldRecordSnapshotsNative, writeSnapshotViaHooksNative } from "./native-exports.js";
+import { getRouterHotpathJsonBindingSync, shouldRecordSnapshotsNative, writeSnapshotViaHooksNative } from "./native-exports.js";
 import { captureResponsesRequestContext, recordResponsesResponse, resumeResponsesConversation as resumeResponsesConversationHost, lookupResponsesContinuationByResponseId as lookupResponsesContinuationByResponseIdHost, resumeLatestResponsesContinuationByScope as resumeLatestResponsesContinuationByScopeHost, materializeLatestResponsesContinuationByScope as materializeLatestResponsesContinuationByScopeHost, rebindResponsesConversationRequestId as rebindResponsesConversationRequestIdHost, clearResponsesConversationByRequestId as clearResponsesConversationByRequestIdHost, finalizeResponsesConversationRequestRetention as finalizeResponsesConversationRequestRetentionHost, clearAllResponsesConversationState as clearAllResponsesConversationStateHost, resetResponsesConversationStateForRestartSimulation as resetResponsesConversationStateForRestartSimulationHost, clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost, } from "./responses-conversation-store-host.js";
 export async function writeSnapshotViaHooks(channelOrOptions, payload) {
     let options;
@@ -68,21 +67,41 @@ export async function clearUnresolvedResponsesConversationRequests() {
 export async function resetResponsesConversationStateForRestartSimulation() {
     resetResponsesConversationStateForRestartSimulationHost();
 }
-let cachedNativeSseRuntimeModule = null;
-async function getNativeSseRuntimeModule() {
-    if (!cachedNativeSseRuntimeModule) {
-        cachedNativeSseRuntimeModule = await importCoreDist("native/router-hotpath/native-sse-runtime");
+function nativeJsonBinding() {
+    return getRouterHotpathJsonBindingSync();
+}
+function requireNativeJsonFunction(capability) {
+    const fn = nativeJsonBinding()[capability];
+    if (typeof fn !== "function") {
+        throw new Error(`[llmswitch-bridge] ${capability} not available`);
     }
-    return cachedNativeSseRuntimeModule;
+    return fn;
+}
+async function collectSseBodyText(source) {
+    const chunks = [];
+    for await (const chunk of source) {
+        chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+    }
+    return chunks.join("");
+}
+function buildJsonFromSseWithNative(input) {
+    const fn = requireNativeJsonFunction("buildJsonFromSseJson");
+    const raw = fn(JSON.stringify({
+        protocol: input.protocol,
+        body_text: input.bodyText,
+        request_id: input.requestId,
+        model: input.model,
+        config: input.config ?? {},
+    }));
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("[llmswitch-bridge] buildJsonFromSseJson returned invalid result");
+    }
+    return parsed;
 }
 export async function buildResponsesJsonFromSseStreamWithNative(input) {
-    const mod = await getNativeSseRuntimeModule();
-    if (typeof mod.collectSseBodyText !== "function" ||
-        typeof mod.buildJsonFromSseWithNative !== "function") {
-        throw new Error("[llmswitch-bridge] native SSE runtime decode helpers not available");
-    }
-    const bodyText = await mod.collectSseBodyText(input.stream);
-    return mod.buildJsonFromSseWithNative({
+    const bodyText = await collectSseBodyText(input.stream);
+    return buildJsonFromSseWithNative({
         protocol: "openai-responses",
         bodyText,
         requestId: input.requestId,
@@ -90,13 +109,9 @@ export async function buildResponsesJsonFromSseStreamWithNative(input) {
         config: input.config ?? {},
     });
 }
-let cachedProviderRuntimeIngress = null;
-async function getProviderRuntimeIngress() {
-    if (!cachedProviderRuntimeIngress) {
-        cachedProviderRuntimeIngress =
-            await importCoreDist("native/router-hotpath/native-provider-runtime-ingress");
-    }
-    return cachedProviderRuntimeIngress;
+function reportProviderRuntimeIngressWithNative(capability, event) {
+    const fn = requireNativeJsonFunction(capability);
+    return JSON.parse(fn(JSON.stringify(event)));
 }
 export async function preloadCriticalBridgeRuntimeModules() {
     const loaded = [];
@@ -104,34 +119,17 @@ export async function preloadCriticalBridgeRuntimeModules() {
     loaded.push("native/router-hotpath/snapshot-hooks");
     await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
     loaded.push("bridge/responses-conversation-store-host");
-    const nativeSseRuntimeModule = await getNativeSseRuntimeModule();
-    if (typeof nativeSseRuntimeModule.collectSseBodyText !== "function" ||
-        typeof nativeSseRuntimeModule.buildJsonFromSseWithNative !== "function") {
-        throw new Error("[llmswitch-bridge] preload failed: native SSE runtime decode helpers not available");
-    }
-    loaded.push("native/router-hotpath/native-sse-runtime");
-    const ingressModule = await getProviderRuntimeIngress();
-    if (typeof ingressModule.reportProviderErrorToRouterPolicy !== "function" ||
-        typeof ingressModule.reportProviderSuccessToRouterPolicy !== "function") {
-        throw new Error("[llmswitch-bridge] preload failed: provider runtime ingress hooks not available");
-    }
-    loaded.push("native/router-hotpath/native-provider-runtime-ingress");
+    requireNativeJsonFunction("buildJsonFromSseJson");
+    loaded.push("native-json/sse-runtime");
+    requireNativeJsonFunction("reportProviderErrorToRouterPolicyJson");
+    requireNativeJsonFunction("reportProviderSuccessToRouterPolicyJson");
+    loaded.push("native-json/provider-runtime-ingress");
     return { loaded };
 }
 export async function reportProviderErrorToRouterPolicy(event) {
-    const mod = await getProviderRuntimeIngress();
-    const fn = mod.reportProviderErrorToRouterPolicy;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] reportProviderErrorToRouterPolicy not available");
-    }
-    return fn(event);
+    return reportProviderRuntimeIngressWithNative("reportProviderErrorToRouterPolicyJson", event);
 }
 export async function reportProviderSuccessToRouterPolicy(event) {
-    const mod = await getProviderRuntimeIngress();
-    const fn = mod.reportProviderSuccessToRouterPolicy;
-    if (typeof fn !== "function") {
-        throw new Error("[llmswitch-bridge] reportProviderSuccessToRouterPolicy not available");
-    }
-    return fn(event);
+    return reportProviderRuntimeIngressWithNative("reportProviderSuccessToRouterPolicyJson", event);
 }
 //# sourceMappingURL=runtime-integrations.js.map

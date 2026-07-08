@@ -7,6 +7,14 @@
 - Verification: focused Jest PASS 216/216 (`provider-response-converter.unified-semantics`, `runtime-integrations.snapshot`, `state-integrations`, `hub-pipeline-stage-residue-audit`); strict TS shell reference audit PASS with `prodTsShellCount=97`, `shellsWithHostTextRefs=14`, `coreModuleSubpathRefs=30`; zero-ts closeout PASS; minimal TS surface PASS; rustification audit PASS (`prodTsFileCount=97`, `nonNativeFileCount=0`); sharedmodule tsc PASS; root tsc PASS; `git diff --check` PASS.
 - Boundary: full objective remains active. Remaining host bridge refs include provider response orchestration/shared conversion/metadata writer/SSE and routing integration shell subpaths; no live runtime replay claimed for this source/reference slice.
 
+# 2026-07-09: provider-response/runtime bridge shell refs direct-native wired
+
+- Change: `runtime-integrations.ts/js` no longer loads `native-sse-runtime` or `native-provider-runtime-ingress`; SSE body collection remains host IO and Rust JSON capabilities own SSE decode/provider ingress policy.
+- Change: `provider-response-converter-host.ts/js` no longer loads orchestration protocol, shared conversion, resp semantics, runtime metadata, metadata writer, routing-state, or SSE runtime TS shell subpaths. It calls the corresponding Rust JSON capabilities through `getRouterHotpathJsonBindingSync()` and keeps only host stream/MetadataCenter IO.
+- Gate update: `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now requires direct `resolveProviderResponseContextHelpersJson` capability use and forbids the old resp-semantics subpath in this host bridge.
+- Verification: focused Jest PASS 242/242 (`provider-response-rust-plan`, `hub-pipeline-stage-residue-audit`, provider-response unified/prebuilt SSE, runtime snapshot, state-integrations); strict TS shell reference audit PASS with `shellsWithHostTextRefs=9`, `coreModuleSubpathRefs=26`; zero-ts closeout PASS; minimal TS surface PASS; rustification audit PASS (`prodTsFileCount=97`, `nonNativeFileCount=0`); sharedmodule tsc PASS; root tsc PASS; JS syntax checks PASS; `git diff --check` PASS.
+- Boundary: remaining host bridge subpath refs are now concentrated in `snapshot-recorder.ts/js`, `native-exports.ts/js`, and `routing-integrations.ts/js`. No live runtime replay claimed for this source/reference slice.
+
 # 2026-07-09: llmswitch TS shell reference closeout continuation
 
 - Change: deleted `responses-conversation-store-native.ts` and rewired `responses-conversation-store-host.ts/js` to call direct `getRouterHotpathJsonBindingSync()` JSON capabilities for responses store plans/resume/materialize.

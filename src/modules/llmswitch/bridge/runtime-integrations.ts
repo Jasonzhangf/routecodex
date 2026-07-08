@@ -9,9 +9,9 @@ import type {
   ProviderErrorEvent,
   ProviderSuccessEvent,
 } from "../../../types/llmswitch-local-types.js";
-import { importCoreDist } from "./module-loader.js";
 import type { AnyRecord } from "./module-loader.js";
 import {
+  getRouterHotpathJsonBindingSync,
   shouldRecordSnapshotsNative,
   writeSnapshotViaHooksNative,
 } from "./native-exports.js";
@@ -171,26 +171,48 @@ export async function resetResponsesConversationStateForRestartSimulation(): Pro
   resetResponsesConversationStateForRestartSimulationHost();
 }
 
-type NativeSseRuntimeModule = {
-  collectSseBodyText?: (stream: AsyncIterable<string | Buffer>) => Promise<string>;
-  buildJsonFromSseWithNative?: (input: {
-    protocol: string;
-    bodyText: string;
-    requestId?: string;
-    model?: string;
-    config?: AnyRecord;
-  }) => AnyRecord;
-};
+function nativeJsonBinding(): Record<string, unknown> {
+  return getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+}
 
-let cachedNativeSseRuntimeModule: NativeSseRuntimeModule | null = null;
-
-async function getNativeSseRuntimeModule(): Promise<NativeSseRuntimeModule> {
-  if (!cachedNativeSseRuntimeModule) {
-    cachedNativeSseRuntimeModule = await importCoreDist<NativeSseRuntimeModule>(
-      "native/router-hotpath/native-sse-runtime",
-    );
+function requireNativeJsonFunction<T extends (...args: any[]) => unknown>(
+  capability: string,
+): T {
+  const fn = nativeJsonBinding()[capability];
+  if (typeof fn !== "function") {
+    throw new Error(`[llmswitch-bridge] ${capability} not available`);
   }
-  return cachedNativeSseRuntimeModule;
+  return fn as T;
+}
+
+async function collectSseBodyText(source: AsyncIterable<string | Buffer>): Promise<string> {
+  const chunks: string[] = [];
+  for await (const chunk of source) {
+    chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+  }
+  return chunks.join("");
+}
+
+function buildJsonFromSseWithNative(input: {
+  protocol: string;
+  bodyText: string;
+  requestId?: string;
+  model?: string;
+  config?: AnyRecord;
+}): AnyRecord {
+  const fn = requireNativeJsonFunction<(inputJson: string) => string>("buildJsonFromSseJson");
+  const raw = fn(JSON.stringify({
+    protocol: input.protocol,
+    body_text: input.bodyText,
+    request_id: input.requestId,
+    model: input.model,
+    config: input.config ?? {},
+  }));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("[llmswitch-bridge] buildJsonFromSseJson returned invalid result");
+  }
+  return parsed as AnyRecord;
 }
 
 export async function buildResponsesJsonFromSseStreamWithNative(input: {
@@ -199,17 +221,8 @@ export async function buildResponsesJsonFromSseStreamWithNative(input: {
   model: string;
   config?: AnyRecord;
 }): Promise<unknown> {
-  const mod = await getNativeSseRuntimeModule();
-  if (
-    typeof mod.collectSseBodyText !== "function" ||
-    typeof mod.buildJsonFromSseWithNative !== "function"
-  ) {
-    throw new Error(
-      "[llmswitch-bridge] native SSE runtime decode helpers not available",
-    );
-  }
-  const bodyText = await mod.collectSseBodyText(input.stream);
-  return mod.buildJsonFromSseWithNative({
+  const bodyText = await collectSseBodyText(input.stream);
+  return buildJsonFromSseWithNative({
     protocol: "openai-responses",
     bodyText,
     requestId: input.requestId,
@@ -218,25 +231,12 @@ export async function buildResponsesJsonFromSseStreamWithNative(input: {
   });
 }
 
-type ProviderRuntimeIngressExports = {
-  reportProviderErrorToRouterPolicy?: (
-    event: ProviderErrorEvent,
-  ) => ProviderErrorEvent;
-  reportProviderSuccessToRouterPolicy?: (
-    event: ProviderSuccessEvent,
-  ) => ProviderSuccessEvent;
-};
-
-let cachedProviderRuntimeIngress: ProviderRuntimeIngressExports | null = null;
-
-async function getProviderRuntimeIngress(): Promise<ProviderRuntimeIngressExports> {
-  if (!cachedProviderRuntimeIngress) {
-    cachedProviderRuntimeIngress =
-      await importCoreDist<ProviderRuntimeIngressExports>(
-        "native/router-hotpath/native-provider-runtime-ingress",
-      );
-  }
-  return cachedProviderRuntimeIngress;
+function reportProviderRuntimeIngressWithNative<TEvent>(
+  capability: string,
+  event: TEvent,
+): TEvent {
+  const fn = requireNativeJsonFunction<(inputJson: string) => string>(capability);
+  return JSON.parse(fn(JSON.stringify(event))) as TEvent;
 }
 
 export async function preloadCriticalBridgeRuntimeModules(): Promise<{
@@ -250,27 +250,12 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
   await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
   loaded.push("bridge/responses-conversation-store-host");
 
-  const nativeSseRuntimeModule = await getNativeSseRuntimeModule();
-  if (
-    typeof nativeSseRuntimeModule.collectSseBodyText !== "function" ||
-    typeof nativeSseRuntimeModule.buildJsonFromSseWithNative !== "function"
-  ) {
-    throw new Error(
-      "[llmswitch-bridge] preload failed: native SSE runtime decode helpers not available",
-    );
-  }
-  loaded.push("native/router-hotpath/native-sse-runtime");
+  requireNativeJsonFunction<(inputJson: string) => string>("buildJsonFromSseJson");
+  loaded.push("native-json/sse-runtime");
 
-  const ingressModule = await getProviderRuntimeIngress();
-  if (
-    typeof ingressModule.reportProviderErrorToRouterPolicy !== "function" ||
-    typeof ingressModule.reportProviderSuccessToRouterPolicy !== "function"
-  ) {
-    throw new Error(
-      "[llmswitch-bridge] preload failed: provider runtime ingress hooks not available",
-    );
-  }
-  loaded.push("native/router-hotpath/native-provider-runtime-ingress");
+  requireNativeJsonFunction<(inputJson: string) => string>("reportProviderErrorToRouterPolicyJson");
+  requireNativeJsonFunction<(inputJson: string) => string>("reportProviderSuccessToRouterPolicyJson");
+  loaded.push("native-json/provider-runtime-ingress");
 
   return { loaded };
 }
@@ -278,25 +263,11 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
 export async function reportProviderErrorToRouterPolicy(
   event: ProviderErrorEvent,
 ): Promise<ProviderErrorEvent> {
-  const mod = await getProviderRuntimeIngress();
-  const fn = mod.reportProviderErrorToRouterPolicy;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] reportProviderErrorToRouterPolicy not available",
-    );
-  }
-  return fn(event);
+  return reportProviderRuntimeIngressWithNative("reportProviderErrorToRouterPolicyJson", event);
 }
 
 export async function reportProviderSuccessToRouterPolicy(
   event: ProviderSuccessEvent,
 ): Promise<ProviderSuccessEvent> {
-  const mod = await getProviderRuntimeIngress();
-  const fn = mod.reportProviderSuccessToRouterPolicy;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] reportProviderSuccessToRouterPolicy not available",
-    );
-  }
-  return fn(event);
+  return reportProviderRuntimeIngressWithNative("reportProviderSuccessToRouterPolicyJson", event);
 }
