@@ -1,33 +1,29 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseFunctionCallArgumentsDonePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseOutputItemDescriptorWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseOutputTextDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseOutputTextDonePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildGeminiSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import {
+  buildResponsesSseEventSequenceDirectNative,
+  buildResponsesSseFunctionCallArgumentsDeltaPayloadDirectNative,
+  buildResponsesSseFunctionCallArgumentsDonePayloadDirectNative,
+  buildResponsesSseOutputItemDescriptorDirectNative,
+  buildResponsesSseOutputTextDeltaPayloadDirectNative,
+  buildResponsesSseOutputTextDonePayloadDirectNative
+} from './helpers/responses-sse-direct-native.js';
 
 async function collectEvents(response: any): Promise<any[]> {
-  const events: any[] = [];
-  const context = {
+  return buildResponsesSseEventSequenceDirectNative({
+    response,
     requestId: 'req_output_item_descriptor_native',
-    sequenceCounter: 0,
-    outputIndexCounter: 0,
-    contentIndexCounter: new Map<string, number>()
-  };
-  for await (const event of buildGeminiSseEventSequenceWithNative(response, context as any, {
-    enableTimestampGeneration: false,
-    chunkSize: 0,
-    enableRecovery: false,
-  } as any)) {
-    events.push(event);
-  }
-  return events;
+    config: {
+      enableTimestampGeneration: false,
+      chunkSize: 0,
+      enableRecovery: false,
+    }
+  });
 }
 
 describe('responses SSE output item descriptor native owner', () => {
   it('builds added descriptors through the native owner', () => {
-    const descriptor = buildResponsesSseOutputItemDescriptorWithNative({
+    const descriptor = buildResponsesSseOutputItemDescriptorDirectNative({
       id: 'fc_1',
       type: 'function_call',
       status: 'completed',
@@ -47,7 +43,7 @@ describe('responses SSE output item descriptor native owner', () => {
   });
 
   it('builds done descriptors through the native owner with verbatim reasoning summary', () => {
-    const descriptor = buildResponsesSseOutputItemDescriptorWithNative({
+    const descriptor = buildResponsesSseOutputItemDescriptorDirectNative({
       id: 'rs_1',
       type: 'reasoning',
       summary: ['- inspect `file.ts`'],
@@ -66,13 +62,13 @@ describe('responses SSE output item descriptor native owner', () => {
   });
 
   it('fails missing output item type instead of synthesizing an unknown descriptor', () => {
-    expect(() => buildResponsesSseOutputItemDescriptorWithNative({
+    expect(() => buildResponsesSseOutputItemDescriptorDirectNative({
       id: 'item_missing_type'
     }, 'added')).toThrow('Responses output item descriptor missing type');
   });
 
   it('fails malformed reasoning content instead of serializing non-array content', () => {
-    expect(() => buildResponsesSseOutputItemDescriptorWithNative({
+    expect(() => buildResponsesSseOutputItemDescriptorDirectNative({
       id: 'rs_malformed_content',
       type: 'reasoning',
       summary: [],
@@ -81,7 +77,7 @@ describe('responses SSE output item descriptor native owner', () => {
   });
 
   it('builds output_text.done payloads through the native owner', () => {
-    const payload = buildResponsesSseOutputTextDonePayloadWithNative(3, 'msg_1', 1, 'final text');
+    const payload = buildResponsesSseOutputTextDonePayloadDirectNative(3, 'msg_1', 1, 'final text');
 
     expect(payload).toEqual({
       output_index: 3,
@@ -93,7 +89,7 @@ describe('responses SSE output item descriptor native owner', () => {
   });
 
   it('builds output_text.delta payloads through the native owner', () => {
-    const payload = buildResponsesSseOutputTextDeltaPayloadWithNative(3, 'msg_1', 1, 'delta text');
+    const payload = buildResponsesSseOutputTextDeltaPayloadDirectNative(3, 'msg_1', 1, 'delta text');
 
     expect(payload).toEqual({
       output_index: 3,
@@ -105,13 +101,13 @@ describe('responses SSE output item descriptor native owner', () => {
   });
 
   it('builds function_call_arguments payloads through the native owner', () => {
-    const delta = buildResponsesSseFunctionCallArgumentsDeltaPayloadWithNative(
+    const delta = buildResponsesSseFunctionCallArgumentsDeltaPayloadDirectNative(
       2,
       'fc_1',
       'call_1',
       '{"q"'
     );
-    const done = buildResponsesSseFunctionCallArgumentsDonePayloadWithNative(
+    const done = buildResponsesSseFunctionCallArgumentsDonePayloadDirectNative(
       2,
       'fc_1',
       'call_1',
@@ -235,7 +231,7 @@ describe('responses SSE output item descriptor native owner', () => {
           type: 'output_text'
         }]
       }]
-    } as any)).rejects.toThrow('Invalid Responses message: missing content text');
+    } as any)).rejects.toThrow('Responses content part descriptor missing text');
   });
 
   it('projects function_call_arguments events through the native payload owner', async () => {
@@ -292,6 +288,6 @@ describe('responses SSE output item descriptor native owner', () => {
         name: 'search',
         call_id: 'call_missing_args'
       }]
-    } as any)).rejects.toThrow('Responses SSE text chunk payload missing text');
+    } as any)).rejects.toThrow('Invalid Responses function_call item: missing arguments');
   });
 });

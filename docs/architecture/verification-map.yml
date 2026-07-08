@@ -2349,9 +2349,11 @@ verification:
   - feature_id: sse.responses_encode_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
     contract:
+      - tests/sharedmodule/responses-sse-output-item-descriptor-native.spec.ts
+      - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
+      - tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts
       - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
       - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts
       - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
@@ -2362,7 +2364,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden."
+      - "Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden. Direct Rust/NAPI tests must keep the deleted TS event-payload wrapper from returning."
 
   - feature_id: sse.chat_stream_projection
     change_risk: high

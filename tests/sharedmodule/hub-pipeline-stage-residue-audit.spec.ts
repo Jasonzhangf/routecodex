@@ -725,6 +725,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-sse-event-payload.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-anthropic-sse-event-payload.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-gemini-sse-event-payload.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts',
     ];
     const existingRetiredPaths = retiredPaths.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
     const sourceRoots = [

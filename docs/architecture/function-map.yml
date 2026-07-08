@@ -4006,7 +4006,7 @@ owners:
     status: active
     summary: "Responses JSON to ordered client-visible Responses SSE event projection"
     owner_kind: rust_ssot
-    owner_scope: "Rust-owned Responses JSON to ordered client-visible Responses SSE event projection; TS may only marshal native calls and transport frames"
+    owner_scope: "Rust-owned Responses JSON to ordered client-visible Responses SSE event projection; TS may only keep transport frames"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
     canonical_types:
       - ResponsesSseEvent
@@ -4014,8 +4014,8 @@ owners:
     canonical_builders:
       - build_responses_sse_stream_frames_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
+      - tests/sharedmodule/helpers/responses-sse-direct-native.ts
       - src/server/handlers/handler-response-utils.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -4033,7 +4033,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Encode projection emits client protocol frames only through the Rust native owner. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden."
+      - "Encode projection emits client protocol frames only through the Rust native owner. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden. The old Responses SSE TS event-payload wrapper is deleted; tests use direct Rust/NAPI evidence."
 
   - feature_id: sse.chat_stream_projection
     status: active

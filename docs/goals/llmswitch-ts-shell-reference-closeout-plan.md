@@ -179,6 +179,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 Responses SSE event payload wrapper deleted
+
+- Physically deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts` after direct Rust NAPI tests replaced the old TS wrapper imports.
+- Added `tests/sharedmodule/helpers/responses-sse-direct-native.ts` as test-only direct native binding evidence for Responses SSE payload/sequence builders; it does not create a runtime TS owner.
+- `tests/sharedmodule/responses-sse-output-item-descriptor-native.spec.ts`, `tests/sharedmodule/responses-sse-metadata-boundary.spec.ts`, and `tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts` now call `router_hotpath_napi.node` directly.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now locks the deleted Responses SSE wrapper path alongside the Chat/Anthropic/Gemini event-payload wrappers.
+- `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` now mark Responses SSE encode projection as direct Rust/NAPI-owned with the old event-payload wrapper deleted.
+- Strict audit now reports `prodTsShellCount=90`, `nonNativeFileCount=0`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=8`.
+- Verification passed: focused Responses SSE/residue Jest 220/220, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule `tsc`, root `tsc`, exact source ref scan for deleted wrapper path, and `git diff --check`.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

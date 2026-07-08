@@ -1,36 +1,32 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { buildResponsesSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { normalizeResponsesSseReasoningSummaryWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseReasoningSummaryPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseReasoningDeltaPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseReasoningLifecyclePayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseResponseEventPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseTextChunksWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
-import { buildResponsesSseEventEnvelopeWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import {
+  buildResponsesSseEventEnvelopeDirectNative,
+  buildResponsesSseEventSequenceDirectNative,
+  buildResponsesSseReasoningDeltaPayloadDirectNative,
+  buildResponsesSseReasoningLifecyclePayloadDirectNative,
+  buildResponsesSseReasoningSummaryPayloadDirectNative,
+  buildResponsesSseResponseEventPayloadDirectNative,
+  buildResponsesSseTextChunksDirectNative,
+  normalizeResponsesSseReasoningSummaryDirectNative
+} from './helpers/responses-sse-direct-native.js';
 
 async function collectEvents(response: any, overrides: Record<string, unknown> = {}): Promise<any[]> {
-  const events: any[] = [];
-  const context = {
+  return buildResponsesSseEventSequenceDirectNative({
+    response,
     requestId: 'req_reasoning_summary_no_normalize',
-    sequenceCounter: 0,
-    outputIndexCounter: 0,
-    contentIndexCounter: new Map<string, number>()
-  };
-  for await (const event of buildResponsesSseEventSequenceWithNative(response, context as any, {
-    enableTimestampGeneration: false,
-    chunkSize: 0,
-    enableRecovery: false,
-    ...overrides
-  } as any)) {
-    events.push(event);
-  }
-  return events;
+    config: {
+      enableTimestampGeneration: false,
+      chunkSize: 0,
+      enableRecovery: false,
+      ...overrides
+    }
+  });
 }
 
 describe('responses SSE reasoning summary no-normalize boundary', () => {
   it('builds event envelope timestamp and sequence through the native owner', () => {
-    expect(buildResponsesSseEventEnvelopeWithNative({
+    expect(buildResponsesSseEventEnvelopeDirectNative({
       requestId: 'req_native_envelope',
       currentSequence: 7,
       enableTimestampGeneration: false,
@@ -44,7 +40,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       direction: 'json_to_sse'
     });
 
-    expect(buildResponsesSseEventEnvelopeWithNative({
+    expect(buildResponsesSseEventEnvelopeDirectNative({
       requestId: 'req_native_envelope_no_seq',
       currentSequence: 7,
       enableTimestampGeneration: false,
@@ -53,12 +49,12 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('builds text chunks through the native owner', () => {
-    expect(buildResponsesSseTextChunksWithNative('hello world again', 8)).toEqual([
+    expect(buildResponsesSseTextChunksDirectNative('hello world again', 8)).toEqual([
       'hello ',
       'world ',
       'again'
     ]);
-    expect(buildResponsesSseTextChunksWithNative('hello world', 0)).toEqual(['hello world']);
+    expect(buildResponsesSseTextChunksDirectNative('hello world', 0)).toEqual(['hello world']);
   });
 
   it('builds response start payloads through native owner with empty output', async () => {
@@ -88,7 +84,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('builds response event payloads through native owner directly', () => {
-    const start = buildResponsesSseResponseEventPayloadWithNative(
+    const start = buildResponsesSseResponseEventPayloadDirectNative(
       'start',
       {
         id: 'resp_direct_start',
@@ -101,7 +97,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       },
       'in_progress'
     );
-    const requiredAction = buildResponsesSseResponseEventPayloadWithNative(
+    const requiredAction = buildResponsesSseResponseEventPayloadDirectNative(
       'required_action',
       {
         id: 'resp_direct_required',
@@ -128,12 +124,12 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('builds reasoning lifecycle payloads through native owner', () => {
-    const start = buildResponsesSseReasoningLifecyclePayloadWithNative(
+    const start = buildResponsesSseReasoningLifecyclePayloadDirectNative(
       'start',
       'rs_native_lifecycle',
       ['- keep `verbatim`']
     );
-    const done = buildResponsesSseReasoningLifecyclePayloadWithNative(
+    const done = buildResponsesSseReasoningLifecyclePayloadDirectNative(
       'done',
       'rs_native_lifecycle'
     );
@@ -143,7 +139,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       summary: [{ type: 'summary_text', text: '- keep `verbatim`' }]
     });
     expect(done).toEqual({ item_id: 'rs_native_lifecycle' });
-    expect(() => buildResponsesSseReasoningLifecyclePayloadWithNative('start', ' ', [])).toThrow(
+    expect(() => buildResponsesSseReasoningLifecyclePayloadDirectNative('start', ' ', [])).toThrow(
       'Responses reasoning lifecycle payload item_id is required'
     );
   });
@@ -236,7 +232,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('normalizes reasoning summary entries through the native owner verbatim', () => {
-    const summary = normalizeResponsesSseReasoningSummaryWithNative([
+    const summary = normalizeResponsesSseReasoningSummaryDirectNative([
       '- inspect `file.ts`',
       { text: '> keep quoted detail' },
       { type: 'summary_text', text: '  spaced summary  ' },
@@ -303,7 +299,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('builds reasoning summary payloads through the native owner', () => {
-    expect(buildResponsesSseReasoningSummaryPayloadWithNative(
+    expect(buildResponsesSseReasoningSummaryPayloadDirectNative(
       'part_added',
       1,
       'rs_1',
@@ -316,7 +312,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       part: { type: 'summary_text', text: '' }
     });
 
-    expect(buildResponsesSseReasoningSummaryPayloadWithNative(
+    expect(buildResponsesSseReasoningSummaryPayloadDirectNative(
       'part_done',
       1,
       'rs_1',
@@ -388,7 +384,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
         content: [{ type: 'reasoning_text' }]
       }],
       usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
-    })).rejects.toThrow('Responses reasoning delta payload missing value');
+    })).rejects.toThrow('Invalid Responses reasoning_text: missing text');
   });
 
   it('fails malformed reasoning content instead of silently treating it as empty', async () => {
@@ -409,7 +405,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
   });
 
   it('builds reasoning delta payloads through the native owner directly', () => {
-    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+    expect(buildResponsesSseReasoningDeltaPayloadDirectNative(
       'text',
       1,
       'rs_1',
@@ -422,7 +418,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       delta: 'think'
     });
 
-    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+    expect(buildResponsesSseReasoningDeltaPayloadDirectNative(
       'signature',
       1,
       'rs_1',
@@ -435,7 +431,7 @@ describe('responses SSE reasoning summary no-normalize boundary', () => {
       signature: { ciphertext: 'sig' }
     });
 
-    expect(buildResponsesSseReasoningDeltaPayloadWithNative(
+    expect(buildResponsesSseReasoningDeltaPayloadDirectNative(
       'image',
       1,
       'rs_1',

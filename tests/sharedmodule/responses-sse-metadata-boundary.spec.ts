@@ -1,23 +1,17 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { buildResponsesSseEventSequenceWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.js';
+import { buildResponsesSseEventSequenceDirectNative } from './helpers/responses-sse-direct-native.js';
 
 async function collectEvents(response: any): Promise<any[]> {
-  const events: any[] = [];
-  const context = {
+  return buildResponsesSseEventSequenceDirectNative({
+    response,
     requestId: 'req_metadata_response_boundary',
-    sequenceCounter: 0,
-    outputIndexCounter: 0,
-    contentIndexCounter: new Map<string, number>()
-  };
-  for await (const event of buildResponsesSseEventSequenceWithNative(response, context as any, {
-    enableTimestampGeneration: false,
-    chunkSize: 256,
-    enableRecovery: false,
-  } as any)) {
-    events.push(event);
-  }
-  return events;
+    config: {
+      enableTimestampGeneration: false,
+      chunkSize: 256,
+      enableRecovery: false,
+    }
+  });
 }
 
 describe('responses SSE metadata boundary', () => {
