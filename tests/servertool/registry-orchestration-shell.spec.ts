@@ -17,6 +17,20 @@ const resolveServertoolRegistryHandlerWithNativeMock = jest.fn((input: any) => {
   }
 });
 const planServertoolRegistryBuiltinAutoHookEntriesWithNativeMock = jest.fn();
+const createServertoolExecutionLoopStateWithNativeMock = jest.fn(() => ({
+  executedToolCalls: [],
+  executedIds: [],
+  executedFlowIds: []
+}));
+const resolveServertoolExecutionLoopInitialDecisionWithNativeMock = jest.fn(() => ({
+  action: 'skip_non_tool_call_handler'
+}));
+const applyServertoolExecutionLoopInitialDecisionWithNativeMock = jest.fn((decision: any, application: any) => {
+  if (decision?.action === 'skip_non_tool_call_handler') {
+    return application.skipNonToolCallHandler();
+  }
+  throw new Error('[servertool] unexpected registry test action');
+});
 
 jest.unstable_mockModule(
   'rcc-llmswitch-core/native/servertool-wrapper',
@@ -33,12 +47,14 @@ jest.unstable_mockModule(
     planServertoolToolCallDispatchWithNative: jest.fn(),
     planServertoolExecutionDispatchErrorWithNative: jest.fn(),
     appendServertoolExecutedRecordWithNative: jest.fn(),
-    createServertoolExecutionLoopStateWithNative: jest.fn(),
+    createServertoolExecutionLoopStateWithNative: createServertoolExecutionLoopStateWithNativeMock,
     planServertoolHandlerErrorExecutionLoopEffectWithNative: jest.fn(),
     planServertoolNoopExecutionLoopEffectWithNative: jest.fn(),
-    resolveServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    resolveServertoolExecutionLoopInitialDecisionWithNative:
+      resolveServertoolExecutionLoopInitialDecisionWithNativeMock,
     resolveServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
-    applyServertoolExecutionLoopInitialDecisionWithNative: jest.fn(),
+    applyServertoolExecutionLoopInitialDecisionWithNative:
+      applyServertoolExecutionLoopInitialDecisionWithNativeMock,
     applyServertoolExecutionLoopResultDecisionWithNative: jest.fn(),
     runStoplessBuiltinHandlerForRuntimeWithNative: jest.fn(),
     resolveAutoHookCallerFinalizationDecisionWithNative: jest.fn(),
@@ -50,7 +66,7 @@ jest.unstable_mockModule(
 );
 
 const {
-  getServerToolHandler,
+  runServertoolIoExecutionQueue,
 } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/execution-queue-shell.js'
 );
@@ -60,37 +76,83 @@ const {
   '../../sharedmodule/llmswitch-core/src/servertool/auto-hook-caller.js'
 );
 
+async function runQueueRegistryLookup(name: string): Promise<void> {
+  await runServertoolIoExecutionQueue({
+    dispatchPlan: {
+      executableToolCalls: [
+        {
+          id: `call-${name}`,
+          name,
+          arguments: '{}',
+          executionMode: 'guarded',
+          stripAfterExecute: false
+        }
+      ],
+      noopToolCalls: []
+    } as any,
+    options: { requestId: `req-${name}` } as any,
+    contextBase: {
+      base: {},
+      toolCalls: [],
+      adapterContext: {},
+      requestId: `req-${name}`,
+      entryEndpoint: 'openai',
+      providerProtocol: 'openai-chat'
+    } as any,
+    baseForExecution: {} as any
+  });
+}
+
 describe('registry-orchestration-shell', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     listBuiltinAutoHandlerEntriesMock.mockReturnValue({ entries: [] });
   });
 
-  test('returns builtin entry and ignores retired ad-hoc lookup plans', () => {
-    const builtin = { name: 'builtin' };
+  test('queue uses native builtin registry entry and ignores retired ad-hoc lookup plans', async () => {
+    const builtin = {
+      name: 'builtin',
+      trigger: 'tool_call',
+      registration: { executionMode: 'guarded' },
+      execution: { kind: 'builtin', builtinName: 'builtin' }
+    };
     getBuiltinHandlerEntryMock.mockReturnValue(builtin);
 
     planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'return_builtin',
       canonicalName: 'builtin',
     });
-    expect(getServerToolHandler('Builtin')).toBe(builtin);
+    await runQueueRegistryLookup('Builtin');
+    expect(getBuiltinHandlerEntryMock).toHaveBeenCalledWith({ name: 'builtin' });
+    expect(resolveServertoolExecutionLoopInitialDecisionWithNativeMock).toHaveBeenLastCalledWith({
+      hasHandlerEntry: true,
+      triggerMode: 'tool_call',
+      nativeExecutionMode: 'guarded',
+      tsExecutionMode: 'guarded'
+    });
 
     planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'return_none',
     });
-    expect(getServerToolHandler('adhoc')).toBeUndefined();
+    await runQueueRegistryLookup('adhoc');
+    expect(resolveServertoolExecutionLoopInitialDecisionWithNativeMock).toHaveBeenLastCalledWith({
+      hasHandlerEntry: false,
+      triggerMode: undefined,
+      nativeExecutionMode: undefined,
+      tsExecutionMode: 'guarded'
+    });
   });
 
-  test('fails fast when native registry lookup returns an unknown action', () => {
+  test('fails fast when native registry lookup returns an unknown action', async () => {
     planServertoolRegistryLookupFromSkeletonWithNativeMock.mockReturnValueOnce({
       action: 'unknown_registry_action',
     });
 
-    expect(() => getServerToolHandler('unknown')).toThrow(
+    await expect(runQueueRegistryLookup('unknown')).rejects.toThrow(
       '[servertool] invalid registry lookup action'
     );
     expect(getBuiltinHandlerEntryMock).not.toHaveBeenCalled();
+    expect(resolveServertoolExecutionLoopInitialDecisionWithNativeMock).not.toHaveBeenCalled();
   });
 
   test('projects auto-hook descriptors directly through native descriptor planner', () => {

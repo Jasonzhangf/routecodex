@@ -45,7 +45,7 @@ function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
   }
 }
 
-export const getServerToolHandler = (
+const getServerToolHandler = (
   name: string
 ): ServerToolHandlerEntry | undefined => {
   const entry = resolveServertoolRegistryHandlerWithNative({
