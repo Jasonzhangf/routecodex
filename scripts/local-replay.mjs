@@ -2,7 +2,28 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+
+const nodeRequire = createRequire(import.meta.url);
+
+function loadNativeBinding() {
+  return nodeRequire(
+    path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+  );
+}
+
+function runOpenAIRequestCodec(payload, options) {
+  const binding = loadNativeBinding();
+  const fn = binding.runOpenaiOpenaiRequestCodecJson;
+  if (typeof fn !== 'function') {
+    throw new Error('runOpenaiOpenaiRequestCodecJson native export is required');
+  }
+  const raw = fn(JSON.stringify(payload ?? {}), JSON.stringify(options ?? {}));
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error('runOpenaiOpenaiRequestCodecJson returned invalid payload');
+  }
+  return JSON.parse(raw);
+}
 
 async function main() {
   const reqFile = process.argv[2] || path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat', 'req_1762264740299_ifnozpv3l_raw-request.json');
@@ -16,15 +37,13 @@ async function main() {
   const payload = raw?.body || raw;
   const requestId = (raw?.requestId) || `replay_${Date.now()}`;
 
-  // Import codec from local compiled dist
-  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion', 'codecs', 'openai-openai-codec.js')).href;
-  const { OpenAIOpenAIConversionCodec } = await import(codecUrl);
-  const codec = new OpenAIOpenAIConversionCodec({});
-
-  const profile = { outgoingProtocol: 'openai-chat' };
-  const context = { requestId, endpoint: '/v1/chat/completions', entryEndpoint: '/v1/chat/completions', metadata: {} };
-
-  const normalized = await codec.convertRequest(payload, profile, context);
+  const normalized = runOpenAIRequestCodec(payload, {
+    requestId,
+    endpoint: '/v1/chat/completions',
+    entryEndpoint: '/v1/chat/completions',
+    metadata: {},
+    preserveStreamField: true,
+  });
   await fs.writeFile(path.join(outDir, `replay_${requestId}_convertRequest.json`), JSON.stringify(normalized, null, 2), 'utf-8');
   console.log('convertRequest done; output written to', path.join(outDir, `replay_${requestId}_convertRequest.json`));
 }

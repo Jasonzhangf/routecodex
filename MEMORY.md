@@ -1711,3 +1711,9 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts` is physically deleted. Do not restore `buildRouterMetadataInputWithNative` or `coerceStandardizedRequestFromPayloadWithNative` as runtime TS wrapper exports.
 - Tests/scripts needing these semantics should call direct Rust/NAPI capabilities `buildRouterMetadataInputJson` and `coerceStandardizedRequestFromPayloadJson`.
 - Current shell audit after this deletion is `prodTsShellCount=75`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: OpenAI codec TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.ts` is physically deleted. Do not restore `OpenAIOpenAIConversionCodec` or the wrapper-local request context map as runtime TS state.
+- Tests/scripts needing OpenAI<->OpenAI codec evidence should call direct Rust/NAPI `runOpenaiOpenaiRequestCodecJson` and `runOpenaiOpenaiResponseCodecJson`.
+- Current shell audit after this deletion is `prodTsShellCount=74`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.

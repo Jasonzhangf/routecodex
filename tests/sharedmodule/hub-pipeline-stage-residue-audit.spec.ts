@@ -4541,6 +4541,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/bridge-instructions.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/bridge-policies.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/compaction-detect.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/mcp-injection.d.ts',
@@ -4575,6 +4576,37 @@ describe('hub pipeline stage residue audit', () => {
     const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
     expect(existing).toEqual([]);
+  });
+
+  it('OpenAI OpenAI codec TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.ts'
+    );
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('openai-openai-codec')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
+    expect(findings).toEqual([]);
   });
 
   it('responses conversation store scope isolation keys must be native-owned', () => {

@@ -96,7 +96,7 @@
 - 工具 canonicalize（native）：`rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs`
 - Responses 桥接：`v2/conversion/responses/responses-openai-bridge.ts`
   - Responses→Chat 请求适配入口直接使用 bridge owner；请求语义继续下沉到 Rust req_inbound / req_chatprocess native 边界，禁止恢复 shared adapter 中转层。
-- OpenAI 编解码：`v2/conversion/codecs/openai-openai-codec.ts`
+- OpenAI 编解码：Rust/NAPI `runOpenaiOpenaiRequestCodecJson`、`runOpenaiOpenaiResponseCodecJson`
 - Anthropic 编解码：`v2/conversion/codecs/anthropic-openai-codec.ts`
 
 ## 10. 端到端流程简述（CCR 对齐）

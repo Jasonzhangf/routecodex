@@ -28077,3 +28077,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Tests now call direct Rust/NAPI `buildRouterMetadataInputJson` and `coerceStandardizedRequestFromPayloadJson` through `tests/sharedmodule/helpers/hub-pipeline-builders-direct-native.ts`; `scripts/tests/replay-orphan-followup-sample.mjs` loads the native binding directly.
 - Residue audit now locks the old builders wrapper path physically absent instead of scanning a live TS wrapper.
 - Verification PASS: focused Jest 207/207; `node --check scripts/tests/replay-orphan-followup-sample.mjs`; sharedmodule/root `tsc`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=75`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`prodTsFileCount=75`, `nonNativeFileCount=0`); exact old path scan only found absent-path assertion; `git diff --check`.
+
+# 2026-07-09: llmswitch OpenAI codec TS shell deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.ts`.
+- The old class wrapper had no production importer; tests and replay scripts now call direct Rust/NAPI `runOpenaiOpenaiRequestCodecJson` / `runOpenaiOpenaiResponseCodecJson`.
+- Removed the stale request-context map test because it only covered deleted TS wrapper state, not Rust runtime truth.
+- Residue audit locks the old codec source path and generated `.d.ts` absent; guidance docs now name the Rust/NAPI codec exports instead of the TS file.
+- Verification PASS: focused codec/residue Jest 194/194; script syntax checks; exact source ref scan only found residue absent assertions; strict shell audit `prodTsShellCount=74`; zero-ts closeout; minimal TS surface; rustification audit `nonNativeFileCount=0`; sharedmodule/root `tsc`; function-map compile gate; `git diff --check`.

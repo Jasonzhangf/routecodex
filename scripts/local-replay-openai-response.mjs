@@ -2,7 +2,28 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+
+const nodeRequire = createRequire(import.meta.url);
+
+function loadNativeBinding() {
+  return nodeRequire(
+    path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+  );
+}
+
+function runOpenAIResponseCodec(payload, options) {
+  const binding = loadNativeBinding();
+  const fn = binding.runOpenaiOpenaiResponseCodecJson;
+  if (typeof fn !== 'function') {
+    throw new Error('runOpenaiOpenaiResponseCodecJson native export is required');
+  }
+  const raw = fn(JSON.stringify(payload ?? {}), JSON.stringify(options ?? {}));
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error('runOpenaiOpenaiResponseCodecJson returned invalid payload');
+  }
+  return JSON.parse(raw);
+}
 
 async function pickLatestProviderResponse() {
   const dir = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
@@ -25,13 +46,12 @@ async function main() {
   const payload = obj?.data || obj; // accept wrapped
   const requestId = (obj?.requestId) || `replay_${Date.now()}`;
 
-  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'codecs', 'openai-openai-codec.js')).href;
-  const { OpenAIOpenAIConversionCodec } = await import(codecUrl);
-  const codec = new OpenAIOpenAIConversionCodec({});
-  const profile = { outgoingProtocol: 'openai-chat' };
-  const context = { requestId, endpoint: '/v1/chat/completions', entryEndpoint: '/v1/chat/completions', metadata: {} };
-
-  const normalized = await codec.convertResponse(payload, profile, context);
+  const normalized = runOpenAIResponseCodec(payload, {
+    requestId,
+    endpoint: '/v1/chat/completions',
+    entryEndpoint: '/v1/chat/completions',
+    metadata: {},
+  });
   const outPath = path.join(outDir, `replay_${requestId}_convertResponse.json`);
   await fs.writeFile(outPath, JSON.stringify(normalized, null, 2), 'utf-8');
   console.log('convertResponse done; output written to', outPath);

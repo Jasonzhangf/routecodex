@@ -1,16 +1,11 @@
-import { OpenAIOpenAIConversionCodec } from '../openai-openai-codec.js';
+import {
+  runOpenAIRequestCodecDirectNative,
+  runOpenAIResponseCodecDirectNative,
+} from '../../../../../../tests/sharedmodule/helpers/openai-codec-direct-native.js';
 
-describe('openai-openai-codec native wrapper', () => {
-  const profile = {
-    id: 'openai-openai-test',
-    incomingProtocol: 'openai-chat',
-    outgoingProtocol: 'openai-chat',
-    codec: 'openai-openai'
-  } as any;
-
+describe('openai-openai codec direct native owner', () => {
   test('request passthrough keeps stream and stringifies tool arguments', async () => {
-    const codec = new OpenAIOpenAIConversionCodec({});
-    const result = await codec.convertRequest(
+    const result = runOpenAIRequestCodecDirectNative(
       {
         model: 'gpt-4.1',
         stream: true,
@@ -32,11 +27,11 @@ describe('openai-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
       {
         requestId: 'req_openai_codec_request',
-        entryEndpoint: '/v1/chat/completions'
-      } as any
+        entryEndpoint: '/v1/chat/completions',
+        preserveStreamField: true,
+      }
     );
 
     expect((result as any).model).toBe('gpt-4.1');
@@ -48,17 +43,7 @@ describe('openai-openai-codec native wrapper', () => {
   });
 
   test('response normalizes tool text and arguments', async () => {
-    const codec = new OpenAIOpenAIConversionCodec({});
-    await codec.convertRequest(
-      { model: 'gpt-4.1', stream: false, messages: [{ role: 'user', content: 'hi' }] },
-      profile,
-      {
-        requestId: 'req_openai_codec_response_norm',
-        entryEndpoint: '/v1/chat/completions'
-      } as any
-    );
-
-    const result = await codec.convertResponse(
+    const result = runOpenAIResponseCodecDirectNative(
       {
         data: {
           choices: [
@@ -93,11 +78,10 @@ describe('openai-openai-codec native wrapper', () => {
           ]
         }
       },
-      profile,
       {
         requestId: 'req_openai_codec_response_norm',
         entryEndpoint: '/v1/chat/completions'
-      } as any
+      }
     );
 
     expect((result as any).choices[0].finish_reason).toBe('tool_calls');
@@ -112,17 +96,7 @@ describe('openai-openai-codec native wrapper', () => {
   });
 
   test('response finalize keeps finish invariants and tool-call completion shape', async () => {
-    const codec = new OpenAIOpenAIConversionCodec({});
-    await codec.convertRequest(
-      { model: 'gpt-4.1', stream: true, messages: [{ role: 'user', content: 'run pwd' }] },
-      profile,
-      {
-        requestId: 'req_openai_codec_finalize',
-        entryEndpoint: '/v1/chat/completions'
-      } as any
-    );
-
-    const result = await codec.convertResponse(
+    const result = runOpenAIResponseCodecDirectNative(
       {
         choices: [
           {
@@ -142,11 +116,10 @@ describe('openai-openai-codec native wrapper', () => {
           }
         ]
       },
-      profile,
       {
         requestId: 'req_openai_codec_finalize',
         entryEndpoint: '/v1/chat/completions'
-      } as any
+      }
     );
 
     expect((result as any).choices[0]).toMatchObject({
@@ -166,35 +139,5 @@ describe('openai-openai-codec native wrapper', () => {
         ]
       }
     });
-  });
-
-  test('request context store prunes expired request ids', async () => {
-    const codec = new OpenAIOpenAIConversionCodec({});
-    const originalNow = Date.now;
-    let now = 1_000;
-    Date.now = () => now;
-    try {
-      await codec.convertRequest(
-        { model: 'gpt-4.1', stream: true, messages: [{ role: 'user', content: 'one' }] },
-        profile,
-        {
-          requestId: 'req_openai_codec_leak_old',
-          entryEndpoint: '/v1/chat/completions'
-        } as any
-      );
-      now += 6 * 60_000;
-      await codec.convertRequest(
-        { model: 'gpt-4.1', stream: false, messages: [{ role: 'user', content: 'two' }] },
-        profile,
-        {
-          requestId: 'req_openai_codec_leak_new',
-          entryEndpoint: '/v1/chat/completions'
-        } as any
-      );
-
-      expect(((codec as any).ctxMap as { size: () => number }).size()).toBe(1);
-    } finally {
-      Date.now = originalNow;
-    }
   });
 });
