@@ -123,46 +123,6 @@ function recordServertoolStage(recorder: StageRecorder | undefined, stageId: str
   recorder.record(stageId, normalizeRecordPayload(payload));
 }
 
-function isServertoolStageTimingDetailEnabled(): boolean {
-  const raw = process.env.ROUTECODEX_STAGE_TIMING_DETAIL
-    ?? process.env.RCC_STAGE_TIMING_DETAIL
-    ?? process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL
-    ?? process.env.RCC_HUB_STAGE_TIMING_DETAIL;
-  if (raw === undefined) {
-    return false;
-  }
-  const normalized = String(raw).trim().toUpperCase();
-  return normalized === '1' || normalized === 'TRUE' || normalized === 'YES' || normalized === 'ON';
-}
-
-function logServertoolStageTiming(
-  requestId: string,
-  stage: string,
-  phase: 'start' | 'completed' | 'error',
-  details?: Record<string, unknown>
-): void {
-  const raw = process.env.ROUTECODEX_STAGE_TIMING
-    ?? process.env.RCC_STAGE_TIMING
-    ?? process.env.ROUTECODEX_HUB_STAGE_TIMING
-    ?? process.env.RCC_HUB_STAGE_TIMING;
-  if (raw === undefined || !requestId || !stage) {
-    return;
-  }
-  const normalized = String(raw).trim().toUpperCase();
-  if (normalized !== '1' && normalized !== 'TRUE' && normalized !== 'YES' && normalized !== 'ON') {
-    return;
-  }
-  let line = `[servertool.detail][${requestId}] ${stage}.${phase}`;
-  if (details && Object.keys(details).length > 0) {
-    line += ` ${JSON.stringify(details)}`;
-  }
-  if (phase === 'error') {
-    console.error(line);
-    return;
-  }
-  console.log(line);
-}
-
 function runPreflightSideEffects(args: {
   preflightAction: EnginePreflightNativePlan;
   stopSignal: StopGatewayContext;
@@ -327,7 +287,6 @@ export async function runServertoolEnginePostflight(args: {
 export async function runServertoolResponseStageOrchestrationShell(
   options: ServertoolResponseStageShellOptions
 ): Promise<ServertoolResponseStageShellResult> {
-  const forceDetailLog = isServertoolStageTimingDetailEnabled();
   const runtimeControl = readRuntimeControlFromAnyBoundMetadataCenter(options.adapterContext);
   const gatePlan = planServertoolResponseStageGateWithNative({
     payload: options.payload,
@@ -355,8 +314,6 @@ export async function runServertoolResponseStageOrchestrationShell(
   }
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
 
-  logServertoolStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'start');
-  const orchestrationStart = Date.now();
   const orchestration = await runServerToolOrchestrationShell(
     {
       chat: options.payload,
@@ -366,12 +323,6 @@ export async function runServertoolResponseStageOrchestrationShell(
       stageRecorder: options.stageRecorder
     }
   );
-  logServertoolStageTiming(options.requestId, 'HubRespChatProcess03Governed.servertool_orchestration', 'completed', {
-    elapsedMs: Date.now() - orchestrationStart,
-    executed: orchestration.executed,
-    flowId: orchestration.flowId,
-    forceLog: forceDetailLog
-  });
 
   const output = materializeServertoolResponseStageOrchestrationOutputWithNative({
     originalPayload: options.payload,

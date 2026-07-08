@@ -225,6 +225,11 @@ describe('response-stage-orchestration-shell', () => {
     expect(source).not.toContain('if (output.returnedExecutedPayload)');
     expect(source).not.toContain('chat: options.payload as JsonObject');
     expect(source).not.toContain('options.adapterContext as Record<string, unknown>');
+    expect(source).not.toContain('[servertool.detail]');
+    expect(source).not.toContain('ROUTECODEX_STAGE_TIMING');
+    expect(source).not.toContain('const orchestrationStart = Date.now()');
+    expect(source).not.toContain('Date.now() - orchestrationStart');
+    expect(source).not.toContain('forceLog: forceDetailLog');
     expect(source).toContain('chat: options.payload');
     expect(source).toContain('adapterContext: options.adapterContext');
     expect(source).not.toContain("gateDecision.action === 'return_passthrough_bypass'");

@@ -5636,6 +5636,16 @@ function checkServertoolRustOutcomeCloseout() {
     'runtimeControl as Record<string, unknown>',
     'runtimeControl != null && typeof runtimeControl ===',
     'runtimeMetadataSnapshot?.metadataCenterSnapshot as Record<string, unknown>',
+    'function isServertoolStageTimingDetailEnabled(',
+    'function logServertoolStageTiming(',
+    '[servertool.detail]',
+    'ROUTECODEX_STAGE_TIMING',
+    'RCC_STAGE_TIMING',
+    'ROUTECODEX_HUB_STAGE_TIMING',
+    'RCC_HUB_STAGE_TIMING',
+    'const orchestrationStart = Date.now()',
+    'Date.now() - orchestrationStart',
+    'forceLog: forceDetailLog',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(

@@ -394,5 +394,11 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('args.effectiveServerToolTimeoutMs || args.serverToolTimeoutMs');
     expect(source).not.toContain('function createServerToolEngineRunner(');
     expect(source).not.toContain('createServerToolTimeoutError(');
+    expect(source).not.toContain('function isServertoolStageTimingDetailEnabled(');
+    expect(source).not.toContain('function logServertoolStageTiming(');
+    expect(source).not.toContain('[servertool.detail]');
+    expect(source).not.toContain('ROUTECODEX_STAGE_TIMING');
+    expect(source).not.toContain('RCC_STAGE_TIMING');
+    expect(source).not.toContain('forceLog: forceDetailLog');
   });
 });
