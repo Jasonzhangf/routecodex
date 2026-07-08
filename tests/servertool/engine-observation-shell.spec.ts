@@ -90,7 +90,6 @@ describe('engine-observation-shell', () => {
 
     expect(() =>
       mod.recordServertoolEngineMatchHit({
-        requestId: 'req-match-hit-failfast',
         execution: {
           flowId: 'flow-match-hit',
           toolName: 'reasoningStop',
@@ -143,7 +142,6 @@ describe('engine-observation-shell', () => {
 
     expect(() =>
       mod.recordServertoolEngineMatchHit({
-        requestId: 'req-match-hit-missing-flow',
         execution: {
           toolName: 'reasoningStop',
           toolCall: {

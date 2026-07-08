@@ -206,7 +206,6 @@ export function recordServertoolEngineMatchSkipped(args: {
 }
 
 export function recordServertoolEngineMatchHit(args: {
-  requestId: string;
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
@@ -505,7 +504,6 @@ export async function runServerToolOrchestrationShell(
   }
 
   const flowId = recordServertoolEngineMatchHit({
-    requestId: options.requestId,
     stageRecorder: options.stageRecorder,
     execution: engineResult.execution
   });
