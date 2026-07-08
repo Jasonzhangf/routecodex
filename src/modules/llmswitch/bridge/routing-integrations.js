@@ -47,6 +47,23 @@ function parseNativeJsonResult(raw) {
     }
     return JSON.parse(text);
 }
+function parseHubPipelineNativeJsonResult(raw, label) {
+    const text = String(raw);
+    if (text.startsWith('Error: ')) {
+        throw new Error(text.slice('Error: '.length));
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    }
+    catch (error) {
+        throw new Error(`[llmswitch-bridge] ${label} returned invalid payload: ${String(error)}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`[llmswitch-bridge] ${label} returned non-object payload`);
+    }
+    return parsed;
+}
 export async function bootstrapVirtualRouterConfig(input) {
     const mod = await importCoreDist('native/router-hotpath/native-virtual-router-bootstrap-config');
     const fn = mod.bootstrapVirtualRouterConfig;
@@ -706,14 +723,8 @@ export function createHubPipelineNative(config) {
     }
     const createHubPipelineEngineJson = requireNativeHubPipelineFn('createHubPipelineEngineJson');
     const result = createHubPipelineEngineJson(JSON.stringify(config));
-    let parsed;
-    try {
-        parsed = JSON.parse(result);
-    }
-    catch (error) {
-        throw new Error(`[llmswitch-bridge] createHubPipelineNative returned invalid payload: ${String(error)}`);
-    }
-    const handle = parsed?.handle;
+    const parsed = parseHubPipelineNativeJsonResult(result, 'createHubPipelineNative');
+    const handle = parsed.handle;
     if (typeof handle !== 'string' || !handle) {
         throw new Error('[llmswitch-bridge] createHubPipelineNative returned invalid handle');
     }
@@ -728,12 +739,7 @@ export function executeHubPipelineNative(handle, request) {
     }
     const hubPipelineExecuteJson = requireNativeHubPipelineFn('hubPipelineExecuteJson');
     const raw = hubPipelineExecuteJson(handle, JSON.stringify(request));
-    try {
-        return JSON.parse(raw);
-    }
-    catch (error) {
-        throw new Error(`[llmswitch-bridge] executeHubPipelineNative returned invalid payload: ${String(error)}`);
-    }
+    return parseHubPipelineNativeJsonResult(raw, 'executeHubPipelineNative');
 }
 export function updateHubPipelineVirtualRouterConfigNative(handle, config) {
     if (typeof handle !== 'string' || !handle) {

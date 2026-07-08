@@ -90,6 +90,23 @@ function parseNativeJsonResult(raw: unknown): unknown {
   return JSON.parse(text) as unknown;
 }
 
+function parseHubPipelineNativeJsonResult(raw: unknown, label: string): AnyRecord {
+  const text = String(raw);
+  if (text.startsWith('Error: ')) {
+    throw new Error(text.slice('Error: '.length));
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(`[llmswitch-bridge] ${label} returned invalid payload: ${String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`[llmswitch-bridge] ${label} returned non-object payload`);
+  }
+  return parsed as AnyRecord;
+}
+
 type VirtualRouterBootstrapModule = {
   bootstrapVirtualRouterConfig?: (input: AnyRecord) => AnyRecord;
 };
@@ -937,13 +954,8 @@ export function createHubPipelineNative(config: AnyRecord): string {
     'createHubPipelineEngineJson'
   );
   const result = createHubPipelineEngineJson(JSON.stringify(config));
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(result);
-  } catch (error) {
-    throw new Error(`[llmswitch-bridge] createHubPipelineNative returned invalid payload: ${String(error)}`);
-  }
-  const handle = (parsed as { handle?: unknown } | null)?.handle;
+  const parsed = parseHubPipelineNativeJsonResult(result, 'createHubPipelineNative');
+  const handle = parsed.handle;
   if (typeof handle !== 'string' || !handle) {
     throw new Error('[llmswitch-bridge] createHubPipelineNative returned invalid handle');
   }
@@ -961,11 +973,7 @@ export function executeHubPipelineNative(handle: string, request: AnyRecord): An
     'hubPipelineExecuteJson'
   );
   const raw = hubPipelineExecuteJson(handle, JSON.stringify(request));
-  try {
-    return JSON.parse(raw) as AnyRecord;
-  } catch (error) {
-    throw new Error(`[llmswitch-bridge] executeHubPipelineNative returned invalid payload: ${String(error)}`);
-  }
+  return parseHubPipelineNativeJsonResult(raw, 'executeHubPipelineNative');
 }
 
 export function updateHubPipelineVirtualRouterConfigNative(handle: string, config: AnyRecord): void {
