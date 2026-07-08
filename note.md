@@ -27822,3 +27822,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Change: deleted `hub-pipeline-types.ts`, removed it from `minimal-ts-surface.json`, rewired `provider-response-rust-plan.spec.ts` to import `StageRecorder` from `servertool/types.ts`, and updated residue gates/docs/lesson.
 - Verification: focused residue/provider Jest PASS 212 tests; sharedmodule tsc PASS; root tsc PASS; `verify:llmswitch-minimal-ts-surface -- --json` PASS (`entries=12`, `current non-native prod TS files=9`, `explicit native-linked TS shells=3`); `verify:llmswitch-rustification-audit -- --json` PASS (`prodTsFileCount=122`, `prodTsLocTotal=27304`, `nonNativeFileCount=9`, `nonNativeLocTotal=2427`); function-map and mainline-call-map gates PASS; llmswitch-core package build PASS; `git diff --check` PASS.
 - Boundary: no global install/restart; this is a source/type-shell deletion and static/build gate slice, not a live runtime behavior change.
+
+# 2026-07-08: log color session collision closeout
+
+- Trigger: screenshot showed 5520 and 5555 log lines sharing one visible color even though they were different sessions.
+- Owner locked: `vr.hit_log_projection`, Rust SSOT `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs`; TS facade is not the color owner.
+- Red: `tests/sharedmodule/virtual-router-hit-log.spec.ts` failed because `active-session-color-2` and `active-session-color-3` both resolved to `\x1b[94m` under the old 22-color palette.
+- Change: commit `753fd79c2 fix(log): avoid session color collisions`; removed the fixed palette, generated deterministic truecolor ANSI from the session hash, and added Rust + Jest locks for stability and non-collision.
+- Verification: Rust focused test PASS; focused VR hit/request-log Jest PASS; `npm run build:native-hotpath` PASS; llmswitch/root `tsc` PASS; function-map/mainline/VR/rustification gates PASS; `build:base` PASS; `install:release` installed `routecodex/rcc 0.90.3673`; 5520/5555 `/health` ready/version 0.90.3673; installed-runtime smoke proved different truecolor ANSI for `port-5520-session-smoke` vs `port-5555-session-smoke` and each VR hit line starts with its own session color.
+- Boundary: `handler-response-utils.usage-log-tag.spec.ts` remains blocked by unrelated dirty bridge/test work requiring `requestContext.context.toolsRaw`; not touched. Release build changed package version files and other worker files were already dirty, but only the Rust owner and VR hit-log test were committed for this fix.
