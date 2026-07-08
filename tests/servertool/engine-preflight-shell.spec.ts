@@ -8,6 +8,19 @@ const resolveServertoolEnginePreflightDecisionWithNativeMock = jest.fn((input: a
   result: input.preflightAction.result,
   shouldRunSideEffects: input.preflightAction.action !== 'return_original_chat'
 }));
+const resolveServertoolEngineOrchestrationPreflightDecisionWithNativeMock = jest.fn();
+const resolveServertoolEngineSkipDecisionWithNativeMock = jest.fn();
+const resolveServertoolTimeoutMsFromEnvCandidatesWithNativeMock = jest.fn(() => 1000);
+const planServertoolEngineTriggerObservationWithNativeMock = jest.fn(() => ({
+  logStopEntry: null,
+  logStopCompare: null
+}));
+const runPrimaryServerToolEngineSelectionMock = jest.fn();
+const logStopEntryMock = jest.fn();
+const logProgressMock = jest.fn();
+const logAutoHookTraceMock = jest.fn();
+const logStopCompareMock = jest.fn();
+const orchestrateServertoolEngineMock = jest.fn();
 
 jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
@@ -93,19 +106,46 @@ jest.unstable_mockModule(
     createServertoolProviderProtocolErrorFromPlanWithNative: jest.fn((input: any) => input),
     planServertoolEngineRuntimeActionWithNative: jest.fn(),
     planServertoolEnginePreflightWithNative: planServertoolEnginePreflightWithNativeMock,
-    planServertoolEngineTriggerObservationWithNative: jest.fn(),
+    planServertoolEngineTriggerObservationWithNative: planServertoolEngineTriggerObservationWithNativeMock,
     resolveServertoolEngineMatchHitWithNative: jest.fn(),
     resolveServertoolEnginePreflightDecisionWithNative: resolveServertoolEnginePreflightDecisionWithNativeMock,
     resolveServertoolEnginePostflightPayloadWithNative: jest.fn(),
-    resolveServertoolEngineSkipDecisionWithNative: jest.fn(),
-    resolveServertoolEngineOrchestrationPreflightDecisionWithNative: jest.fn(),
-    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: jest.fn(),
+    resolveServertoolEngineSkipDecisionWithNative: resolveServertoolEngineSkipDecisionWithNativeMock,
+    resolveServertoolEngineOrchestrationPreflightDecisionWithNative: resolveServertoolEngineOrchestrationPreflightDecisionWithNativeMock,
+    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: resolveServertoolTimeoutMsFromEnvCandidatesWithNativeMock,
     planServertoolTimeoutErrorWithNative: jest.fn(),
     planStoplessExecutionWithNative: jest.fn(),
   })
 );
 
-const { runEnginePreflight } = await import(
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
+  () => ({
+    runPrimaryServerToolEngineSelection: runPrimaryServerToolEngineSelectionMock
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js',
+  () => ({
+    orchestrateServertoolEngine: orchestrateServertoolEngineMock
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js',
+  () => ({
+    appendServertoolMatchSkippedProgressEvent: jest.fn(),
+    createServertoolProgressLogger: jest.fn(() => ({
+      logStopEntry: logStopEntryMock,
+      logProgress: logProgressMock,
+      logAutoHookTrace: logAutoHookTraceMock,
+      logStopCompare: logStopCompareMock
+    }))
+  })
+);
+
+const { runServerToolOrchestrationShell } = await import(
   '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js'
 );
 
@@ -115,6 +155,33 @@ describe('engine-preflight-shell', () => {
     resolveServertoolEnginePreflightDecisionWithNativeMock.mockImplementation((input: any) => ({
       result: input.preflightAction.result,
       shouldRunSideEffects: input.preflightAction.action !== 'return_original_chat'
+    }));
+    resolveServertoolEngineOrchestrationPreflightDecisionWithNativeMock.mockImplementation(({ preflight }: any) => {
+      if (preflight.kind === 'continue') {
+        return {
+          returnPreflightChat: false,
+          stopSignal: preflight.stopSignal
+        };
+      }
+      return {
+        returnPreflightChat: true,
+        chat: preflight.chat
+      };
+    });
+    runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+      mode: 'passthrough',
+      finalChatResponse: { id: 'chat-3' },
+      execution: null,
+      metadataWritePlan: null
+    });
+    resolveServertoolEngineSkipDecisionWithNativeMock.mockImplementation((input: any) => ({
+      returnSkipped: true,
+      triggerResult: 'skipped_passthrough',
+      skipReason: 'passthrough',
+      shellResult: {
+        chat: input.finalChatResponse,
+        executed: false
+      }
     }));
     inspectStopGatewaySignalMock.mockReturnValue({
       observed: true,
@@ -146,6 +213,15 @@ describe('engine-preflight-shell', () => {
     });
   });
 
+  async function runPublicPreflight(chat: Record<string, unknown>) {
+    return runServerToolOrchestrationShell({
+      chat: chat as any,
+      adapterContext: {} as any,
+      requestId: `req-${String(chat.id ?? 'preflight')}`,
+      entryEndpoint: '/v1/chat/completions'
+    });
+  }
+
   test('keeps engine preflight planning and stop-gateway wiring in the owner shell', async () => {
     const source = await import('node:fs/promises').then((fs) =>
       fs.readFile(
@@ -156,6 +232,7 @@ describe('engine-preflight-shell', () => {
 
     expect(await import('node:fs').then((fs) => fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine-preflight-shell.ts'))).toBe(false);
     expect(source).toContain('planServertoolEnginePreflightWithNative');
+    expect(source).not.toContain('export function runEnginePreflight(');
     expect(source).not.toContain('args.adapterContext as Record<string, unknown>');
     expect(source).toContain('function runPreflightSideEffects(');
     expect(source).toContain('inspectStopGatewaySignal(');
@@ -185,9 +262,7 @@ describe('engine-preflight-shell', () => {
     expect(source).not.toContain('./orchestration-policy-block.js');
   });
 
-  test('fails fast when native preflight decision rejects action', () => {
-    const logStopEntry = jest.fn();
-    const logStopCompare = jest.fn();
+  test('fails fast when native preflight decision rejects action', async () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'unknown_preflight_action',
       attachStopGatewayContext: true,
@@ -208,21 +283,16 @@ describe('engine-preflight-shell', () => {
       throw new Error('[servertool] invalid engine preflight action');
     });
 
-    expect(() =>
-      runEnginePreflight({
-        chat: { id: 'chat-invalid-action' } as any,
-        adapterContext: {} as any,
-        logStopEntry,
-        logStopCompare,
-      })
-    ).toThrow('[servertool] invalid engine preflight action');
+    await expect(
+      runPublicPreflight({ id: 'chat-invalid-action' })
+    ).rejects.toThrow('[servertool] invalid engine preflight action');
 
     expect(attachStopGatewayContextMock).not.toHaveBeenCalled();
-    expect(logStopEntry).not.toHaveBeenCalled();
-    expect(logStopCompare).not.toHaveBeenCalled();
+    expect(logStopEntryMock).not.toHaveBeenCalled();
+    expect(logStopCompareMock).not.toHaveBeenCalled();
   });
 
-  test('returns original chat when native preflight says so', () => {
+  test('returns original chat when native preflight says so', async () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat',
       attachStopGatewayContext: false,
@@ -232,23 +302,17 @@ describe('engine-preflight-shell', () => {
       }
     });
 
-    const result = runEnginePreflight({
-      chat: { id: 'chat-1' } as any,
-      adapterContext: {} as any,
-      logStopEntry: jest.fn(),
-      logStopCompare: jest.fn(),
-    });
+    const result = await runPublicPreflight({ id: 'chat-1' });
 
     expect(result).toEqual({
-      kind: 'return_original_chat',
       chat: { id: 'chat-1' },
+      executed: false
     });
     expect(attachStopGatewayContextMock).not.toHaveBeenCalled();
+    expect(runPrimaryServerToolEngineSelectionMock).not.toHaveBeenCalled();
   });
 
-  test('returns direct passthrough and logs trigger when native preflight disables stopless', () => {
-    const logStopEntry = jest.fn();
-    const logStopCompare = jest.fn();
+  test('returns direct passthrough and logs trigger when native preflight disables stopless', async () => {
     planServertoolEnginePreflightWithNativeMock.mockReturnValue({
       action: 'return_original_chat_direct_passthrough',
       attachStopGatewayContext: true,
@@ -266,47 +330,50 @@ describe('engine-preflight-shell', () => {
       }
     });
 
-    const result = runEnginePreflight({
+    const result = await runServerToolOrchestrationShell({
       chat: { id: 'chat-2' } as any,
       adapterContext: {} as any,
-      logStopEntry,
-      logStopCompare,
+      requestId: 'req-chat-2',
+      entryEndpoint: '/v1/chat/completions',
+      stageRecorder: {
+        record: jest.fn()
+      } as any
     });
 
     expect(result).toEqual({
-      kind: 'return_original_chat_direct_passthrough',
       chat: { id: 'chat-2' },
+      executed: false
     });
     expect(attachStopGatewayContextMock).toHaveBeenCalled();
-    expect(logStopEntry).toHaveBeenCalledWith(
+    expect(logStopEntryMock).toHaveBeenCalledWith(
       'trigger',
       'skipped_direct_passthrough',
       expect.objectContaining({ reason: 'stop_schema_missing', source: 'chat', eligible: true })
     );
-    expect(logStopCompare).toHaveBeenCalledWith('trigger');
+    expect(logStopCompareMock).toHaveBeenCalledWith('trigger');
   });
 
-  test('continues with stop signal and logs observed entry', () => {
-    const logStopEntry = jest.fn();
-    const logStopCompare = jest.fn();
-
-    const result = runEnginePreflight({
+  test('continues with stop signal and logs observed entry', async () => {
+    const result = await runServerToolOrchestrationShell({
       chat: { id: 'chat-3' } as any,
       adapterContext: {} as any,
-      logStopEntry,
-      logStopCompare,
+      requestId: 'req-chat-3',
+      entryEndpoint: '/v1/chat/completions',
+      stageRecorder: {
+        record: jest.fn()
+      } as any
     });
 
     expect(result).toEqual({
-      kind: 'continue',
-      stopSignal: expect.objectContaining({ observed: true, reason: 'stop_schema_missing' }),
+      chat: { id: 'chat-3' },
+      executed: false
     });
     expect(attachStopGatewayContextMock).toHaveBeenCalled();
-    expect(logStopEntry).toHaveBeenCalledWith(
+    expect(logStopEntryMock).toHaveBeenCalledWith(
       'entry',
       'observed',
       expect.objectContaining({ reason: 'stop_schema_missing', source: 'chat', eligible: true })
     );
-    expect(logStopCompare).not.toHaveBeenCalled();
+    expect(logStopCompareMock).not.toHaveBeenCalled();
   });
 });

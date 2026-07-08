@@ -5651,6 +5651,10 @@ function checkServertoolRustOutcomeCloseout() {
     'export interface ServertoolResponseStageShellOptions',
     'export interface ServertoolResponseStageShellResult',
     'export interface ServerToolOrchestrationResult',
+    'export function runEnginePreflight(',
+    'export function recordServertoolEngineMatchSkipped(',
+    'export function recordServertoolEngineMatchHit(',
+    'export async function runServertoolEnginePostflight(',
   ]) {
     if (engineOrchestrationShell.includes(marker)) {
       fail(
@@ -5735,7 +5739,7 @@ function checkServertoolRustOutcomeCloseout() {
     );
   }
   for (const marker of [
-    'export function runEnginePreflight(',
+    'function runEnginePreflight(',
     'function runPreflightSideEffects(',
     'planServertoolEnginePreflightWithNative',
     'resolveServertoolEnginePreflightDecisionWithNative',

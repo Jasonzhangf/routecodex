@@ -153,7 +153,7 @@ function runPreflightSideEffects(args: {
   }
 }
 
-export function runEnginePreflight(args: {
+function runEnginePreflight(args: {
   chat: JsonObject;
   adapterContext: AdapterContext;
   logStopEntry: LogStopEntry;
@@ -184,7 +184,7 @@ export function runEnginePreflight(args: {
     | EnginePreflightContinueResult;
 }
 
-export function recordServertoolEngineMatchSkipped(args: {
+function recordServertoolEngineMatchSkipped(args: {
   requestId: string;
   entryEndpoint: string;
   engineMode: 'passthrough' | 'tool_flow';
@@ -205,7 +205,7 @@ export function recordServertoolEngineMatchSkipped(args: {
   });
 }
 
-export function recordServertoolEngineMatchHit(args: {
+function recordServertoolEngineMatchHit(args: {
   execution: ServerToolExecution;
   stageRecorder?: StageRecorder;
 }): string {
@@ -220,7 +220,7 @@ export function recordServertoolEngineMatchHit(args: {
   return flowId;
 }
 
-export async function runServertoolEnginePostflight(args: {
+async function runServertoolEnginePostflight(args: {
   options: {
     requestId: string;
     adapterContext: AdapterContext;

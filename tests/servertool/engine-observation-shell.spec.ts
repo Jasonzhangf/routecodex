@@ -1,23 +1,195 @@
 import * as fs from 'node:fs';
-import { describe, expect, test, jest } from '@jest/globals';
-import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { beforeEach, describe, expect, test, jest } from '@jest/globals';
 
-function bindProviderProtocol(adapterContext: Record<string, unknown>, providerProtocol = 'openai-responses'): void {
-  const center = MetadataCenter.attach(adapterContext);
-  if (!center.readRuntimeControl().providerProtocol) {
-    center.writeRuntimeControl(
-      'providerProtocol',
-      providerProtocol,
-      {
-        module: 'tests/servertool/engine-observation-shell.spec.ts',
-        symbol: 'bindProviderProtocol',
-        stage: 'test'
+const appendServertoolMatchSkippedProgressEventMock = jest.fn();
+const logProgressMock = jest.fn();
+const runPrimaryServerToolEngineSelectionMock = jest.fn();
+const readRuntimeControlFromAnyBoundMetadataCenterMock = jest.fn(() => null);
+const readRuntimeMetadataSnapshotFromAnyBoundMetadataCenterMock = jest.fn(() => null);
+const buildServertoolPostflightObservationSummaryWithNativeMock = jest.fn();
+const planServertoolEngineRuntimeActionWithNativeMock = jest.fn();
+const resolveServertoolEngineMatchHitWithNativeMock = jest.fn();
+const resolveServertoolEnginePostflightPayloadWithNativeMock = jest.fn();
+const resolveServertoolEngineSkipDecisionWithNativeMock = jest.fn();
+const planStoplessExecutionWithNativeMock = jest.fn();
+const orchestrateServertoolEngineMock = jest.fn();
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/progress-log-block.js',
+  () => ({
+    appendServertoolMatchSkippedProgressEvent: appendServertoolMatchSkippedProgressEventMock,
+    createServertoolProgressLogger: jest.fn(() => ({
+      logStopEntry: jest.fn(),
+      logProgress: logProgressMock,
+      logAutoHookTrace: jest.fn(),
+      logStopCompare: jest.fn()
+    }))
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-selection-block.js',
+  () => ({
+    runPrimaryServerToolEngineSelection: runPrimaryServerToolEngineSelectionMock
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/run-server-side-tool-engine-shell.js',
+  () => ({
+    orchestrateServertoolEngine: orchestrateServertoolEngineMock
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js',
+  () => ({
+    attachStopGatewayContext: jest.fn(),
+    inspectStopGatewaySignal: jest.fn(() => ({
+      observed: true,
+      reason: 'stop',
+      source: 'chat',
+      eligible: true
+    })),
+    readRuntimeControlFromAnyBoundMetadataCenter: readRuntimeControlFromAnyBoundMetadataCenterMock,
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter: readRuntimeMetadataSnapshotFromAnyBoundMetadataCenterMock,
+    writeRuntimeControlToBoundMetadataCenter: jest.fn()
+  })
+);
+
+jest.unstable_mockModule(
+  '../../sharedmodule/llmswitch-core/src/servertool/timeout-error-block.js',
+  () => ({
+    createServertoolProviderProtocolErrorFromPlan: jest.fn((plan: unknown) => plan),
+    withTimeout: jest.fn((promise: Promise<unknown>) => promise)
+  })
+);
+
+jest.unstable_mockModule(
+  'rcc-llmswitch-core/native/servertool-wrapper',
+  () => ({
+    buildServertoolPostflightObservationSummaryWithNative: buildServertoolPostflightObservationSummaryWithNativeMock,
+    containsSyntheticRouteCodexControlTextWithNative: jest.fn(() => false),
+    detectProviderResponseShapeWithNative: jest.fn(() => 'chat_completion'),
+    extractServertoolResponseStageOrchestrationShellResultWithNative: jest.fn((output: any) => output.shellResult),
+    materializeServertoolResponseStageOrchestrationOutputWithNative: jest.fn(),
+    planServertoolEngineRuntimeActionWithNative: planServertoolEngineRuntimeActionWithNativeMock,
+    planServertoolEnginePreflightWithNative: jest.fn(() => ({
+      action: 'continue_to_engine',
+      attachStopGatewayContext: false,
+      result: {
+        kind: 'continue',
+        stopSignal: {
+          observed: true,
+          reason: 'stop',
+          source: 'chat',
+          eligible: true
+        }
       }
-    );
-  }
+    })),
+    planServertoolResponseStageGateWithNative: jest.fn(),
+    planServertoolEngineTriggerObservationWithNative: jest.fn(() => ({
+      logStopEntry: null,
+      logStopCompare: null
+    })),
+    resolveServertoolEngineMatchHitWithNative: resolveServertoolEngineMatchHitWithNativeMock,
+    resolveServertoolEnginePreflightDecisionWithNative: jest.fn((input: any) => ({
+      result: input.preflightAction.result,
+      shouldRunSideEffects: false
+    })),
+    resolveServertoolEnginePostflightPayloadWithNative: resolveServertoolEnginePostflightPayloadWithNativeMock,
+    resolveServertoolEngineSkipDecisionWithNative: resolveServertoolEngineSkipDecisionWithNativeMock,
+    resolveServertoolEngineOrchestrationPreflightDecisionWithNative: jest.fn((input: any) => ({
+      returnPreflightChat: false,
+      stopSignal: input.preflight.stopSignal
+    })),
+    resolveServertoolResponseStageOrchestrationGateApplicationWithNative: jest.fn(),
+    resolveServertoolTimeoutMsFromEnvCandidatesWithNative: jest.fn(() => 1000),
+    planServertoolTimeoutErrorWithNative: jest.fn(),
+    planStoplessExecutionWithNative: planStoplessExecutionWithNativeMock
+  })
+);
+
+const { runServerToolOrchestrationShell } = await import(
+  '../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js'
+);
+
+function setSkippedEngineResult(chat: Record<string, unknown> = { id: 'chat-skip' }): void {
+  runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+    mode: 'passthrough',
+    finalChatResponse: chat,
+    execution: null,
+    metadataWritePlan: null
+  });
+  resolveServertoolEngineSkipDecisionWithNativeMock.mockImplementation((input: any) => ({
+    returnSkipped: true,
+    triggerResult: 'skipped_passthrough',
+    skipReason: 'passthrough',
+    shellResult: {
+      chat: input.finalChatResponse,
+      executed: false
+    }
+  }));
+}
+
+function setHitEngineResult(args: {
+  finalChatResponse?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
+  projectedFlowId?: string;
+} = {}): void {
+  const execution = args.execution ?? { flowId: 'flow-match-hit' };
+  runPrimaryServerToolEngineSelectionMock.mockResolvedValue({
+    mode: 'tool_flow',
+    finalChatResponse: args.finalChatResponse ?? { id: 'chat-hit' },
+    execution,
+    metadataWritePlan: null
+  });
+  resolveServertoolEngineSkipDecisionWithNativeMock.mockReturnValue({
+    returnSkipped: false
+  });
+  resolveServertoolEngineMatchHitWithNativeMock.mockImplementation((input: any) => {
+    if (typeof input.execution?.flowId !== 'string') {
+      throw new Error('Servertool match hit requires execution.flowId');
+    }
+    return { flowId: input.execution.flowId };
+  });
+  planStoplessExecutionWithNativeMock.mockImplementation((input: any) => ({
+    execution: input.execution,
+    orchestrationPlan: {
+      isStopMessageFlow: false,
+      action: 'return_servertool_cli_projection_final'
+    }
+  }));
+  planServertoolEngineRuntimeActionWithNativeMock.mockImplementation((input: any) => ({
+    action: 'return_servertool_cli_projection_final',
+    executed: true,
+    flowIdSource: 'engine_execution',
+    progressStatus: 'completed (servertool cli projection; no reenter)',
+    finalPayloadSource: 'engine_result',
+    projectedFlowId: args.projectedFlowId ?? input.currentFlowId
+  }));
+  resolveServertoolEnginePostflightPayloadWithNativeMock.mockImplementation((input: any) => input.engineResult.finalChatResponse);
+}
+
+function runEngineForTest(stageRecorder?: { record: ReturnType<typeof jest.fn> }) {
+  return runServerToolOrchestrationShell({
+    chat: { id: 'chat-in' } as any,
+    adapterContext: {} as any,
+    requestId: 'req-engine-observation',
+    entryEndpoint: '/v1/chat/completions',
+    stageRecorder: stageRecorder as any
+  });
 }
 
 describe('engine-observation-shell', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    readRuntimeControlFromAnyBoundMetadataCenterMock.mockReturnValue(null);
+    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenterMock.mockReturnValue(null);
+    buildServertoolPostflightObservationSummaryWithNativeMock.mockReturnValue({});
+    setSkippedEngineResult();
+  });
+
   test('engine.ts facade stays deleted and orchestration owner remains explicit', () => {
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/engine.ts')).toBe(false);
     const source = fs.readFileSync(
@@ -68,48 +240,34 @@ describe('engine-observation-shell', () => {
   });
 
   test('match stage recorder failures are fail-fast', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
-    const adapterContext: Record<string, unknown> = {};
-    bindProviderProtocol(adapterContext, 'openai-chat');
     const stageRecorder = {
       record: jest.fn(() => {
         throw new Error('stage recorder down');
       })
     };
 
-    expect(() =>
-      mod.recordServertoolEngineMatchSkipped({
-        requestId: 'req-match-skip-failfast',
-        entryEndpoint: '/v1/chat/completions',
-        engineMode: 'passthrough',
-        skipReason: 'passthrough',
-        adapterContext: adapterContext as any,
-        stageRecorder: stageRecorder as any
-      })
-    ).toThrow('stage recorder down');
+    setSkippedEngineResult();
+    await expect(runEngineForTest(stageRecorder)).rejects.toThrow('stage recorder down');
 
-    expect(() =>
-      mod.recordServertoolEngineMatchHit({
-        execution: {
-          flowId: 'flow-match-hit',
-          toolName: 'reasoningStop',
-          toolCall: {
-            id: 'call_match_hit',
-            type: 'function',
-            function: {
-              name: 'reasoningStop',
-              arguments: '{}'
-            }
-          },
-          followup: null
-        } as any,
-        stageRecorder: stageRecorder as any
-      })
-    ).toThrow('stage recorder down');
+    setHitEngineResult({
+      execution: {
+        flowId: 'flow-match-hit',
+        toolName: 'reasoningStop',
+        toolCall: {
+          id: 'call_match_hit',
+          type: 'function',
+          function: {
+            name: 'reasoningStop',
+            arguments: '{}'
+          }
+        },
+        followup: null
+      }
+    });
+    await expect(runEngineForTest(stageRecorder)).rejects.toThrow('stage recorder down');
   });
 
   test('match skipped consumes native skipReason instead of deriving it from engine mode', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const source = fs.readFileSync(
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
@@ -118,8 +276,6 @@ describe('engine-observation-shell', () => {
       'sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts',
       'utf8'
     );
-    const adapterContext: Record<string, unknown> = {};
-    bindProviderProtocol(adapterContext, 'openai-chat');
 
     expect(source).not.toContain("args.engineMode === 'passthrough' ? 'passthrough' : 'no_execution'");
     expect(orchestrationSource).not.toContain("engineSkipPlan.skipReason ?? 'no_execution'");
@@ -128,80 +284,64 @@ describe('engine-observation-shell', () => {
     expect(orchestrationSource).not.toContain("throw new Error('[servertool] native engine skip plan missing skipReason')");
     expect(orchestrationSource).not.toContain('engineSkipPlan.skipReason as string');
     expect(orchestrationSource).toContain('skipReason: engineSkipDecision.skipReason');
-    mod.recordServertoolEngineMatchSkipped({
-      requestId: 'req-match-skip-native-reason',
+
+    setSkippedEngineResult();
+    await runEngineForTest();
+
+    expect(appendServertoolMatchSkippedProgressEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'req-engine-observation',
       entryEndpoint: '/v1/chat/completions',
+      skipReason: 'passthrough'
+    }));
+    expect(resolveServertoolEngineSkipDecisionWithNativeMock).toHaveBeenCalledWith(expect.objectContaining({
       engineMode: 'passthrough',
-      skipReason: 'passthrough',
-      adapterContext: adapterContext as any
-    });
+      hasExecution: false
+    }));
   });
 
   test('match hit requires execution flowId instead of falling back to unknown', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
-
-    expect(() =>
-      mod.recordServertoolEngineMatchHit({
-        execution: {
-          toolName: 'reasoningStop',
-          toolCall: {
-            id: 'call_missing_flow',
-            type: 'function',
-            function: {
-              name: 'reasoningStop',
-              arguments: '{}'
-            }
-          },
-          followup: null
-        } as any
-      })
-    ).toThrow('Servertool match hit requires execution.flowId');
+    setHitEngineResult({
+      execution: {
+        toolName: 'reasoningStop',
+        toolCall: {
+          id: 'call_missing_flow',
+          type: 'function',
+          function: {
+            name: 'reasoningStop',
+            arguments: '{}'
+          }
+        },
+        followup: null
+      }
+    });
+    await expect(runEngineForTest()).rejects.toThrow('Servertool match hit requires execution.flowId');
   });
 
   test('postflight stage recorder failures are fail-fast', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const stageRecorder = {
-      record: jest.fn(() => {
-        throw new Error('postflight recorder down');
+      record: jest.fn((stageId: string) => {
+        if (stageId === 'servertool.execution') {
+          throw new Error('postflight recorder down');
+        }
       })
     };
 
-    await expect(
-      mod.runServertoolEnginePostflight({
-        options: {
-          requestId: 'req-postflight-failfast',
-          adapterContext: {} as any
-        },
-        engineResult: {
-          mode: 'tool_flow',
-          finalChatResponse: {
-            tool_outputs: [
-              {
-                tool_name: 'reasoningStop',
-                tool_call_id: 'call_postflight_failfast',
-                content: 'ok'
-              }
-            ]
-          },
-          execution: {
-            flowId: 'flow-postflight-failfast',
-            followup: null
-          }
-        } as any,
-        runtimeAction: {
-          action: 'return_servertool_cli_projection_final',
-          executed: true,
-          flowIdSource: 'engine_execution',
-          progressStatus: 'completed (servertool cli projection; no reenter)',
-          finalPayloadSource: 'engine_result',
-          projectedFlowId: 'flow-postflight-failfast'
-        },
+    setHitEngineResult({
+      execution: {
         flowId: 'flow-postflight-failfast',
-        totalSteps: 5,
-        stageRecorder: stageRecorder as any,
-        logProgress: jest.fn()
-      })
-    ).rejects.toThrow('postflight recorder down');
+        followup: null
+      },
+      finalChatResponse: {
+        tool_outputs: [
+          {
+            tool_name: 'reasoningStop',
+            tool_call_id: 'call_postflight_failfast',
+            content: 'ok'
+          }
+        ]
+      }
+    });
+    await expect(runEngineForTest(stageRecorder)).rejects.toThrow('postflight recorder down');
   });
 
   test('postflight observation summary is native-owned', async () => {
@@ -243,48 +383,43 @@ describe('engine-observation-shell', () => {
     expect(source).toContain('const metadataCenterSnapshot = runtimeMetadataSnapshot?.metadataCenterSnapshot;');
     expect(source).toContain('metadataCenterSnapshot: metadataCenterSnapshot ?? null');
 
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
     const stageRecorder = {
       record: jest.fn()
     };
-    await mod.runServertoolEnginePostflight({
-      options: {
-        requestId: 'req-postflight-native-summary',
-        adapterContext: {} as any
-      },
-      engineResult: {
-        mode: 'tool_flow',
-        finalChatResponse: {
-          tool_outputs: [
-            {
-              tool_name: 'reasoningStop',
-              tool_call_id: 'call_postflight_summary',
-              content: 'ok'
-            }
-          ]
-        },
-        execution: {
-          flowId: 'flow-postflight-summary',
-          followup: {
-            injection: {
-              ops: [{ op: 'append' }, { op: 1 }]
-            }
+
+    buildServertoolPostflightObservationSummaryWithNativeMock.mockReturnValue({
+      mode: 'tool_flow',
+      flowId: 'flow-postflight-summary',
+      hasFollowup: true,
+      toolOutputCount: 1,
+      toolName: 'reasoningStop',
+      toolCallId: 'call_postflight_summary',
+      toolOutputContent: 'ok',
+      followup: {
+        mode: 'injection',
+        injectionOps: ['append']
+      }
+    });
+    setHitEngineResult({
+      execution: {
+        flowId: 'flow-postflight-summary',
+        followup: {
+          injection: {
+            ops: [{ op: 'append' }, { op: 1 }]
           }
         }
-      } as any,
-      runtimeAction: {
-        action: 'return_servertool_cli_projection_final',
-        executed: true,
-        flowIdSource: 'engine_execution',
-        progressStatus: 'completed (servertool cli projection; no reenter)',
-        finalPayloadSource: 'engine_result',
-        projectedFlowId: 'flow-postflight-summary'
       },
-      flowId: 'flow-postflight-summary',
-      totalSteps: 5,
-      stageRecorder: stageRecorder as any,
-      logProgress: jest.fn()
+      finalChatResponse: {
+        tool_outputs: [
+          {
+            tool_name: 'reasoningStop',
+            tool_call_id: 'call_postflight_summary',
+            content: 'ok'
+          }
+        ]
+      }
     });
+    await runEngineForTest(stageRecorder);
 
     expect(stageRecorder.record).toHaveBeenCalledWith(
       'servertool.execution',
@@ -305,35 +440,15 @@ describe('engine-observation-shell', () => {
   });
 
   test('postflight consumes Rust-projected flow id without interpreting flowIdSource in TS', async () => {
-    const mod = await import('../../sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.js');
-    const logProgress = jest.fn();
+    setHitEngineResult({
+      finalChatResponse: { id: 'chat-postflight-rust-projected-flow' },
+      execution: {
+        flowId: 'flow-engine-ts-must-not-read'
+      },
+      projectedFlowId: 'flow-rust-projected'
+    });
 
-    await expect(
-      mod.runServertoolEnginePostflight({
-        options: {
-          requestId: 'req-postflight-rust-projected-flow',
-          adapterContext: {} as any
-        },
-        engineResult: {
-          mode: 'tool_flow',
-          finalChatResponse: { id: 'chat-postflight-rust-projected-flow' },
-          execution: {
-            flowId: 'flow-engine-ts-must-not-read'
-          }
-        } as any,
-        runtimeAction: {
-          action: 'return_servertool_cli_projection_final',
-          executed: true,
-          flowIdSource: 'unknown_flow_id_source',
-          progressStatus: 'completed (servertool cli projection; no reenter)',
-          finalPayloadSource: 'engine_result',
-          projectedFlowId: 'flow-rust-projected'
-        } as any,
-        flowId: 'flow-current-ts-must-not-read',
-        totalSteps: 5,
-        logProgress
-      })
-    ).resolves.toEqual({
+    await expect(runEngineForTest()).resolves.toEqual({
       chat: { id: 'chat-postflight-rust-projected-flow' },
       executed: true,
       flowId: 'flow-rust-projected'
@@ -352,6 +467,10 @@ describe('engine-observation-shell', () => {
     expect(source).not.toContain('export interface ServertoolResponseStageShellOptions');
     expect(source).not.toContain('export interface ServertoolResponseStageShellResult');
     expect(source).not.toContain('export interface ServerToolOrchestrationResult');
+    expect(source).not.toContain('export function runEnginePreflight(');
+    expect(source).not.toContain('export function recordServertoolEngineMatchSkipped(');
+    expect(source).not.toContain('export function recordServertoolEngineMatchHit(');
+    expect(source).not.toContain('export async function runServertoolEnginePostflight(');
     expect(source).not.toMatch(/export interface ServerToolOrchestrationOptions\s*\{[\s\S]{0,220}providerProtocol:\s*string;/);
     expect(source).not.toContain('readProviderProtocolFromAnyBoundMetadataCenter');
     expect(source).not.toContain('providerProtocol: args.providerProtocol');
