@@ -5,7 +5,7 @@ import {
   extractSimpleXmlToolsFromText,
   extractToolNamespaceXmlBlocksFromText,
   normalizeAssistantTextToToolCalls
-} from '../../sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.js';
+} from './helpers/text-markup-direct-native.js';
 
 describe('text-markup-normalizer (tool text → tool_calls)', () => {
   it('extracts <list_directory> XML block via dedicated simple-xml extractor', () => {
@@ -220,7 +220,6 @@ I need to add a backend endpoint and then execute the patch.
         '',
         '› Summarize recent commits'
       ].join('\n'));
-    expect(Array.isArray(listCalls)).toBe(true);
     expect(listCalls?.length ?? 0).toBe(0);
 
     const execCalls = extractBareExecCommandFromText([
@@ -229,7 +228,6 @@ I need to add a backend endpoint and then execute the patch.
         '',
         '• {"type":"blocked","summary":"服务状态异常导致 state API 测试失败","blocker":"unified-api 服务 health check 失败，core-daemon 显示 unified-api 状态为 unhealthy","impact":"无法验证新分解的 Xiaohongshu 模块与 state API 的集成","next_action":"检查 unified-api 日志 (/Users/fanzhang/.webauto/logs/unified-api.log) 定位启动失败原因","evidence":["node scripts/xiaohongshu/tests/test-state-api.mjs 返回 ECONNREFUSED","node scripts/core-daemon.mjs status 显示 unified-api 为 unhealthy"]}'
       ].join('\n'));
-    expect(Array.isArray(execCalls)).toBe(true);
     expect(execCalls?.length ?? 0).toBe(0);
   });
 });

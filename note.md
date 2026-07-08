@@ -28009,3 +28009,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Removed `./guidance` and `./v2/guidance` package exports plus the host ambient module declaration for `rcc-llmswitch-core/guidance`.
 - `tests/sharedmodule/tool-guidance-exec-command.spec.ts` now calls direct Rust/NAPI `buildSystemToolGuidanceJson` and `augmentOpenAIToolsJson` via test-only helper `tests/sharedmodule/helpers/tool-guidance-direct-native.ts`.
 - Verification PASS: focused guidance/residue Jest 199/199; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=85`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact guidance subpath ref scan; `git diff --check`.
+
+# 2026-07-09: llmswitch text markup normalizer shell deletion
+
+- Scope: continued zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts` and `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts`.
+- Text markup tests now call direct Rust/NAPI capabilities through `tests/sharedmodule/helpers/text-markup-direct-native.ts`; `scripts/verify-apply-patch.mjs` now uses host bridge `normalizeAssistantTextToToolCallsJson`.
+- Verification PASS: focused text-markup/residue Jest 206/206; sharedmodule/root `tsc`; exact source/script ref scan for deleted subpaths; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=83`, `shellsWithProdImporters=69`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`).

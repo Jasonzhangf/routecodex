@@ -1,4 +1,4 @@
-import { normalizeAssistantTextToToolCalls } from '../../sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.js';
+import { normalizeAssistantTextToToolCalls } from './helpers/text-markup-direct-native.js';
 
 describe('text-markup-normalizer RCC fence surface', () => {
   it('rejects RCC fence with glued closing marker by Rust native contract', () => {

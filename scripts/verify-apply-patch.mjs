@@ -14,6 +14,10 @@ const repoRoot = path.resolve(__dirname, '..');
 const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
 const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 const { importCoreModule } = await import(coreLoaderUrl);
+const bridgeNativeExportsUrl = pathToFileURL(
+  path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')
+).href;
+const { normalizeAssistantTextToToolCallsJson } = await import(bridgeNativeExportsUrl);
 
 const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value) => value;
 
@@ -22,9 +26,6 @@ async function loadCoreModule(subpath) {
 }
 
 async function runApplyPatchTextCase(label, payloadText) {
-  const { normalizeAssistantTextToToolCalls } = await loadCoreModule(
-    'conversion/shared/text-markup-normalizer'
-  );
   let canonicalizeChatResponseTools = null;
   try {
     const canonicalizerModule = await loadCoreModule('conversion/shared/tool-canonicalizer');
@@ -42,7 +43,7 @@ async function runApplyPatchTextCase(label, payloadText) {
   };
   let normalizedMsg;
   try {
-    normalizedMsg = normalizeAssistantTextToToolCalls(message);
+    normalizedMsg = await normalizeAssistantTextToToolCallsJson(message);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error ?? '');
     if (msg.includes('native normalizeAssistantTextToToolCallsJson is required but unavailable')) {

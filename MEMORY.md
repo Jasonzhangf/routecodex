@@ -1656,3 +1656,9 @@
 - `sharedmodule/llmswitch-core/src/guidance/index.ts` is physically deleted, and package exports `./guidance` / `./v2/guidance` are removed. Tool guidance truth remains Rust/NAPI exports such as `buildSystemToolGuidanceJson`, `augmentOpenAIToolsJson`, and `augmentAnthropicToolsJson`.
 - Tests that need guidance evidence should call direct native helper code, not recreate the public TS shell or package subpath.
 - Current llmswitch shell audit metric after this deletion is `prodTsShellCount=85`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Text markup normalizer TS shells are retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts` and `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts` are physically deleted. Do not restore them as public `conversion/shared/text-markup-normalizer` subpaths.
+- Text tool-call extraction and assistant-text normalization truth remains Rust/NAPI (`extract*Tool*FromTextJson`, `normalizeAssistantTextToToolCallsJson`). Tests should call direct native helper code; host scripts should use the host bridge native export.
+- Current llmswitch shell audit metric after this deletion is `prodTsShellCount=83`, `shellsWithProdImporters=69`, with `nonNativeFileCount=0`.

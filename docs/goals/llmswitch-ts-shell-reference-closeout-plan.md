@@ -225,6 +225,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Tool guidance tests now call direct Rust/NAPI exports `buildSystemToolGuidanceJson` and `augmentOpenAIToolsJson` through a test-only direct native helper.
 - Residue coverage now locks the guidance TS shell as physically absent.
 
+### 2026-07-09 text markup normalizer shells deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts` and its helper `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer/normalize.ts`.
+- Text markup tests now call direct Rust/NAPI extraction and normalization exports through a test-only direct native helper.
+- `scripts/verify-apply-patch.mjs` now calls the host bridge native export `normalizeAssistantTextToToolCallsJson` instead of loading the deleted llmswitch-core subpath.
+- Residue/red-test coverage now locks both retired source paths as physically absent.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:
