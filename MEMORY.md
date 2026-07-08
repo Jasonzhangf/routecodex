@@ -1326,6 +1326,12 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts` is now physically deleted; the 2026-07-06 guidance to import it directly is superseded.
 - Tests/scripts that need Anthropic response conversion must call direct native response semantics (`native-hub-pipeline-resp-semantics` / Rust NAPI full exports), not the retired `response-runtime-anthropic` dist subpath.
 - Function/verification maps now mark `response-runtime-anthropic.ts` as forbidden runtime TS surface; residue/red-test coverage locks the file as absent.
+
+# 2026-07-09: Standardized bridge runtime TS shell is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts` is physically deleted.
+- Remaining ChatEnvelope/StandardizedRequest TS surface is declaration-only (`types/chat-envelope.d.ts`, `types/standardized.d.ts`); conversion behavior belongs to native req inbound/outbound semantics.
+- Tests that need chat↔standardized conversion evidence must use direct native helpers, not restore the old runtime wrapper.
 # 2026-07-06: VR contracts type surface is facade-scoped
 
 - Upper production layers must not import `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` directly.

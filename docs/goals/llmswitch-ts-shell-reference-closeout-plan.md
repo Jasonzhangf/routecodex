@@ -239,6 +239,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `scripts/tests/anthropic-chat-e2e.mjs` and `scripts/tests/anthropic-responses-roundtrip.mjs` now load `dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js` instead of the retired response runtime dist subpath.
 - Function/verification maps and residue/red-test coverage now lock the former response runtime shell as physically absent.
 
+### 2026-07-09 Standardized bridge runtime shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts`.
+- Chat semantics tests now call direct native req inbound/outbound conversion helpers through `tests/sharedmodule/helpers/standardized-bridge-direct-native.ts`.
+- Function/verification maps now keep only the still-consumed ChatEnvelope/StandardizedRequest declaration files as TS bridge surface and forbid restoring the runtime wrapper.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

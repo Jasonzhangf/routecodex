@@ -1849,8 +1849,8 @@ owners:
     status: active
     summary: "Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases"
     owner_kind: ts_bridge
-    owner_scope: "Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases"
-    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+    owner_scope: "file-scoped Hub ChatEnvelope/StandardizedRequest TS bridge type surface and direct native conversion evidence"
+    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
     canonical_types:
       - AdapterContext
       - ChatContinuationSemantics
@@ -1860,18 +1860,21 @@ owners:
       - StandardizedRequest
       - ProcessedRequest
     canonical_builders:
-      - chatEnvelopeToStandardized
-      - standardizedToChatEnvelope
+      - chatEnvelopeToStandardizedWithNative
     allowed_paths:
+      - sharedmodule/llmswitch-core/src/conversion/hub/types
       - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - tests/sharedmodule
+      - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
+      - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
     forbidden_mentions_allowlist:
       - AdapterContext
       - StandardizedRequest
@@ -1886,6 +1889,7 @@ owners:
     notes:
       - "ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface."
+      - "The former `standardized-bridge.ts` runtime wrapper shell is deleted; tests that need conversion evidence call native req inbound/outbound semantics directly."
 
   - feature_id: hub.response_anthropic_client_projection
     status: active

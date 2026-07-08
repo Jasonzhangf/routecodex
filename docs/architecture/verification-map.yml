@@ -1072,7 +1072,8 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/chat-semantics-stage1.spec.ts
@@ -1085,6 +1086,7 @@ verification:
     notes:
       - "Public TS ChatEnvelope/StandardizedRequest types are limited to externally consumed bridge declarations."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases are residue and must remain module-internal."
+      - "The former `standardized-bridge.ts` runtime wrapper shell must stay physically deleted; conversion evidence uses direct native semantics."
 
   - feature_id: hub.response_anthropic_client_projection
     change_risk: high

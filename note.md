@@ -6,6 +6,14 @@
 - Verification PASS: focused Jest 195/195 (red/residue), `verify:hub-response-anthropic-native` Rust tests 102/102, sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=82`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old response-runtime subpath, script syntax checks, and `git diff --check`.
 - Boundary: broad `npm test -- --runInBand ...` was not used as evidence because repo `npm test` prepends unrelated routing-instructions suites that fail on pre-existing deleted servertool/VR/sample assumptions; focused `jest:run --runTestsByPath` passed for this slice.
 
+# 2026-07-09: Standardized bridge runtime shell deleted
+
+- Scope: delete `sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts` after exact refs showed only test/map/doc callers.
+- Change: chat semantics tests now call native req inbound/outbound standardized conversion through `tests/sharedmodule/helpers/standardized-bridge-direct-native.ts`.
+- Map update: `hub.chat_envelope_type_surface` now treats only the `.d.ts` type declarations as remaining TS bridge surface and forbids restoring the runtime wrapper.
+- Verification PASS: focused bridge Jest 2/2 plus residue/red checks 195/195, sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=81`, `zeroProdNoHostCount=11`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old standardized bridge subpath, and `git diff --check`.
+- Boundary: full `tests/sharedmodule/chat-semantics-stage1.spec.ts` still has unrelated VR config failures (`routing configuration missing`) in request-pipeline tests; the direct chat↔standardized bridge tests passed.
+
 # 2026-07-09: snapshot-recorder host bridge ref direct-native wired
 
 - Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.

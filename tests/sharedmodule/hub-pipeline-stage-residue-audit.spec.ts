@@ -755,20 +755,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(references).toEqual([]);
   });
 
-  it('standardized bridge must not export zero-consumer option type shells', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts'),
-      'utf8',
-    );
-
-    const findings = collectMatches(source, [
-      { label: 'exports zero-consumer chat-to-standardized options', pattern: /export\s+interface\s+ChatToStandardizedOptions\b/ },
-      { label: 'exports zero-consumer standardized-to-chat options', pattern: /export\s+interface\s+StandardizedToChatOptions\b/ },
-    ]);
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('chatEnvelopeToStandardizedWithNative');
-    expect(source).toContain('standardizedToChatEnvelopeWithNative');
+  it('standardized bridge runtime shell must stay physically deleted', () => {
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts')),
+    ).toBe(false);
   });
 
   it('anthropic response runtime must not restore response semantics in TS', () => {
