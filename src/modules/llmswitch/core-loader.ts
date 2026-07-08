@@ -3,8 +3,6 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
-export type LlmsImpl = 'ts';
-
 const BUILTIN_SHARED_MODULE_REL = path.join('sharedmodule', 'llmswitch-core');
 const PACKAGE_CANDIDATES = [
   BUILTIN_SHARED_MODULE_REL,
@@ -79,14 +77,7 @@ function tryResolvePackageRootViaRequire(packageName: string, baseUrl: string): 
   }
 }
 
-function assertOnlyCoreDistImpl(impl: LlmsImpl): void {
-  if (impl !== 'ts') {
-    throw new Error(`[llmswitch-core-loader] unsupported llmswitch core implementation: ${String(impl)}`);
-  }
-}
-
-export function resolveCorePackageDir(impl: LlmsImpl = 'ts'): string {
-  assertOnlyCoreDistImpl(impl);
+export function resolveCorePackageDir(): string {
   if (corePackageDir) {
     return corePackageDir;
   }
@@ -144,10 +135,9 @@ export function resolveCorePackageDir(impl: LlmsImpl = 'ts'): string {
   );
 }
 
-function resolveCoreDistPath(subpath: string, impl: LlmsImpl): string {
-  assertOnlyCoreDistImpl(impl);
+function resolveCoreDistPath(subpath: string): string {
   const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
-  const distDir = path.join(resolveCorePackageDir(impl), 'dist');
+  const distDir = path.join(resolveCorePackageDir(), 'dist');
   const candidate = path.join(distDir, `${clean}.js`);
   if (!fs.existsSync(candidate)) {
     throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认对应核心库包含该模块。`);
@@ -155,15 +145,15 @@ function resolveCoreDistPath(subpath: string, impl: LlmsImpl): string {
   return candidate;
 }
 
-export function resolveCoreModulePath(subpath: string, impl: LlmsImpl = 'ts'): string {
-  return resolveCoreDistPath(subpath, impl);
+export function resolveCoreModulePath(subpath: string): string {
+  return resolveCoreDistPath(subpath);
 }
 
-export function resolveCoreModuleUrl(subpath: string, impl: LlmsImpl = 'ts'): string {
-  const modulePath = resolveCoreDistPath(subpath, impl);
+export function resolveCoreModuleUrl(subpath: string): string {
+  const modulePath = resolveCoreDistPath(subpath);
   return pathToFileURL(modulePath).href;
 }
 
-export async function importCoreModule<T = unknown>(subpath: string, impl: LlmsImpl = 'ts'): Promise<T> {
-  return (await import(resolveCoreModuleUrl(subpath, impl))) as T;
+export async function importCoreModule<T = unknown>(subpath: string): Promise<T> {
+  return (await import(resolveCoreModuleUrl(subpath))) as T;
 }

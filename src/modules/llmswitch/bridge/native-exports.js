@@ -147,7 +147,7 @@ export function getRouterHotpathJsonBindingSync() {
         return cachedRouterHotpathJsonBindingSync;
     }
     try {
-        const packageDir = resolveCorePackageDir('ts');
+        const packageDir = resolveCorePackageDir();
         const candidates = [
             path.join(packageDir, 'rust-core', 'target', 'release', 'router_hotpath_napi.node'),
             path.join(packageDir, 'rust-core', 'target', 'debug', 'router_hotpath_napi.node'),

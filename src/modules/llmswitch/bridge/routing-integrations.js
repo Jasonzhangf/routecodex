@@ -721,7 +721,7 @@ export function resolveRouteCodexConfigPathNativeSync(options = {}) {
     return output;
 }
 function loadNativeBindingForConfigCodec() {
-    const coreDir = resolveCorePackageDir('ts');
+    const coreDir = resolveCorePackageDir();
     const nativePath = path.join(coreDir, 'dist', 'native', 'router_hotpath_napi.node');
     return nodeRequire(nativePath);
 }

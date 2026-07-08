@@ -28,6 +28,12 @@
 - Change: architecture scripts now assert the old compat-engine TS shell is physically absent while preserving Rust/native ownership checks.
 - Verification PASS: focused Jest 4 suites/198 tests; compat architecture scripts; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=78`, `shellsWithProdImporters=67`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit; sharedmodule/root `tsc`; exact source ref scan; `git diff --check`.
 
+# 2026-07-09: llmswitch core-loader impl selector removed
+
+- Scope: remove the remaining dead `impl='ts'` selector surface from `src/modules/llmswitch/core-loader.ts/js/d.ts` and direct host bridge callers to the single core dist resolver.
+- Change: `resolveCorePackageDir`, `resolveCoreModulePath`, `resolveCoreModuleUrl`, and `importCoreModule` no longer accept an implementation argument; `routing-integrations` and `native-exports` call `resolveCorePackageDir()` directly.
+- Verification PASS: exact source/runtime scan found no `LlmsImpl`, unsupported implementation branch, or explicit `resolveCorePackageDir('ts')` caller outside docs; root/sharedmodule `tsc`; JS syntax check for touched JS files; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit`; zero-ts closeout; minimal TS surface; rustification audit; `git diff --check`.
+
 # 2026-07-09: snapshot-recorder host bridge ref direct-native wired
 
 - Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.

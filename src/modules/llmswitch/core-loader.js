@@ -72,13 +72,7 @@ function tryResolvePackageRootViaRequire(packageName, baseUrl) {
         return null;
     }
 }
-function assertOnlyCoreDistImpl(impl) {
-    if (impl !== 'ts') {
-        throw new Error(`[llmswitch-core-loader] unsupported llmswitch core implementation: ${String(impl)}`);
-    }
-}
-export function resolveCorePackageDir(impl = 'ts') {
-    assertOnlyCoreDistImpl(impl);
+export function resolveCorePackageDir() {
     if (corePackageDir) {
         return corePackageDir;
     }
@@ -129,23 +123,22 @@ export function resolveCorePackageDir(impl = 'ts') {
     const targets = PACKAGE_CANDIDATES.map((pkg) => path.join('<project>', pkg)).join(' 或 ');
     throw new Error(`[llmswitch-core-loader] 无法定位 llmswitch 核心库，请执行 npm install 以确保 ${targets} 存在。`);
 }
-function resolveCoreDistPath(subpath, impl) {
-    assertOnlyCoreDistImpl(impl);
+function resolveCoreDistPath(subpath) {
     const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
-    const distDir = path.join(resolveCorePackageDir(impl), 'dist');
+    const distDir = path.join(resolveCorePackageDir(), 'dist');
     const candidate = path.join(distDir, `${clean}.js`);
     if (!fs.existsSync(candidate)) {
         throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认对应核心库包含该模块。`);
     }
     return candidate;
 }
-export function resolveCoreModulePath(subpath, impl = 'ts') {
-    return resolveCoreDistPath(subpath, impl);
+export function resolveCoreModulePath(subpath) {
+    return resolveCoreDistPath(subpath);
 }
-export function resolveCoreModuleUrl(subpath, impl = 'ts') {
-    const modulePath = resolveCoreDistPath(subpath, impl);
+export function resolveCoreModuleUrl(subpath) {
+    const modulePath = resolveCoreDistPath(subpath);
     return pathToFileURL(modulePath).href;
 }
-export async function importCoreModule(subpath, impl = 'ts') {
-    return (await import(resolveCoreModuleUrl(subpath, impl)));
+export async function importCoreModule(subpath) {
+    return (await import(resolveCoreModuleUrl(subpath)));
 }

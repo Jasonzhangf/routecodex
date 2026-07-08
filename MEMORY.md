@@ -1345,6 +1345,11 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts` is physically deleted with it; request compat adapter-context evidence now goes through direct native test helper only.
 - Tests/scripts that need request/response compat evidence must call direct native req outbound compat helpers; request compat truth remains in Rust `req_outbound_stage3_compat`.
 - Architecture scripts now treat the old compat engine shell as a forbidden resurrection path.
+
+# 2026-07-09: llmswitch core-loader has no implementation selector
+
+- `src/modules/llmswitch/core-loader.ts/js/d.ts` no longer exports `LlmsImpl` or accepts an implementation parameter; the loader resolves the single llmswitch-core dist surface only.
+- Host bridge callers must use `resolveCorePackageDir()` without `'ts'` or engine/source selector arguments. Reintroducing implementation selection would violate the llmswitch-core TS shell closeout direction.
 # 2026-07-06: VR contracts type surface is facade-scoped
 
 - Upper production layers must not import `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` directly.

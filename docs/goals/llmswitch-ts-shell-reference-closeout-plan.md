@@ -257,6 +257,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Compat tests now call direct native req outbound compat helpers through `tests/sharedmodule/helpers/compat-engine-direct-native.ts`; this helper is test-only evidence and not a runtime TS owner.
 - Architecture verification scripts now assert the old compat engine TS shell is physically absent while continuing to verify Rust request compat truth and native req-outbound bridge exports.
 
+### 2026-07-09 core-loader implementation selector removed
+
+- `src/modules/llmswitch/core-loader.ts/js/d.ts` no longer exports `LlmsImpl` or accepts an implementation selector argument on core package/module resolution APIs.
+- `src/modules/llmswitch/bridge/routing-integrations.ts/js` and `src/modules/llmswitch/bridge/native-exports.ts/js` now call `resolveCorePackageDir()` without a dead `'ts'` implementation parameter.
+- Exact source/runtime scan found no remaining `LlmsImpl`, unsupported implementation branch, or explicit `resolveCorePackageDir('ts')` caller outside docs.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:
