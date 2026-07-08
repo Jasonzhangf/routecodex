@@ -113,9 +113,7 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
         'dist/modules/llmswitch/bridge/native-exports.js',
         'dist/modules/llmswitch/bridge/routing-integrations.js',
         'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
-        'sharedmodule/llmswitch-core/dist/servertool/metadata-center-carrier.js',
         'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
-        'node_modules/rcc-llmswitch-core/dist/servertool/metadata-center-carrier.js',
       ];
       for (const relativePath of candidates) {
         await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);

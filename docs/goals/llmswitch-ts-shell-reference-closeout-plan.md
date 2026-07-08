@@ -210,6 +210,14 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/sharedmodule/native-governance-apply-patch-line-edit.spec.ts` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` lock the old wrapper path as physically absent.
 - Function map and verification map now record that direct NAPI tests are evidence, not runtime TS ownership.
 
+### 2026-07-09 servertool MetadataCenter carrier shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts`.
+- Stop-gateway and stop-message compare tests now call direct native exports for Rust decisions/normalization and use the server HTTP MetadataCenter API for request-local runtime-control writes.
+- `scripts/architecture/verify-metadata-center-dualwrite-api.mjs` no longer allows this servertool-local migration shell to perform direct MetadataCenter writes.
+- `scripts/verify-rcc-release-install.mjs` no longer imports the deleted dist path from installed packages.
+- Residue and red-test coverage now lock the shell as physically absent while keeping the bound MetadataCenter/no-flat-providerProtocol boundary.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

@@ -1,14 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
+import * as fs from 'node:fs';
 
 import {
-  attachStopMessageCompareContext,
-  readStopMessageCompareContext,
-  type StopMessageCompareContext
-} from '../../sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.js';
-import {
-  formatStopMessageCompareContextWithNative
-} from 'rcc-llmswitch-core/native/servertool-wrapper';
+  formatStopMessageCompareContextWithNative,
+  normalizeStopMessageCompareContextWithNative
+} from '../../src/modules/llmswitch/bridge/native-exports.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
+
+type StopMessageCompareContext = Record<string, unknown>;
 
 const BASE_CONTEXT: StopMessageCompareContext = {
   armed: true,
@@ -56,27 +55,19 @@ function makeAdapterWithCompareContext(value: Record<string, unknown>): Record<s
   return adapterContext;
 }
 
-describe('servertool stop-message compare context', () => {
-  test('metadata carrier uses explicit nullish object presence checks', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile(
-        'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts',
-        'utf8'
-      )
-    );
+function readStopMessageCompareContext(adapterContext: unknown): unknown {
+  const target = adapterContext && typeof adapterContext === 'object'
+    ? adapterContext as Record<string, unknown>
+    : undefined;
+  const center = target ? MetadataCenter.read(target) : undefined;
+  return normalizeStopMessageCompareContextWithNative(
+    center?.readRuntimeControl().stopMessageCompareContext
+  );
+}
 
-    expect(source).not.toContain("return value && typeof value === 'object'");
-    expect(source).toContain("return value != null && typeof value === 'object'");
-    expect(source).not.toContain("runtimeControl && typeof runtimeControl === 'object'");
-    expect(source).toContain("runtimeControl != null && typeof runtimeControl === 'object'");
-    expect(source).not.toContain("requestTruth && typeof requestTruth === 'object'");
-    expect(source).toContain("requestTruth != null && typeof requestTruth === 'object'");
-    expect(source).not.toContain("providerObservation && typeof providerObservation === 'object'");
-    expect(source).toContain("providerObservation != null && typeof providerObservation === 'object'");
-    expect(source).not.toContain('metadata: adapterContext as Record<string, unknown>');
-    expect(source).not.toContain('readRuntimeControlFromAnyBoundMetadataCenter(adapterContext as Record<string, unknown>)');
-    expect(source).toContain('metadata: adapterContext,');
-    expect(source).toContain('readRuntimeControlFromAnyBoundMetadataCenter(adapterContext)');
+describe('servertool stop-message compare context', () => {
+  test('servertool metadata carrier shell stays physically deleted', () => {
+    expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts')).toBe(false);
   });
 
   test('reads MetadataCenter runtime_control compare context through native normalization', () => {
@@ -127,15 +118,21 @@ describe('servertool stop-message compare context', () => {
 
   test('attach writes normalized MetadataCenter runtime_control context', () => {
     const adapterContext: Record<string, unknown> = {};
-    MetadataCenter.attach(adapterContext);
-    attachStopMessageCompareContext(adapterContext, {
+    const center = MetadataCenter.attach(adapterContext);
+    const normalized = normalizeStopMessageCompareContextWithNative({
       ...BASE_CONTEXT,
       textLength: 11.9,
       maxRepeats: 2.7,
       used: 1.1,
       remaining: 1.8,
       stage: ' entry '
-    } as StopMessageCompareContext);
+    });
+    center.writeRuntimeControl(
+      'stopMessageCompareContext',
+      normalized as Record<string, unknown>,
+      TEST_WRITER,
+      'stop-message compare control signal'
+    );
 
     expect(readStopMessageCompareContext(adapterContext)).toEqual({
       ...NORMALIZED_BASE_CONTEXT,
@@ -151,8 +148,13 @@ describe('servertool stop-message compare context', () => {
     const metadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(metadata);
     const adapterContext: Record<string, unknown> = { metadata };
-
-    attachStopMessageCompareContext(adapterContext, BASE_CONTEXT);
+    const normalized = normalizeStopMessageCompareContextWithNative(BASE_CONTEXT);
+    center.writeRuntimeControl(
+      'stopMessageCompareContext',
+      normalized as Record<string, unknown>,
+      TEST_WRITER,
+      'stop-message compare control signal'
+    );
 
     expect(MetadataCenter.read(adapterContext.metadata as Record<string, unknown>)).toBe(center);
   });
@@ -160,13 +162,19 @@ describe('servertool stop-message compare context', () => {
 
   test('attach preserves observation hash, stable count, and tool signature for no-change loop tracking', () => {
     const adapterContext: Record<string, unknown> = {};
-    MetadataCenter.attach(adapterContext);
-    attachStopMessageCompareContext(adapterContext, {
+    const center = MetadataCenter.attach(adapterContext);
+    const normalized = normalizeStopMessageCompareContextWithNative({
       ...BASE_CONTEXT,
       observationHash: 'same-observation',
       observationStableCount: 3.9,
       toolSignatureHash: 'tool-signature'
-    } as StopMessageCompareContext);
+    });
+    center.writeRuntimeControl(
+      'stopMessageCompareContext',
+      normalized as Record<string, unknown>,
+      TEST_WRITER,
+      'stop-message compare control signal'
+    );
 
     expect(readStopMessageCompareContext(adapterContext)).toEqual({
       ...NORMALIZED_BASE_CONTEXT,
@@ -174,18 +182,6 @@ describe('servertool stop-message compare context', () => {
       observationStableCount: 3,
       toolSignatureHash: 'tool-signature'
     });
-  });
-
-  test('missing MetadataCenter fails instead of writing legacy runtime metadata', () => {
-    expect(() => attachStopMessageCompareContext({}, BASE_CONTEXT)).toThrow(
-      'MetadataCenter runtime_control.stopMessageCompareContext writer requires a bound MetadataCenter'
-    );
-  });
-
-  test('invalid adapter context fails instead of swallowing metadata write errors', () => {
-    expect(() => attachStopMessageCompareContext(null, BASE_CONTEXT)).toThrow(
-      'MetadataCenter runtime_control.stopMessageCompareContext writer requires object carrier'
-    );
   });
 
   test('invalid metadata context is absent and formats as no context', () => {

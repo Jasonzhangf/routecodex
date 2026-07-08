@@ -919,6 +919,7 @@ verification:
       - "Retired semantic mapper public wrappers and modules must stay deleted; do not restore `mapOpenaiChat*`, `buildSubmitToolOutputsPayload`, or provider-response signature/submit-check bridge surfaces without a live runtime consumer and map update."
       - "Retired req-process standalone public wrappers must stay deleted; do not restore `applyHubOperations*` / `applyReqProcessRouteSelection*` public TS/NAPI surfaces while the Rust mainline owns operation application and route selection."
       - "Retired VR bootstrap provider-profile/routing/meta and stop-message parse/apply public wrappers must stay deleted; do not restore standalone TS/NAPI surfaces for Rust-internal bootstrap/profile/routing/meta or routing-instruction parse/apply helpers."
+      - "Retired zero-production-import servertool MetadataCenter carrier shell must stay deleted; stop-gateway/compare evidence should use direct native exports plus the server HTTP MetadataCenter API."
 
   - feature_id: hub.metadata_center_mainline
     change_risk: high
@@ -992,6 +993,7 @@ verification:
       - "Gate must fail on direct business writes to `runtime_control`, `__rt`, top-level control projections, or stopless/servertool control fields outside the unified API."
       - "Gate must fail if any required family policy drifts from `write_once` / `replaceable_by_owner_only` / `append_only` / `finalize_only`."
       - "Rust reader tests must prove typed center is preferred over payload residue before each residue allowlist entry is removed."
+      - "The deleted servertool MetadataCenter carrier shell must not return as a direct MetadataCenter write migration endpoint."
 
   - feature_id: hub.metadata_center_request_capture
     change_risk: high

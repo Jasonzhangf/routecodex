@@ -27993,3 +27993,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `tests/sharedmodule/native-governance-apply-patch-line-edit.spec.ts` and residue audit now lock the old wrapper path physically absent.
 - Function/verification maps and rustification audit docs record the wrapper deletion; `no-fallback-diff-rules.json` no longer keeps a catch-return rule for the deleted path.
 - Verification PASS: focused Jest 201/201; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=87`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); `git diff --check`.
+
+# 2026-07-09: llmswitch servertool MetadataCenter carrier shell deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass, prioritizing servertool bridge residue.
+- Deleted `sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts`.
+- Tests now use direct Rust/native host bridge exports for stop-gateway/stop-message compare decisions and the server HTTP `MetadataCenter` API for request-local `runtime_control` write/read evidence.
+- `verify-metadata-center-dualwrite-api` no longer allows the deleted servertool-local migration shell as a direct MetadataCenter writer; release-install verifier no longer imports the deleted dist subpath.
+- Verification PASS: focused Jest 207/207; sharedmodule/root `tsc`; `verify:metadata-center-dualwrite-api`; metadata-center manifest/write-boundary gates; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=86`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact prod/script/package ref scan for deleted path; `git diff --check`.

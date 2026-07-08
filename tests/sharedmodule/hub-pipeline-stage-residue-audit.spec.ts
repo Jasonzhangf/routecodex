@@ -4302,6 +4302,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
+  it('servertool MetadataCenter carrier shell must stay physically deleted', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts');
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
   it('SSE public barrel must not expose retired bidirectional facade', () => {
     const repoRoot = process.cwd();
     const files = [

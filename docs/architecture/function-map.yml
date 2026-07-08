@@ -1604,6 +1604,7 @@ owners:
       - "Retired zero-consumer request-governance public bridge (`resolveGovernanceContext*`, `applyGovernedControlOperations*`, `applyGovernedMergeRequest*`, `mergeGovernanceSummaryIntoMetadata*`, `finalizeGovernedRequest*`, plus `chat_governance_context.rs` / `chat_governance_finalize.rs`) is physically deleted; request governance must stay in active Rust Hub mainline / `req_process_stage1_tool_governance*` owners, not standalone NAPI surfaces."
       - "Retired heavy-input fastpath control surface (`hub_req_inbound_unified_fastpath.rs`, `decideHeavyInputFastpathJson`, TS wrapper/parser/test) is physically deleted; Hub runtime must not restore a second request fastpath."
       - "Retired target-utils control surface (`hub_pipeline_target_utils.rs`, `applyTargetMetadataJson`, `applyTargetToSubjectJson`, `extractTargetModelIdJson`) is physically deleted; Rust `req_process_stage2_route_select.rs` owns target metadata/application in the main request route stage."
+      - "Retired zero-production-import servertool MetadataCenter carrier shell (`sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts`) is physically deleted; stop-gateway/compare tests use direct native decision exports plus the server HTTP MetadataCenter API, and direct write allowance remains limited to the unified API/runtime-control writer."
 
   - feature_id: hub.metadata_center_mainline
     status: active
@@ -1652,6 +1653,7 @@ owners:
       - "The machine-readable metadata-center manifest must stay code-bound: every declared family/slot needs matching TS type, state bucket, writer, reader, and release coverage until the owner migrates to Rust."
       - "Closeout release is now a real handler owner path: response closeout must call `releaseMetadataCenterForHttpResponse -> MetadataCenter.markReleased`, not stay as documentation-only pending state."
       - "First-batch `runtime_control` carrier plumbing now lives in the registry core plus host-side projection reader; stopless followup materialization writes `runtime_control.stopless` through the bound MetadataCenter side-channel with fail-fast binding checks, while broader request-attempt / entry-shell writer migration remains partial."
+      - "Retired zero-production-import servertool MetadataCenter carrier shell must stay deleted; servertool-local direct MetadataCenter write facades are no longer an allowed migration endpoint."
       - "Current repeated merge/backfill surfaces (`buildHandlerPipelineMetadata`, `finalizeRequestExecutorAttemptMetadata`) are now thin projection surfaces; adapter-context session backfill has been physically deleted."
       - "`request_truth.sessionId/conversationId` are write-once inbound identity facts. They must not be restored from continuation history, must not be mirrored into continuation_context, and must not be derived from tmux/client attachment scope."
       - "Future center must store provenance: writer module, symbol, stage, status, overwrite history."
