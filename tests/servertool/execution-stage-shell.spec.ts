@@ -213,6 +213,8 @@ describe('execution-stage-shell', () => {
     expect(source).not.toContain('finalizeServertoolResponseStage(');
     expect(source).toContain('applyServertoolResponseStageFinalize');
     expect(source).toContain('runServertoolResponseStageAutoHookPass');
+    expect(source).toContain('type ServertoolResponseStageAutoHookPassResult =');
+    expect(source).not.toContain('export type ServertoolResponseStageAutoHookPassResult');
     expect(source).toContain('finalizeServertoolResponseStageWithNative');
     expect(source).toContain('responseStageAutoHookResult: responseStageAutoHook');
     expect(source).not.toContain("from './cli-projection-runtime-shell.js'");

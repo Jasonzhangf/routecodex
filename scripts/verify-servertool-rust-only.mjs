@@ -5922,6 +5922,7 @@ function checkServertoolRustOutcomeCloseout() {
     }
   }
   for (const marker of [
+    'export type ServertoolResponseStageAutoHookPassResult',
     'structuredClone(args.baseObject)',
     'const baseForExecution = structuredClone',
     'const baseForExecution = args.baseObject;',

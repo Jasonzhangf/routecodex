@@ -26,7 +26,7 @@ import {
 import { runServertoolAutoHookCaller } from './auto-hook-caller.js';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 
-export type ServertoolResponseStageAutoHookPassResult =
+type ServertoolResponseStageAutoHookPassResult =
   | { action: 'return_passthrough_bypass'; result?: never }
   | { action: 'continue_without_result'; result?: never }
   | { action: 'return_auto_hook_result'; result: ServerSideToolEngineResult };
