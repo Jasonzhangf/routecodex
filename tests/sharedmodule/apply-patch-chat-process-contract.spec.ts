@@ -4,6 +4,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { coerceStandardizedRequestFromPayloadDirectNative } from './helpers/hub-pipeline-builders-direct-native.js';
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
   const preselectedRoute = {
@@ -78,11 +79,8 @@ function buildApplyPatchRequest(): StandardizedRequest {
 
 describe('apply_patch freeform chat-process contract', () => {
   it('keeps hub envelope standardization out of apply_patch argument rewriting', async () => {
-    const { coerceStandardizedRequestFromPayloadWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js'
-    );
     const inputPatch = '*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch\n';
-    const output = coerceStandardizedRequestFromPayloadWithNative({
+    const output = coerceStandardizedRequestFromPayloadDirectNative({
       payload: {
         model: 'gpt-test',
         messages: [
@@ -158,10 +156,7 @@ describe('apply_patch freeform chat-process contract', () => {
   });
 
   it('canonicalizes apply_patch failure guidance before tool history re-enters standardized messages', async () => {
-    const { coerceStandardizedRequestFromPayloadWithNative } = await import(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js'
-    );
-    const output = coerceStandardizedRequestFromPayloadWithNative({
+    const output = coerceStandardizedRequestFromPayloadDirectNative({
       payload: {
         model: 'gpt-test',
         messages: [

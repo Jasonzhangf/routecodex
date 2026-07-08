@@ -2510,8 +2510,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts';
     const retiredMetadataPolicyWrapperPath =
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts';
+    const retiredBuildersWrapperPath =
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
@@ -2602,6 +2603,7 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(path.join(repoRoot, retiredAggregateWrapperPath))).toBe(false);
     expect(fs.existsSync(path.join(repoRoot, retiredMetadataPolicyWrapperPath))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, retiredBuildersWrapperPath))).toBe(false);
 
     for (const relativePath of scannedFiles) {
       const absolutePath = path.join(repoRoot, relativePath);

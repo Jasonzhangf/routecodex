@@ -1705,3 +1705,9 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts` is physically deleted. Do not restore `resolveStopMessageRouterMetadataWithNative` or its wrapper-local parser/logging behavior as a runtime TS shell.
 - Tests should lock the path as absent; parser observability should not keep retired zero-consumer wrappers alive.
 - Current shell audit after this deletion is `prodTsShellCount=76`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Hub builders TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts` is physically deleted. Do not restore `buildRouterMetadataInputWithNative` or `coerceStandardizedRequestFromPayloadWithNative` as runtime TS wrapper exports.
+- Tests/scripts needing these semantics should call direct Rust/NAPI capabilities `buildRouterMetadataInputJson` and `coerceStandardizedRequestFromPayloadJson`.
+- Current shell audit after this deletion is `prodTsShellCount=75`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.

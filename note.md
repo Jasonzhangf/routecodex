@@ -28069,3 +28069,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-metadata-policy.ts`.
 - The only live references were the wrapper file itself, parser-observability test, and residue audit; tests now assert the old metadata-policy parser wrapper path is absent instead of preserving parser behavior for a retired shell.
 - Verification PASS: focused Jest 209/209; sharedmodule/root `tsc`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=76`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`prodTsFileCount=76`, `nonNativeFileCount=0`); exact old path scan only found absent-path assertions; `git diff --check`.
+
+# 2026-07-09: llmswitch Hub builders wrapper deletion
+
+- Scope: continued zero-prod/no-host shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts`.
+- Tests now call direct Rust/NAPI `buildRouterMetadataInputJson` and `coerceStandardizedRequestFromPayloadJson` through `tests/sharedmodule/helpers/hub-pipeline-builders-direct-native.ts`; `scripts/tests/replay-orphan-followup-sample.mjs` loads the native binding directly.
+- Residue audit now locks the old builders wrapper path physically absent instead of scanning a live TS wrapper.
+- Verification PASS: focused Jest 207/207; `node --check scripts/tests/replay-orphan-followup-sample.mjs`; sharedmodule/root `tsc`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=75`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`prodTsFileCount=75`, `nonNativeFileCount=0`); exact old path scan only found absent-path assertion; `git diff --check`.

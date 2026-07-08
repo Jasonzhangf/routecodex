@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
-import { coerceStandardizedRequestFromPayloadWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
+import { coerceStandardizedRequestFromPayloadDirectNative } from './helpers/hub-pipeline-builders-direct-native.js';
 
 const FIXTURE_ROOT = path.join(
   process.cwd(),
@@ -31,7 +31,7 @@ describe('responses request standardization real-sample regressions', () => {
     const meta = readJson(path.join(fixtureDir, 'meta.json'));
     const payload = readJson(path.join(fixtureDir, 'request-body.json'));
 
-    const output = coerceStandardizedRequestFromPayloadWithNative({
+    const output = coerceStandardizedRequestFromPayloadDirectNative({
       payload,
       normalized: {
         id: meta.requestId ?? path.basename(fixtureDir),

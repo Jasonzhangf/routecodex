@@ -2,7 +2,24 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { coerceStandardizedRequestFromPayloadWithNative } from '../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
+import { createRequire } from 'node:module';
+
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+);
+
+function coerceStandardizedRequestFromPayloadDirectNative(input) {
+  const fn = nativeBinding.coerceStandardizedRequestFromPayloadJson;
+  if (typeof fn !== 'function') {
+    throw new Error('coerceStandardizedRequestFromPayloadJson native export is required');
+  }
+  const raw = fn(JSON.stringify(input ?? {}));
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error('coerceStandardizedRequestFromPayloadJson returned invalid payload');
+  }
+  return JSON.parse(raw);
+}
 
 function findLatestOrphanCallId(logPath) {
   const text = fs.readFileSync(logPath, 'utf8');
@@ -45,7 +62,7 @@ function main() {
   const sample = findSampleByCallId(samplesBase, callId);
   if (!sample) throw new Error(`cannot find sample containing call_id=${callId}`);
 
-  const out = coerceStandardizedRequestFromPayloadWithNative({
+  const out = coerceStandardizedRequestFromPayloadDirectNative({
     payload: sample.payload,
     normalized: {
       id: 'replay-orphan-followup-sample',

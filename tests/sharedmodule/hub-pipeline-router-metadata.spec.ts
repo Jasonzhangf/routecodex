@@ -1,9 +1,9 @@
-import { buildRouterMetadataInputWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.js';
 import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { buildRouterMetadataInputDirectNative } from './helpers/hub-pipeline-builders-direct-native.js';
 
 describe('hub pipeline router metadata builder', () => {
   it('preserves followup routing directives required by virtual router', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-followup-router-meta',
       entryEndpoint: '/v1/responses',
       processMode: 'chat',
@@ -33,7 +33,7 @@ describe('hub pipeline router metadata builder', () => {
 
 
   it('preserves provider-binding allowed provider keys for provider-mode relay', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-provider-relay-router-meta',
       entryEndpoint: '/v1/chat/completions',
       processMode: 'chat',
@@ -62,7 +62,7 @@ describe('hub pipeline router metadata builder', () => {
   });
 
   it('hydrates router continuation from request semantics and routes by unified request-chain key', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-cont-router-meta',
       entryEndpoint: '/v1/chat/completions',
       processMode: 'chat',
@@ -107,7 +107,7 @@ describe('hub pipeline router metadata builder', () => {
   });
 
   it('keeps responses relay continuation residue nested without promoting route truth to the top level', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-responses-relay-cont-router-meta',
       entryEndpoint: '/v1/responses',
       processMode: 'chat',
@@ -162,7 +162,7 @@ describe('hub pipeline router metadata builder', () => {
   });
 
   it('does not revive retryProviderKey from legacy __rt residue without runtime_control', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-legacy-rt-retry-provider-key',
       entryEndpoint: '/v1/responses',
       processMode: 'chat',
@@ -185,7 +185,7 @@ describe('hub pipeline router metadata builder', () => {
   });
 
   it('prefers metadataCenterSnapshot runtimeControl.routeHint over flat routeHint and resume residue', () => {
-    const output = buildRouterMetadataInputWithNative({
+    const output = buildRouterMetadataInputDirectNative({
       requestId: 'req-snapshot-route-hint',
       entryEndpoint: '/v1/responses',
       processMode: 'chat',
