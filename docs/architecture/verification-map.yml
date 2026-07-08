@@ -1355,6 +1355,26 @@ verification:
       - "The retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` must stay physically deleted; test/script evidence calls direct router_hotpath_napi exports."
       - "The retired TS OpenAI-request helper `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` must stay physically deleted; test evidence calls direct router_hotpath_napi exports."
 
+  - feature_id: conversion.shared.gemini
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+    contract:
+      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/gemini-openai-codec.test.ts
+      - tests/sharedmodule/gemini-openai-codec.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    integration:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:llmswitch-ts-shell-reference-audit
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:base
+    notes:
+      - "Gemini/OpenAI message and tool/result normalization must remain in gemini_openai_codec.rs."
+      - "The retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts` must stay physically deleted; test evidence calls direct router_hotpath_napi exports."
+
   - feature_id: conversion.responses.store
     change_risk: high
     unit:

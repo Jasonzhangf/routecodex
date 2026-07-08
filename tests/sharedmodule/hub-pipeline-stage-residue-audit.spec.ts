@@ -4662,6 +4662,41 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('Gemini OpenAI codec TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts'
+    );
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'docs/architecture/function-map.yml'
+          || relativePath === 'docs/architecture/verification-map.yml'
+        ) continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('gemini-openai-codec')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
+    expect(findings).toEqual([]);
+  });
+
   it('responses conversation store scope isolation keys must be native-owned', () => {
     const repoRoot = process.cwd();
     const storeSource = fs.readFileSync(

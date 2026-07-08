@@ -168,12 +168,11 @@ Gemini REST 规范使用 `contents[].role` + `parts[]` + `tools.functionDeclarat
 - 仅在前半段/后半段增加 `gemini-messages` 的 codec，既有 Chat/Responses/Anthropic 行为不受影响。
 - 非 passthrough 流水线继续遵循统一约束：`entryProtocol → Chat → providerProtocol`（请求）与 `providerProtocol → Chat → entryProtocol`（响应），中段只认 Chat。
 
-计划中的 main codec 文件：
-- `src/conversion/codecs/gemini-openai-codec.ts`
-  - `buildOpenAIChatFromGeminiRequest(gReq)`：Gemini 请求 → OpenAI Chat 请求
-  - `buildGeminiRequestFromOpenAIChat(chatReq)`：OpenAI Chat 请求 → Gemini 请求
-  - `buildOpenAIChatFromGeminiResponse(gResp)`：Gemini 响应 → OpenAI Chat completion
-  - `buildGeminiFromOpenAIChat(chatResp)`：OpenAI Chat completion → Gemini 响应（用于“入口/出口都是 Gemini”的回环测试与 `/v1/gemini` 出口）
+当前 main codec 真源：
+- `rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs`
+  - `runGeminiOpenaiRequestCodecJson(gReq)`：Gemini 请求 → OpenAI Chat 请求
+  - `runGeminiOpenaiResponseCodecJson(gResp)`：Gemini 响应 → OpenAI Chat completion
+  - `runGeminiFromOpenaiChatCodecJson(chatResp)`：OpenAI Chat completion → Gemini 响应（用于“入口/出口都是 Gemini”的回环测试与 `/v1/gemini` 出口）
 
 请求侧（Gemini → Chat）映射要点：
 - `contents: Content[]`

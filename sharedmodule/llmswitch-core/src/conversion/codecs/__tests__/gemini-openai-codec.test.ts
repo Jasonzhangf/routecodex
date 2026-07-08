@@ -1,21 +1,14 @@
 import {
-  GeminiOpenAIConversionCodec,
-  buildGeminiFromOpenAIChat,
-  buildOpenAIChatFromGeminiRequest,
-  buildOpenAIChatFromGeminiResponse
-} from '../gemini-openai-codec.js';
+  buildGeminiFromOpenAIChatDirectNative as buildGeminiFromOpenAIChat,
+  buildOpenAIChatFromGeminiRequestDirectNative as buildOpenAIChatFromGeminiRequest,
+  buildOpenAIChatFromGeminiResponseDirectNative as buildOpenAIChatFromGeminiResponse,
+  convertGeminiRequestDirectNative,
+  convertGeminiResponseDirectNative,
+} from '../../../../../../tests/sharedmodule/helpers/gemini-codec-direct-native.js';
 
-describe('gemini-openai-codec native wrapper', () => {
-  const profile = {
-    id: 'gemini-openai-test',
-    incomingProtocol: 'gemini-chat',
-    outgoingProtocol: 'openai-chat',
-    codec: 'gemini-openai'
-  } as any;
-
+describe('gemini-openai codec direct native owner', () => {
   test('request maps gemini payload into openai chat request', async () => {
-    const codec = new GeminiOpenAIConversionCodec({});
-    const result = await codec.convertRequest(
+    const result = convertGeminiRequestDirectNative(
       {
         model: 'gemini-2.5-pro',
         systemInstruction: { parts: [{ text: 'Use tools carefully' }] },
@@ -57,9 +50,7 @@ describe('gemini-openai-codec native wrapper', () => {
         },
         metadata: { requestLabel: 'gemini-req' },
         safetySettings: [{ category: 'HARM_CATEGORY_HATE_SPEECH' }]
-      },
-      profile,
-      { requestId: 'req_gemini_codec_request' } as any
+      }
     );
 
     expect((result as any).model).toBe('gemini-2.5-pro');
@@ -168,8 +159,7 @@ describe('gemini-openai-codec native wrapper', () => {
   });
 
   test('outbound maps openai chat response back to gemini response', async () => {
-    const codec = new GeminiOpenAIConversionCodec({});
-    const result = await codec.convertResponse(
+    const result = convertGeminiResponseDirectNative(
       {
         id: 'chatcmpl_1',
         model: 'gpt-4.1',
@@ -203,9 +193,7 @@ describe('gemini-openai-codec native wrapper', () => {
           completion_tokens: 7,
           total_tokens: 19
         }
-      },
-      profile,
-      { requestId: 'req_gemini_codec_response' } as any
+      }
     );
 
     expect((result as any).id).toBe('chatcmpl_1');

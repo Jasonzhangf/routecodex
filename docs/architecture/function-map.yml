@@ -4410,6 +4410,34 @@ owners:
       - "Retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` must stay physically deleted; tests/scripts use direct router_hotpath_napi evidence instead."
       - "Retired TS OpenAI-request helper `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` must stay physically deleted; tests use direct router_hotpath_napi evidence instead."
 
+  - feature_id: conversion.shared.gemini
+    status: active
+    summary: "Gemini OpenAI chat protocol normalization and tool/result mapping"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped rust owner for conversion type Gemini"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+    canonical_types:
+      - GeminiOpenaiCodecInput
+      - GeminiOpenaiCodecOutput
+    canonical_builders:
+      - stage_a_conversion_shared_gemini_owner_boundary
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/gemini-openai-codec.test.ts
+      - tests/sharedmodule/gemini-openai-codec.spec.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:llmswitch-ts-shell-reference-audit
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "Retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts` must stay physically deleted; tests use direct router_hotpath_napi evidence instead."
+
   - feature_id: conversion.responses.store
     status: active
     summary: "Responses conversation store and continuation management"

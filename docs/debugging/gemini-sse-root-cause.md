@@ -20,10 +20,10 @@ Client (receives final SSE)
 ## Root Cause
 **Gemini parts with `functionCall`, `thought`, `executableCode` are未被正确转换为 Responses 格式**
 
-`GeminiSseToJsonConverter` 正确收集所有 parts（包括 tool calls），但后续转换层（可能在 `codecs/gemini-openai-codec.ts` 或 Responses 转换器中）不认识这些 part 类型，导致它们被过滤掉。
+`GeminiSseToJsonConverter` 正确收集所有 parts（包括 tool calls），但后续转换层（现在的 Rust 真源是 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs` 或 Responses 转换器）不认识这些 part 类型，导致它们被过滤掉。
 
 ## Files Need Investigation
-1. `/sharedmodule/llmswitch-core/src/codecs/gemini-openai-codec.ts`  
+1. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs`
    - Gemini → OpenAI 格式转换
    - 需要添加 `functionCall` → `tool_calls` 映射
    - 需要添加 `thought` → `reasoning_content` 映射
@@ -36,7 +36,7 @@ Client (receives final SSE)
    - 需要 user 提供关键的转换逻辑
 
 ## Next Steps
-1. 查看 `gemini-openai-codec.ts` 的 part 转换逻辑
+1. 查看 `gemini_openai_codec.rs` 的 part 转换逻辑
 2. 添加对以下 Gemini part 类型的支持：
    - `functionCall` →  OpenAI `tool_calls`
    - `functionResponse` → tool result

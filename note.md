@@ -1,3 +1,10 @@
+# 2026-07-09: Gemini OpenAI codec TS shell deleted
+
+- Scope: delete zero-production-import `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts`.
+- Change: Gemini codec tests now call direct `router_hotpath_napi.node` exports through `tests/sharedmodule/helpers/gemini-codec-direct-native.ts`; stale debug doc references now point to Rust `gemini_openai_codec.rs`.
+- Map/gate update: added `conversion.shared.gemini` function/verification map entries, Rust feature/canonical-builder anchor, and residue audit lock for the retired TS codec path.
+- Verification PASS: focused Jest 198/198; `rustfmt --check` for `gemini_openai_codec.rs`; sharedmodule/root tsc; `verify:function-map-compile-gate`; strict shell reference audit (`prodTsShellCount=68`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); `git diff --check`.
+
 # 2026-07-09: Anthropic OpenAI codec TS shell deleted
 
 - Scope: delete zero-production-import `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` after direct Rust/NAPI exports covered its request/response conversion evidence.

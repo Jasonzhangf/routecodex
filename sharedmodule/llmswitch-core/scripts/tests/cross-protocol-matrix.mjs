@@ -243,17 +243,26 @@ const {
 } = await import(
   pathToFileURL(
     path.join(
-      distRoot(),
-      'conversion',
-      'codecs',
-      'anthropic-openai-codec.js'
+      REPO_ROOT,
+      '..',
+      '..',
+      'scripts',
+      'helpers',
+      'anthropic-codec-direct-native.mjs'
     )
   ).href
 );
 
 const { buildOpenAIChatFromGeminiRequest } = await import(
   pathToFileURL(
-    path.join(distRoot(), 'conversion', 'codecs', 'gemini-openai-codec.js')
+    path.join(
+      REPO_ROOT,
+      '..',
+      '..',
+      'scripts',
+      'helpers',
+      'gemini-codec-direct-native.mjs'
+    )
   ).href
 );
 

@@ -12,6 +12,10 @@ use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 use crate::shared_json_utils::read_trimmed_string;
 
+// feature_id: conversion.shared.gemini
+// canonical_builder: stage_a_conversion_shared_gemini_owner_boundary
+pub(crate) fn stage_a_conversion_shared_gemini_owner_boundary() {}
+
 fn parse_value(raw: &str) -> NapiResult<Value> {
     serde_json::from_str(raw).map_err(|e| napi::Error::from_reason(e.to_string()))
 }

@@ -1,4 +1,4 @@
-import { buildGeminiFromOpenAIChat } from '../../sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.js';
+import { buildGeminiFromOpenAIChatDirectNative as buildGeminiFromOpenAIChat } from './helpers/gemini-codec-direct-native.js';
 
 describe('buildGeminiFromOpenAIChat', () => {
   it('wraps array arguments strings into object payloads', () => {

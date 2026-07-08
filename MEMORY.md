@@ -1752,3 +1752,10 @@
 - Tests needing Anthropic image mapping or OpenAI function `tool_choice` to Anthropic `{type:"tool", name}` evidence should call direct Rust/NAPI `buildAnthropicFromOpenaiChatJson` through test-only helper code.
 - The direct native helper must preserve NAPI Error object messages so fail-fast assertions continue to prove Rust error truth, for example malformed data URL image payloads.
 - Current shell audit after this deletion is `prodTsShellCount=69`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Gemini OpenAI codec TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts` is physically deleted. Do not restore `GeminiOpenAIConversionCodec`, `buildOpenAIChatFromGeminiRequest`, `buildOpenAIChatFromGeminiResponse`, or `buildGeminiFromOpenAIChat` as runtime TS wrapper ownership.
+- Tests needing Gemini<->OpenAI codec evidence should call direct Rust/NAPI exports through helper code. Current direct exports are `runGeminiOpenaiRequestCodecJson`, `runGeminiOpenaiResponseCodecJson`, and `runGeminiFromOpenaiChatCodecJson`.
+- Gemini codec truth remains Rust `gemini_openai_codec.rs`; test helpers are evidence glue only, not runtime owners.
+- Current shell audit after this deletion is `prodTsShellCount=68`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
