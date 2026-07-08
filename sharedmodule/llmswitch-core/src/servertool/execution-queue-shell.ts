@@ -22,16 +22,10 @@ import {
   applyServertoolExecutionLoopInitialDecisionWithNative,
   applyServertoolExecutionLoopResultDecisionWithNative,
   runStoplessBuiltinHandlerForRuntimeWithNative,
-  type NativeServertoolExecutedRecord,
   type NativeServertoolExecutionLoopState
 } from 'rcc-llmswitch-core/native/servertool-wrapper';
 import { createServertoolProviderProtocolErrorFromPlan } from './timeout-error-block.js';
 import type { ServerToolHandlerEntry } from './types.js';
-
-export type {
-  NativeServertoolExecutedRecord as ServertoolExecutedRecord,
-  NativeServertoolExecutionLoopState as ServertoolExecutionLoopState
-};
 
 function replaceJsonObjectInPlace(target: JsonObject, next: JsonObject): void {
   const newKeys = new Set(Object.keys(next));

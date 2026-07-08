@@ -225,6 +225,8 @@ describe('execution-queue-shell', () => {
     expect(source).toContain('runServertoolIoExecutionQueue');
     expect(source).toContain('const getServerToolHandler =');
     expect(source).not.toContain('export const getServerToolHandler');
+    expect(source).not.toContain('NativeServertoolExecutedRecord as ServertoolExecutedRecord');
+    expect(source).not.toContain('NativeServertoolExecutionLoopState as ServertoolExecutionLoopState');
     expect(source).toContain('resolveServertoolExecutionLoopInitialDecisionWithNative');
     expect(source).toContain('resolveServertoolExecutionLoopResultDecisionWithNative');
     expect(source).toContain('applyServertoolExecutionLoopInitialDecisionWithNative');

@@ -3002,6 +3002,8 @@ function checkServertoolExecutionDispatchRustOwner() {
     'state.executedFlowIds.push(',
     'state.lastExecution = execution',
     'export const getServerToolHandler',
+    'NativeServertoolExecutedRecord as ServertoolExecutedRecord',
+    'NativeServertoolExecutionLoopState as ServertoolExecutionLoopState',
     'const newKeys = new Set(Object.keys(nextChatResponse));',
     "  ToolCall\n} from './types.js';",
   ]) {
