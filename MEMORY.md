@@ -1338,6 +1338,13 @@
 - `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` is physically deleted.
 - Snapshot recorder runtime behavior lives in the host bridge `src/modules/llmswitch/bridge/snapshot-recorder.ts` for IO/observation only; snapshot normalization, write planning, policy, and write execution are direct native snapshot hook capabilities.
 - The obsolete ambient module for `rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js` is removed; do not restore that dist subpath.
+
+# 2026-07-09: Compat engine runtime TS shell is deleted
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts` is physically deleted.
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts` is physically deleted with it; request compat adapter-context evidence now goes through direct native test helper only.
+- Tests/scripts that need request/response compat evidence must call direct native req outbound compat helpers; request compat truth remains in Rust `req_outbound_stage3_compat`.
+- Architecture scripts now treat the old compat engine shell as a forbidden resurrection path.
 # 2026-07-06: VR contracts type surface is facade-scoped
 
 - Upper production layers must not import `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` directly.

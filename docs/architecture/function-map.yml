@@ -2556,6 +2556,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -2617,6 +2618,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -2645,6 +2647,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -2672,6 +2675,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -2699,6 +2703,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
+      - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server

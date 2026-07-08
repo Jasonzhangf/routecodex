@@ -1,9 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
-const { applyRequestCompat } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.js'
-);
+import { applyRequestCompatDirectNative as applyRequestCompat } from './helpers/compat-engine-direct-native.js';
 
 function adapterContextWithProviderProtocol(providerProtocol: string): Record<string, unknown> {
   const adapterContext: Record<string, unknown> = { providerProtocol };

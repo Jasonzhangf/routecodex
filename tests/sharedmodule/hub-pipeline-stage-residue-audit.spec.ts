@@ -1070,20 +1070,22 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(registryPath)).toBe(false);
   });
 
-  it('compat result type must stay owned by the native compat shell', () => {
+  it('compat engine runtime shell must stay physically deleted', () => {
     const repoRoot = process.cwd();
     const retiredTypePath = path.join(
       repoRoot,
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts',
     );
-    const engineSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts'),
-      'utf8',
+    const enginePath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts',
     );
 
     expect(fs.existsSync(retiredTypePath)).toBe(false);
-    expect(engineSource).not.toContain('./compat-types.js');
-    expect(engineSource).toContain('export interface CompatApplicationResult');
+    expect(fs.existsSync(enginePath)).toBe(false);
+    expect(
+      fs.existsSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts')),
+    ).toBe(false);
   });
 
   it('public conversion barrel must stay deleted and root exports only direct live owners', () => {
@@ -4086,16 +4088,9 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const retiredTypePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-types.ts');
     const enginePath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts');
-    const source = fs.readFileSync(enginePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'restores retired compat profile config', pattern: /CompatProfileConfig|CompatStageConfig/ },
-      { label: 'restores retired compat mapping shells', pattern: /MappingInstruction|FilterInstruction|FieldMapping/ },
-      { label: 'restores retired compat protocol aliases', pattern: /CompatDirection|CompatNativeProtocolToken|NativeProviderProtocolToken/ },
-      { label: 'restores retired action config aliases', pattern: /ShapeFilterConfig|ResponseBlacklistConfig|RequestRulesConfig|AutoThinkingConfig|ResponseNormalizeConfig|ResponseValidateConfig|HarvestToolCallsFromTextConfig|ToolTextRequestGuidanceConfig|DeepSeekWebResponseConfig/ },
-    ]);
 
     expect(fs.existsSync(retiredTypePath)).toBe(false);
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(enginePath)).toBe(false);
   });
 
   it('ChatEnvelope type surface must not export zero-consumer nested semantic shells', () => {

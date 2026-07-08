@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { buildNativeReqOutboundCompatAdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.js';
+import { buildNativeReqOutboundCompatAdapterContextDirectNative as buildNativeReqOutboundCompatAdapterContext } from './helpers/compat-engine-direct-native.js';
 
 const TEST_METADATA_WRITER = {
   module: 'tests/sharedmodule/native-adapter-context.metadata-center-provider-protocol.spec.ts',

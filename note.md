@@ -21,6 +21,13 @@
 - Change: removed obsolete ambient module for `rcc-llmswitch-core/dist/conversion/hub/snapshot-recorder.js`.
 - Verification PASS: focused Jest 194/194 (`snapshot-recorder-native-plan`, `hub-pipeline-stage-residue-audit`), sharedmodule/root tsc, `verify:function-map-compile-gate`, shell reference audit (`prodTsShellCount=80`, `zeroProdNoHostCount=10`), zero-ts closeout, minimal TS surface, rustification audit, exact source/host/package scan for old snapshot-recorder subpath, and `git diff --check`.
 
+# 2026-07-09: Compat engine runtime shell deletion verified
+
+- Scope: delete `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts` and `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts`; exact refs show no production importer and only tests/scripts/maps/docs forbidden-path references remain.
+- Change: compat tests now call direct native req outbound compat helper in `tests/sharedmodule/helpers/compat-engine-direct-native.ts`.
+- Change: architecture scripts now assert the old compat-engine TS shell is physically absent while preserving Rust/native ownership checks.
+- Verification PASS: focused Jest 4 suites/198 tests; compat architecture scripts; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=78`, `shellsWithProdImporters=67`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`); zero-ts closeout; minimal TS surface; rustification audit; sharedmodule/root `tsc`; exact source ref scan; `git diff --check`.
+
 # 2026-07-09: snapshot-recorder host bridge ref direct-native wired
 
 - Scope: finish current host bridge shell subpath closeout by removing snapshot recorder's llmswitch-core dist facade load.

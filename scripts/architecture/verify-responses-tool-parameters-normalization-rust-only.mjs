@@ -10,7 +10,6 @@ function read(relPath) {
 
 const rustRequestCompat = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs');
 const reqProfiles = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs');
-const compatEngine = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts');
 const nativeReqOutboundBridge = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts');
 const functionMap = read('docs/architecture/function-map.yml');
 const verificationMap = read('docs/architecture/verification-map.yml');
@@ -44,8 +43,8 @@ for (const required of [
   }
 }
 
-if (!compatEngine.includes('feature_id: responses.tool_parameters_normalization')) {
-  failures.push('compat-engine missing shared tool-parameters normalization feature anchor');
+if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts'))) {
+  failures.push('compat-engine TS runtime shell must stay physically deleted');
 }
 
 if (!nativeReqOutboundBridge.includes('runReqOutboundStage3CompatJson')) {

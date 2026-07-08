@@ -251,6 +251,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Snapshot recorder native plan test now exercises `src/modules/llmswitch/bridge/snapshot-recorder.ts`, which owns host IO/observation and delegates snapshot stage normalization, write-option planning, should-record policy, and write execution to direct native snapshot hook capabilities.
 - Removed the obsolete host ambient declaration for the retired sharedmodule dist snapshot-recorder subpath.
 
+### 2026-07-09 Compat engine runtime shell deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts` and `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/native-adapter-context.ts`.
+- Compat tests now call direct native req outbound compat helpers through `tests/sharedmodule/helpers/compat-engine-direct-native.ts`; this helper is test-only evidence and not a runtime TS owner.
+- Architecture verification scripts now assert the old compat engine TS shell is physically absent while continuing to verify Rust request compat truth and native req-outbound bridge exports.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:

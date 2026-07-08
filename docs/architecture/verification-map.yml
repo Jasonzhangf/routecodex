@@ -1683,7 +1683,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1693,13 +1693,13 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
+      - "Shared chat-style function tool to Responses wire normalization must stay inside Rust request compat; the old compat-engine TS runtime shell must stay physically deleted."
 
   - feature_id: responses.tool_parameters_normalization
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1709,13 +1709,13 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Shared tool parameters normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
+      - "Shared tool parameters normalization must stay inside Rust request compat; the old compat-engine TS runtime shell must stay physically deleted."
 
   - feature_id: responses.instructions_to_input_normalization
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1725,7 +1725,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Shared instructions-to-input normalization must stay inside Rust request compat; TS bridge may only call the native stage runner."
+      - "Shared instructions-to-input normalization must stay inside Rust request compat; the old compat-engine TS runtime shell must stay physically deleted."
 
   - feature_id: config.path_resolution_surface
     change_risk: high
