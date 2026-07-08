@@ -12,6 +12,10 @@ import type {
 import { importCoreDist } from "./module-loader.js";
 import type { AnyRecord } from "./module-loader.js";
 import {
+  shouldRecordSnapshotsNative,
+  writeSnapshotViaHooksNative,
+} from "./native-exports.js";
+import {
   captureResponsesRequestContext,
   recordResponsesResponse,
   resumeResponsesConversation as resumeResponsesConversationHost,
@@ -26,31 +30,10 @@ import {
   clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost,
 } from "./responses-conversation-store-host.js";
 
-type SnapshotHooksModule = {
-  writeSnapshotViaHooks?: (options: AnyRecord) => Promise<void> | void;
-};
-
-let cachedSnapshotHooksModule: SnapshotHooksModule | null = null;
-
-async function getSnapshotHooksModule(): Promise<SnapshotHooksModule> {
-  if (!cachedSnapshotHooksModule) {
-    cachedSnapshotHooksModule = await importCoreDist<SnapshotHooksModule>(
-      "conversion/snapshot-utils",
-    );
-  }
-  return cachedSnapshotHooksModule;
-}
-
 export async function writeSnapshotViaHooks(
   channelOrOptions: string | AnyRecord,
   payload?: AnyRecord,
 ): Promise<void> {
-  const hooksModule = await getSnapshotHooksModule();
-  const writer = hooksModule?.writeSnapshotViaHooks;
-  if (typeof writer !== "function") {
-    throw new Error("[llmswitch-bridge] writeSnapshotViaHooks not available");
-  }
-
   let options: AnyRecord | undefined;
   if (payload && typeof channelOrOptions === "string") {
     const channelValue =
@@ -66,7 +49,7 @@ export async function writeSnapshotViaHooks(
     return;
   }
 
-  await writer(options);
+  writeSnapshotViaHooksNative(options);
 }
 
 export async function captureResponsesRequestContextForRequest(args: {
@@ -261,13 +244,8 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
 }> {
   const loaded: string[] = [];
 
-  const snapshotHooksModule = await getSnapshotHooksModule();
-  if (typeof snapshotHooksModule.writeSnapshotViaHooks !== "function") {
-    throw new Error(
-      "[llmswitch-bridge] preload failed: writeSnapshotViaHooks not available",
-    );
-  }
-  loaded.push("conversion/snapshot-utils");
+  shouldRecordSnapshotsNative();
+  loaded.push("native/router-hotpath/snapshot-hooks");
 
   await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
   loaded.push("bridge/responses-conversation-store-host");

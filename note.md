@@ -1,3 +1,12 @@
+# 2026-07-09: llmswitch host bridge snapshot/routing-state shell refs closed
+
+- Change: `runtime-integrations.ts/js` no longer loads `conversion/snapshot-utils`; snapshot preload/write now goes through direct `getRouterHotpathJsonBindingSync()` capabilities exposed by `native-exports.ts/js`.
+- Change: `state-integrations.ts/js` no longer loads `native/router-hotpath/native-virtual-router-routing-state`; load/save now calls native JSON capabilities directly and preserves routing state Set/Map shape through native serialize/deserialize.
+- Change: `provider-response-converter-host.ts/js` no longer loads `native-virtual-router-routing-state` only for session usage; usage planning now calls `planChatProcessSessionUsageJson` via direct native binding.
+- Evidence: bridge subpath scan for `native/router-hotpath/native-virtual-router-routing-state|conversion/snapshot-utils` under `src/modules/llmswitch/bridge` returned 0 matches.
+- Verification: focused Jest PASS 216/216 (`provider-response-converter.unified-semantics`, `runtime-integrations.snapshot`, `state-integrations`, `hub-pipeline-stage-residue-audit`); strict TS shell reference audit PASS with `prodTsShellCount=97`, `shellsWithHostTextRefs=14`, `coreModuleSubpathRefs=30`; zero-ts closeout PASS; minimal TS surface PASS; rustification audit PASS (`prodTsFileCount=97`, `nonNativeFileCount=0`); sharedmodule tsc PASS; root tsc PASS; `git diff --check` PASS.
+- Boundary: full objective remains active. Remaining host bridge refs include provider response orchestration/shared conversion/metadata writer/SSE and routing integration shell subpaths; no live runtime replay claimed for this source/reference slice.
+
 # 2026-07-09: llmswitch TS shell reference closeout continuation
 
 - Change: deleted `responses-conversation-store-native.ts` and rewired `responses-conversation-store-host.ts/js` to call direct `getRouterHotpathJsonBindingSync()` JSON capabilities for responses store plans/resume/materialize.

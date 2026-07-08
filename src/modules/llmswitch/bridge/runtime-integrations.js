@@ -5,20 +5,9 @@
  * provider runtime ingress hooks.
  */
 import { importCoreDist } from "./module-loader.js";
+import { shouldRecordSnapshotsNative, writeSnapshotViaHooksNative } from "./native-exports.js";
 import { captureResponsesRequestContext, recordResponsesResponse, resumeResponsesConversation as resumeResponsesConversationHost, lookupResponsesContinuationByResponseId as lookupResponsesContinuationByResponseIdHost, resumeLatestResponsesContinuationByScope as resumeLatestResponsesContinuationByScopeHost, materializeLatestResponsesContinuationByScope as materializeLatestResponsesContinuationByScopeHost, rebindResponsesConversationRequestId as rebindResponsesConversationRequestIdHost, clearResponsesConversationByRequestId as clearResponsesConversationByRequestIdHost, finalizeResponsesConversationRequestRetention as finalizeResponsesConversationRequestRetentionHost, clearAllResponsesConversationState as clearAllResponsesConversationStateHost, resetResponsesConversationStateForRestartSimulation as resetResponsesConversationStateForRestartSimulationHost, clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost, } from "./responses-conversation-store-host.js";
-let cachedSnapshotHooksModule = null;
-async function getSnapshotHooksModule() {
-    if (!cachedSnapshotHooksModule) {
-        cachedSnapshotHooksModule = await importCoreDist("conversion/snapshot-utils");
-    }
-    return cachedSnapshotHooksModule;
-}
 export async function writeSnapshotViaHooks(channelOrOptions, payload) {
-    const hooksModule = await getSnapshotHooksModule();
-    const writer = hooksModule?.writeSnapshotViaHooks;
-    if (typeof writer !== "function") {
-        throw new Error("[llmswitch-bridge] writeSnapshotViaHooks not available");
-    }
     let options;
     if (payload && typeof channelOrOptions === "string") {
         const channelValue = typeof payload.channel === "string" && payload.channel
@@ -32,7 +21,7 @@ export async function writeSnapshotViaHooks(channelOrOptions, payload) {
     if (!options) {
         return;
     }
-    await writer(options);
+    writeSnapshotViaHooksNative(options);
 }
 export async function captureResponsesRequestContextForRequest(args) {
     captureResponsesRequestContext(args);
@@ -111,11 +100,8 @@ async function getProviderRuntimeIngress() {
 }
 export async function preloadCriticalBridgeRuntimeModules() {
     const loaded = [];
-    const snapshotHooksModule = await getSnapshotHooksModule();
-    if (typeof snapshotHooksModule.writeSnapshotViaHooks !== "function") {
-        throw new Error("[llmswitch-bridge] preload failed: writeSnapshotViaHooks not available");
-    }
-    loaded.push("conversion/snapshot-utils");
+    shouldRecordSnapshotsNative();
+    loaded.push("native/router-hotpath/snapshot-hooks");
     await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
     loaded.push("bridge/responses-conversation-store-host");
     const nativeSseRuntimeModule = await getNativeSseRuntimeModule();

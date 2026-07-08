@@ -3,8 +3,9 @@
  *
  * Routing state and session identifier compatibility wrappers.
  */
-import { requireCoreDist } from './module-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
+const NO_SESSION_DIR_OVERRIDE = '__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__';
 function buildStateIntegrationFailure(stage, error, details) {
     const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
     const message = `[llmswitch-bridge.state-integrations] ${stage} failed: ${formatUnknownError(error)}${detailSuffix}`;
@@ -17,40 +18,109 @@ function buildStateIntegrationFailure(stage, error, details) {
     });
     return wrapped;
 }
+function nativeJsonBinding() {
+    return getRouterHotpathJsonBindingSync();
+}
+function requireNativeJsonFunction(capability) {
+    const fn = nativeJsonBinding()[capability];
+    if (typeof fn !== 'function') {
+        throw new Error(`${capability} native unavailable`);
+    }
+    return fn;
+}
+function normalizeSessionDirOverride(sessionDir) {
+    if (typeof sessionDir !== 'string') {
+        return NO_SESSION_DIR_OVERRIDE;
+    }
+    const trimmed = sessionDir.trim();
+    return trimmed || NO_SESSION_DIR_OVERRIDE;
+}
+function plainRoutingState(state) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+        return state;
+    }
+    const record = state;
+    return {
+        ...record,
+        allowedProviders: Array.from(record.allowedProviders instanceof Set ? record.allowedProviders : []),
+        disabledProviders: Array.from(record.disabledProviders instanceof Set ? record.disabledProviders : []),
+        disabledKeys: Array.from(record.disabledKeys instanceof Map ? record.disabledKeys : new Map()).map(([provider, keys]) => ({
+            provider,
+            keys: Array.from(keys instanceof Set ? keys : []),
+        })),
+        disabledModels: Array.from(record.disabledModels instanceof Map ? record.disabledModels : new Map()).map(([provider, models]) => ({
+            provider,
+            models: Array.from(models instanceof Set ? models : []),
+        })),
+    };
+}
+function hydrateRoutingState(raw) {
+    if (raw === null)
+        return null;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return raw;
+    }
+    const record = raw;
+    const disabledKeys = new Map();
+    if (Array.isArray(record.disabledKeys)) {
+        for (const entry of record.disabledKeys) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+                continue;
+            const item = entry;
+            if (typeof item.provider !== 'string' || !Array.isArray(item.keys))
+                continue;
+            disabledKeys.set(item.provider, new Set(item.keys.filter((key) => typeof key === 'string' || typeof key === 'number')));
+        }
+    }
+    const disabledModels = new Map();
+    if (Array.isArray(record.disabledModels)) {
+        for (const entry of record.disabledModels) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+                continue;
+            const item = entry;
+            if (typeof item.provider !== 'string' || !Array.isArray(item.models))
+                continue;
+            disabledModels.set(item.provider, new Set(item.models.filter((model) => typeof model === 'string')));
+        }
+    }
+    return {
+        ...record,
+        allowedProviders: new Set((Array.isArray(record.allowedProviders) ? record.allowedProviders : []).filter((value) => typeof value === 'string')),
+        disabledProviders: new Set((Array.isArray(record.disabledProviders) ? record.disabledProviders : []).filter((value) => typeof value === 'string')),
+        disabledKeys,
+        disabledModels,
+    };
+}
+function serializeRoutingStateForNative(state) {
+    if (state === null)
+        return JSON.stringify(null);
+    const serialize = requireNativeJsonFunction('serializeRoutingInstructionStateJson');
+    return serialize(JSON.stringify(plainRoutingState(state)));
+}
+function deserializeRoutingStateFromNative(raw) {
+    const parsed = JSON.parse(raw);
+    if (parsed === null)
+        return null;
+    const deserialize = requireNativeJsonFunction('deserializeRoutingInstructionStateJson');
+    return hydrateRoutingState(JSON.parse(deserialize(JSON.stringify(parsed))));
+}
 export function loadRoutingInstructionStateSync(key) {
     try {
-        const mod = requireCoreDist('native/router-hotpath/native-virtual-router-routing-state');
-        const fn = mod.loadRoutingInstructionStateSync;
-        if (typeof fn !== 'function') {
-            throw new Error('loadRoutingInstructionStateSync native unavailable');
-        }
-        return fn(key);
+        const fn = requireNativeJsonFunction('loadRoutingInstructionStateJson');
+        const raw = fn(key, normalizeSessionDirOverride());
+        return deserializeRoutingStateFromNative(raw);
     }
     catch (error) {
         throw buildStateIntegrationFailure('routing_state_store.load_state.invoke', error, { key });
     }
 }
 export function saveRoutingInstructionStateAsync(key, state) {
-    try {
-        const mod = requireCoreDist('native/router-hotpath/native-virtual-router-routing-state');
-        const fn = mod.saveRoutingInstructionStateAsync;
-        if (typeof fn !== 'function') {
-            throw new Error('saveRoutingInstructionStateAsync native unavailable');
-        }
-        fn(key, state);
-    }
-    catch (error) {
-        throw buildStateIntegrationFailure('routing_state_store.save_async.invoke', error, { key });
-    }
+    saveRoutingInstructionStateSync(key, state);
 }
 export function saveRoutingInstructionStateSync(key, state) {
     try {
-        const mod = requireCoreDist('native/router-hotpath/native-virtual-router-routing-state');
-        const fn = mod.saveRoutingInstructionStateSync;
-        if (typeof fn !== 'function') {
-            throw new Error('saveRoutingInstructionStateSync native unavailable');
-        }
-        fn(key, state);
+        const fn = requireNativeJsonFunction('saveRoutingInstructionStateJson');
+        fn(key, serializeRoutingStateForNative(state), normalizeSessionDirOverride());
     }
     catch (error) {
         throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });

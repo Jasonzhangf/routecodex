@@ -1,5 +1,6 @@
 import type { Readable } from 'node:stream';
 import { requireCoreDist } from './module-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
@@ -70,10 +71,6 @@ type NativeSharedSemanticsModule = {
 
 type RuntimeMetadataModule = {
   ensureRuntimeMetadata?: (carrier: Record<string, unknown>) => JsonObject;
-};
-
-type NativeRoutingStateModule = {
-  planChatProcessSessionUsage?: (input: { context: Record<string, unknown>; usage?: Record<string, unknown> }) => unknown;
 };
 
 type NativeSseRuntimeModule = {
@@ -181,10 +178,6 @@ const ensureRuntimeMetadata = requireCoreModuleFn<
   RuntimeMetadataModule,
   NonNullable<RuntimeMetadataModule['ensureRuntimeMetadata']>
 >('conversion/runtime-metadata', 'ensureRuntimeMetadata', 'runtime metadata');
-const planChatProcessSessionUsage = requireCoreModuleFn<
-  NativeRoutingStateModule,
-  NonNullable<NativeRoutingStateModule['planChatProcessSessionUsage']>
->('native/router-hotpath/native-virtual-router-routing-state', 'planChatProcessSessionUsage', 'native routing state');
 const buildReadableFromSseFrames = requireCoreModuleFn<
   NativeSseRuntimeModule,
   NonNullable<NativeSseRuntimeModule['buildReadableFromSseFrames']>
@@ -229,6 +222,18 @@ const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn<
   NativeRespSemanticsModule,
   NonNullable<NativeRespSemanticsModule['resolveProviderResponseContextHelpersWithNative']>
 >('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
+
+function planChatProcessSessionUsageWithNative(input: {
+  context: Record<string, unknown>;
+  usage?: Record<string, unknown>;
+}): unknown {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding.planChatProcessSessionUsageJson as undefined | ((inputJson: string) => string);
+  if (typeof fn !== 'function') {
+    throw new Error('[provider-response-converter-host] native routing state.planChatProcessSessionUsageJson not available');
+  }
+  return JSON.parse(fn(JSON.stringify(input ?? {}))) as unknown;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -470,7 +475,7 @@ function executeProviderResponseNativeRuntimeStateEffect(args: {
     );
   }
   if (plan.usageArgs) {
-    planChatProcessSessionUsage({
+    planChatProcessSessionUsageWithNative({
       context: args.context as unknown as Record<string, unknown>,
       usage: plan.usageArgs.usage as Record<string, unknown> | undefined
     });

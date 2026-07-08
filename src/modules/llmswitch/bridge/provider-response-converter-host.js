@@ -1,4 +1,5 @@
 import { requireCoreDist } from './module-loader.js';
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 import { recordResponsesResponse, finalizeResponsesConversationRequestRetention, } from './responses-conversation-store-host.js';
 function requireModuleFn(module, name, label) {
     const fn = module[name];
@@ -20,7 +21,6 @@ const normalizeProviderResponseEffectPlanWithNative = requireCoreModuleFn('nativ
 const resolveProviderProtocolWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol', 'resolveProviderProtocolWithNative', 'native protocol');
 const publishResponsesRecordPlanWithNative = requireCoreModuleFn('native/router-hotpath/native-shared-conversion-semantics', 'publishResponsesRecordPlanWithNative', 'native shared semantics');
 const ensureRuntimeMetadata = requireCoreModuleFn('conversion/runtime-metadata', 'ensureRuntimeMetadata', 'runtime metadata');
-const planChatProcessSessionUsage = requireCoreModuleFn('native/router-hotpath/native-virtual-router-routing-state', 'planChatProcessSessionUsage', 'native routing state');
 const buildReadableFromSseFrames = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildReadableFromSseFrames', 'native sse runtime');
 const buildSseFramesFromJsonWithNative = requireCoreModuleFn('native/router-hotpath/native-sse-runtime', 'buildSseFramesFromJsonWithNative', 'native sse runtime');
 const buildProviderSseStreamReadErrorDescriptorWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'buildProviderSseStreamReadErrorDescriptorWithNative', 'native resp semantics');
@@ -32,6 +32,14 @@ const readContinuationContextFromBoundMetadataCenter = requireCoreModuleFn('conv
 const readRequestTruthFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRequestTruthFromBoundMetadataCenter', 'metadata writer');
 const readRuntimeControlFromBoundMetadataCenter = requireCoreModuleFn('conversion/hub/metadata-center-runtime-control-writer', 'readRuntimeControlFromBoundMetadataCenter', 'metadata writer');
 const resolveProviderResponseContextHelpersWithNative = requireCoreModuleFn('native/router-hotpath/native-hub-pipeline-resp-semantics', 'resolveProviderResponseContextHelpersWithNative', 'native resp semantics');
+function planChatProcessSessionUsageWithNative(input) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.planChatProcessSessionUsageJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[provider-response-converter-host] native routing state.planChatProcessSessionUsageJson not available');
+    }
+    return JSON.parse(fn(JSON.stringify(input ?? {})));
+}
 function isRecord(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -221,7 +229,7 @@ function executeProviderResponseNativeRuntimeStateEffect(args) {
         finalizeResponsesConversationRequestRetention(plan.finalizeArgs.requestId, { keepForSubmitToolOutputs: plan.finalizeArgs.keepForSubmitToolOutputs });
     }
     if (plan.usageArgs) {
-        planChatProcessSessionUsage({
+        planChatProcessSessionUsageWithNative({
             context: args.context,
             usage: plan.usageArgs.usage
         });

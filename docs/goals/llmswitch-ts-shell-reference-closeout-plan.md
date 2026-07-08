@@ -179,6 +179,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 snapshot and routing-state host bridge refs closed
+
+- `src/modules/llmswitch/bridge/runtime-integrations.ts/js` now calls direct native snapshot hook capabilities via `native-exports.ts/js`; the host bridge no longer loads `conversion/snapshot-utils`.
+- `src/modules/llmswitch/bridge/state-integrations.ts/js` now calls direct native JSON capabilities for routing instruction state load/save and preserves Set/Map state through native serialize/deserialize; the host bridge no longer loads `native/router-hotpath/native-virtual-router-routing-state`.
+- `src/modules/llmswitch/bridge/provider-response-converter-host.ts/js` now calls `planChatProcessSessionUsageJson` through `getRouterHotpathJsonBindingSync()` instead of loading the routing-state TS shell for session usage planning.
+- Exact bridge scan for `native/router-hotpath/native-virtual-router-routing-state|conversion/snapshot-utils` under `src/modules/llmswitch/bridge` returns zero matches.
+- Strict reference audit improved to `shellsWithHostTextRefs=14` and `coreModuleSubpathRefs=30` while `prodTsShellCount=97` remains unchanged.
+- Verification passed: focused Jest 216/216, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, and `git diff --check`.
+- Remaining work: continue closing provider response orchestration/shared conversion/metadata writer/SSE and routing integration shell subpaths before deleting further shells.
+
 ### 2026-07-09 responses store and node contract shell deletion
 
 - `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-native.ts` was removed after host bridge direct native JSON wiring was in place.

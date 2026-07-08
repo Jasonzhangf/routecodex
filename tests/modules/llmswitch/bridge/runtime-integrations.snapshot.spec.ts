@@ -5,15 +5,12 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
     jest.resetModules();
   });
 
-  test('writeSnapshotViaHooks loads conversion/snapshot-utils and forwards payload', async () => {
-    const importCoreDistMock = jest.fn();
+  test('writeSnapshotViaHooks forwards payload to native snapshot hooks', async () => {
     const writer = jest.fn();
-    importCoreDistMock.mockResolvedValue({
-      writeSnapshotViaHooks: writer
-    });
-
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
-      importCoreDist: importCoreDistMock
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+      writeSnapshotViaHooksNative: writer,
+      shouldRecordSnapshotsNative: jest.fn(() => true),
+      getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
     }));
 
     const mod = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
@@ -24,7 +21,6 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
       data: { ok: true }
     });
 
-    expect(importCoreDistMock).toHaveBeenCalledWith('conversion/snapshot-utils');
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         endpoint: '/v1/responses',
@@ -36,14 +32,11 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
   });
 
   test('RED: writeSnapshotViaHooks forwards providerKey and groupRequestId so --snap requests do not stay anonymous pending forever', async () => {
-    const importCoreDistMock = jest.fn();
     const writer = jest.fn();
-    importCoreDistMock.mockResolvedValue({
-      writeSnapshotViaHooks: writer
-    });
-
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
-      importCoreDist: importCoreDistMock
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+      writeSnapshotViaHooksNative: writer,
+      shouldRecordSnapshotsNative: jest.fn(() => true),
+      getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
     }));
 
     const mod = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
@@ -56,7 +49,6 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
       data: { ok: true }
     });
 
-    expect(importCoreDistMock).toHaveBeenCalledWith('conversion/snapshot-utils');
     expect(writer).toHaveBeenCalledWith(
       expect.objectContaining({
         endpoint: '/v1/responses',

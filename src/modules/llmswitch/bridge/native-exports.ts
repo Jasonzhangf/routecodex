@@ -1170,6 +1170,24 @@ export function describeServerModuleHelpWithNative(moduleId: string): AnyRecord 
   return fn(moduleId);
 }
 
+export function shouldRecordSnapshotsNative(): boolean {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding.shouldRecordSnapshotsJson as undefined | (() => string);
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldRecordSnapshotsJson not available');
+  }
+  return JSON.parse(String(fn())) as boolean;
+}
+
+export function writeSnapshotViaHooksNative(options: AnyRecord): void {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding.writeSnapshotViaHooksJson as undefined | ((optionsJson: string) => string | void);
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] writeSnapshotViaHooksJson not available');
+  }
+  fn(JSON.stringify(options ?? null));
+}
+
 export function validatePipelineNodeContractBoundaryNative(
   nodeId: string,
   before: unknown,

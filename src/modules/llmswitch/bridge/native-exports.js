@@ -649,6 +649,22 @@ export function describeServerModuleHelpWithNative(moduleId) {
     }
     return fn(moduleId);
 }
+export function shouldRecordSnapshotsNative() {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.shouldRecordSnapshotsJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] shouldRecordSnapshotsJson not available');
+    }
+    return JSON.parse(String(fn()));
+}
+export function writeSnapshotViaHooksNative(options) {
+    const binding = getRouterHotpathJsonBindingSync();
+    const fn = binding.writeSnapshotViaHooksJson;
+    if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] writeSnapshotViaHooksJson not available');
+    }
+    fn(JSON.stringify(options ?? null));
+}
 export function validatePipelineNodeContractBoundaryNative(nodeId, before, after) {
     const fn = getHubVrNodeContracts().validatePipelineNodeContractBoundaryWithNative;
     if (typeof fn !== 'function') {
