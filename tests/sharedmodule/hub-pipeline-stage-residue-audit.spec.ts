@@ -5277,7 +5277,6 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs',
     );
     const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
-    const stopMessageNativeSource = fs.readFileSync(stopMessageNativePath, 'utf8');
     const rustLookupSource = fs.readFileSync(rustLookupPath, 'utf8');
     const rustRuntimeStateStart = rustLookupSource.indexOf('pub fn resolve_runtime_stop_message_state(');
     const rustRuntimeStateEnd = rustLookupSource.indexOf(
@@ -5304,17 +5303,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
     expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
     expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
-    expect(stopMessageNativeSource).not.toContain('followupFlowId');
+    expect(fs.existsSync(stopMessageNativePath)).toBe(false);
 
     const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${metadataCenterStateBlock}`, [
       { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
       { label: 'runtime stop stage TS normalizes state locally', pattern: /toLowerCase\(\)|normalizeStopMessageStageMode/i },
       { label: 'metadata-center stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
     ]);
-    const stopMessageNativeFindings = collectMatches(stopMessageNativeSource, [
-      { label: 'stop-message native bridge keeps TS skip-hop branch', pattern: /skip_servertool_followup_hop/ },
-      { label: 'stop-message native bridge keeps local followup flow routing policy', pattern: /followupFlowId\s*&&|FLOW_ID|preserve_eligibility|stop_message_followup_policy/ },
-    ]);
-    expect([...runtimeFindings, ...stopMessageNativeFindings]).toEqual([]);
+    expect(runtimeFindings).toEqual([]);
   });
 });

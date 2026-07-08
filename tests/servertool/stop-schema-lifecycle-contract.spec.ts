@@ -1,9 +1,9 @@
 import { describe, expect, test } from '@jest/globals';
-import { evaluateStopSchemaGateWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js';
+import { evaluateStopSchemaGateDirectNative } from './helpers/stop-message-direct-native.ts';
 
 describe('stop schema lifecycle contract', () => {
   test('missing schema enters followup contract and counts loop-guard budget', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '我想停一下，但还没给结构化 schema。',
       used: 0,
       maxRepeats: 3,
@@ -16,7 +16,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('reasoningStop arguments allow terminal stop', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '',
       reasoningStopArguments:
         '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
@@ -34,7 +34,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('simple_question true allows natural stop without stopreason', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '',
       reasoningStopArguments: '{"simple_question":true}',
       used: 0,
@@ -50,7 +50,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('simple_question true overrides other stop schema fields', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '',
       reasoningStopArguments: '{"simple_question":true,"stopreason":"unknown"}',
       used: 0,
@@ -62,7 +62,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('simple_question false still requires stopreason', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '',
       reasoningStopArguments: '{"simple_question":false}',
       used: 0,
@@ -74,7 +74,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('fenced non-terminal schema follows up with schema-aware guidance', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
         '<rcc_stop_schema>{"stopreason":2,"reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}</rcc_stop_schema>',
       used: 0,
@@ -91,7 +91,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('json code fence stop schema is harvested as the same stop contract', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
         '继续执行。\n```json\n{"stopreason":2,"reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}\n```',
       used: 0,
@@ -106,7 +106,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('fence invalid json returns invalid_json guidance', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
@@ -118,7 +118,7 @@ describe('stop schema lifecycle contract', () => {
   });
 
   test('bare json without fence is treated as missing schema', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
         '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
       used: 0,

@@ -27975,3 +27975,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Residue audit now locks the wrapper path physically absent while keeping retired session header helper public NAPI exports forbidden.
 - Release snapshot test now checks a live dist anchor instead of preserving the retired wrapper path; also replaced its stale ESM `require(...)` version read with `fs.readFileSync` JSON parsing.
 - Verification PASS: focused Jest 202/202; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=89`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); exact source ref scan; `git diff --check`.
+
+# 2026-07-09: llmswitch stop-message auto wrapper deletion
+
+- Scope: continued `docs/goals/llmswitch-ts-shell-reference-closeout-plan.md` zero-prod/no-host shell deletion pass, prioritizing stopmessage/servertool-adjacent wrappers.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`.
+- `tests/servertool/stop-message-native-decision.spec.ts` and `tests/servertool/stop-schema-lifecycle-contract.spec.ts` now call direct Rust/NAPI `decideStopMessageAction` and `evaluateStopSchemaGateJson` through test-only helper `tests/servertool/helpers/stop-message-direct-native.ts`.
+- Residue audit now locks the old stop-message auto wrapper path physically absent instead of scanning a live TS wrapper for followup-flow residue.
+- Function/verification maps and rustification audit docs record the wrapper deletion; `no-fallback-diff-rules.json` no longer keeps a catch-return rule for the deleted path.
+- Verification PASS: focused Jest 221/221; sharedmodule/root `tsc`; `verify:function-map-compile-gate`; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=88`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`).

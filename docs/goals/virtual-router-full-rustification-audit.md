@@ -60,7 +60,7 @@
 | native-virtual-router-bootstrap-providers.ts | 131 | 2 | 2 |
 | native-virtual-router-bootstrap-routing.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
 | native-snapshot-hooks.ts | 113 | 3 | 2 |
-| native-stop-message-auto-semantics.ts | 117 | 10 | 3 |
+| native-stop-message-auto-semantics.ts | 已删：2026-07-09 direct `decideStopMessageAction` / `evaluateStopSchemaGateJson` test evidence | 0 | 0 |
 | native-virtual-router-routing-instructions-semantics.ts | 144 | 3 | 2 |
 | native-chat-process-governed-filter-semantics.ts | 78 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-process-post-governed-normalization-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |

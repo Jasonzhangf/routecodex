@@ -1,7 +1,7 @@
 /**
  * Black-box test: exercises the TS→Rust serialization boundary for stop-message decision.
  *
- * Does NOT mock the native decision — calls real `decideStopMessageActionWithNative`.
+ * Does NOT mock the native decision — calls real `decideStopMessageAction`.
  * This catches serde rename mismatch, JSON shape drift, and serialization contract breaks.
  *
  * MUST remain in the CI regression list (ci-jest.mjs).
@@ -9,11 +9,11 @@
 
 import { describe, test, expect } from '@jest/globals';
 import {
-  decideStopMessageActionWithNative,
-  evaluateStopSchemaGateWithNative,
+  decideStopMessageActionDirectNative,
+  evaluateStopSchemaGateDirectNative,
   type StopMessageDecisionContext,
   type StopMessageDecision
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.js';
+} from './helpers/stop-message-direct-native.ts';
 
 function buildMinimalDecisionContext(args: {
   stopEligible: boolean;
@@ -43,7 +43,7 @@ describe('stop-message native decision (blackbox)', () => {
     const ctx = buildMinimalDecisionContext({
       stopEligible: true,
     });
-    const decision: StopMessageDecision = decideStopMessageActionWithNative(ctx);
+    const decision: StopMessageDecision = decideStopMessageActionDirectNative(ctx);
     expect(decision.action).toBe('trigger');
     expect(decision.followup_text).toBeTruthy();
   });
@@ -52,7 +52,7 @@ describe('stop-message native decision (blackbox)', () => {
     const ctx = buildMinimalDecisionContext({
       stopEligible: false,
     });
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('skip');
   });
 
   test('default exhausted → skip', () => {
@@ -60,7 +60,7 @@ describe('stop-message native decision (blackbox)', () => {
       stopEligible: true,
       persistedDefaultExhausted: true,
     });
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('skip');
   });
 
   test('plan mode active → skip', () => {
@@ -68,7 +68,7 @@ describe('stop-message native decision (blackbox)', () => {
       ...buildMinimalDecisionContext({ stopEligible: true }),
       plan_mode_active: true,
     };
-    const decision = decideStopMessageActionWithNative(ctx);
+    const decision = decideStopMessageActionDirectNative(ctx);
     expect(decision.action).toBe('skip');
     expect(decision.skip_reason).toBe('skip_plan_mode');
   });
@@ -78,7 +78,7 @@ describe('stop-message native decision (blackbox)', () => {
       ...buildMinimalDecisionContext({ stopEligible: true }),
       port_stop_message_disabled: true,
     };
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('skip');
   });
 
   test('persisted snapshot with used=0 → trigger', () => {
@@ -92,7 +92,7 @@ describe('stop-message native decision (blackbox)', () => {
         stage_mode: 'on',
       },
     };
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('trigger');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('trigger');
   });
 
   test('persisted snapshot used >= max_repeats → skip', () => {
@@ -106,7 +106,7 @@ describe('stop-message native decision (blackbox)', () => {
         stage_mode: 'on',
       },
     };
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('skip');
   });
 
   test('stage_mode off → skip', () => {
@@ -120,7 +120,7 @@ describe('stop-message native decision (blackbox)', () => {
         stage_mode: 'off',
       },
     };
-    expect(decideStopMessageActionWithNative(ctx).action).toBe('skip');
+    expect(decideStopMessageActionDirectNative(ctx).action).toBe('skip');
   });
 
   test('submit_tool_outputs resume remains eligible for stopless continuation', () => {
@@ -135,13 +135,13 @@ describe('stop-message native decision (blackbox)', () => {
         stage_mode: 'on',
       },
     };
-    const decision = decideStopMessageActionWithNative(ctx);
+    const decision = decideStopMessageActionDirectNative(ctx);
     expect(decision.action).toBe('trigger');
     expect(decision.skip_reason ?? undefined).toBeUndefined();
   });
 
   test('stop schema gate counts missing schema as schema error budget', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '未完成。继续处理 DNS。',
       used: 0,
       maxRepeats: 3,
@@ -160,7 +160,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('malformed schema returns parse feedback and explicit field guidance', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
@@ -172,7 +172,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('unterminated json fence is treated as invalid schema instead of missing schema', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '```json\n{"stopreason":2,"reason":"继续"}',
       used: 0,
       maxRepeats: 3,
@@ -183,7 +183,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stop schema gate exhausts repeated missing schema loop', () => {
-    const first = evaluateStopSchemaGateWithNative({
+    const first = evaluateStopSchemaGateDirectNative({
       assistantText: '还是无法继续，工具被拒绝。',
       used: 0,
       maxRepeats: 3,
@@ -192,7 +192,7 @@ describe('stop-message native decision (blackbox)', () => {
     expect(first.reason_code).toBe('stop_schema_missing');
     expect(first.no_change_count).toBe(1);
 
-    const second = evaluateStopSchemaGateWithNative({
+    const second = evaluateStopSchemaGateDirectNative({
       assistantText: '还是无法继续，工具被拒绝。',
       used: 0,
       maxRepeats: 3,
@@ -203,7 +203,7 @@ describe('stop-message native decision (blackbox)', () => {
     expect(second.reason_code).toBe('stop_schema_missing');
     expect(second.no_change_count).toBe(2);
 
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '还是无法继续，工具被拒绝。',
       used: 0,
       maxRepeats: 3,
@@ -217,7 +217,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stopless budget does not reset when provider switches inside the same term', () => {
-    const decision = decideStopMessageActionWithNative({
+    const decision = decideStopMessageActionDirectNative({
       ...buildMinimalDecisionContext({
         stopEligible: true,
       }),
@@ -240,7 +240,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stop schema gate allows blocked with reason only', () => {
-    const shallow = evaluateStopSchemaGateWithNative({
+    const shallow = evaluateStopSchemaGateDirectNative({
       assistantText:
         '<rcc_stop_schema>{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":0,"evidence":"","next_step":""}</rcc_stop_schema>',
       used: 0,
@@ -251,7 +251,7 @@ describe('stop-message native decision (blackbox)', () => {
     expect(shallow.count_budget).toBe(false);
     expect(shallow.missing_fields).toEqual([]);
 
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
         '<rcc_stop_schema>{"stopreason":1,"reason":"工具权限被客户端拒绝，无法继续读取文件。","has_evidence":1,"evidence":"exec_command rejected","issue_cause":"客户端拒绝工具权限","excluded_factors":"非模型输出格式问题","diagnostic_order":"工具调用 -> 拒绝日志 -> 阻塞判定","done_steps":"确认工具权限被拒","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"需要先确认工具权限"}</rcc_stop_schema>',
       used: 5,
@@ -263,7 +263,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('valid terminal reasoningStop arguments allow stop without requiring prior explicit hook call', () => {
-    const gate = evaluateStopSchemaGateWithNative({
+    const gate = evaluateStopSchemaGateDirectNative({
       assistantText: '',
       reasoningStopArguments:
         '{"stopreason":0,"reason":"任务完成","has_evidence":1,"evidence":"live probe ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"check->verify","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"summary ready"}',
@@ -282,7 +282,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('default stopless followup prompt starts with goal and evidence check', () => {
-    const decision = decideStopMessageActionWithNative(buildMinimalDecisionContext({
+    const decision = decideStopMessageActionDirectNative(buildMinimalDecisionContext({
       stopEligible: true,
     }));
     expect(decision.action).toBe('trigger');
@@ -294,7 +294,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('last default stopless followup asks for final user-facing summary only', () => {
-    const decision = decideStopMessageActionWithNative({
+    const decision = decideStopMessageActionDirectNative({
       ...buildMinimalDecisionContext({
         stopEligible: true,
       }),
@@ -314,7 +314,7 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('default snapshot uses heuristic prompt instead of fixed configured text', () => {
-    const decision = decideStopMessageActionWithNative({
+    const decision = decideStopMessageActionDirectNative({
       ...buildMinimalDecisionContext({
         stopEligible: true,
         defaultText: '继续完成当前用户目标。若仍需操作、检查或验证，必须调用可用工具继续执行；不要只总结。'
@@ -337,13 +337,13 @@ describe('stop-message native decision (blackbox)', () => {
   });
 
   test('stop schema gate exhausts only invalid schema budget', () => {
-    const invalid1 = evaluateStopSchemaGateWithNative({
+    const invalid1 = evaluateStopSchemaGateDirectNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
     expect(invalid1.action).toBe('followup');
-    const invalid2 = evaluateStopSchemaGateWithNative({
+    const invalid2 = evaluateStopSchemaGateDirectNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
@@ -351,7 +351,7 @@ describe('stop-message native decision (blackbox)', () => {
       prevNoChangeCount: invalid1.no_change_count,
     });
     expect(invalid2.action).toBe('followup');
-    const invalid3 = evaluateStopSchemaGateWithNative({
+    const invalid3 = evaluateStopSchemaGateDirectNative({
       assistantText: '<rcc_stop_schema>{bad json}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
@@ -362,7 +362,7 @@ describe('stop-message native decision (blackbox)', () => {
     expect(invalid3.reason_code).toBe('stop_schema_budget_exhausted');
     expect(invalid3.count_budget).toBe(true);
 
-    const valid = evaluateStopSchemaGateWithNative({
+    const valid = evaluateStopSchemaGateDirectNative({
       assistantText:
         '<rcc_stop_schema>{"stopreason":0,"reason":"测试通过","has_evidence":1,"evidence":"cargo test green","issue_cause":"实现满足 contract","excluded_factors":"无关配置未参与","diagnostic_order":"单测 -> gate","done_steps":"补齐 Rust gate","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"gate green"}</rcc_stop_schema>',
       used: 3,

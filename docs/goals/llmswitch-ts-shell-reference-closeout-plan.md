@@ -196,6 +196,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the old wrapper path as physically absent while keeping the retired header-helper public NAPI symbols forbidden.
 - `tests/scripts/install-release-snapshot.spec.ts` now checks a still-live sharedmodule dist file instead of preserving the retired session identifier wrapper path.
 
+### 2026-07-09 stop-message auto wrapper deleted
+
+- Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-stop-message-auto-semantics.ts`.
+- `tests/servertool/stop-message-native-decision.spec.ts` and `tests/servertool/stop-schema-lifecycle-contract.spec.ts` now call direct Rust/NAPI `decideStopMessageAction` and `evaluateStopSchemaGateJson` through test-only helper code.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the old wrapper path as physically absent.
+- Function map and verification map now record that the stop-message auto wrapper must stay deleted and that direct NAPI tests are evidence, not runtime TS ownership.
+
 ### 2026-07-09 SSE event payload wrappers deleted
 
 - Physically deleted three zero-production-import SSE native wrapper shells after direct Rust NAPI tests replaced the old TS wrapper imports:
