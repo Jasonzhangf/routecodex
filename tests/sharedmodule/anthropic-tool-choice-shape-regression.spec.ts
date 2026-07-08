@@ -1,4 +1,4 @@
-import { buildAnthropicRequestFromOpenAIChat } from '../../sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.js';
+import { buildAnthropicFromOpenAIChatDirectNative as buildAnthropicRequestFromOpenAIChat } from './helpers/anthropic-codec-direct-native.js';
 
 describe('anthropic tool_choice shape regression', () => {
   it('maps OpenAI function selector to Anthropic tool selector', () => {

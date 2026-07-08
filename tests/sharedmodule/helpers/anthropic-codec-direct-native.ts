@@ -15,6 +15,15 @@ function nativeFn(name: string): (...args: unknown[]) => unknown {
 }
 
 function parseNativeRecord(raw: unknown, capability: string): Record<string, unknown> {
+  if (raw instanceof Error) {
+    throw raw;
+  }
+  if (raw && typeof raw === 'object' && 'message' in raw) {
+    const message = (raw as { message?: unknown }).message;
+    if (typeof message === 'string' && message.length > 0) {
+      throw new Error(message);
+    }
+  }
   if (typeof raw !== 'string' || raw.length === 0) {
     throw new Error(`${capability} returned invalid payload`);
   }

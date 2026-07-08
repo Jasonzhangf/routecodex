@@ -4391,6 +4391,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_response_helper.rs
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts
+      - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts
       - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils.ts
       - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-tool-schema.ts
       - sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts
@@ -4407,6 +4408,7 @@ owners:
     notes:
       - "Anthropic protocol normalization forbidden in TS per ARCH-CNV-4."
       - "Retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` must stay physically deleted; tests/scripts use direct router_hotpath_napi evidence instead."
+      - "Retired TS OpenAI-request helper `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` must stay physically deleted; tests use direct router_hotpath_napi evidence instead."
 
   - feature_id: conversion.responses.store
     status: active

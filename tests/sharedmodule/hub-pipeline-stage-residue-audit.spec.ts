@@ -4347,6 +4347,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     [
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-response.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/chat-output-normalizer.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/reasoning-tool-normalizer.ts',

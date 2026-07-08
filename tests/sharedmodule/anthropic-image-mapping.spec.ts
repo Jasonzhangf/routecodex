@@ -1,4 +1,4 @@
-import { buildAnthropicRequestFromOpenAIChat } from '../../sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.js';
+import { buildAnthropicFromOpenAIChatDirectNative as buildAnthropicRequestFromOpenAIChat } from './helpers/anthropic-codec-direct-native.js';
 
 describe('anthropic image mapping invariants', () => {
   it('maps data-url image to anthropic embedded base64 source', () => {

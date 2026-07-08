@@ -1353,6 +1353,7 @@ verification:
     notes:
       - "Anthropic/OpenAI message and tool-schema normalization must remain in anthropic_openai_codec.rs; TS anthropic shared utils are forbidden semantic owners."
       - "The retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/anthropic-openai-codec.ts` must stay physically deleted; test/script evidence calls direct router_hotpath_napi exports."
+      - "The retired TS OpenAI-request helper `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` must stay physically deleted; test evidence calls direct router_hotpath_napi exports."
 
   - feature_id: conversion.responses.store
     change_risk: high

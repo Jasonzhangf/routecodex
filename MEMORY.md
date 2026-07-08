@@ -1745,3 +1745,10 @@
 - Tests/scripts needing Anthropic<->OpenAI codec evidence should call direct Rust/NAPI exports through helper code. Current direct exports are `buildOpenaiChatFromAnthropicJson` and `buildAnthropicFromOpenaiChatJson`.
 - Anthropic codec truth remains Rust `anthropic_openai_codec.rs`; the helper files under `tests/sharedmodule/helpers` and `scripts/helpers` are evidence/CLI glue only, not runtime owners.
 - Current shell audit after this deletion is `prodTsShellCount=70`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Anthropic OpenAI request helper TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-openai-request.ts` is physically deleted. Do not restore it as a shared conversion TS shell for Anthropic outbound request building.
+- Tests needing Anthropic image mapping or OpenAI function `tool_choice` to Anthropic `{type:"tool", name}` evidence should call direct Rust/NAPI `buildAnthropicFromOpenaiChatJson` through test-only helper code.
+- The direct native helper must preserve NAPI Error object messages so fail-fast assertions continue to prove Rust error truth, for example malformed data URL image payloads.
+- Current shell audit after this deletion is `prodTsShellCount=69`, `shellsWithProdImporters=63`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
