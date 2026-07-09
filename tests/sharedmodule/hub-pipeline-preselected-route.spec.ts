@@ -117,8 +117,8 @@ jest.unstable_mockModule(
   })
 );
 
-const { executeRequestStagePipeline } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js'
+const { executeRequestStagePipelineDirectNative: executeRequestStagePipeline } = await import(
+  './helpers/request-stage-direct-native.js'
 );
 
 const preselectedRoute = {

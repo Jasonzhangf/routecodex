@@ -1,26 +1,24 @@
-import type { VirtualRouterRuntime } from "../../../native/router-hotpath/native-virtual-router-runtime.js";
-type HubPipelineConfig = Record<string, unknown>;
-type HubPipelineNodeResult = Record<string, unknown>;
-type HubPipelineResult = Record<string, unknown>;
-type NormalizedRequest = Record<string, unknown>;
 import {
   buildRequestStageMetadataDispatchWithNative,
   buildRequestStageHubPipelineResultWithNative,
   buildRequestStageNativeResultPlanWithNative,
   buildRequestStageRuntimeControlWritePlanWithNative,
-  runHubPipelineLibWithNative
-} from '../../../native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { applyNativeRuntimeControlWritePlan, readRuntimeControlFromBoundMetadataCenter, readRequestTruthFromBoundMetadataCenter, readContinuationContextFromBoundMetadataCenter } from "../metadata-center-runtime-control-writer.js";
-
-
-
+  runHubPipelineLibWithNative,
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import {
+  applyNativeRuntimeControlWritePlan,
+  readContinuationContextFromBoundMetadataCenter,
+  readRequestTruthFromBoundMetadataCenter,
+  readRuntimeControlFromBoundMetadataCenter,
+} from '../../../sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.js';
 
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
-  module: 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
-  symbol: 'syncRequestStageRuntimeControlToMetadataCenter',
+  module: 'tests/sharedmodule/helpers/request-stage-direct-native.ts',
+  symbol: 'executeRequestStagePipelineDirectNative',
   stage: 'HubReqChatProcess03Governed',
 } as const;
 
+// feature_id: hub.request_stage_pipeline_bridge
 function syncRequestStageRuntimeControlToMetadataCenter(args: {
   sourceMetadata: Record<string, unknown>;
   outputMetadata: Record<string, unknown>;
@@ -35,16 +33,14 @@ function syncRequestStageRuntimeControlToMetadataCenter(args: {
     metadata: args.sourceMetadata,
     runtimeControl: writePlan.runtimeControl,
     writer: REQUEST_STAGE_RUNTIME_CONTROL_WRITER,
-    reason: 'rust request chatprocess runtime control'
+    reason: 'rust request chatprocess runtime control',
   });
 }
 
-// feature_id: hub.request_stage_pipeline_bridge
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function executeRequestStagePipeline(args: any): Promise<any> {
+export async function executeRequestStagePipelineDirectNative(args: any): Promise<any> {
   const normalized = args.normalized;
   const config = args.config;
-  const entryMode = args.entryMode ?? "request_stage";
+  const entryMode = args.entryMode ?? 'request_stage';
   const requestTruthPayload = readRequestTruthFromBoundMetadataCenter(normalized.metadata);
   const continuationContextPayload = readContinuationContextFromBoundMetadataCenter(normalized.metadata);
   const metadataCenterRuntimeControl = readRuntimeControlFromBoundMetadataCenter(normalized.metadata);
@@ -60,7 +56,7 @@ export async function executeRequestStagePipeline(args: any): Promise<any> {
   const nativePlan = runHubPipelineLibWithNative({
     config: {
       virtualRouter: config.virtualRouter as unknown as Record<string, unknown>,
-      runtimeRouterRequired: true,
+      runtimeRouterRequired: args.runtimeRouterRequired ?? true,
       ...(config.policy ? { policy: config.policy as unknown as Record<string, unknown> } : {}),
       ...(config.toolSurface ? { toolSurface: config.toolSurface as unknown as Record<string, unknown> } : {}),
     },
@@ -104,5 +100,5 @@ export async function executeRequestStagePipeline(args: any): Promise<any> {
     requestId: normalized.id,
     resultPlan,
     entryMode,
-  }) as unknown as HubPipelineResult;
+  });
 }

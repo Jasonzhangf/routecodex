@@ -141,7 +141,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
       - src/modules/llmswitch/bridge/native-exports.ts
@@ -1090,7 +1089,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
       - tests/sharedmodule
       - docs
     forbidden_paths:
@@ -1683,7 +1681,6 @@ owners:
       - applyMetadataCenterRustWriteResult
     allowed_paths:
       - src/server/runtime/http-server/metadata-center
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
@@ -1818,19 +1815,25 @@ owners:
       - "HubPipeline object construction is retired; server/runtime stores native handle strings only."
 
   - feature_id: hub.request_stage_pipeline_bridge
-    status: active
-    summary: "Hub request-stage TS bridge executes native request/chat_process stage plan and preserves preselected-route handoff semantics"
-    owner_kind: ts_bridge
-    owner_scope: "Hub request-stage TS bridge executes native request/chat_process stage plan and preserves preselected-route handoff semantics"
-    owner_module: sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+    status: retired
+    summary: "Retired Hub request-stage TS bridge; request/chat_process execution is Rust/native-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust Hub request/chat_process stage plan execution and preselected-route handoff semantics"
+    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
     canonical_types:
-      - HubPipelineResult
+      - HubReqChatProcess03Governed
+      - HubReqOutbound05ProviderSemantic
     canonical_builders:
-      - executeRequestStagePipeline
+      - runHubPipelineLibWithNative
+      - buildRequestStageMetadataDispatchWithNative
+      - buildRequestStageNativeResultPlanWithNative
+      - buildRequestStageHubPipelineResultWithNative
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
-      - tests/sharedmodule
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
+      - tests/sharedmodule/helpers/request-stage-direct-native.ts
     forbidden_paths:
+      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/src/router
@@ -1844,7 +1847,8 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "This file is the TS request/chat_process execution shell only; route selection and request-stage semantics remain Rust-owned."
+      - "The old `hub-pipeline-execute-request-stage.ts` shell is physically deleted and must stay deleted."
+      - "Test-only request-stage direct-native helper exists only to preserve focused white-box evidence; it is not a runtime owner."
       - "Preselected-route handoff must stay request-scoped control metadata, not client/provider payload."
 
   - feature_id: hub.chat_envelope_type_surface

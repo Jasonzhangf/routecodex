@@ -3,6 +3,9 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 import { stringifyNativePayloadForError } from './native-hub-bridge-action-semantics-shared.js';
 import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
+// feature_id: hub.request_stage_pipeline_bridge
+// canonical_builders: runHubPipelineLibWithNative, buildRequestStageMetadataDispatchWithNative, buildRequestStageNativeResultPlanWithNative
+
 type HubPipelineInput = {
   requestId: string;
   endpoint: string;

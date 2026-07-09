@@ -38,16 +38,9 @@ function requireContains(relPath, marker, message) {
   }
 }
 
-forbid(
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
-  /routerEngine\.route\s*\(/,
-  'TS request-stage bridge must not preselect routes; preselectedRoute must be written by the Rust/VR owner before native HubPipeline entry'
-);
-forbid(
-  'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
-  /retryProviderKey\s*=\s*typeof\s+runtimeControl\.retryProviderKey|metadata\.retryProviderKey\s*=/,
-  'TS request-stage bridge must not derive retryProviderKey for router metadata'
-);
+if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts'))) {
+  failures.push('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts: retired TS request-stage bridge must stay physically deleted');
+}
 forbid(
   'src/modules/llmswitch/bridge/responses-request-bridge.ts',
   /providerProtocol:\s*['"]openai-responses['"]/,

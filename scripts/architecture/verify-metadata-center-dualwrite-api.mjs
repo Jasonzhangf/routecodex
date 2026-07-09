@@ -24,7 +24,7 @@ const runtimeControlWriter = read('sharedmodule/llmswitch-core/src/conversion/hu
 const rustDirectDecision = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 const rustReqGovernance = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs');
 const rustStoplessSignals = read('sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs');
-const tsRequestStageBridge = read('sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts');
+const requestStageDirectNativeHelper = read('tests/sharedmodule/helpers/request-stage-direct-native.ts');
 
 const sourceRoots = ['src', 'sharedmodule/llmswitch-core/src', 'scripts'];
 const directWriteCallPattern = /\b(?:\w+\.)?write(?:RequestTruth|ContinuationContext|RuntimeControl|ProviderObservation|ResponseObservation|CloseoutStatus|DebugSnapshot)\??\s*\(/g;
@@ -222,14 +222,14 @@ for (const { source, needle, label } of forbiddenRustTruthResidueNeedles) {
 
 const forbiddenTsTruthResidueNeedles = [
   {
-    source: tsRequestStageBridge,
+    source: requestStageDirectNativeHelper,
     needle: 'out.stopMessageEnabled = runtimeControl.stopMessageEnabled',
-    label: 'request stage bridge top-level stopMessageEnabled projection',
+    label: 'request stage direct native helper top-level stopMessageEnabled projection',
   },
   {
-    source: tsRequestStageBridge,
+    source: requestStageDirectNativeHelper,
     needle: 'out.stopMessageExcludeDirect = runtimeControl.stopMessageExcludeDirect',
-    label: 'request stage bridge top-level stopMessageExcludeDirect projection',
+    label: 'request stage direct native helper top-level stopMessageExcludeDirect projection',
   }
 ];
 

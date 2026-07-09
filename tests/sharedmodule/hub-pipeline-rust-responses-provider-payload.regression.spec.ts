@@ -1,10 +1,44 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import { HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
-import { executeRequestStagePipeline } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
+import { executeRequestStagePipelineDirectNative as executeRequestStagePipeline } from './helpers/request-stage-direct-native.js';
 import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+
+function virtualRouterConfigForPreselectedRoute(route: {
+  target: {
+    providerKey: string;
+    providerType?: string;
+    providerId?: string;
+    runtimeKey?: string;
+    modelId?: string;
+    outboundProfile?: string;
+  };
+}) {
+  const target = route.target;
+  return {
+    providers: {
+      [target.providerKey]: {
+        providerKey: target.providerKey,
+        providerType: target.providerType ?? 'openai',
+        providerId: target.providerId,
+        runtimeKey: target.runtimeKey ?? target.providerId ?? target.providerKey.split('.').slice(0, -1).join('.'),
+        modelId: target.modelId ?? 'gpt-5.5',
+        outboundProfile: target.outboundProfile ?? 'openai-responses',
+        endpoint: `mock://${target.providerKey}`,
+        auth: { type: 'apikey', apiKey: 'test-key' },
+      },
+    },
+    routing: {
+      default: [{
+        id: 'default-priority',
+        mode: 'priority',
+        targets: [target.providerKey],
+      }],
+    },
+  };
+}
 
 describe('hub pipeline Rust responses provider payload regression', () => {
   it('projects providerPayload and selected target from native engine handle output', async () => {
@@ -40,26 +74,26 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           input: 'route from native handle'
         },
         metadata: {
-          entryEndpoint: '/v1/responses',
-          metadataCenterSnapshot: {
-            requestTruth: {
-              requestId: 'req_native_handle_executor_contract',
-              sessionId: 'native-handle-contract-session'
-            },
-            runtimeControl: {
-              preselectedRoute: {
-                target: {
-                  providerKey: 'snapshot.key1.gpt-5.5',
-                  providerType: 'openai',
-                  runtimeKey: 'snapshot.key1',
-                  modelId: 'gpt-5.5',
-                  outboundProfile: 'openai-responses'
-                },
-                decision: {
-                  routeName: 'thinking/gateway-priority-5555-priority-thinking'
-                },
-                diagnostics: { source: 'test' }
-              }
+          entryEndpoint: '/v1/responses'
+        },
+        metadataCenterSnapshot: {
+          requestTruth: {
+            requestId: 'req_native_handle_executor_contract',
+            sessionId: 'native-handle-contract-session'
+          },
+          runtimeControl: {
+            preselectedRoute: {
+              target: {
+                providerKey: 'snapshot.key1.gpt-5.5',
+                providerType: 'openai',
+                runtimeKey: 'snapshot.key1',
+                modelId: 'gpt-5.5',
+                outboundProfile: 'openai-responses'
+              },
+              decision: {
+                routeName: 'thinking/gateway-priority-5555-priority-thinking'
+              },
+              diagnostics: { source: 'test' }
             }
           }
         }
@@ -81,8 +115,18 @@ describe('hub pipeline Rust responses provider payload regression', () => {
   });
 
   it('keeps /v1/responses tool requests as Responses wire payload for openai-responses providers', () => {
+    const preselectedRoute = {
+      target: {
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        providerId: 'minimonth',
+        modelId: 'MiniMax-M2.7',
+        outboundProfile: 'openai-responses'
+      },
+      decision: { routeName: 'tools/gateway-priority-5555-weighted-tools' },
+      diagnostics: {}
+    };
     const result = runHubPipelineLibWithNative({
-      config: { virtualRouter: {} },
+      config: { virtualRouter: virtualRouterConfigForPreselectedRoute(preselectedRoute) },
       request: {
         requestId: 'req_responses_tools_provider_payload',
         endpoint: '/v1/responses',
@@ -118,16 +162,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           entryEndpoint: '/v1/responses',
           providerProtocol: 'openai-responses',
           runtime_control: {
-            preselectedRoute: {
-              target: {
-                providerKey: 'minimonth.key1.MiniMax-M2.7',
-                providerId: 'minimonth',
-                modelId: 'MiniMax-M2.7',
-                outboundProfile: 'openai-responses'
-              },
-              decision: { routeName: 'tools/gateway-priority-5555-weighted-tools' },
-              diagnostics: {}
-            }
+            preselectedRoute
           }
         }
       }
@@ -151,8 +186,18 @@ describe('hub pipeline Rust responses provider payload regression', () => {
   });
 
   it('uses metadataCenterSnapshot preselectedRoute for bootstrapped request routing without runtime_control residue', () => {
+    const preselectedRoute = {
+      target: {
+        providerKey: 'snapshot.key1.gpt-5.5',
+        providerId: 'snapshot',
+        modelId: 'gpt-5.5',
+        outboundProfile: 'openai-responses'
+      },
+      decision: { routeName: 'thinking/gateway-priority-5555-priority-thinking' },
+      diagnostics: { source: 'metadataCenterSnapshot' }
+    };
     const result = runHubPipelineLibWithNative({
-      config: { virtualRouter: {} },
+      config: { virtualRouter: virtualRouterConfigForPreselectedRoute(preselectedRoute) },
       request: {
         requestId: 'req_responses_snapshot_preselected_route',
         endpoint: '/v1/responses',
@@ -178,16 +223,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
         },
         metadataCenterSnapshot: {
           runtimeControl: {
-            preselectedRoute: {
-              target: {
-                providerKey: 'snapshot.key1.gpt-5.5',
-                providerId: 'snapshot',
-                modelId: 'gpt-5.5',
-                outboundProfile: 'openai-responses'
-              },
-              decision: { routeName: 'thinking/gateway-priority-5555-priority-thinking' },
-              diagnostics: { source: 'metadataCenterSnapshot' }
-            }
+            preselectedRoute
           }
         }
       }
@@ -213,8 +249,18 @@ describe('hub pipeline Rust responses provider payload regression', () => {
   });
 
   it('RED: keeps stopless schema feedback and guidance in final provider payload for /v1/responses', () => {
+    const preselectedRoute = {
+      target: {
+        providerKey: 'minimonth.key1.MiniMax-M2.7',
+        providerId: 'minimonth',
+        modelId: 'MiniMax-M2.7',
+        outboundProfile: 'openai-responses'
+      },
+      decision: { routeName: 'thinking/gateway-priority-5555-weighted-thinking' },
+      diagnostics: {}
+    };
     const result = runHubPipelineLibWithNative({
-      config: { virtualRouter: {} },
+      config: { virtualRouter: virtualRouterConfigForPreselectedRoute(preselectedRoute) },
       request: {
         requestId: 'req_responses_stopless_provider_payload',
         endpoint: '/v1/responses',
@@ -285,16 +331,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           providerProtocol: 'openai-responses',
           clientInjectReady: true,
           runtime_control: {
-            preselectedRoute: {
-              target: {
-                providerKey: 'minimonth.key1.MiniMax-M2.7',
-                providerId: 'minimonth',
-                modelId: 'MiniMax-M2.7',
-                outboundProfile: 'openai-responses'
-              },
-              decision: { routeName: 'thinking/gateway-priority-5555-weighted-thinking' },
-              diagnostics: {}
-            }
+            preselectedRoute
           }
         }
       }
@@ -324,31 +361,38 @@ describe('hub pipeline Rust responses provider payload regression', () => {
       headers: {},
       query: {},
       body: {
-        model: 'gpt-5.5',
+        model: 'mimo-v2.5',
         input: [
           {
             type: 'message',
             role: 'user',
-            content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]
+            content: [{ type: 'input_text', text: 'read files <**stopless:on**>' }]
           }
         ],
-        stream: false
+        stream: false,
+        metadata: {
+          sessionId: 'sess_responses_stopless_real_entry_provider_payload'
+        }
       },
       metadata: {}
     } as any);
     expect(MetadataCenter.read(metadata)?.readRuntimeControl()).toMatchObject({
       stopMessageEnabled: true
     });
+    expect(MetadataCenter.read(metadata)?.readRequestTruth()).toMatchObject({
+      sessionId: 'sess_responses_stopless_real_entry_provider_payload'
+    });
     MetadataCenter.read(metadata)?.writeRuntimeControl(
       'preselectedRoute',
       {
         target: {
-          providerKey: 'minimax.key1.MiniMax-M2.7',
-          providerId: 'minimax',
-          modelId: 'MiniMax-M2.7',
+          providerKey: 'mimo.key2.mimo-v2.5',
+          providerType: 'anthropic',
+          runtimeKey: 'mimo.key2',
+          modelId: 'mimo-v2.5',
           outboundProfile: 'anthropic-messages'
         },
-        decision: { routeName: 'search/gateway-priority-5555-priority-search' },
+        decision: { routeName: 'tools' },
         diagnostics: {}
       },
       {
@@ -365,19 +409,20 @@ describe('hub pipeline Rust responses provider payload regression', () => {
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
         payload: {
-          model: 'gpt-5.5',
+          model: 'mimo-v2.5',
           input: [
             {
               type: 'message',
               role: 'user',
-              content: [{ type: 'input_text', text: '请直接回复一句“阶段完成”，然后结束。<**stopless:on**>' }]
+              content: [{ type: 'input_text', text: 'read files <**stopless:on**>' }]
             }
           ],
-          stream: false
+          stream: false,
+          metadata: {
+            sessionId: 'sess_responses_stopless_real_entry_provider_payload'
+          }
         },
-        metadata: {
-          ...metadata
-        },
+        metadata,
         processMode: 'chat',
         direction: 'request',
         stage: 'inbound',
@@ -388,15 +433,20 @@ describe('hub pipeline Rust responses provider payload regression', () => {
           throw new Error('route should not be called when preselectedRoute is present');
         }
       } as any,
-      config: { virtualRouter: { providers: {}, routes: {}, routing: {} } } as any,
+      config: {
+        virtualRouter: virtualRouterConfigForPreselectedRoute({
+          target: {
+            providerKey: 'mimo.key2.mimo-v2.5',
+            providerType: 'anthropic',
+            runtimeKey: 'mimo.key2',
+            modelId: 'mimo-v2.5',
+            outboundProfile: 'anthropic-messages'
+          }
+        })
+      } as any,
+      runtimeRouterRequired: false,
     });
 
-    // eslint-disable-next-line no-console
-    console.error('stopless real entry provider payload diag', JSON.stringify({
-      providerPayload: result.providerPayload,
-      metadata: result.metadata,
-      nodeResults: result.nodeResults
-    }, null, 2));
     const payloadText = JSON.stringify(result.providerPayload ?? {});
     expect(payloadText).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
   });

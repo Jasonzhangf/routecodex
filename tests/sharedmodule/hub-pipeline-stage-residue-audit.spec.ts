@@ -1946,37 +1946,36 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline',
     );
-    const checkedFiles = [
-      'hub-pipeline-execute-request-stage.ts',
-          ];
-    const findings: string[] = [];
-    for (const relativePath of checkedFiles) {
-      const source = fs.readFileSync(path.join(pipelineRoot, relativePath), 'utf8');
-      if (relativePath === 'hub-pipeline-execute-request-stage.ts') {
-        expect(source).toContain('runHubPipelineLibWithNative');
-        expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
-      }
-      const matches = collectMatches(source, [
-        { label: 'requires request stage hooks', pattern: /requireRequestStageHooks/ },
-        { label: 'passes hooks into request stage', pattern: /hooks:/ },
-        { label: 'createSemanticMapper residue', pattern: /createSemanticMapper/ },
-        { label: 'createFormatAdapter residue', pattern: /createFormatAdapter/ },
-        { label: 'SemanticMapper type residue', pattern: /\bSemanticMapper\b/ },
-        { label: 'mapper toChat call residue', pattern: /\.toChat\s*\(/ },
-        { label: 'mapper fromChat call residue', pattern: /\.fromChat\s*\(/ },
-      ]);
-      findings.push(...matches.map((match) => `${relativePath}:${match}`));
-    }
+    expect(fs.existsSync(path.join(pipelineRoot, 'hub-pipeline-execute-request-stage.ts'))).toBe(false);
+    const helperSource = fs.readFileSync(
+      path.join(process.cwd(), 'tests/sharedmodule/helpers/request-stage-direct-native.ts'),
+      'utf8',
+    );
+    expect(helperSource).toContain('runHubPipelineLibWithNative');
+    expect(helperSource).toContain('buildRequestStageMetadataDispatchWithNative');
+    const findings = collectMatches(helperSource, [
+      { label: 'requires request stage hooks', pattern: /requireRequestStageHooks/ },
+      { label: 'passes hooks into request stage', pattern: /hooks:/ },
+      { label: 'createSemanticMapper residue', pattern: /createSemanticMapper/ },
+      { label: 'createFormatAdapter residue', pattern: /createFormatAdapter/ },
+      { label: 'SemanticMapper type residue', pattern: /\bSemanticMapper\b/ },
+      { label: 'mapper toChat call residue', pattern: /\.toChat\s*\(/ },
+      { label: 'mapper fromChat call residue', pattern: /\.fromChat\s*\(/ },
+    ]);
 
     expect(findings).toEqual([]);
   });
 
   it('request-stage bridge must not retain legacy metadataCenter or __rt compatibility residue', () => {
-    const filePath = path.join(
+    const retiredFilePath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    expect(fs.existsSync(retiredFilePath)).toBe(false);
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'tests/sharedmodule/helpers/request-stage-direct-native.ts'),
+      'utf8',
+    );
     expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
     expect(source).toContain('buildRequestStageRuntimeControlWritePlanWithNative');
     expect(source).toContain('buildRequestStageNativeResultPlanWithNative');
@@ -2252,7 +2251,11 @@ describe('hub pipeline stage residue audit', () => {
     );
     const retiredEntry = path.join(pipelineRoot, 'hub-pipeline-execute-chat-process-entry.ts');
     expect(fs.existsSync(retiredEntry)).toBe(false);
-    const mainlineSource = fs.readFileSync(path.join(pipelineRoot, 'hub-pipeline-execute-request-stage.ts'), 'utf8');
+    expect(fs.existsSync(path.join(pipelineRoot, 'hub-pipeline-execute-request-stage.ts'))).toBe(false);
+    const mainlineSource = fs.readFileSync(
+      path.join(process.cwd(), 'tests/sharedmodule/helpers/request-stage-direct-native.ts'),
+      'utf8',
+    );
 
     expect(mainlineSource).toContain('runHubPipelineLibWithNative');
     const findings = [

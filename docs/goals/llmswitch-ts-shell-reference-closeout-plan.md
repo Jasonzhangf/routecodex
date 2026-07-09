@@ -197,6 +197,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Strict audit now reports `prodTsShellCount=90`, `nonNativeFileCount=0`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=8`.
 - Verification passed: focused Responses SSE/residue Jest 220/220, `verify:sse-architecture-boundary`, `verify:function-map-compile-gate`, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule `tsc`, root `tsc`, exact source ref scan for deleted wrapper path, and `git diff --check`.
 
+### 2026-07-09 Hub request-stage wrapper deleted
+
+- Physically deleted `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts`.
+- Added `tests/sharedmodule/helpers/request-stage-direct-native.ts` as test-only direct Rust/NAPI request-stage evidence; runtime ownership remains in Rust/native `runHubPipelineLibWithNative` and request-stage plan builders.
+- `tests/sharedmodule/hub-pipeline-preselected-route.spec.ts` and `tests/sharedmodule/hub-pipeline-rust-responses-provider-payload.regression.spec.ts` now use the direct native helper instead of importing the retired shell.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`, `scripts/architecture/verify-route-metadata-preselected-route-owner.mjs`, and `scripts/architecture/verify-metadata-center-dualwrite-api.mjs` now lock the old request-stage shell as physically absent and validate the direct-native evidence surface.
+- The real-entry stopless provider payload regression now supplies request truth `sessionId` through the entry payload; this matches the Rust request governance contract that requires both `stopMessageEnabled` and `requestTruth.sessionId` before injecting stopless guidance.
+- Function map and verification map now mark `hub.request_stage_pipeline_bridge` as retired/Rust-owned with the old shell in forbidden paths.
+- Verification passed: focused request-stage/residue Jest 217/217, route metadata owner gate, metadata-center dualwrite gate, function-map compile gate, strict shell reference audit (`prodTsShellCount=60`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`), zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, exact source/package scan for old shell refs, and `git diff --check`.
+
 ### 2026-07-09 session identifier wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts`.

@@ -972,7 +972,6 @@ verification:
     unit:
       - src/server/runtime/http-server/metadata-center/metadata-center.ts
       - src/server/runtime/http-server/metadata-center/request-truth-readers.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
     contract:
       - tests/server/runtime/http-server/metadata-center/request-truth-readers.spec.ts
@@ -1056,7 +1055,9 @@ verification:
   - feature_id: hub.request_stage_pipeline_bridge
     change_risk: medium
     unit:
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
+      - tests/sharedmodule/helpers/request-stage-direct-native.ts
     contract:
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1067,7 +1068,8 @@ verification:
       - npm run verify:llmswitch-core-tsc
       - npm run build:base
     notes:
-      - "This TS shell may only preserve preselected-route handoff and execute the native request/chat_process plan."
+      - "The old `hub-pipeline-execute-request-stage.ts` shell is physically deleted and must stay deleted."
+      - "Test helper evidence must call direct native wrappers; no runtime TS request-stage owner may be restored."
       - "Any route-selection or payload-semantics change still belongs to Rust/native Hub mainline owners."
 
   - feature_id: hub.chat_envelope_type_surface

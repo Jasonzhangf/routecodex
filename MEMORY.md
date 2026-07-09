@@ -5,6 +5,12 @@
 - Gate rule: `verify:servertool-rust-only` forbids `planServertoolNoop*`, `noopResult`, `noopEffectPlan`, and default skeleton registry/profile resurrection markers for `continue_execution`, `stop_message_auto`, `reasoningstop`, `web_search`, `vision_auto`, `exec_command`, and old flow ids.
 - Evidence: Rust focused tests for `execution_loop_effect_contract` 3/3, `servertool_skeleton_config` 17/17, `chat_servertool_orchestration` 44/44, and `plans_servertool_execution_loop_effect_via_servertool_core_bridge` 1/1 passed; native hotpath build passed; focused servertool Jest passed 123/123; `verify:servertool-rust-only`, root `tsc --noEmit`, function-map compile gate, mainline call-map, and mainline manifest sync passed.
 
+# 2026-07-09: Hub request-stage TS shell is retired
+
+- Verified rule: `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` is physically deleted and must stay deleted; request/chat_process execution evidence now uses direct Rust/NAPI helper `tests/sharedmodule/helpers/request-stage-direct-native.ts`, which is test-only and not a runtime owner.
+- Verified rule: request-side stopless provider guidance requires both `runtimeControl.stopMessageEnabled=true` and `requestTruth.sessionId`; tests must provide real entry session truth such as `body.metadata.sessionId`, not hand-write nested `runtimeControl.stopMessage` as compensation.
+- Evidence: focused request-stage/residue Jest passed 217/217; `verify-route-metadata-preselected-route-owner`, `verify-metadata-center-dualwrite-api`, `verify:function-map-compile-gate`, strict shell audit (`prodTsShellCount=60`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`), zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, source/package exact ref scan, and `git diff --check` passed.
+
 # 2026-07-06: rcc start defaults foreground, daemon is explicit
 
 - Correction: `rcc start` / `rcc start --snap` must default to foreground startup logs, not a silent daemon supervisor summary. It still performs managed takeover/restart by default; daemon mode requires explicit `ROUTECODEX_START_DAEMON=1` / `RCC_START_DAEMON=1`.

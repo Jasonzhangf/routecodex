@@ -6,6 +6,15 @@
 - Verification PASS: focused Jest 201/201; `verify-vr-no-ts-runtime`; strict shell reference audit (`prodTsShellCount=61`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; Rust `provider_bootstrap` tests 7/7; exact ref scan only found retired-path gates/docs; `git diff --check`.
 - Boundary: no live runtime replay claimed for this source/reference slice; unrelated dirty files in provider direct/router-direct path were preserved.
 
+# 2026-07-09: Hub request-stage shell deleted
+
+- Scope: delete `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline-execute-request-stage.ts` after strict audit found it was the only `prodImportRefs=0 && hostTextRefs=0` shell.
+- Change: `tests/sharedmodule/helpers/request-stage-direct-native.ts` now provides test-only direct native request-stage evidence through `buildRequestStageMetadataDispatchWithNative`, `runHubPipelineLibWithNative`, `buildRequestStageNativeResultPlanWithNative`, `buildRequestStageRuntimeControlWritePlanWithNative`, and `buildRequestStageHubPipelineResultWithNative`.
+- Change: `hub-pipeline-preselected-route` and Responses provider payload regression tests now use the direct native helper instead of importing the retired shell; residue/architecture gates require the old shell path to stay physically absent.
+- Debug finding: request-side stopless provider guidance requires both `runtimeControl.stopMessageEnabled=true` and request truth `sessionId`; the real-entry regression now supplies `body.metadata.sessionId` and no longer writes a test-only nested `stopMessage` compensation.
+- Verification PASS: focused request-stage/residue Jest 217/217; `verify-route-metadata-preselected-route-owner`; `verify-metadata-center-dualwrite-api`; `verify:function-map-compile-gate`; strict shell audit (`prodTsShellCount=60`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; source/package exact scan found no production/package old shell refs; `git diff --check`.
+- Boundary: no live runtime replay claimed for this source/reference shell deletion slice; unrelated dirty files from other workers were preserved.
+
 # 2026-07-09: Gemini OpenAI codec TS shell deleted
 
 - Scope: delete zero-production-import `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts`.
