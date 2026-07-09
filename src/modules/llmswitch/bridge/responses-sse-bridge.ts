@@ -13,6 +13,7 @@ import {
 } from './responses-sse-transport.js';
 import {
   projectResponsesSseFrameForClientNative,
+  updateResponsesSseTransportTerminalStateNative,
 } from './native-exports.js';
 
 export const buildClientSseKeepaliveFrameForHttp = buildClientSseKeepaliveFrameForHttpImpl;
@@ -44,4 +45,12 @@ export function projectResponsesSseFrameForClientForHttp(args: {
   state: ResponsesSseClientProjectionStateForHttp;
 } {
   return projectResponsesSseFrameForClientNative(args);
+}
+
+export function updateResponsesSseTransportTerminalStateForHttp(input: {
+  chunk: unknown;
+  state: Record<string, unknown> | undefined;
+  flushRemainder?: boolean;
+}): { state: Record<string, unknown>; observedTerminal: boolean } {
+  return updateResponsesSseTransportTerminalStateNative(input);
 }

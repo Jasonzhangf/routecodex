@@ -28,6 +28,7 @@ import {
   buildClientSseKeepaliveFrameForHttp,
   createResponsesSseClientProjectionStateForHttp,
   projectResponsesSseFrameForClientForHttp,
+  updateResponsesSseTransportTerminalStateForHttp,
 } from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
 
 type FlushableResponse = Response & {
@@ -548,6 +549,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     ? args.responsesRequestContext.context.toolsRaw
     : [];
   let projectionState = createResponsesSseClientProjectionStateForHttp();
+  let sseTransportTerminalState: Record<string, unknown> | undefined;
+  let sseSemanticTerminalObserved = false;
   let pendingSseFrameBuffer = '';
   const detachOutboundStream = () => {
     try {
@@ -671,7 +674,8 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     detachOutboundStream();
     const closeBeforeStreamEnd =
       trigger === 'close'
-      && !streamEnded;
+      && !streamEnded
+      && !sseSemanticTerminalObserved;
     const details = {
       status,
       trigger,
@@ -726,6 +730,17 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       if (result.usageLogInfo) {
         result.usageLogInfo.finishReason = usageFrame.finishReason;
       }
+    }
+    if (
+      isResponsesSseEndpoint(entryEndpoint)
+      && !isDirectPassthrough
+    ) {
+      const terminalState = updateResponsesSseTransportTerminalStateForHttp({
+        chunk: frame,
+        state: sseTransportTerminalState,
+      });
+      sseTransportTerminalState = terminalState.state;
+      sseSemanticTerminalObserved = sseSemanticTerminalObserved || terminalState.observedTerminal;
     }
     if (
       !parsed

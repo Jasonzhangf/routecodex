@@ -130,28 +130,19 @@ const checks = [
       'prepareResponsesJsonBodyForSseBridgeForHttp',
       'normalizeClientVisibleResponsesSseFrameForHttp(',
       'response.required_action',
-      'projectResponsesSseFrameForClientNative(',
-      'updateResponsesSseTransportTerminalStateForHttp',
-      'updateResponsesSseTransportTerminalStateNative',
     ],
     forbiddenTokens: [],
   },
   {
     file: 'src/modules/llmswitch/bridge/responses-sse-bridge.js',
     allowedImport: './responses-sse-transport.js',
-    forbiddenLocalTokens: [
-      'updateResponsesSseTransportTerminalStateForHttp',
-      'updateResponsesSseTransportTerminalStateNative',
-    ],
+    forbiddenLocalTokens: [],
     forbiddenTokens: [],
   },
   {
     file: 'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
     allowedImport: './responses-sse-transport.js',
-    forbiddenLocalTokens: [
-      'updateResponsesSseTransportTerminalStateForHttp',
-      'updateResponsesSseTransportTerminalStateNative',
-    ],
+    forbiddenLocalTokens: [],
     forbiddenTokens: [],
   },
   {
@@ -263,7 +254,6 @@ const checks = [
       'result.usageLogInfo?.finishReason',
       'bridgePlan.finishReason',
       'sseCloseoutFinishReason',
-      'updateResponsesSseTransportTerminalStateForHttp',
       'responsesSseObservedTerminal',
       'responsesSseTransportState',
       'function updateResponsesTerminalProbeFromTransportText(',

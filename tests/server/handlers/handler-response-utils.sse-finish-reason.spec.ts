@@ -265,6 +265,83 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect((destroyReason as Error | undefined)?.message).toBe('CLIENT_RESPONSE_CLOSED');
   });
 
+  it('does not report client close after Responses terminal event as before-terminal failure', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    const writeServerSnapshot = jest.fn(async () => undefined);
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => true,
+      writeServerSnapshot
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    res.on('error', () => {});
+    const upstream = new PassThrough();
+    let output = '';
+    res.on('data', (chunk) => {
+      output += String(chunk);
+      if (output.includes('event: response.completed')) {
+        res.destroy();
+      }
+    });
+
+    const closed = new Promise<void>((resolve) => {
+      res.on('close', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: upstream
+      } as any,
+      'req-terminal-client-close-not-before-terminal',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    upstream.write('event: response.completed\n');
+    upstream.write(
+      'data: {"type":"response.completed","response":{"id":"resp_terminal_close","object":"response","status":"completed","output":[]}}\n\n'
+    );
+
+    await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    const warnOutput = warnSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(output).toContain('event: response.completed');
+    expect(warnOutput).not.toContain('client_close_before_terminal');
+    expect(writeServerSnapshot).not.toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'client-response.error',
+      data: expect.objectContaining({
+        reason: 'client_close_before_terminal',
+      }),
+    }));
+  });
+
   it('does not prestart-close a responses SSE stream unless the client is explicitly marked disconnected', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -1487,7 +1564,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
       const output = chunks.join('');
       expect(output).toContain('"type": "response.completed"');
-      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(true);
+      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(false);
       expect(destroySpy).toHaveBeenCalled();
       expect(destroyReason).toBeInstanceOf(Error);
     } finally {
@@ -1587,7 +1664,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       const output = chunks.join('');
       expect(output).toContain('event: response.completed');
       expect(output).toContain('"type":"response.completed"');
-      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(true);
+      expect(snapshots.some((snapshot) => snapshot.phase === 'client-response.error')).toBe(false);
       expect(destroySpy).toHaveBeenCalled();
       expect(destroyReason).toBeInstanceOf(Error);
     } finally {

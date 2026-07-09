@@ -5,7 +5,7 @@
  * Client projection is delegated to the Rust native owner.
  */
 import { buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl } from './responses-sse-transport.js';
-import { projectResponsesSseFrameForClientNative } from './native-exports.js';
+import { projectResponsesSseFrameForClientNative, updateResponsesSseTransportTerminalStateNative } from './native-exports.js';
 export const buildClientSseKeepaliveFrameForHttp = buildClientSseKeepaliveFrameForHttpImpl;
 export function createResponsesSseClientProjectionStateForHttp() {
     return {
@@ -16,5 +16,8 @@ export function createResponsesSseClientProjectionStateForHttp() {
 }
 export function projectResponsesSseFrameForClientForHttp(args) {
     return projectResponsesSseFrameForClientNative(args);
+}
+export function updateResponsesSseTransportTerminalStateForHttp(input) {
+    return updateResponsesSseTransportTerminalStateNative(input);
 }
 //# sourceMappingURL=responses-sse-bridge.js.map

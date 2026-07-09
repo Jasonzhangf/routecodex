@@ -9,6 +9,26 @@ const mockBridgeModule = async () => ({
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
+  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
+  })),
+  projectResponsesSseFrameForClientForHttp: jest.fn((args: { frame: string; state: unknown }) => ({
+    emit: true,
+    frame: args.frame,
+    state: args.state,
+  })),
+  updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: {
+    chunk: unknown;
+    state: Record<string, unknown> | undefined;
+  }) => {
+    const chunk = typeof input.chunk === 'string' ? input.chunk : '';
+    return {
+      state: input.state ?? {},
+      observedTerminal: chunk.includes('response.completed') || chunk.includes('response.done') || chunk.includes('[DONE]'),
+    };
+  }),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,

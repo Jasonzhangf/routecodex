@@ -24,3 +24,11 @@ export declare function projectResponsesSseFrameForClientForHttp(args: {
     frame: string;
     state: ResponsesSseClientProjectionStateForHttp;
 };
+export declare function updateResponsesSseTransportTerminalStateForHttp(input: {
+    chunk: unknown;
+    state: Record<string, unknown> | undefined;
+    flushRemainder?: boolean;
+}): {
+    state: Record<string, unknown>;
+    observedTerminal: boolean;
+};
