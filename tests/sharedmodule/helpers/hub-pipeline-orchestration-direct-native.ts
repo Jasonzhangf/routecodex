@@ -1,9 +1,8 @@
-import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-loader.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { failNativeRequired, isNativeDisabledByEnv } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 import {
-  formatUnknownError,
   stringifyNativePayloadForError
-} from './native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 // feature_id: hub.request_stage_pipeline_bridge
 // Rust owner symbols: run_hub_pipeline_lib_json, build_request_stage_metadata_dispatch_json,
@@ -129,21 +128,12 @@ export type MetadataWritePlanRuntimeControlWritePlan = {
   runtimeControl?: Record<string, unknown> | null;
 };
 
-const NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS = 60_000;
-const nonBlockingProtocolLogState = new Map<string, number>();
 const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-protocol.parse-failed');
 
 
 function logNativeProtocolNonBlocking(stage: string, error: unknown): void {
-  const now = Date.now();
-  const last = nonBlockingProtocolLogState.get(stage) ?? 0;
-  if (now - last < NON_BLOCKING_PROTOCOL_LOG_THROTTLE_MS) {
-    return;
-  }
-  nonBlockingProtocolLogState.set(stage, now);
-  console.warn(
-    `[native-hub-pipeline-orchestration-semantics-protocol] ${stage} failed (non-blocking): ${formatUnknownError(error)}`
-  );
+  void stage;
+  void error;
 }
 
 function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {

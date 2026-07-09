@@ -1,4 +1,4 @@
-import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { runHubPipelineLibWithNative } from '../sharedmodule/helpers/hub-pipeline-orchestration-direct-native.js';
 
 type StandardizedRequest = Record<string, unknown> & {
   messages: Array<Record<string, unknown>>;
@@ -8,8 +8,30 @@ type StandardizedRequest = Record<string, unknown> & {
 };
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
+  const preselectedRoute = {
+    target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
+    decision: { routeName: 'test/preselected' },
+    diagnostics: {},
+  };
+  const virtualRouter = {
+    providers: {
+      'test.key1.gpt-test': {
+        providerKey: 'test.key1.gpt-test',
+        providerType: 'openai',
+        runtimeKey: 'test.key1',
+        modelId: 'gpt-test',
+        outboundProfile: 'openai-chat',
+        enabled: true,
+        endpoint: 'mock://test.key1',
+        auth: { type: 'apikey', apiKey: 'test-key' },
+      },
+    },
+    routing: {
+      default: [{ id: 'default-priority', priority: 100, mode: 'priority', targets: ['test.key1.gpt-test'] }],
+    },
+  };
   const result = runHubPipelineLibWithNative({
-    config: { virtualRouter: {} },
+    config: { virtualRouter, runtimeRouterRequired: false },
     request: {
       requestId,
       endpoint: '/v1/chat/completions',
@@ -18,11 +40,14 @@ function runRequestPipeline(request: StandardizedRequest, metadata: Record<strin
       payload: request as unknown as Record<string, unknown>,
       metadata: {
         ...metadata,
-        __routecodexPreselectedRoute: {
-          target: { providerKey: 'test.key1.gpt-test', modelId: 'gpt-test', outboundProfile: 'openai-chat' },
-          decision: { routeName: 'test/preselected' },
-          diagnostics: {},
+        runtime_control: {
+          preselectedRoute,
         },
+      },
+      metadataCenterSnapshot: {
+        requestTruth: {},
+        continuationContext: {},
+        runtimeControl: { preselectedRoute },
       },
       stream: false,
       processMode: 'chat',

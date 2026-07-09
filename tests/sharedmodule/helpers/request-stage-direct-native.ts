@@ -4,7 +4,7 @@ import {
   buildRequestStageNativeResultPlanWithNative,
   buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative,
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+} from './hub-pipeline-orchestration-direct-native.js';
 
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   module: 'tests/sharedmodule/helpers/request-stage-direct-native.ts',

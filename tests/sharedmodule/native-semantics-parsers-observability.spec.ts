@@ -118,7 +118,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       normalizeHubEndpointWithNative: (endpoint: string) => string;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
+      './helpers/hub-pipeline-orchestration-direct-native.js',
       'normalizeHubEndpointJson'
     );
 

@@ -209,7 +209,7 @@
         <p>As of 2026-06-30, the implementation contracts are now explicit:</p>
         <ul>
           <li><code>sharedmodule/llmswitch-core/src/servertool/pending-session.ts</code> and <code>pending-injection-block.ts</code> are physically retired; they must not be restored as stopless/session truth.</li>
-          <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.{ts,js}</code> now passes an explicit &quot;no override&quot; sentinel when caller does not provide <code>sessionDir</code>, and <code>router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs</code> no longer reads <code>ROUTECODEX_SESSION_DIR</code> as a storage override. Persistent routing-state owner now accepts only explicit override input or canonical <code>~/.rcc</code> roots.</li>
+          <li>The retired <code>native-virtual-router-routing-state.{ts,js}</code> wrapper must stay deleted. <code>router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs</code> owns the explicit &quot;no override&quot; sentinel and no longer reads <code>ROUTECODEX_SESSION_DIR</code> as a storage fallback; tests that need this surface call the native JSON functions through test-only direct helpers.</li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs</code> now reads runtime path overrides only from <code>metadata.__rt.*</code>; top-level <code>metadata.sessionDir/rccUserDir</code> no longer count as legal fallback.</li>
         </ul>
         <h2>Request / Response Flow</h2>

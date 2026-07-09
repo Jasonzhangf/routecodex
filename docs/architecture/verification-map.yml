@@ -1062,7 +1062,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
+      - tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts
       - tests/sharedmodule/helpers/request-stage-direct-native.ts
     contract:
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
@@ -1150,7 +1150,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
+      - tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs

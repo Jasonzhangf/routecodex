@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+import { runHubPipelineLibWithNative } from './helpers/hub-pipeline-orchestration-direct-native.js';
 import { NativeHubPipelineTestWrapper as HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
 import { executeRequestStagePipelineDirectNative as executeRequestStagePipeline } from './helpers/request-stage-direct-native.js';
 import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';

@@ -200,7 +200,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `src/modules/llmswitch/bridge/provider-response-converter-host.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts`
+- `tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
 - `sharedmodule/llmswitch-core/src/servertool/types.d.ts`

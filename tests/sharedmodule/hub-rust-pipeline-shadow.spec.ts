@@ -1,12 +1,12 @@
 /**
  * HubPipeline Rust Shadow Test
  * Phase 1 Slice 0: Verify Rust runHubPipelineJson can process real fixture payloads.
- * Uses the protocol wrapper; the aggregate orchestration semantics wrapper is retired.
+ * Uses test-only direct native glue; production orchestration TS wrappers are retired.
  */
 import { describe, expect, test } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { runHubPipelineOrchestrationWithNative } from './helpers/hub-pipeline-orchestration-direct-native.js';
 
 interface HubPipelineInput {
   requestId: string;
@@ -27,33 +27,12 @@ interface HubPipelineOutput {
   error?: { code?: string; message?: string };
 }
 
-let _semantics: typeof import('../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js') | null = null;
-
-async function getSemantics() {
-  if (!_semantics) {
-    const p = pathToFileURL(
-      path.join(
-        process.cwd(),
-        'sharedmodule',
-        'llmswitch-core',
-        'dist',
-        'native',
-        'router-hotpath',
-        'native-hub-pipeline-orchestration-semantics-protocol.js',
-      )
-    ).href;
-    _semantics = await import(p);
-  }
-  return _semantics;
-}
-
 async function runRustPipeline(input: HubPipelineInput): Promise<HubPipelineOutput> {
-  const semantics = await getSemantics();
-  if (!semantics || typeof (semantics as any).runHubPipelineOrchestrationWithNative !== 'function') {
+  if (typeof runHubPipelineOrchestrationWithNative !== 'function') {
     return { error: { code: 'NATIVE_UNAVAILABLE', message: 'runHubPipelineOrchestrationWithNative not found' } };
   }
   try {
-    const result = (semantics as any).runHubPipelineOrchestrationWithNative(input);
+    const result = runHubPipelineOrchestrationWithNative(input as any);
     if (!result || typeof result !== 'object') {
       return { error: { code: 'EMPTY_RESULT', message: 'Rust returned non-object' } };
     }

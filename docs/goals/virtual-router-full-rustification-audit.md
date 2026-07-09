@@ -29,7 +29,7 @@
 | native-chat-process-governance-semantics.ts | 610 | 20 | 22 |
 | native-hub-pipeline-edge-stage-semantics.ts | 560 | 11 | 14 |
 | native-hub-bridge-policy-semantics.ts | 541 | 14 | 12 |
-| native-hub-pipeline-orchestration-semantics-protocol.ts | 539 | 12 | 15 |
+| native-hub-pipeline-orchestration-semantics-protocol.ts | 已删：2026-07-09 zero-production-import wrapper; tests use `tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts` for direct native coverage | 0 | 0 |
 | native-hub-pipeline-resp-semantics-outbound-tools.ts | 480 | 14 | 14 |
 | native-hub-pipeline-resp-semantics-inbound-tools.ts | 476 | 15 | 16 |
 | native-shared-conversion-semantics-id-stream.ts | 462 | 15 | 16 |

@@ -1050,18 +1050,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(legacyFiles).toEqual([]);
   });
 
-  it('TS native wrapper must fail fast through required export gate for Rust lib total entry', () => {
-    const wrapperPath = path.join(
+  it('retired hub pipeline orchestration protocol wrapper must stay test-only', () => {
+    const productionWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+    );
+    const helperPath = path.join(
+      process.cwd(),
+      'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
     );
     const requiredExportsPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
     );
-    const wrapperSource = fs.readFileSync(wrapperPath, 'utf8');
+    const wrapperSource = fs.readFileSync(helperPath, 'utf8');
     const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
 
+    expect(fs.existsSync(productionWrapperPath)).toBe(false);
     expect(requiredExportsSource).toContain('"executeHubPipelineJson"');
     expect(wrapperSource).toContain('export function executeHubPipelineWithNative');
     expect(wrapperSource).toContain("const capability = 'executeHubPipelineJson'");
@@ -2549,7 +2554,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredBuildersWrapperPath =
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
@@ -5247,7 +5252,7 @@ describe('hub pipeline stage residue audit', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts');
     const nativeOwnerPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
     );
     const nativeOwnerSource = fs.readFileSync(nativeOwnerPath, 'utf8');
 
@@ -5265,7 +5270,7 @@ describe('hub pipeline stage residue audit', () => {
     const nativeWrapperSource = fs.readFileSync(
       path.join(
         process.cwd(),
-        'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+        'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
       ),
       'utf8',
     );
@@ -5282,7 +5287,7 @@ describe('hub pipeline stage residue audit', () => {
     );
     const nativeWrapperPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+      'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
     );
     const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
     const requiredExportsPath = path.join(

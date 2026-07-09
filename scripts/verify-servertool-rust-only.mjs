@@ -173,7 +173,6 @@ function checkNoActiveRuntimeRefs() {
   const files = activeRuntimeRoots.flatMap((root) => collectFiles(root));
   const allow = new Set([
     repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
-    repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts'),
   ]);
   for (const file of files) {
     if (allow.has(file)) {
@@ -217,7 +216,7 @@ function checkProviderResponseFailFastShell() {
 function checkNativeExportSurface() {
   const requiredExportsPath = repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
   const libPath = repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
-  const protocolPath = repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts');
+  const protocolPath = repoPath('tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts');
   for (const [path, source] of [
     [requiredExportsPath, readRequired(requiredExportsPath)],
     [libPath, readRequired(libPath)],

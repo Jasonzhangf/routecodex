@@ -103,7 +103,7 @@ const mockBuildRequestStageMetadataDispatchWithNative = jest.fn((input: {
 });
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js',
+  './helpers/hub-pipeline-orchestration-direct-native.js',
   () => ({
     runHubPipelineLibWithNative: mockRunHubPipelineLibWithNative,
     buildRequestStageMetadataDispatchWithNative: mockBuildRequestStageMetadataDispatchWithNative,

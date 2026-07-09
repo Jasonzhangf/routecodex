@@ -1388,11 +1388,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts",
       "textContains": ""
     },

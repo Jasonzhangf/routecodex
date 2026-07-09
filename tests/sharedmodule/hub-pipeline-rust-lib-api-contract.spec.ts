@@ -25,7 +25,7 @@ const {
   runHubPipelineOrchestrationWithNative,
   runHubPipelineLibWithNative,
 } = await import(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js'
+  './helpers/hub-pipeline-orchestration-direct-native.js'
 );
 
 describe('HubPipeline Rust Lib API contract', () => {
@@ -64,7 +64,7 @@ describe('HubPipeline Rust Lib API contract', () => {
 
   it('orchestration semantics protocol exports the Rust lib entry', async () => {
     const { runHubPipelineLibWithNative: fromLib } = await import(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js'
+      './helpers/hub-pipeline-orchestration-direct-native.js'
     ).catch(() => ({ runHubPipelineLibWithNative: undefined }));
     expect(fromLib).toBeDefined();
   });
