@@ -44,6 +44,7 @@ jest.unstable_mockModule('../../src/modules/llmswitch/bridge/native-exports.js',
 
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../helpers/native-hub-pipeline-test-wrapper.js');
 
+// feature_id: hub.runtime_ingress_bridge
 describe('HubPipeline runtime ingress wiring', () => {
   beforeEach(() => {
     for (const call of Object.values(nativeCalls)) {
@@ -159,23 +160,40 @@ describe('HubPipeline runtime ingress wiring', () => {
 
   it('keeps HubPipeline native engine bridge owner names queryable by function map', async () => {
     const fs = await import('node:fs');
-    const source = fs.readFileSync(
+    const rustOwner = fs.readFileSync(
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs',
+      'utf8',
+    );
+    const bridgeSource = fs.readFileSync(
       'src/modules/llmswitch/bridge/routing-integrations.ts',
       'utf8',
     );
 
-    for (const bridgeName of [
-      'createHubPipelineEngineJson',
-      'hubPipelineExecuteJson',
-      'disposeHubPipelineEngineJson',
-      'updateHubPipelineVirtualRouterConfigJson',
-      'updateHubPipelineEngineDepsJson',
-      'hubPipelineVirtualRouterRouteJson',
-      'hubPipelineVirtualRouterDiagnoseRouteJson',
-      'hubPipelineVirtualRouterStatusJson',
-      'hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson',
+    expect(rustOwner).toContain('feature_id: hub.runtime_ingress_bridge');
+    for (const ownerSymbol of [
+      'create_hub_pipeline_engine_json',
+      'hub_pipeline_execute_json',
+      'dispose_hub_pipeline_engine_json',
+      'update_hub_pipeline_virtual_router_config_json',
+      'update_hub_pipeline_engine_deps_json',
+      'hub_pipeline_virtual_router_route_json',
+      'hub_pipeline_virtual_router_diagnose_route_json',
+      'hub_pipeline_virtual_router_status_json',
+      'hub_pipeline_virtual_router_mark_concurrency_scope_busy_json',
     ]) {
-      expect(source).toContain(bridgeName);
+      expect(rustOwner).toContain(ownerSymbol);
+    }
+    for (const bridgeName of [
+      'createHubPipelineNative',
+      'executeHubPipelineNative',
+      'updateHubPipelineVirtualRouterConfigNative',
+      'updateHubPipelineEngineDepsNative',
+      'routeHubPipelineVirtualRouterNative',
+      'diagnoseHubPipelineVirtualRouterNative',
+      'getHubPipelineVirtualRouterStatusNative',
+      'markHubPipelineVirtualRouterConcurrencyScopeBusyNative',
+    ]) {
+      expect(bridgeSource).toContain(bridgeName);
     }
   });
 });

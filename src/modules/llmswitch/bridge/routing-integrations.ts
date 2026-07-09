@@ -10,6 +10,11 @@ import type { AnyRecord } from './module-loader.js';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
 // feature_id: hub.runtime_ingress_bridge
+// Rust owner symbols:
+// create_hub_pipeline_engine_json, hub_pipeline_execute_json,
+// dispose_hub_pipeline_engine_json,
+// update_hub_pipeline_virtual_router_config_json,
+// update_hub_pipeline_engine_deps_json.
 type NativeHubPipelineOrchestrationSemantics = {
   createHubPipelineEngineJson?: (inputJson: string) => string;
   disposeHubPipelineEngineJson?: (handle: string) => void;

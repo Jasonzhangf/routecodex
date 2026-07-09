@@ -6,6 +6,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
+// feature_id: hub.chat_envelope_type_surface
 const HUB_CAPTURE_KEY: &str = "__hub_capture";
 
 fn as_object<'a>(value: &'a Value) -> Option<&'a Map<String, Value>> {

@@ -1,9 +1,30 @@
-import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
 import {
   flattenChatToolsForFunctionCallingWithNative,
   mapBridgeToolsToChatWithNative,
   mapChatToolsToBridgeWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
+
+export type ChatToolDefinition = {
+  type: 'function' | string;
+  name?: string;
+  description?: string;
+  defer_loading?: boolean;
+  tools?: Array<{
+    type?: 'function' | string;
+    name?: string;
+    description?: string;
+    parameters?: unknown;
+    strict?: boolean;
+    defer_loading?: boolean;
+  }>;
+  function?: {
+    name: string;
+    description?: string;
+    parameters?: unknown;
+    strict?: boolean;
+  };
+  [key: string]: unknown;
+};
 
 export type BridgeToolDefinition = {
   type: string;

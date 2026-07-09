@@ -878,7 +878,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_metadata_semantics.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_inbound_02_standardized.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts
     contract:
       - tests/red-tests/hub_pipeline_meta_error_carrier_contract.test.ts
       - tests/red-tests/hub_pipeline_live_runtime_typed_entrypoints_e2e.test.ts
@@ -1034,9 +1033,10 @@ verification:
   - feature_id: hub.runtime_ingress_bridge
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
       - src/server/runtime/http-server/http-server-runtime-setup.ts
       - src/modules/llmswitch/bridge/routing-integrations.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
     contract:
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1048,14 +1048,16 @@ verification:
       - npx tsc --noEmit --pretty false
       - npm run build:base
     notes:
-      - "HubPipeline runtime ingress bridge is TS glue only; native engine handle/lifecycle/deps call failures must be surfaced, not logged as non-blocking."
+      - "HubPipeline runtime ingress bridge is Rust-owned; TS bridge is host/native-call glue only, and native engine handle/lifecycle/deps call failures must be surfaced, not logged as non-blocking."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel."
       - "The old aggregate runtime ingress wrapper `native-hub-pipeline-orchestration-semantics.ts` must stay physically deleted; tests must mock the direct `router_hotpath_napi` binding through `routing-integrations`/`native-exports`, not the retired wrapper."
 
   - feature_id: hub.request_stage_pipeline_bridge
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
       - tests/sharedmodule/helpers/request-stage-direct-native.ts
     contract:
@@ -1069,14 +1071,13 @@ verification:
       - npm run build:base
     notes:
       - "The old `hub-pipeline-execute-request-stage.ts` shell is physically deleted and must stay deleted."
-      - "Test helper evidence must call direct native wrappers; no runtime TS request-stage owner may be restored."
+      - "Rust NAPI/request-stage builders own the request-stage bridge semantics; TS protocol wrapper and test helper evidence may call direct native wrappers but no runtime TS request-stage owner may be restored."
       - "Any route-selection or payload-semantics change still belongs to Rust/native Hub mainline owners."
 
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low
     unit:
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
       - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
     contract:

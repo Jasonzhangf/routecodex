@@ -3,8 +3,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 import { ensureBridgeInstructions } from '../bridge-instructions.js';
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
-import type { ChatToolDefinition } from '../hub/types/chat-envelope.js';
-import type { JsonObject, JsonValue } from '../hub/types/json.js';
 import {
   convertMessagesToBridgeInput,
   convertBridgeInputToChatMessages,
@@ -16,7 +14,8 @@ import {
   enforceToolCallIdStyle,
   sanitizeResponsesFunctionName
 } from '../shared/responses-tool-utils.js';
-import { mapChatToolsToBridge, type BridgeToolDefinition } from '../shared/tool-mapping.js';
+import { mapChatToolsToBridge } from '../shared/tool-mapping.js';
+import type { BridgeToolDefinition, ChatToolDefinition } from '../shared/tool-mapping.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
@@ -52,12 +51,14 @@ import {
 } from './responses-openai-bridge/utils.js';
 
 export type Unknown = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
+type JsonValue = unknown;
 
-function isJsonObject(value: JsonValue | null | undefined): value is JsonObject {
+function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value);
 }
 
-function jsonClone<T extends JsonValue>(value: T): T {
+function jsonClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 

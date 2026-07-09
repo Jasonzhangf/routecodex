@@ -2,10 +2,10 @@
  * Virtual Router 类型定义
  */
 
-import type { ChatContinuationSemantics } from "../../conversion/hub/types/chat-envelope.js";
-import type { StandardizedRequest } from "../../conversion/hub/types/standardized.js";
-
 export type RoutingInstructionMode = "force" | "none";
+
+type NativeRouterRequest = Record<string, unknown>;
+type NativeRouterContinuationSemantics = Record<string, unknown>;
 
 type RoutePoolMode = "round-robin" | "priority";
 
@@ -433,7 +433,7 @@ export interface RouterMetadataInput {
   tmux_session_id?: string;
   stopMessageClientInjectSessionScope?: string;
   stopMessageClientInjectScope?: string;
-  continuation?: ChatContinuationSemantics;
+  continuation?: NativeRouterContinuationSemantics;
   responsesResume?: {
     previousRequestId?: string;
     restoredFromResponseId?: string;
@@ -702,7 +702,7 @@ export interface ProviderSuccessEvent {
 
 export interface FeatureBuilder {
   build(
-    request: StandardizedRequest,
+    request: NativeRouterRequest,
     metadata: RouterMetadataInput,
   ): RoutingFeatures;
 }

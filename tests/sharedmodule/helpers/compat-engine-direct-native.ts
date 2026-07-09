@@ -1,5 +1,3 @@
-import type { AdapterContext } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
-import type { JsonObject } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import path from 'node:path';
@@ -15,6 +13,9 @@ const nodeRequire = createRequire(import.meta.url);
 const nativeBinding = nodeRequire(
   path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
 ) as Record<string, unknown>;
+
+type AdapterContext = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
 
 function nativeFn(name: string): (...args: unknown[]) => unknown {
   const fn = nativeBinding[name];

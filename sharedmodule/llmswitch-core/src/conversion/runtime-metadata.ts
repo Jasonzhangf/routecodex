@@ -1,13 +1,13 @@
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-import type { JsonObject, JsonValue } from './hub/types/json.js';
 import {
   cloneRuntimeMetadataWithNative,
   ensureRuntimeMetadataCarrierWithNative,
   readRuntimeMetadataWithNative
 } from '../native/router-hotpath/native-shared-conversion-semantics.js';
 
+type JsonObject = Record<string, unknown>;
 export type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
 
 import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from './hub/metadata-center-runtime-control-writer.js';
@@ -15,7 +15,7 @@ import { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL } from './hub/metadata-cen
 // re-export for consumers that need it
 export { METADATA_CENTER_SYMBOL, RUST_SNAPSHOT_SYMBOL };
 
-function isJsonObject(value: JsonValue | null | undefined): value is JsonObject {
+function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value);
 }
 
@@ -49,7 +49,7 @@ export function readRuntimeMetadata(carrier?: Record<string, unknown> | null): J
     return undefined;
   }
   const candidate = readRuntimeMetadataWithNative(carrier);
-  return candidate && isJsonObject(candidate as JsonValue) ? (candidate as JsonObject) : undefined;
+  return candidate && isJsonObject(candidate) ? candidate : undefined;
 }
 
 export function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObject {
@@ -65,8 +65,8 @@ export function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObj
   }
   Object.assign(carrier, nextCarrier);
   const existing = (carrier as RuntimeMetadataCarrier).__rt;
-  if (existing && isJsonObject(existing as JsonValue)) {
-    return existing as JsonObject;
+  if (existing && isJsonObject(existing)) {
+    return existing;
   }
   (carrier as RuntimeMetadataCarrier).__rt = {};
   return (carrier as RuntimeMetadataCarrier).__rt as JsonObject;
@@ -74,5 +74,5 @@ export function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObj
 
 export function cloneRuntimeMetadata(carrier?: Record<string, unknown> | null): JsonObject | undefined {
   const rt = cloneRuntimeMetadataWithNative(carrier);
-  return rt && isJsonObject(rt as JsonValue) ? (JSON.parse(JSON.stringify(rt)) as JsonObject) : undefined;
+  return rt && isJsonObject(rt) ? (JSON.parse(JSON.stringify(rt)) as JsonObject) : undefined;
 }

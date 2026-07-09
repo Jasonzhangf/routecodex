@@ -1,4 +1,3 @@
-import type { ProcessedRequest, StandardizedRequest } from '../../conversion/hub/types/standardized.js';
 import {
   createVirtualRouterRouteHostEffects,
   injectVirtualRouterRuntimeMetadata
@@ -52,6 +51,8 @@ type TokenEstimateOutput = {
   tokens?: unknown;
 };
 
+type NativeRouterRequest = Record<string, unknown>;
+
 export type VirtualRouterRuntimeDeps = {
   healthStore?: VirtualRouterHealthStore;
   routingStateStore?: {
@@ -69,7 +70,7 @@ export type VirtualRouterRuntime = {
   }): void;
   updateVirtualRouterConfig(config: VirtualRouterConfig): void;
   route(
-    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    request: NativeRouterRequest,
     metadata: RouterMetadataInput | Record<string, unknown>
   ): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics };
   getStopMessageState(metadata: RouterMetadataInput | Record<string, unknown>): StopMessageStateSnapshot | null;
@@ -83,7 +84,7 @@ export type VirtualRouterRuntime = {
   handleProviderSuccess(event: ProviderSuccessEvent): void;
   getStatus(): RoutingStatusSnapshot;
   diagnoseRoute(
-    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    request: NativeRouterRequest,
     metadata: RouterMetadataInput | Record<string, unknown>
   ): VirtualRouterDryRunDiagnostics;
   resetProviderQuota(providerKey: string): void;
@@ -120,7 +121,7 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
   }
 
   route(
-    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    request: NativeRouterRequest,
     metadata: RouterMetadataInput | Record<string, unknown> = {}
   ): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics } {
     const routeHostEffects = createVirtualRouterRouteHostEffects({ request, metadata });
@@ -189,7 +190,7 @@ export class VirtualRouterEngine implements VirtualRouterRuntime {
   }
 
   diagnoseRoute(
-    request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+    request: NativeRouterRequest,
     metadata: RouterMetadataInput | Record<string, unknown> = {}
   ): VirtualRouterDryRunDiagnostics {
     if (typeof this.nativeProxy.diagnoseRoute !== 'function') {
@@ -235,7 +236,7 @@ export function createVirtualRouterRuntime(deps?: VirtualRouterRuntimeDeps): Vir
   return new VirtualRouterEngine(deps);
 }
 
-function invokeTokenEstimator(request: StandardizedRequest | ProcessedRequest | Record<string, unknown>): number {
+function invokeTokenEstimator(request: NativeRouterRequest): number {
   const parsed = callNativeJson(
     'estimateVirtualRouterRequestTokensJson',
     'estimateVirtualRouterRequestTokensJson',
@@ -258,12 +259,12 @@ function invokeTokenEstimator(request: StandardizedRequest | ProcessedRequest | 
   return parsed.tokens;
 }
 
-export function countRequestTokens(request: StandardizedRequest | ProcessedRequest | Record<string, unknown>): number {
+export function countRequestTokens(request: NativeRouterRequest): number {
   return invokeTokenEstimator(request);
 }
 
 export function computeRequestTokens(
-  request: StandardizedRequest | ProcessedRequest | Record<string, unknown>,
+  request: NativeRouterRequest,
   _fallbackText = ''
 ): number {
   return invokeTokenEstimator(request);

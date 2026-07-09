@@ -6,7 +6,8 @@ import {
   readNativeFunction,
   safeStringify
 } from './native-hub-pipeline-resp-semantics-shared.js';
-import type { JsonObject } from '../../conversion/hub/types/json.js';
+
+type JsonObject = Record<string, unknown>;
 
 export interface AnthropicStopReasonResolution {
   normalized: string;

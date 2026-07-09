@@ -35,13 +35,6 @@ declare module 'rcc-llmswitch-core/conversion/hub/format-adapters/index' {
   }
 }
 
-declare module 'rcc-llmswitch-core/conversion/hub/types/chat-envelope' {
-  export interface AdapterContext {
-    requestId: string;
-    [key: string]: unknown;
-  }
-}
-
 declare module 'rcc-llmswitch-core/v2/runtime/virtual-router-hit-log' {
   export function resolveSessionColor(sessionId?: string): string | undefined;
   export function resolveSessionLogColorKey(input?: Record<string, unknown> | null): string | undefined;

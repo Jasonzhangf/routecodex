@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use crate::hub_pipeline_lib::engine::HubPipelineEngine;
 use crate::hub_pipeline_lib::types::HubPipelineConfig;
 
+// feature_id: hub.runtime_ingress_bridge
 static ENGINE_REGISTRY: std::sync::LazyLock<Mutex<HashMap<String, HubPipelineEngine>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 

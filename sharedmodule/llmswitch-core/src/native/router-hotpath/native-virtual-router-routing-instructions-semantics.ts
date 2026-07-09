@@ -1,8 +1,13 @@
 import { failNativeRequired } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import type { RoutingInstruction } from './native-virtual-router-routing-state.js';
-import type { StandardizedMessage } from '../../conversion/hub/types/standardized.js';
 import { resolveRccUserDirWithNative as resolveRccUserDir } from './native-shared-conversion-semantics-core.js';
+
+type StandardizedMessage = {
+  role?: unknown;
+  content?: unknown;
+  [key: string]: unknown;
+};
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;

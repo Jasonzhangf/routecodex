@@ -1812,3 +1812,9 @@
 - Fixed source truth: Rust direct decision no longer returns `servertool_followup_requires_hub_relay` for stop-message includeDirect, and `src/server/runtime/http-server/index.ts` no longer marks `client_tools_require_hub_relay` or `stopless_servertool_requires_hub_relay` as relayable skip reasons.
 - Gate truth: `verify:responses-direct-tool-shape-contract` forbids `client_tools_require_hub_relay`, `stopless_servertool_requires_hub_relay`, `responses_chat_process_requires_hub_relay`, and `servertool_followup_requires_hub_relay` from becoming router-direct Hub relay reasons again.
 - Verified in global installed `routecodex/rcc 0.90.3682`: active install dist has zero matches for those four reasons, `/health` is ready on 5520/5555, and live tool-bearing `/v1/responses` samples on both ports completed with `[response] completed` and `[usage]` instead of direct-relay failure.
+
+# 2026-07-09: Hub runtime/request bridge owner maps are Rust-owned
+
+- `hub.runtime_ingress_bridge` owner truth is Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs`; `src/modules/llmswitch/bridge/routing-integrations.ts` is host/native-call glue only.
+- `hub.request_stage_pipeline_bridge` owner truth is Rust NAPI `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`; `native-hub-pipeline-orchestration-semantics-protocol.ts` is native-call/JSON IO glue only.
+- For function-map canonical builder gates, do not list Rust implementation directories in `allowed_paths` when they define the same canonical builders as the owner module. Use exact owner file in `function-map.yml`; use `verification-map.yml` for broader Rust source coverage.

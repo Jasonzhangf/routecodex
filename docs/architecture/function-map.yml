@@ -1551,7 +1551,6 @@ owners:
       - describe_pipeline_contract
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/json.ts
       - src/providers/core/runtime
       - src/server/handlers
     forbidden_paths:
@@ -1575,7 +1574,7 @@ owners:
       - "Metadata is side-channel only; leak to provider/client payload must fail-fast."
       - "Protocol truth writes are limited to request entry and VR selection; all later stages may only read the already-written truth from MetadataCenter."
       - "Rust contract help owns the standard control/data split for Hub and VR nodes."
-      - "TS JSON helpers are bridge-only `JsonValue` / `JsonObject` / `isJsonObject` / `jsonClone`; zero-consumer `JsonArray` / `isJsonArray` public helpers are retired."
+      - "Retired Hub JSON TS type surface (`conversion/hub/types/json.d.ts`) is physically deleted; TS shells use local JSON records only at IO edges and Rust owns metadata carrier semantics."
       - "Retired image attachment metadata control surface (`chat_post_governed_normalization_semantics.rs`, `buildImageAttachmentMetadataJson`) is physically deleted; current media semantics belong to live chat process media/Hub mainline owners, not a zero-consumer NAPI export."
       - "Retired zero-consumer native exports (`extractWebSearchSemanticsHintJson`, `normalizeReasoningInOpenAIPayloadJson`, `governToolNameResponseJson`, `resolveDefaultToolGovernanceRulesJson`) are physically deleted; keep live mainline owners (`analyzeChatWebSearchIntentJson`, lowercase-ai reasoning wrapper, request governance/default registry internals) instead of restoring standalone control surfaces."
       - "Retired standalone tool-governance control surface (`hub_tool_governance_semantics.rs`, `governRequestJson`) is physically deleted; live tool governance belongs to `req_process_stage1_tool_governance.rs` / chat governance / Hub mainline typed boundaries."
@@ -1778,21 +1777,21 @@ owners:
   - feature_id: hub.runtime_ingress_bridge
     status: active
     summary: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
-    owner_kind: ts_bridge
-    owner_scope: "Hub Pipeline native handle bridge for engine lifecycle, Virtual Router runtime ingress, and deps wiring"
-    owner_module: src/modules/llmswitch/bridge/routing-integrations.ts
+    owner_kind: rust_ssot
+    owner_scope: "Hub Pipeline native handle registry, engine lifecycle, Virtual Router runtime ingress, and deps wiring"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs
     canonical_types:
       - HubPipelineHandle
     canonical_builders:
-      - createHubPipelineEngineJson
-      - hubPipelineExecuteJson
-      - disposeHubPipelineEngineJson
-      - updateHubPipelineVirtualRouterConfigJson
-      - updateHubPipelineEngineDepsJson
+      - create_hub_pipeline_engine_json
+      - hub_pipeline_execute_json
+      - dispose_hub_pipeline_engine_json
+      - update_hub_pipeline_virtual_router_config_json
+      - update_hub_pipeline_engine_deps_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs
       - src/server/runtime/http-server/http-server-runtime-setup.ts
       - src/modules/llmswitch/bridge/routing-integrations.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine
       - tests/sharedmodule
     forbidden_paths:
       - src/server/runtime/http-server/executor
@@ -1808,8 +1807,8 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Runtime ingress handle owner is the host bridge direct native binding plus Rust hub_pipeline_engine; the old aggregate TS wrapper `native-hub-pipeline-orchestration-semantics.ts` is physically deleted and must not be restored."
-      - "TS owns only lifecycle glue that passes native Hub engine handles and calls Virtual Router runtime ingress/deps APIs."
+      - "Runtime ingress handle owner is Rust `hub_pipeline_engine::registry`; the old aggregate TS wrapper `native-hub-pipeline-orchestration-semantics.ts` is physically deleted and must not be restored."
+      - "TS owns only host/native-call glue that passes native Hub engine handles and invokes Rust lifecycle/deps APIs; it must not become the semantic owner."
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
       - "HubPipeline object construction is retired; server/runtime stores native handle strings only."
@@ -1819,15 +1818,15 @@ owners:
     summary: "Retired Hub request-stage TS bridge; request/chat_process execution is Rust/native-owned"
     owner_kind: rust_ssot
     owner_scope: "Rust Hub request/chat_process stage plan execution and preselected-route handoff semantics"
-    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
     canonical_types:
       - HubReqChatProcess03Governed
       - HubReqOutbound05ProviderSemantic
     canonical_builders:
-      - runHubPipelineLibWithNative
-      - buildRequestStageMetadataDispatchWithNative
-      - buildRequestStageNativeResultPlanWithNative
-      - buildRequestStageHubPipelineResultWithNative
+      - run_hub_pipeline_lib_json
+      - build_request_stage_metadata_dispatch_json
+      - build_request_stage_native_result_plan_json
+      - build_request_stage_hub_pipeline_result_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts
@@ -1848,15 +1847,15 @@ owners:
     migration_target: rust
     notes:
       - "The old `hub-pipeline-execute-request-stage.ts` shell is physically deleted and must stay deleted."
-      - "Test-only request-stage direct-native helper exists only to preserve focused white-box evidence; it is not a runtime owner."
+      - "Rust NAPI/request-stage builders own the request-stage bridge semantics; TS protocol wrapper and test-only direct-native helper are native-call/JSON IO only, not runtime owners."
       - "Preselected-route handoff must stay request-scoped control metadata, not client/provider payload."
 
   - feature_id: hub.chat_envelope_type_surface
-    status: active
-    summary: "Hub ChatEnvelope/StandardizedRequest TS bridge type surface for still-consumed envelope/context aliases"
-    owner_kind: ts_bridge
-    owner_scope: "file-scoped Hub ChatEnvelope/StandardizedRequest TS bridge type surface and direct native conversion evidence"
-    owner_module: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+    status: retired
+    summary: "retired Hub ChatEnvelope/StandardizedRequest TS bridge type surface"
+    owner_kind: retired_ts_surface
+    owner_scope: "retired file-scoped Hub ChatEnvelope/StandardizedRequest TS bridge type surface; native JSON entrypoints remain Rust-owned"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
     canonical_types:
       - AdapterContext
       - ChatContinuationSemantics
@@ -1866,11 +1865,9 @@ owners:
       - StandardizedRequest
       - ProcessedRequest
     canonical_builders:
-      - chatEnvelopeToStandardizedWithNative
+      - chat_envelope_to_standardized_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/conversion/hub/types
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts
-      - sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - tests/sharedmodule
@@ -1878,6 +1875,7 @@ owners:
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
+      - sharedmodule/llmswitch-core/src/conversion/hub/types
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
       - sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.ts
     forbidden_mentions_allowlist:
@@ -1892,7 +1890,8 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "ChatEnvelope and StandardizedRequest TS types are bridge-only declarations for current external consumers; Hub semantic truth remains Rust-owned."
+      - "ChatEnvelope, StandardizedRequest, and JsonObject TS declaration shells are physically deleted; tests and TS IO shells may use local minimal Record shapes but must not restore a shared Hub TS type owner."
+      - "Native conversion evidence remains `chatEnvelopeToStandardizedWithNative` and Rust `hub_standardized_bridge`; TS wrapper is native-call/JSON IO only."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface."
       - "The former `standardized-bridge.ts` runtime wrapper shell is deleted; tests that need conversion evidence call native req inbound/outbound semantics directly."
 

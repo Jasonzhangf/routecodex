@@ -886,6 +886,7 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> NapiR
     hub_pipeline_lib::effect_plan::normalize_provider_response_effect_plan_json(input_json)
 }
 
+// feature_id: hub.request_stage_pipeline_bridge
 #[napi(js_name = "resolveProviderProtocolJson")]
 pub fn resolve_provider_protocol_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_blocks::napi_bindings::resolve_provider_protocol_json(input_json)

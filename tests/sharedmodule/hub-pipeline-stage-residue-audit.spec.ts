@@ -1257,24 +1257,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(retiredPath)).toBe(false);
   });
 
-  it('hub json type surface must stay type-only without runtime helper exports', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts'),
-      'utf8',
-    );
+  it('hub json type surface must stay physically deleted', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts');
 
-    const findings = collectMatches(source, [
-      { label: 'exports zero-consumer JsonPrimitive alias', pattern: /export\s+type\s+JsonPrimitive\b/ },
-      { label: 'declares zero-consumer JsonPrimitive alias', pattern: /(?:export\s+)?type\s+JsonPrimitive\b/ },
-      { label: 'exports zero-consumer JsonArray alias', pattern: /export\s+type\s+JsonArray\b/ },
-      { label: 'exports zero-consumer isJsonArray helper', pattern: /export\s+function\s+isJsonArray\b/ },
-      { label: 'exports runtime JSON object guard from type shell', pattern: /export\s+function\s+isJsonObject\b/ },
-      { label: 'exports runtime JSON clone helper from type shell', pattern: /export\s+function\s+jsonClone\b/ },
-    ]);
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('export type JsonValue');
-    expect(source).toContain('export interface JsonObject');
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('servertool progress file shell must not retain zero-consumer event type shell', () => {
@@ -4194,42 +4180,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(enginePath)).toBe(false);
   });
 
-  it('ChatEnvelope type surface must not export zero-consumer nested semantic shells', () => {
+  it('ChatEnvelope type surface must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const forbidden = [
-      'ChatRole',
-      'ChatToolCall',
-      'ChatMessage',
-      'ChatContinuationScope',
-      'ChatContinuationStateOrigin',
-      'ChatContinuationPointer',
-      'ChatToolContinuation',
-      'ChatToolOutput',
-      'MissingField',
-      'ChatProtocolMappingDisposition',
-      'ChatProtocolMappingAuditEntry',
-      'ChatSemanticAudit',
-      'ChatToolSemantics',
-      'ChatResponsesSemantics',
-      'ChatAnthropicSemantics',
-      'ChatGeminiSemantics',
-    ];
-    const findings: string[] = [];
 
-    for (const name of forbidden) {
-      const declaration = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${name}\\b`);
-      if (declaration.test(source)) {
-        findings.push(`restored zero-consumer nested type ${name}`);
-      }
-    }
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('feature_id: hub.chat_envelope_type_surface');
-    expect(source).toContain('export interface AdapterContext');
-    expect(source).toContain('export interface ChatContinuationSemantics');
-    expect(source).toContain('export interface ChatSemantics');
-    expect(source).toContain('export interface ChatEnvelope');
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('ServerTool type surface must not restore zero-consumer nested execution shells', () => {
@@ -4256,31 +4210,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).toContain("phase: 'pre' | 'default' | 'post'");
   });
 
-  it('StandardizedRequest type surface must not export zero-consumer nested field shells', () => {
+  it('StandardizedRequest type surface must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const forbidden = [
-      'ToolCall',
-      'ToolChoice',
-      'StandardizedTool',
-      'ToolCallResult',
-      'StandardizedMessageContent',
-      'StandardizedParameters',
-      'StandardizedMetadata',
-    ];
-    const findings: string[] = [];
 
-    for (const name of forbidden) {
-      const declaration = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${name}\\b`);
-      if (declaration.test(source)) {
-        findings.push(`restored zero-consumer standardized nested type ${name}`);
-      }
-    }
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('export interface StandardizedMessage');
-    expect(source).toContain('export interface StandardizedRequest');
-    expect(source).toContain('export interface ProcessedRequest');
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('legacy conversion type surface must stay physically deleted after codec owner split', () => {
@@ -5027,9 +4960,6 @@ describe('hub pipeline stage residue audit', () => {
 
   it('llmswitch-core src must not keep side-by-side TS emit artifacts', () => {
     const allowedGeneratedDeclarations = new Set([
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts',
       'sharedmodule/llmswitch-core/src/servertool/types.d.ts',
     ]);
@@ -5044,11 +4974,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('Hub and Virtual Router source truth dirs must not keep side-by-side TS emit artifacts', () => {
-    const allowedGeneratedDeclarations = new Set([
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.d.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/json.d.ts',
-      'sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.d.ts',
-    ]);
+    const allowedGeneratedDeclarations = new Set<string>();
     const artifactRoots = [
       'sharedmodule/llmswitch-core/src/conversion/hub',
       [

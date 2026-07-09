@@ -1,5 +1,4 @@
 import type { BridgeInputItem } from '../../bridge-message-utils.js';
-import type { JsonObject } from '../../hub/types/json.js';
 import type { ResponsesRequestContext } from '../responses-openai-bridge.js';
 import {
   buildSlimResponsesBridgeContextWithNative,
@@ -12,6 +11,8 @@ import {
   stripResponsesToolControlFieldsWithNative,
   unwrapResponsesDataWithNative
 } from '../../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+
+type JsonObject = Record<string, unknown>;
 
 export function collectResponsesRequestParameters(
   payload: Record<string, unknown> | undefined,

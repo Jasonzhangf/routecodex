@@ -28200,3 +28200,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Active dist scan: both current install roots have zero matches for `client_tools_require_hub_relay`, `stopless_servertool_requires_hub_relay`, `responses_chat_process_requires_hub_relay`, and `servertool_followup_requires_hub_relay`.
 - Verification PASS: `npm run verify:responses-direct-tool-shape-contract`; focused router-direct protocol-boundary Jest red/green case; `cargo test -p router-hotpath-napi direct_decision`; targeted diff check.
 - Live log proof after fix: 5520 request `openai-responses-router-gpt-5.4-20260709T104149598-483057-4906` and 5555 request `openai-responses-router-gpt-5.5-20260709T104150528-483058-4907` both completed and wrote `[usage]`; no new direct relay failure after those live probes.
+
+# 2026-07-09: Hub runtime/request bridge owner maps moved to Rust
+
+- Scope: continued Hub Pipeline TS residue rustification by收口 owner/map, not changing runtime behavior.
+- `hub.runtime_ingress_bridge` owner moved from TS `src/modules/llmswitch/bridge/routing-integrations.ts` to Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs`; TS bridge is now documented/tested as host/native-call glue only.
+- `hub.request_stage_pipeline_bridge` owner moved from TS protocol shell `native-hub-pipeline-orchestration-semantics-protocol.ts` to Rust NAPI `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`; canonical builders are the Rust snake_case NAPI entrypoints.
+- Important gate lesson: `function-map` `allowed_paths` may include the exact owner file plus TS wrappers/tests, but not Rust implementation directories that also define canonical builders, or `verify-function-map-canonical-builder-definitions` reports duplicate owner definitions. Put broader Rust implementation coverage in `verification-map.yml` instead.
+- Verification PASS: `npm run verify:function-map-compile-gate`; `npm run verify:architecture-ts-owner-ban`; focused runtime/preselected/residue Jest 219/219; `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-rustification-audit` (`nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.

@@ -1,5 +1,3 @@
-import type { AdapterContext, ChatEnvelope } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
-import type { StandardizedRequest } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { chatEnvelopeToStandardizedWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,6 +6,10 @@ const nodeRequire = createRequire(import.meta.url);
 const nativeBinding = nodeRequire(
   path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
 ) as Record<string, unknown>;
+
+type AdapterContext = Record<string, unknown>;
+export type ChatEnvelope = Record<string, unknown>;
+export type StandardizedRequest = Record<string, any>;
 
 function standardizedToChatEnvelopeDirectNativeBinding(
   request: Record<string, unknown>,

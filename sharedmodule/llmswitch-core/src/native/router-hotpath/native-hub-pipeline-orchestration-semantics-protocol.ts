@@ -4,7 +4,8 @@ import { stringifyNativePayloadForError } from './native-hub-bridge-action-seman
 import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
 
 // feature_id: hub.request_stage_pipeline_bridge
-// canonical_builders: runHubPipelineLibWithNative, buildRequestStageMetadataDispatchWithNative, buildRequestStageNativeResultPlanWithNative
+// Rust owner symbols: run_hub_pipeline_lib_json, build_request_stage_metadata_dispatch_json,
+// build_request_stage_native_result_plan_json, build_request_stage_hub_pipeline_result_json.
 
 type HubPipelineInput = {
   requestId: string;

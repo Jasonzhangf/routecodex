@@ -1,4 +1,3 @@
-import type { ProcessedRequest, StandardizedRequest } from '../conversion/hub/types/standardized.js';
 import type {
   RouterMetadataInput,
   RoutingDecision,
@@ -19,6 +18,8 @@ import {
   readNativeFunction,
   safeStringify
 } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+type NativeRouterRequest = Record<string, unknown>;
 
 export type VirtualRouterRouteHostEffects = {
   finalize: (
@@ -56,7 +57,7 @@ export function parseStopMessageInstruction(instruction: string): RoutingInstruc
 }
 
 export function buildStopMessageMarkerParseLog(
-  request: StandardizedRequest | ProcessedRequest,
+  request: NativeRouterRequest,
   metadata: RouterMetadataInput
 ): StopMessageMarkerParseLog | null {
   const capability = 'buildStopMessageMarkerParseLogJson';
@@ -174,12 +175,12 @@ export function formatStopMessageStatusLabel(
 }
 
 export function createVirtualRouterRouteHostEffects(args: {
-  request: StandardizedRequest | ProcessedRequest | Record<string, unknown>;
+  request: NativeRouterRequest;
   metadata: RouterMetadataInput | Record<string, unknown>;
   hitLog?: VirtualRouterHitLogConfig;
 }): VirtualRouterRouteHostEffects {
   const metadata = coerceRouterMetadata(args.metadata);
-  const parseLog = buildStopMessageMarkerParseLog(args.request as StandardizedRequest | ProcessedRequest, metadata);
+  const parseLog = buildStopMessageMarkerParseLog(args.request, metadata);
   return {
     finalize: (result, getStopMessageState) => {
       emitStopMessageMarkerParseLog(parseLog);
