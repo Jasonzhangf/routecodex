@@ -4394,7 +4394,6 @@ describe('hub pipeline stage residue audit', () => {
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts',
-      'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-shell-utils.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
@@ -4407,6 +4406,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFiles = [
       'sharedmodule/llmswitch-core/src/conversion/compaction-detect.ts',
       'sharedmodule/llmswitch-core/src/conversion/mcp-injection.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/thought_signature_validator/tests.rs',

@@ -4,11 +4,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
 import {
   createToolCallIdTransformer,
-  enforceToolCallIdStyle,
-  sanitizeResponsesFunctionName
+  enforceToolCallIdStyle
 } from '../shared/responses-tool-utils.js';
-import { mapChatToolsToBridge } from '../shared/tool-mapping.js';
-import type { BridgeToolDefinition, ChatToolDefinition } from '../shared/tool-mapping.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
@@ -36,7 +33,8 @@ import {
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 import {
   buildProviderProtocolErrorWithNative,
-  ensureBridgeInstructionsWithNative
+  ensureBridgeInstructionsWithNative,
+  mapChatToolsToBridgeWithNative
 } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   resolveBridgePolicyActionsWithNative,
@@ -77,6 +75,57 @@ export interface BridgeInputBuildResult {
   latestUserInstruction?: string;
   originalSystemMessages: string[];
 }
+
+type ChatToolDefinition = {
+  type: 'function' | string;
+  name?: string;
+  description?: string;
+  defer_loading?: boolean;
+  tools?: Array<{
+    type?: 'function' | string;
+    name?: string;
+    description?: string;
+    parameters?: unknown;
+    strict?: boolean;
+    defer_loading?: boolean;
+  }>;
+  function?: {
+    name: string;
+    description?: string;
+    parameters?: unknown;
+    strict?: boolean;
+  };
+  [key: string]: unknown;
+};
+
+type BridgeToolDefinition = {
+  type: string;
+  name?: string;
+  description?: string;
+  strict?: boolean;
+  defer_loading?: boolean;
+  parameters?: unknown;
+  tools?: Array<{
+    type?: string;
+    name?: string;
+    description?: string;
+    strict?: boolean;
+    defer_loading?: boolean;
+    parameters?: unknown;
+    function?: {
+      name?: string;
+      description?: string;
+      strict?: boolean;
+      parameters?: unknown;
+    };
+  }>;
+  function?: {
+    name?: string;
+    description?: string;
+    strict?: boolean;
+    parameters?: unknown;
+  };
+};
 
 function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value);
@@ -637,9 +686,9 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   // tools: 反向映射为 ResponsesToolDefinition 形状
   const chatTools: ChatToolDefinition[] = Array.isArray(chat.tools) ? (chat.tools as ChatToolDefinition[]) : [];
 
-  const responsesToolsFromChat = mapChatToolsToBridge(chatTools, {
-    sanitizeName: sanitizeResponsesFunctionName
-  });
+  const responsesToolsFromChat = chatTools.length
+    ? (mapChatToolsToBridgeWithNative(chatTools, { sanitizeMode: 'responses' }) as BridgeToolDefinition[])
+    : undefined;
 
   const resumeTools = continuationPreviousResponseId.length > 0
     ? readResumeToolsFromChatSemantics(chat as Record<string, unknown>)

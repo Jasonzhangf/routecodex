@@ -1847,3 +1847,9 @@
 - `sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts` is physically deleted. Do not restore it as the Responses bridge history/input conversion facade.
 - `responses-openai-bridge.ts` may keep local BridgeInput type aliases and small native-call glue, but bridge history construction and bridge-input-to-chat conversion truth must stay in Rust native `buildBridgeHistoryWithNative` and `convertBridgeInputToChatMessagesWithNative`.
 - Current clean-worktree shell audit after this deletion is `prodTsShellCount=56`, `shellsWithProdImporters=55`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Tool mapping TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts` is physically deleted. Do not restore it as the Responses bridge tool mapping facade.
+- `responses-openai-bridge.ts` may keep local tool type aliases and small native-call glue, but chat-tools-to-Responses-tools mapping truth must stay in Rust native `mapChatToolsToBridgeWithNative` with explicit `sanitizeMode: 'responses'`.
+- Current shell audit after this deletion is `prodTsShellCount=55`, `shellsWithProdImporters=54`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

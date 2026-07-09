@@ -28249,3 +28249,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `responses-openai-bridge.ts` now owns only the local BridgeInput type aliases and calls Rust native `buildBridgeHistoryWithNative` / `convertBridgeInputToChatMessagesWithNative` directly for the old facade surface.
 - Residue audit now locks `bridge-message-utils.ts` physically absent and asserts the main bridge directly references the native helper calls.
 - Verification PASS in clean detached worktree with current patch: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=56`, `shellsWithProdImporters=55`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 205/205 after symlinking existing node/native artifacts into the temp worktree; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=56`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
+
+# 2026-07-09: tool-mapping TS facade deleted
+
+- Scope: continued single-import conversion facade deletion after `bridge-message-utils.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts`; strict shell audit showed one production importer only: `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now keeps local tool type aliases and calls Rust native `mapChatToolsToBridgeWithNative(..., { sanitizeMode: 'responses' })` directly; unused TS wrapper exports `mapBridgeToolsToChat` and `flattenChatToolsForFunctionCalling` were not preserved.
+- Residue/red tests now lock `tool-mapping.ts` physically absent instead of requiring a native-only wrapper.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=55`, `shellsWithProdImporters=54`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 210/210; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=55`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
