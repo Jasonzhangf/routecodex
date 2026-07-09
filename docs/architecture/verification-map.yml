@@ -1133,7 +1133,7 @@ verification:
       - tests/red-tests/hub_pipeline_provider_response_converter_no_ts_projection_fallback.test.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
     integration:
-      - sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts
+      - tests/sharedmodule/responses-bridge-closed-loop.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
       - npm run verify:hub-response-responses-chat-projection

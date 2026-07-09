@@ -9,12 +9,12 @@
  * decodeChatResponseFromResponses 之后再实现，这里暂不做 Responses→Chat 的逆向解码，
  * 以避免误用 request 解码器导致的干扰。
  *
- * 运行方式（在 sharedmodule/llmswitch-core 下）：
- *  - npm run build
- *  - node dist/test/responses-bridge-closed-loop.js
+ * 运行方式（在 repo root 下）：
+ *  - npm run verify:llmswitch-core-tsc
+ *  - node --experimental-vm-modules ./node_modules/.bin/jest tests/responses/responses-openai-bridge.spec.ts
  */
 
-import { buildResponsesPayloadFromChat, buildChatResponseFromResponses } from '../conversion/responses/responses-openai-bridge.js';
+import { buildResponsesPayloadFromChat, buildChatResponseFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import fs from 'fs';
 import path from 'path';
 
