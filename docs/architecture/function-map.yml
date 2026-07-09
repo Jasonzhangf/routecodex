@@ -947,6 +947,8 @@ owners:
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
+      - tests/providers/core/runtime/service-profile-resolver.spec.ts
+      - tests/providers/core/runtime/vercel-ai-sdk-openai-transport.spec.ts
     required_gates:
       - npm run verify:provider-failure-ban-blackbox
     migration_target: rust

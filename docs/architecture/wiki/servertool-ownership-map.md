@@ -974,7 +974,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/servertool/types.d.ts` (registration type declarations only)
+- `sharedmodule/llmswitch-core/src/servertool/types.d.ts`
 - `docs`
 
 Forbidden paths:
@@ -993,6 +993,7 @@ Required gates:
 Notes:
 - Loop warning text and repeat-count policy stay Rust-owned in followup-core.
 - Deleted TS loop-state/scope/loop-warning shells must not be restored; Rust/followup-core and Chat Process native bridge own this path.
+- The retired `native-followup-mainline-semantics.ts` facade must stay deleted; servertool type declarations may carry local registration types only.
 - `appendStopMessageLoopWarning` must not return as a TS semantic owner/export.
 
 ## hub.servertool_rust_only_closeout

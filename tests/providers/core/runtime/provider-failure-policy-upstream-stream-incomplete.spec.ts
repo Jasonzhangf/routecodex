@@ -36,4 +36,34 @@ describe('provider-failure-policy upstream_stream_incomplete', () => {
     expect(outcome.recoverable).toBe(true);
     expect(outcome.affectsHealth).toBe(true);
   });
+
+  it('[forward] upstream_stream_idle_timeout affects provider health while remaining recoverable', () => {
+    const classification = resolveProviderFailureClassification({
+      error: {
+        message: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+        code: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+        statusCode: 504,
+      },
+      stage: 'provider.send',
+      statusCode: 504,
+      errorCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+      upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+      reason: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+    });
+    const outcome = resolveProviderFailureOutcome({
+      error: {
+        message: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+        code: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+        statusCode: 504,
+      },
+      stage: 'provider.send',
+      statusCode: 504,
+      errorCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+      upstreamCode: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+      reason: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+    });
+    expect(classification).toBe('recoverable');
+    expect(outcome.recoverable).toBe(true);
+    expect(outcome.affectsHealth).toBe(true);
+  });
 });

@@ -28267,3 +28267,95 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Verification PASS: current worktree `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=43`, `shellsWithProdImporters=42`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); current worktree focused residue Jest 202/202; current worktree `verify:llmswitch-rustification-audit` (`prodTsFileCount=43`, `nonNativeFileCount=0`); current worktree `verify:llmswitch-minimal-ts-surface`; `verify:architecture-fallback-denylist`; `git diff --check`.
 - Verification PASS in clean detached worktree with this patch and linked node/native artifacts: `npm run verify:llmswitch-core-tsc`; focused Jest `hub-pipeline-stage-residue-audit.spec.ts` + `openai-message-normalize.spec.ts` 205/205.
 - Current worktree full `verify:llmswitch-core-tsc` is blocked by unrelated staged deletion of native split wrappers in parallel work; not caused by this patch.
+
+# 2026-07-09: stopreason=2 next_step exact continuation prompt
+
+- Scope: stopless continuation prompt correction after user clarified it must not be hardcoded guidance.
+- Contract locked: when `schemaFeedback.reasonCode=stop_schema_continue_next_step`, the next provider-facing current-turn user prompt is exactly the model-provided `next_step` / CLI `continuationPrompt`; no fixed phrase such as `继续执行你给出的 next_step` may be injected.
+- Rust owner changes: `servertool-core/src/cli_contract.rs` requires derived `followup_text` for `stop_schema_continue_next_step`; `hub_req_inbound_tool_call_normalization.rs` and `shared_responses_conversation_utils.rs` short-circuit to `continuationPrompt` and return no schema-feedback prose for this reason code.
+- Blackbox gate tightened: `scripts/tests/stopless-contract-blackbox.mjs` now asserts the `next_step` case current-turn user text equals `["rerun failing command"]`.
+- Verification PASS: `npm run verify:stopless-contract-blackbox`; `npm run verify:stopless-invalid-schema-blackbox`; `cargo test -p servertool-core cli_contract --lib`; `cargo test -p router-hotpath-napi stop_hook_guidance_text_accepts_continue_next_step_with_empty_missing_fields --lib`; targeted `rustfmt --check`; targeted `git diff --check`.
+- Current unrelated build blocker: full `build:base` / `verify:llmswitch-core-tsc` fails because parallel work deleted native wrapper files still imported by `native-hub-bridge-action-semantics.ts`, `native-shared-conversion-semantics.ts`, and `native-virtual-router-runtime.ts`; this blocker is outside the stopless next_step patch.
+
+# 2026-07-09: native split facade files merged into aggregate owners
+
+- Scope: continued llmswitch-core TS shell contraction after chat request filter wrapper deletion.
+- Merged retired native split wrappers into their aggregate native-call owners and physically deleted the split files:
+  - `native-shared-conversion-semantics-{call-id,id-stream,metadata,misc,openai,reasoning,responses,shell-utils,tool-definitions,toolcalls,tools}.ts`
+  - `native-hub-bridge-action-semantics-tools-{request,core,post}.ts`
+  - `native-virtual-router-engine-proxy.ts`
+- `native-shared-conversion-semantics.ts`, `native-hub-bridge-action-semantics.ts`, and `native-virtual-router-runtime.ts` now own the small native binding/stringify/parse glue; runtime semantics remain Rust/NAPI truth.
+- Updated active gates to stop importing/reading deleted split files: anthropic schema stability imports aggregate owner, response wrapper deletion red test asserts `tool-definitions` split file absent, native required export dist tests import aggregate dist owner, function-map allowed path points to aggregate owner, no-fallback denylist removed deleted split paths.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=39`, `shellsWithProdImporters=38`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=39`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run verify:function-map-compile-gate`; focused Jest 210/210; native required export Jest 13/13.
+- Whitespace check: local `git diff --check` is intercepted by an rtk diff wrapper and exits 2 with no findings; equivalent targeted trailing-whitespace scan across modified files returned 0 matches.
+
+# 2026-07-09: openai-message-normalize TS facade deleted
+
+- Scope: continued single-import shared conversion facade deletion after native split facade merge.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts`; strict shell audit showed one production importer only: `chat-request-filters.ts`.
+- `chat-request-filters.ts` now calls Rust native `normalizeOpenaiChatRequestWithNative` directly and keeps only the existing env switch and IO flow around governed filter payloads.
+- `tests/sharedmodule/openai-message-normalize.spec.ts` now validates the native aggregate owner directly; residue audit locks the old facade path absent and checks `chat-request-filters.ts` for no TS normalize/MCP/tool-history logic.
+- Verification PASS: focused Jest 205/205; `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=38`, `shellsWithProdImporters=37`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=38`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; targeted stale active reference scan; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: responses-response-utils TS facade deleted
+
+- Scope: continued single-import shared response facade deletion after `openai-message-normalize.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts` and dead unreferenced coverage script `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-response-utils.mjs`.
+- `responses-openai-bridge.ts` now keeps the public `buildChatResponseFromResponses` export and calls Rust native `buildChatResponseFromResponsesFullWithNative` directly; response projection semantics remain Rust truth.
+- Function-map no longer lists the deleted facade as allowed path; residue/red tests assert the old facade and coverage script stay absent.
+- Verification PASS: focused Jest 207/207; `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=37`, `shellsWithProdImporters=36`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=37`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; stale active reference scan shows only forbidden/absent-file locks; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: responses-openai response-payload split facade deleted
+
+- Scope: continued Responses bridge split facade deletion after `responses-response-utils.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts`.
+- `responses-openai-bridge.ts` now owns public `buildResponsesPayloadFromChat` / `extractRequestIdFromResponse` exports and calls Rust native response payload helpers directly; the split file no longer exists as a second bridge surface.
+- Updated codec and metadata-boundary tests to import the aggregate bridge; residue audit locks `response-payload.{ts,js,map,d.ts}` absent and checks only the `buildResponsesPayloadFromChat` block for no TS response restore semantics.
+- Verification PASS: focused Jest 203/203; `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=36`, `shellsWithProdImporters=35`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=36`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; stale active reference scan shows only absent-file residue locks; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: responses-host-policy TS facade deleted
+
+- Scope: continued single-import Responses bridge facade deletion after response-payload split merge.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.ts`; strict shell audit showed one production importer only: `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now calls Rust native `evaluateResponsesHostPolicyWithNative` directly; host policy semantics remain Rust native truth.
+- Residue audit locks `responses-host-policy.{ts,js,map,d.ts}` absent.
+- Verification PASS: focused Jest 218/218; `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=35`, `shellsWithProdImporters=34`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=35`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; stale active reference scan shows only native owner and absent-file residue locks; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: followup native facade deleted
+
+- Scope: continued low-risk single-import/native facade deletion after `responses-host-policy.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`; reference audit showed no runtime importer and only `servertool/types.d.ts` type references.
+- Moved `ServerToolHandlerRegistrationSpec` and related servertool registration literal types into `sharedmodule/llmswitch-core/src/servertool/types.d.ts`; no runtime semantics moved to TS.
+- Function-map and servertool ownership wiki now point at Rust owner plus local servertool type declarations, not the retired native facade.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=34`, `shellsWithProdImporters=33`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=34`, `nonNativeFileCount=0`); `npm run verify:servertool-rust-only`; `npm run verify:llmswitch-minimal-ts-surface`; stale active reference scan shows only function-map retired note; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: 5555 vercel-ai-sdk SSE stall root cause and source fix
+
+- Live evidence: active log `~/.rcc/logs/server-5520.log` request `openai-responses-orangeai.key1-glm-5.2-20260709T150926727-484198-1107` waited about 5 minutes before `ECONNRESET`; `error_action_backoff_wait` itself completed after `delayMs=1000`. Timing showed `request.internal=305800ms`, so the stall was before provider stream error surfacing, not the backoff queue.
+- Root cause: `VercelAiSdkOpenAiTransport.executePreparedRequest()` used direct `fetch()` and `Readable.fromWeb()` with only client abort propagation. It bypassed `HttpClient.postStreamOrResponse` headers timeout / stream idle watchdog, and prepared SDK SSE then could hang while executor probed the first stream chunk.
+- Fix: SDK transport now composes provider timeout/header timeout with external abort, wraps SSE streams in an idle watchdog, reads effective values from env/runtime metadata/profile, and classifies `UPSTREAM_STREAM_IDLE_TIMEOUT` in the provider recoverable stream-timeout family. `ServiceProfileResolver` now carries `overrides.streamIdleTimeoutMs` and `overrides.streamHeadersTimeoutMs` into the profile so SDK transport sees the same config truth as HttpClient.
+- Verification: red tests first timed out at 5s; after fix `tests/providers/core/runtime/vercel-ai-sdk-openai-transport.spec.ts`, `tests/providers/core/runtime/service-profile-resolver.spec.ts`, and `tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts` pass 14/14. `npm run build:base`, `verify:function-map-compile-gate`, `verify:architecture-fallback-denylist`, and `verify:sse-architecture-boundary` pass. Live health read-only checks for 5520/5555 both returned `ready=true pipelineReady=true version=0.90.3683`.
+- Remaining unrelated gate failures: `verify:provider-failure-ban-blackbox` currently fails at existing runtime health trip assertion (`healthy` vs `tripped`) after three 503 strikes; executor stage Jest still fails because source `src/modules/llmswitch/bridge/native-exports.js` lacks `buildRequestStageRuntimeControlWritePlanNative` while TS/dist have it. These are separate from the SDK transport timeout fix.
+
+# 2026-07-09: responses-tool-utils TS facade deleted
+
+- Scope: continued single-import Responses bridge facade deletion after `native-followup-mainline-semantics.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts` and its coverage-only script `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs`.
+- `responses-openai-bridge.ts` now owns the local bridge type/mutation glue and calls Rust native tool-id / metadata helpers directly; no `responses-tool-utils` import remains in active source.
+- Residue/red tests now lock the old facade and coverage script physically absent.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused Jest 211/211; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=33`, `shellsWithProdImporters=32`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=33`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run verify:function-map-compile-gate`; stale active reference scan shows only absent-file tests and historical fixtures; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: runtime-metadata TS facade deleted
+
+- Scope: continued single-import conversion facade deletion after `responses-tool-utils.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/runtime-metadata.ts`.
+- `responses-openai-bridge.ts` now owns only the local runtime-metadata carrier mutation glue and calls Rust native `ensureRuntimeMetadataCarrierWithNative` directly for the existing force-web-search metadata carrier path.
+- Deleted stale `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` and removed it from `run-matrix-ci.mjs`; the script imported already-retired dist facades such as `bridge-instructions`, `bridge-message-utils`, and `runtime-metadata`.
+- Residue audit locks `runtime-metadata.{ts,js,map,d.ts}` absent.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused Jest 209/209; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=32`, `shellsWithProdImporters=31`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=32`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run verify:function-map-compile-gate`; script syntax check for `run-matrix-ci.mjs`; stale active reference scan shows only absent-file residue locks; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: retired native split helper imports cleaned
+
+- During commit review, `build:base` first failed because `native-hub-pipeline-resp-semantics-shared.js` and then `native-hub-bridge-action-semantics-shared.js` had been deleted while live TS imports remained.
+- Fixed without restoring the split helper facades: `native-shared-conversion-semantics-core.ts` now owns the small binding/stringify/parse/error glue, and active imports point there.
+- Verification PASS: active source grep for both retired helper paths returns no hits; `npm run verify:llmswitch-core-tsc` PASS; `npm run build:base` PASS.

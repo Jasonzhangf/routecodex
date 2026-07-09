@@ -1859,3 +1859,75 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts` is physically deleted. Do not restore it as a standalone native wrapper.
 - `sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts` may own small native binding/load/stringify/parse fail-fast glue for `buildGovernedFilterPayloadJson` / `buildGovernedFilterPayloadWithContextJson`; actual governed filter semantics remain Rust native truth.
 - Current shell audit after this deletion is `prodTsShellCount=43`, `shellsWithProdImporters=42`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Stopless next_step exact prompt lock
+
+- For `stopreason=2` / `schemaFeedback.reasonCode=stop_schema_continue_next_step`, the next provider-facing current-turn user prompt must be exactly the schema `next_step` carried as CLI `continuationPrompt`. Do not inject fixed prose such as `继续执行你给出的 next_step` or any other generic continuation guidance.
+- Verified lock: `scripts/tests/stopless-contract-blackbox.mjs` asserts the next_step case current-turn user texts equal `["rerun failing command"]`; focused Rust tests and stopless blackboxes passed on 2026-07-09. Full `build:base` was blocked by unrelated parallel deletion of native TS wrapper files still imported elsewhere.
+
+# 2026-07-09: Native split facade wrappers are retired
+
+- `native-shared-conversion-semantics-{call-id,id-stream,metadata,misc,openai,reasoning,responses,shell-utils,tool-definitions,toolcalls,tools}.ts`, `native-hub-bridge-action-semantics-tools-{request,core,post}.ts`, and `native-virtual-router-engine-proxy.ts` are physically deleted. Do not restore these split native wrapper files.
+- Aggregate owners are now the only TS native-call glue for these surfaces: `native-shared-conversion-semantics.ts`, `native-hub-bridge-action-semantics.ts`, and `native-virtual-router-runtime.ts`. Semantics remain Rust/NAPI truth; aggregate TS files may only keep binding/load/stringify/parse fail-fast glue.
+- Active tests/docs must import or allow the aggregate owner, not deleted split paths. Historical goal docs/backups may still mention the old split filenames as audit history, but active source/tests/scripts/docs architecture surfaces should not depend on them except absent-file residue gates.
+- Current shell audit after this deletion is `prodTsShellCount=39`, `shellsWithProdImporters=38`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: OpenAI message normalize TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts` is physically deleted. Do not restore it as the chat request normalization facade.
+- `chat-request-filters.ts` may keep only the env switch and native-call IO glue around `normalizeOpenaiChatRequestWithNative`; message/tool/history normalization truth remains Rust native.
+- Tests should call the aggregate native owner directly or exercise `chat-request-filters.ts`; active gates should assert the retired facade path is absent.
+- Current shell audit after this deletion is `prodTsShellCount=38`, `shellsWithProdImporters=37`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses response utils TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts` is physically deleted. Do not restore it as a response projection facade.
+- `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-response-utils.mjs` is also deleted because it only covered the retired facade and has no package/script caller.
+- `responses-openai-bridge.ts` may keep the public `buildChatResponseFromResponses` export and native invocation/JSON parse glue around `buildChatResponseFromResponsesFullWithNative`; unwrap, bridge actions, passthrough/snapshot retention, and chat carrier projection remain Rust native truth.
+- Current shell audit after this deletion is `prodTsShellCount=37`, `shellsWithProdImporters=36`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses OpenAI response-payload split facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts` is physically deleted. Do not restore it as a split bridge file.
+- `responses-openai-bridge.ts` owns the public `buildResponsesPayloadFromChat` / `extractRequestIdFromResponse` exports and may keep native-call/JSON glue around Rust response payload helpers; response payload closeout and retention truth remain Rust native.
+- Tests and scripts should import the aggregate `responses-openai-bridge.ts` surface, not the deleted `responses-openai-bridge/response-payload` subpath.
+- Current shell audit after this deletion is `prodTsShellCount=36`, `shellsWithProdImporters=35`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses host policy TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.ts` is physically deleted. Do not restore it as a host policy facade.
+- `responses-openai-bridge.ts` may call `evaluateResponsesHostPolicyWithNative` directly; host policy semantics remain Rust native truth.
+- Current shell audit after this deletion is `prodTsShellCount=35`, `shellsWithProdImporters=34`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Followup native facade is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts` is physically deleted. Do not restore it as a native followup wrapper or type source.
+- `servertool/types.d.ts` may carry local registration type declarations, but followup request id, loop warning, budget reset, skeleton config, and followup decision semantics remain Rust-owned in `followup-core` / router-hotpath NAPI.
+- Current shell audit after this deletion is `prodTsShellCount=34`, `shellsWithProdImporters=33`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Vercel AI SDK transport must inherit provider stream timeouts
+
+- 5555 stalls with `provider.sse_decode` followed by `error_action_backoff_wait delayMs=1000` are not necessarily backoff hangs. For request `openai-responses-orangeai.key1-glm-5.2-20260709T150926727-484198-1107`, the 1s backoff completed; the actual stall was the prepared SDK fetch/SSE path waiting about 5 minutes before `ECONNRESET`.
+- The owner is provider runtime transport, not SSE handler or Hub Pipeline. `VercelAiSdkOpenAiTransport.executePreparedRequest()` must enforce the same provider headers timeout and stream idle timeout contract as `HttpClient.postStreamOrResponse`.
+- Provider config overrides for `streamIdleTimeoutMs` and `streamHeadersTimeoutMs` must reach `ServiceProfileResolver` / `ProviderContext.profile`; otherwise `transportBackend = "vercel-ai-sdk"` silently ignores config values that native HttpClient honors.
+- `UPSTREAM_STREAM_IDLE_TIMEOUT` belongs to the recoverable `UPSTREAM_STREAM_TIMEOUT` family and must be allowed as a next-target/reroute transport error.
+- Verified source gates: focused SDK transport, service-profile resolver, and provider-failure policy tests pass, `build:base` passes, function-map compile gate passes, SSE architecture boundary passes, and fallback denylist passes. Broader provider-failure blackbox currently has a separate runtime-health-trip failure and should not be conflated with SDK stream timeout handling.
+
+# 2026-07-09: Responses tool utils TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts` and `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs` are physically deleted. Do not restore the facade or its coverage-only script.
+- `responses-openai-bridge.ts` may keep local `ToolCallIdStyle` / bridge-input mutation glue only to call Rust native `createToolCallIdTransformerWithNative`, `normalizeResponsesCallIdWithNative`, `normalizeFunctionCallIdWithNative`, `normalizeFunctionCallOutputIdWithNative`, and `stripInternalToolingMetadataWithNative`; tool id normalization and metadata stripping truth remain Rust native.
+- Current shell audit after this deletion is `prodTsShellCount=33`, `shellsWithProdImporters=32`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Runtime metadata TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/runtime-metadata.ts` is physically deleted. Do not restore it as a runtime metadata facade.
+- The only previous production consumer was `responses-openai-bridge.ts`; it may keep local native-call/mutation glue around Rust native `ensureRuntimeMetadataCarrierWithNative` only for its force-web-search metadata carrier path.
+- `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs` is physically deleted and removed from `run-matrix-ci.mjs`; it imported multiple already-retired dist facades and no longer represented active Rust/native bridge truth.
+- Current shell audit after this deletion is `prodTsShellCount=32`, `shellsWithProdImporters=31`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Deleted native split helpers must not keep live imports
+
+- `native-hub-pipeline-resp-semantics-shared.ts` and `native-hub-bridge-action-semantics-shared.ts` are retired split helpers. Do not restore them as facades.
+- If active source still imports a retired `native-*-shared.js`, move only binding/stringify/parse/error glue to an existing aggregate/core owner. Current owner for these helper surfaces is `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts`.
+- Verification lock: active source grep for the retired helper paths must return no hits, `npm run verify:llmswitch-core-tsc` must pass, and `npm run build:base` must pass.

@@ -36,7 +36,7 @@ const ENTRIES: ProviderErrorCatalogEntry[] = [
   { code: '502.7300', key: 'SSE_TO_JSON_ERROR', class: 'recoverable', aliases: ['SSE_TO_JSON_ERROR'], status: 502, description: 'SSE to JSON failed' },
   { code: '502.7401', key: 'UPSTREAM_STREAM_TERMINATED', class: 'recoverable', aliases: ['UPSTREAM_STREAM_TERMINATED'], status: 502, description: 'Stream terminated before completion' },
   { code: '502.7402', key: 'UPSTREAM_STREAM_INCOMPLETE', class: 'recoverable', aliases: ['UPSTREAM_STREAM_INCOMPLETE'], status: 502, description: 'Stream incomplete' },
-  { code: '504.7403', key: 'UPSTREAM_STREAM_TIMEOUT', class: 'recoverable', aliases: ['UPSTREAM_STREAM_TIMEOUT', 'UPSTREAM_HEADERS_TIMEOUT', 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT', 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'], status: 504, description: 'Upstream stream timeout family' },
+  { code: '504.7403', key: 'UPSTREAM_STREAM_TIMEOUT', class: 'recoverable', aliases: ['UPSTREAM_STREAM_TIMEOUT', 'UPSTREAM_HEADERS_TIMEOUT', 'UPSTREAM_STREAM_IDLE_TIMEOUT', 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT', 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'], status: 504, description: 'Upstream stream timeout family' },
 
   // local/network transport (non-http)
   { code: '0.1000', key: 'ECONNRESET', class: 'recoverable', aliases: ['ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENOTFOUND', 'ECONNABORTED'], description: 'Network connection failure family' },

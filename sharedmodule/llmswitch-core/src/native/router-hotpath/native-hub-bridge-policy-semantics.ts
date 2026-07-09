@@ -7,7 +7,7 @@ import {
   parseNativeJsonValueOrFail,
   readNativeFunction,
   safeStringify
-} from './native-hub-bridge-action-semantics-shared.js';
+} from './native-shared-conversion-semantics-core.js';
 
 export interface NativeBridgeActionDescriptor {
   name: string;

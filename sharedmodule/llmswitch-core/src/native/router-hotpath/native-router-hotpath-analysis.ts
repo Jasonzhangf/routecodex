@@ -1,4 +1,4 @@
-import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
+import { formatUnknownError } from './native-shared-conversion-semantics-core.js';
 
 type JsonObject = Record<string, unknown>;
 

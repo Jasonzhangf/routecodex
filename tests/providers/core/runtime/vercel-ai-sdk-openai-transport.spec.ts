@@ -1,3 +1,5 @@
+import { once } from 'node:events';
+
 import {
   applyOpenCodeZenThinkingDefaults,
   buildOpenAiSdkChatCallOptions,
@@ -362,6 +364,114 @@ describe('preserveOpenAiSdkChatWireSemantics', () => {
 });
 
 describe('VercelAiSdkOpenAiTransport', () => {
+  it('aborts prepared SDK fetch when upstream never returns headers', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = ((_: URL | RequestInfo, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        if (!signal) {
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    }) as typeof fetch;
+
+    try {
+      const transport = new VercelAiSdkOpenAiTransport();
+      await expect(
+        transport.executePreparedRequest(
+          {
+            endpoint: '/chat/completions',
+            headers: { authorization: 'Bearer test', 'content-type': 'application/json' },
+            targetUrl: 'https://example.com/v1/chat/completions',
+            body: {
+              model: 'glm-5.2',
+              stream: true,
+              messages: [{ role: 'user', content: 'hello' }]
+            },
+            wantsSse: true
+          },
+          {
+            requestId: 'req_sdk_headers_timeout',
+            profile: {
+              defaultBaseUrl: 'https://example.com/v1',
+              defaultEndpoint: '/chat/completions',
+              defaultModel: 'glm-5.2',
+              requiredAuth: [],
+              optionalAuth: [],
+              timeout: 200,
+              streamHeadersTimeoutMs: 40,
+              streamIdleTimeoutMs: 5_000
+            }
+          } as any
+        )
+      ).rejects.toMatchObject({
+        code: 'UPSTREAM_HEADERS_TIMEOUT',
+        statusCode: 504
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('aborts prepared SDK SSE streams when headers arrive but no bytes follow', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = (async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start() {
+          // Keep the upstream SSE body open without emitting any bytes.
+        }
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream; charset=utf-8' }
+      });
+    }) as typeof fetch;
+
+    try {
+      const transport = new VercelAiSdkOpenAiTransport();
+      const result = (await transport.executePreparedRequest(
+        {
+          endpoint: '/chat/completions',
+          headers: { authorization: 'Bearer test', 'content-type': 'application/json' },
+          targetUrl: 'https://example.com/v1/chat/completions',
+          body: {
+            model: 'glm-5.2',
+            stream: true,
+            messages: [{ role: 'user', content: 'hello' }]
+          },
+          wantsSse: true
+        },
+        {
+          requestId: 'req_sdk_stream_idle_timeout',
+          profile: {
+            defaultBaseUrl: 'https://example.com/v1',
+            defaultEndpoint: '/chat/completions',
+            defaultModel: 'glm-5.2',
+            requiredAuth: [],
+            optionalAuth: [],
+            timeout: 5_000,
+            streamHeadersTimeoutMs: 1_000,
+            streamIdleTimeoutMs: 40
+          }
+        } as any
+      )) as { sseStream: NodeJS.ReadableStream };
+
+      result.sseStream.resume();
+      const [error] = (await once(result.sseStream, 'error')) as [Error & { code?: string; statusCode?: number }];
+      expect(error).toMatchObject({
+        code: 'UPSTREAM_STREAM_IDLE_TIMEOUT',
+        statusCode: 504
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('builds request body via AI SDK without merging raw request fields', async () => {
     const originalFetch = global.fetch;
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];

@@ -547,12 +547,16 @@ verification:
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - src/providers/core/runtime/provider-error-catalog.ts
       - src/providers/core/runtime/http-request-executor.ts
+      - src/providers/core/runtime/service-profile-resolver.ts
+      - src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts
       - src/providers/core/runtime/provider-request-header-orchestrator.ts
       - src/providers/core/runtime/transport/oauth-header-preflight.ts
     contract:
       - tests/red-tests/error_chain_singleton_truth.test.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
+      - tests/providers/core/runtime/service-profile-resolver.spec.ts
+      - tests/providers/core/runtime/vercel-ai-sdk-openai-transport.spec.ts
     integration:
       - tests/server/runtime/executor-provider.retryable.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts

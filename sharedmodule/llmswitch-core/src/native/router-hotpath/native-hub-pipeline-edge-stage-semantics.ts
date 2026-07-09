@@ -3,7 +3,7 @@ import {
   isNativeDisabledByEnv,
 } from "./native-router-hotpath-loader.js";
 import { loadNativeRouterHotpathBindingForInternalUse } from "./native-router-hotpath.js";
-import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
+import { formatUnknownError } from './native-shared-conversion-semantics-core.js';
 
 const NON_BLOCKING_EDGE_STAGE_LOG_THROTTLE_MS = 60_000;
 const nonBlockingEdgeStageLogState = new Map<string, number>();

@@ -1,7 +1,9 @@
 import { failNativeRequired, isNativeDisabledByEnv } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { stringifyNativePayloadForError } from './native-hub-bridge-action-semantics-shared.js';
-import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
+import {
+  formatUnknownError,
+  stringifyNativePayloadForError
+} from './native-shared-conversion-semantics-core.js';
 
 // feature_id: hub.request_stage_pipeline_bridge
 // Rust owner symbols: run_hub_pipeline_lib_json, build_request_stage_metadata_dispatch_json,

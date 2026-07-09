@@ -559,6 +559,7 @@ export class HttpRequestExecutor {
     if (
       code === 'UPSTREAM_HEADERS_TIMEOUT'
       || code === 'UPSTREAM_STREAM_TIMEOUT'
+      || code === 'UPSTREAM_STREAM_IDLE_TIMEOUT'
       || code === 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
       || code === 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT'
     ) {

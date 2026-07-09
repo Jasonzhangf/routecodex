@@ -17,10 +17,17 @@ import type { UnknownObject } from '../../../../types/common-types.js';
 import type { ProviderContext } from '../../api/provider-types.js';
 import type { PreparedHttpRequest } from '../http-request-executor.js';
 import { normalizeResponsesToChatBody } from '../../../../utils/responses-to-chat.js';
+import { DEFAULT_PROVIDER, DEFAULT_TIMEOUTS } from '../../../../constants/index.js';
 
 type UnknownRecord = Record<string, unknown>;
 
 type OpenAiProviderOptions = Record<string, unknown>;
+
+type TransportTimeouts = {
+  timeoutMs: number;
+  streamIdleTimeoutMs: number;
+  streamHeadersTimeoutMs: number;
+};
 
 function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -44,8 +51,279 @@ function pickNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function pickPositiveNumber(value: unknown): number | undefined {
+  const numberValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(numberValue) && numberValue > 0 ? Math.floor(numberValue) : undefined;
+}
+
 function pickBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function pickFirstPositiveNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const picked = pickPositiveNumber(value);
+    if (picked !== undefined) {
+      return picked;
+    }
+  }
+  return undefined;
+}
+
+function readRuntimeMetadataNumber(context: ProviderContext, ...keys: string[]): number | undefined {
+  const runtime = asRecord(context.runtimeMetadata);
+  const runtimeMetadata = asRecord(runtime.metadata);
+  const target = asRecord(runtime.target ?? context.target);
+  for (const key of keys) {
+    const value = pickFirstPositiveNumber(runtime[key], runtimeMetadata[key], target[key]);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function resolveOpenAiSdkTransportTimeouts(context: ProviderContext): TransportTimeouts {
+  const envTimeout = pickFirstPositiveNumber(
+    process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS,
+    process.env.RCC_PROVIDER_TIMEOUT_MS
+  );
+  const envStreamIdleTimeoutMs = pickFirstPositiveNumber(
+    process.env.ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+    process.env.RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS
+  );
+  const envStreamHeadersTimeoutMs = pickFirstPositiveNumber(
+    process.env.ROUTECODEX_PROVIDER_STREAM_HEADERS_TIMEOUT_MS,
+    process.env.RCC_PROVIDER_STREAM_HEADERS_TIMEOUT_MS
+  );
+
+  const timeoutMs =
+    envTimeout ??
+    readRuntimeMetadataNumber(context, 'timeoutMs', 'timeout') ??
+    pickPositiveNumber(context.profile?.timeout) ??
+    DEFAULT_PROVIDER.TIMEOUT_MS;
+  const streamIdleTimeoutMs =
+    envStreamIdleTimeoutMs ??
+    readRuntimeMetadataNumber(
+      context,
+      'streamIdleTimeoutMs',
+      'providerStreamIdleTimeoutMs',
+      'streamNoContentTimeoutMs',
+      'providerStreamNoContentTimeoutMs'
+    ) ??
+    pickPositiveNumber(context.profile?.streamIdleTimeoutMs) ??
+    Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_IDLE_CAP_MS, timeoutMs);
+  const streamHeadersTimeoutMs =
+    envStreamHeadersTimeoutMs ??
+    readRuntimeMetadataNumber(
+      context,
+      'streamHeadersTimeoutMs',
+      'providerStreamHeadersTimeoutMs',
+      'headersTimeoutMs',
+      'providerHeadersTimeoutMs'
+    ) ??
+    pickPositiveNumber(context.profile?.streamHeadersTimeoutMs) ??
+    Math.min(DEFAULT_PROVIDER.STREAM_HEADERS_TIMEOUT_MS, timeoutMs);
+
+  return {
+    timeoutMs,
+    streamIdleTimeoutMs,
+    streamHeadersTimeoutMs
+  };
+}
+
+function buildTransportAbortError(code: string): Error & {
+  code: string;
+  status: number;
+  statusCode: number;
+} {
+  const error = Object.assign(new Error(code), {
+    name: 'AbortError',
+    code,
+    status: 504,
+    statusCode: 504
+  });
+  return error;
+}
+
+function normalizeFetchAbortError(error: unknown, signal: AbortSignal): unknown {
+  const reason = (signal as { reason?: unknown }).reason;
+  if (reason instanceof Error) {
+    return reason;
+  }
+  return error;
+}
+
+function attachExternalAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
+  if (!signal) {
+    return () => {};
+  }
+  const abortFromExternal = () => {
+    const reason = (signal as { reason?: unknown }).reason;
+    try {
+      (controller as unknown as { abort: (reason?: unknown) => void }).abort(reason);
+    } catch {
+      controller.abort();
+    }
+  };
+  if (signal.aborted) {
+    abortFromExternal();
+    return () => {};
+  }
+  signal.addEventListener('abort', abortFromExternal as EventListener, { once: true });
+  return () => {
+    try {
+      signal.removeEventListener('abort', abortFromExternal as EventListener);
+    } catch {
+      // ignore detach failure
+    }
+  };
+}
+
+function armInitialFetchTimeouts(args: {
+  controller: AbortController;
+  timeoutMs: number;
+  streamHeadersTimeoutMs: number;
+  externalAbortSignal?: AbortSignal;
+}): {
+  clearInitialTimers: () => void;
+  cleanup: () => void;
+  abortWithReason: (reason: string) => void;
+} {
+  const { controller, timeoutMs, streamHeadersTimeoutMs, externalAbortSignal } = args;
+  const abortWithReason = (reason: string) => {
+    try {
+      (controller as unknown as { abort: (reason?: unknown) => void }).abort(buildTransportAbortError(reason));
+    } catch {
+      controller.abort();
+    }
+  };
+  const timeoutId = setTimeout(() => abortWithReason('UPSTREAM_STREAM_TIMEOUT'), timeoutMs);
+  const headersTimeoutId = setTimeout(() => abortWithReason('UPSTREAM_HEADERS_TIMEOUT'), streamHeadersTimeoutMs);
+  timeoutId.unref?.();
+  headersTimeoutId.unref?.();
+  const detachExternalAbort = attachExternalAbortSignal(controller, externalAbortSignal);
+  const clearInitialTimers = () => {
+    clearTimeout(timeoutId);
+    clearTimeout(headersTimeoutId);
+  };
+  const cleanup = () => {
+    clearInitialTimers();
+    detachExternalAbort();
+  };
+  return {
+    clearInitialTimers,
+    cleanup,
+    abortWithReason
+  };
+}
+
+function wrapOpenAiSdkSseStreamWithIdleTimeout(args: {
+  stream: NodeJS.ReadableStream;
+  controller: AbortController;
+  idleTimeoutMs: number;
+  abortWithReason: (reason: string) => void;
+  cleanupTransport: () => void;
+}): NodeJS.ReadableStream {
+  const { stream, controller, idleTimeoutMs, abortWithReason, cleanupTransport } = args;
+  let cleaned = false;
+  let streamEnded = false;
+  let lastActivityAt = Date.now();
+  let idleWatchdog: NodeJS.Timeout | undefined;
+
+  const destroyStream = (error: Error) => {
+    try {
+      (stream as unknown as { destroy?: (error?: Error) => void }).destroy?.(error);
+    } catch {
+      try {
+        (stream as unknown as { destroy?: () => void }).destroy?.();
+      } catch {
+        // ignore destroy failure
+      }
+    }
+  };
+
+  const cleanup = () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    if (idleWatchdog) {
+      clearInterval(idleWatchdog);
+      idleWatchdog = undefined;
+    }
+    cleanupTransport();
+    try {
+      controller.signal.removeEventListener('abort', onAbort as EventListener);
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      stream.removeListener('close', onClose);
+    } catch {
+      // ignore cleanup failure
+    }
+  };
+
+  const onAbort = () => {
+    const reason = (controller.signal as { reason?: unknown }).reason;
+    const error = reason instanceof Error
+      ? reason
+      : Object.assign(new Error('UPSTREAM_STREAM_ABORTED'), {
+          code: 'UPSTREAM_STREAM_ABORTED',
+          status: 499,
+          statusCode: 499
+        });
+    cleanup();
+    destroyStream(error);
+  };
+  const onData = () => {
+    lastActivityAt = Date.now();
+  };
+  const onEnd = () => {
+    streamEnded = true;
+    cleanup();
+  };
+  const onError = () => {
+    cleanup();
+  };
+  const onClose = () => {
+    if (!streamEnded && !controller.signal.aborted) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore close abort failure
+      }
+    }
+    cleanup();
+  };
+
+  if (Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0) {
+    const intervalMs = Math.max(50, Math.min(1_000, Math.floor(idleTimeoutMs / 2) || 50));
+    idleWatchdog = setInterval(() => {
+      if (cleaned || streamEnded) {
+        return;
+      }
+      if (Date.now() - lastActivityAt < idleTimeoutMs) {
+        return;
+      }
+      const timeoutError = buildTransportAbortError('UPSTREAM_STREAM_IDLE_TIMEOUT');
+      abortWithReason('UPSTREAM_STREAM_IDLE_TIMEOUT');
+      destroyStream(timeoutError);
+    }, intervalMs);
+    idleWatchdog.unref?.();
+  }
+
+  controller.signal.addEventListener('abort', onAbort as EventListener);
+  stream.on('data', onData);
+  stream.once('end', onEnd);
+  stream.once('error', onError);
+  stream.once('close', onClose);
+  return stream;
 }
 
 function isOpenCodeZenProvider(context: ProviderContext): boolean {
@@ -638,29 +916,54 @@ export class VercelAiSdkOpenAiTransport {
       asRecord(argsResult.args)
     );
 
-    const response = await fetch(requestInfo.targetUrl, {
-      method: 'POST',
-      headers: requestInfo.headers,
-      body: JSON.stringify(body),
-      ...(requestInfo.abortSignal ? { signal: requestInfo.abortSignal } : {})
+    const transportTimeouts = resolveOpenAiSdkTransportTimeouts(context);
+    const controller = new AbortController();
+    const timeoutControl = armInitialFetchTimeouts({
+      controller,
+      timeoutMs: transportTimeouts.timeoutMs,
+      streamHeadersTimeoutMs: transportTimeouts.streamHeadersTimeoutMs,
+      externalAbortSignal: requestInfo.abortSignal
     });
+    let response: Response;
+    try {
+      response = await fetch(requestInfo.targetUrl, {
+        method: 'POST',
+        headers: requestInfo.headers,
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      timeoutControl.clearInitialTimers();
+    } catch (error) {
+      timeoutControl.cleanup();
+      throw normalizeFetchAbortError(error, controller.signal);
+    }
 
     if (!response.ok) {
+      timeoutControl.cleanup();
       throw buildHttpError(response.status, await response.text());
     }
 
     const responseHeaders = responseHeadersToRecord(response.headers);
     if (requestInfo.wantsSse) {
       if (!response.body) {
+        timeoutControl.cleanup();
         throw buildHttpError(502, 'missing upstream SSE body');
       }
+      const nodeStream = Readable.fromWeb(response.body as never);
       return {
-        sseStream: Readable.fromWeb(response.body as never),
+        sseStream: wrapOpenAiSdkSseStreamWithIdleTimeout({
+          stream: nodeStream,
+          controller,
+          idleTimeoutMs: transportTimeouts.streamIdleTimeoutMs,
+          abortWithReason: timeoutControl.abortWithReason,
+          cleanupTransport: timeoutControl.cleanup
+        }),
         ...(responseHeaders ? { headers: responseHeaders } : {})
       };
     }
 
     const responseText = await response.text();
+    timeoutControl.cleanup();
     let responseBody: UnknownObject;
     try {
       responseBody = JSON.parse(responseText) as UnknownObject;

@@ -10,7 +10,7 @@ import {
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
-} from './native-hub-bridge-action-semantics-shared.js';
+} from './native-shared-conversion-semantics-core.js';
 
 
 // Inlined from retired native-hub-bridge-action-semantics-tools-request.ts

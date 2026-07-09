@@ -20,6 +20,8 @@ export interface ServiceProfileResolverInput {
       defaultModel?: string;
       timeout?: number;
       maxRetries?: number;
+      streamIdleTimeoutMs?: number;
+      streamHeadersTimeoutMs?: number;
       headers?: Record<string, string>;
     };
     protocol?: string;
@@ -47,6 +49,8 @@ export class ServiceProfileResolver {
     const defaultModelFromCfg = (cfg.overrides?.defaultModel || cfg.defaultModel || '').trim();
     const timeoutFromCfg = cfg.overrides?.timeout ?? cfg.timeout;
     const maxRetriesFromCfg = cfg.overrides?.maxRetries ?? cfg.maxRetries;
+    const streamIdleTimeoutFromCfg = cfg.overrides?.streamIdleTimeoutMs;
+    const streamHeadersTimeoutFromCfg = cfg.overrides?.streamHeadersTimeoutMs;
     const headersFromCfg = (cfg.overrides?.headers || cfg.headers) as Record<string, string> | undefined;
     const authCapsFromCfg = cfg.authCapabilities;
 
@@ -56,6 +60,8 @@ export class ServiceProfileResolver {
       !!defaultModelFromCfg ||
       typeof timeoutFromCfg === 'number' ||
       typeof maxRetriesFromCfg === 'number' ||
+      typeof streamIdleTimeoutFromCfg === 'number' ||
+      typeof streamHeadersTimeoutFromCfg === 'number' ||
       !!authCapsFromCfg ||
       !!headersFromCfg;
 
@@ -119,6 +125,14 @@ export class ServiceProfileResolver {
         typeof maxRetriesFromCfg === 'number'
           ? maxRetriesFromCfg
           : (baseProfile?.maxRetries ?? DEFAULT_PROVIDER.MAX_RETRIES);
+      const streamIdleTimeoutMs =
+        typeof streamIdleTimeoutFromCfg === 'number' && Number.isFinite(streamIdleTimeoutFromCfg)
+          ? streamIdleTimeoutFromCfg
+          : baseProfile?.streamIdleTimeoutMs;
+      const streamHeadersTimeoutMs =
+        typeof streamHeadersTimeoutFromCfg === 'number' && Number.isFinite(streamHeadersTimeoutFromCfg)
+          ? streamHeadersTimeoutFromCfg
+          : baseProfile?.streamHeadersTimeoutMs;
 
       return {
         defaultBaseUrl,
@@ -129,6 +143,8 @@ export class ServiceProfileResolver {
         headers: mergedHeaders,
         timeout,
         maxRetries,
+        ...(streamIdleTimeoutMs !== undefined ? { streamIdleTimeoutMs } : {}),
+        ...(streamHeadersTimeoutMs !== undefined ? { streamHeadersTimeoutMs } : {}),
         hooks: baseProfile?.hooks,
         features: baseProfile?.features,
         extensions: {

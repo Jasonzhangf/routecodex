@@ -4,7 +4,7 @@ import {
 } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { sanitizeFormatEnvelopeWithNative } from './native-hub-pipeline-edge-stage-semantics.js';
-import { formatUnknownError } from './native-hub-pipeline-resp-semantics-shared.js';
+import { formatUnknownError } from './native-shared-conversion-semantics-core.js';
 
 
 export interface NativeReqInboundChatToStandardizedInput {

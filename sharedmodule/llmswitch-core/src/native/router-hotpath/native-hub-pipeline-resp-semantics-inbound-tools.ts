@@ -5,7 +5,7 @@ import {
   isNativeDisabledByEnv,
   readNativeFunction,
   safeStringify
-} from './native-hub-pipeline-resp-semantics-shared.js';
+} from './native-shared-conversion-semantics-core.js';
 
 export interface NativeRespInboundReasoningNormalizeInput {
   payload: Record<string, unknown>;
