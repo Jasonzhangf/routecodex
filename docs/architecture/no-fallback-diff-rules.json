@@ -753,11 +753,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-protocol-blackbox.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-outbound-context-merge.mjs",
       "textContains": ""
     },

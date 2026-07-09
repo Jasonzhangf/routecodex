@@ -2,7 +2,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 import {
+  buildChatResponseFromResponsesFullWithNative,
+  buildProviderProtocolErrorWithNative,
   createToolCallIdTransformerWithNative,
+  ensureBridgeInstructionsWithNative,
+  ensureRuntimeMetadataCarrierWithNative,
+  mapChatToolsToBridgeWithNative,
   normalizeFunctionCallIdWithNative,
   normalizeFunctionCallOutputIdWithNative,
   normalizeResponsesCallIdWithNative,
@@ -12,7 +17,6 @@ import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
 } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
-import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
   buildBridgeHistoryWithNative,
@@ -34,12 +38,6 @@ import {
   unwrapResponsesDataWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 import {
-  buildChatResponseFromResponsesFullWithNative,
-  buildProviderProtocolErrorWithNative,
-  ensureBridgeInstructionsWithNative,
-  mapChatToolsToBridgeWithNative
-} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
-import {
   buildResponsesPayloadFromChatWithNative,
   consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
@@ -51,12 +49,17 @@ import {
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
 } from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
+import {
+  METADATA_CENTER_SYMBOL,
+  RUST_SNAPSHOT_SYMBOL
+} from '../hub/metadata-center-runtime-control-writer.js';
 
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;
 type ProviderErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
 type ToolCallIdStyle = 'preserve' | 'fc';
+type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
 
 interface CallIdTransformer {
   normalizeCallId(raw: unknown): string;
@@ -150,6 +153,55 @@ function isJsonObject(value: unknown): value is JsonObject {
 
 function jsonClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function preserveMetadataCenterBinding(
+  source: Record<string, unknown>,
+  target: Record<string, unknown>
+): void {
+  const sourceCenter = Reflect.get(source, METADATA_CENTER_SYMBOL);
+  if (sourceCenter !== undefined) {
+    Reflect.set(target, METADATA_CENTER_SYMBOL, sourceCenter);
+  }
+  const sourceMetadata = source.metadata;
+  const targetMetadata = target.metadata;
+  if (
+    sourceMetadata
+    && typeof sourceMetadata === 'object'
+    && !Array.isArray(sourceMetadata)
+    && targetMetadata
+    && typeof targetMetadata === 'object'
+    && !Array.isArray(targetMetadata)
+  ) {
+    const metadataCenter = Reflect.get(sourceMetadata as Record<string, unknown>, METADATA_CENTER_SYMBOL);
+    if (metadataCenter !== undefined) {
+      Reflect.set(targetMetadata as Record<string, unknown>, METADATA_CENTER_SYMBOL, metadataCenter);
+    }
+  }
+  const sourceSnapshot = Reflect.get(source, RUST_SNAPSHOT_SYMBOL);
+  if (sourceSnapshot !== undefined) {
+    Reflect.set(target, RUST_SNAPSHOT_SYMBOL, sourceSnapshot);
+  }
+}
+
+function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObject {
+  if (!carrier || typeof carrier !== 'object') {
+    throw new Error('ensureRuntimeMetadata requires object carrier');
+  }
+  const nextCarrier = ensureRuntimeMetadataCarrierWithNative(carrier);
+  preserveMetadataCenterBinding(carrier, nextCarrier as Record<string, unknown>);
+  for (const key of Object.keys(carrier)) {
+    if (!Object.prototype.hasOwnProperty.call(nextCarrier, key)) {
+      delete (carrier as Record<string, unknown>)[key];
+    }
+  }
+  Object.assign(carrier, nextCarrier);
+  const existing = (carrier as RuntimeMetadataCarrier).__rt;
+  if (existing && isJsonObject(existing)) {
+    return existing;
+  }
+  (carrier as RuntimeMetadataCarrier).__rt = {};
+  return (carrier as RuntimeMetadataCarrier).__rt as JsonObject;
 }
 
 function assertResponsesBridgeToolNativeAvailable(): void {

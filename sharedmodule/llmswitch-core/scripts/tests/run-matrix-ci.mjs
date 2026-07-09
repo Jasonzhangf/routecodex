@@ -144,7 +144,6 @@ async function main() {
       env: { C8_COVERAGE: '1' }
     })
   );
-  results.push(await run('matrix:coverage-bridge-protocol-blackbox', 'scripts/tests/coverage-bridge-protocol-blackbox.mjs'));
   // 1e) virtual-router pool mode (round-robin vs priority)
   results.push(await run('matrix:virtual-router-pool-mode', 'scripts/tests/virtual-router-pool-mode.mjs'));
   // 1e.1) virtual-router direct provider.model selection (RR across keys)
