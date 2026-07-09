@@ -7,7 +7,7 @@
  */
 
 import {
-  colorizeHttpLogKeyValue,
+  colorizeImportantLogKeyValue,
   highlightStandaloneHttpCodeTokens
 } from '../../../utils/http-log-code-color.js';
 
@@ -140,7 +140,7 @@ export function highlightLogKeyValues(text: string, baseColor: string): string {
       if (ansiPrefix) {
         return match;
       }
-      const httpCodeValue = colorizeHttpLogKeyValue(key, value, suffix, baseColor);
+      const httpCodeValue = colorizeImportantLogKeyValue(key, value, suffix, baseColor);
       if (httpCodeValue) {
         return httpCodeValue;
       }

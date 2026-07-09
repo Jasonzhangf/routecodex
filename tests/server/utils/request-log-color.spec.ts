@@ -116,7 +116,8 @@ describe('request log color registry', () => {
     expect(line.startsWith(String(expectedColor))).toBe(true);
     expect(line).not.toContain('\x1b[38;5;208m[virtual-router-hit]\x1b[0m');
     expect(stripAnsiCodes(line)).toContain(`req=${requestId} tools/pool -> provider.model`);
-    expect(line.includes('\x1b[97m')).toBe(false);
+    expect(line).toContain('\x1b[97mtools/pool');
+    expect(line).toContain('-> \x1b[97mprovider.model');
   });
 
   it('uses one registered session color for virtual-router-hit, response, and usage lines', () => {
@@ -269,7 +270,9 @@ describe('request log color registry', () => {
 
     expect(expectedColor).toBeDefined();
     expect(line.startsWith(String(expectedColor))).toBe(true);
-    expect(line).toContain(`sid=${sessionId} search/pool -> provider.model`);
+    expect(stripAnsiCodes(line)).toContain(`sid=${sessionId} search/pool -> provider.model`);
+    expect(line).toContain('\x1b[97msearch/pool');
+    expect(line).toContain('-> \x1b[97mprovider.model');
   });
 
   it('colors virtual-router-hit lines from bracket session without request context', () => {
@@ -281,7 +284,9 @@ describe('request log color registry', () => {
 
     expect(expectedColor).toBeDefined();
     expect(line.startsWith(String(expectedColor))).toBe(true);
-    expect(line).toContain(`[${sessionId}] tools/pool -> provider.model`);
+    expect(stripAnsiCodes(line)).toContain(`[${sessionId}] tools/pool -> provider.model`);
+    expect(line).toContain('\x1b[97mtools/pool');
+    expect(line).toContain('-> \x1b[97mprovider.model');
   });
 
   it('uses different virtual-router-hit colors for different session ids', () => {
@@ -363,11 +368,12 @@ describe('request log color registry', () => {
 
     expect(line.startsWith(String(outerColor))).toBe(true);
     expect(line).toContain(`\x1b[97mstatus=200\x1b[0m${outerColor}`);
-    expect(line).toContain('finish_reason=tool_calls');
-    expect(line).toContain('status=200');
+    expect(line).toContain(`\x1b[97mfinish_reason=tool_calls\x1b[0m${outerColor}`);
+    expect(stripAnsiCodes(line)).toContain('status=200');
+    expect(stripAnsiCodes(line)).toContain('finish_reason=tool_calls');
   });
 
-  it('highlights HTTP error codes red while preserving request session color', () => {
+  it('highlights important error fields white while preserving request session color', () => {
     const sessionId = 'session-http-code-highlight';
     const outerColor = resolveSessionAnsiColor(sessionId);
     const line = colorizeRequestLog(
@@ -379,21 +385,41 @@ describe('request log color registry', () => {
 
     expect(line.startsWith(String(outerColor))).toBe(true);
     expect(line.startsWith('\x1b[31m')).toBe(false);
-    expect(line).toContain(`\x1b[31mstatus=429\x1b[0m${outerColor}`);
-    expect(line).toContain(`\x1b[31mcode=HTTP_429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[97mstatus=429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[97mcode=HTTP_429\x1b[0m${outerColor}`);
     expect(line).toContain(`\x1b[97mupstreamCode=HTTP_200\x1b[0m${outerColor}`);
     expect(stripAnsiCodes(line)).toContain('status=429 code=HTTP_429 upstreamCode=HTTP_200');
   });
 
-  it('highlights HTTP codes in scoped console lines without request color context', () => {
+  it('highlights important fields in scoped console lines without request color context', () => {
     const line = colorizeRequestScopedLogLine(
       '[provider-switch] req=req-no-session status=500 code=HTTP_500 upstreamCode=HTTP_302'
     );
 
-    expect(line).toContain('\x1b[31mstatus=500\x1b[0m');
-    expect(line).toContain('\x1b[31mcode=HTTP_500\x1b[0m');
+    expect(line).toContain('\x1b[97mstatus=500\x1b[0m');
+    expect(line).toContain('\x1b[97mcode=HTTP_500\x1b[0m');
     expect(line).toContain('\x1b[97mupstreamCode=HTTP_302\x1b[0m');
     expect(stripAnsiCodes(line)).toContain('status=500 code=HTTP_500 upstreamCode=HTTP_302');
+  });
+
+  it('highlights model, route, and virtual-router target fields white', () => {
+    const sessionId = 'session-important-log-fields';
+    const outerColor = resolveSessionAnsiColor(sessionId);
+    const requestId = 'req-important-fields';
+
+    registerRequestLogContext(requestId, { sessionId });
+    const usageLine = colorizeRequestScopedLogLine(
+      `[usage] req=${requestId} route=router-direct:longcontext model=gpt-5.4->gpt-5.5 usage=unreported`
+    );
+    const hitLine = colorizeVirtualRouterHitLogLine(
+      `[virtual-router-hit] req=${requestId} longcontext/gateway-priority-5520-priority-longcontext -> cc[key1].gpt-5.5 reason=longcontext:token-threshold`
+    );
+
+    expect(usageLine).toContain(`\x1b[97mroute=router-direct:longcontext\x1b[0m${outerColor}`);
+    expect(usageLine).toContain(`\x1b[97mmodel=gpt-5.4->gpt-5.5\x1b[0m${outerColor}`);
+    expect(hitLine).toContain(`\x1b[97mlongcontext/gateway-priority-5520-priority-longcontext\x1b[0m${outerColor}`);
+    expect(hitLine).toContain(`-> \x1b[97mcc[key1].gpt-5.5\x1b[0m${outerColor}`);
+    expect(stripAnsiCodes(hitLine)).toContain('longcontext/gateway-priority-5520-priority-longcontext -> cc[key1].gpt-5.5');
   });
 
   it('uses the registered session color for failed request logs', () => {

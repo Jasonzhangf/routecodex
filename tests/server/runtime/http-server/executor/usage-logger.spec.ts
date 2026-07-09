@@ -168,7 +168,7 @@ describe('usage logger timing summary', () => {
       expect(line.startsWith(String(tmuxColor))).toBe(false);
     }
     expect(renderedLines).toHaveLength(1);
-    expect(rendered).toContain('finish_reason=\x1b[97mstop');
+    expect(rendered).toContain('\x1b[97mfinish_reason=stop');
     expect(rendered).toContain('project=/tmp/demo-project:5555');
     expect(rendered).toContain('route=tools');
     expect(rendered).toContain('model=gpt-5->demo-model');

@@ -1,6 +1,6 @@
 import { resolveEffectiveRequestId } from './request-id-manager.js';
 import { resolveSessionAnsiColor, resolveSessionLogColorKey } from '../../utils/session-log-color.js';
-import { highlightHttpCodesInLogText } from './http-log-code-color.js';
+import { highlightImportantLogFields } from './http-log-code-color.js';
 
 const ANSI_RESET = '\x1b[0m';
 const ANSI_ERROR_LOG_COLOR = '\x1b[31m';
@@ -201,12 +201,12 @@ export function colorizeRequestLog(
   const requestColor = resolveRequestLogColorToken(requestId, context);
   const color = requestColor ?? (options?.isError ? ANSI_ERROR_LOG_COLOR : undefined);
   if (!color) {
-    return highlightHttpCodesInLogText(text);
+    return highlightImportantLogFields(text);
   }
   if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
-    return highlightHttpCodesInLogText(text, color);
+    return highlightImportantLogFields(text, color);
   }
-  return `${color}${highlightHttpCodesInLogText(stripAnsiCodes(text), color)}${ANSI_RESET}`;
+  return `${color}${highlightImportantLogFields(stripAnsiCodes(text), color)}${ANSI_RESET}`;
 }
 
 export function colorizeVirtualRouterHitLogLine(text: string): string {
@@ -215,9 +215,9 @@ export function colorizeVirtualRouterHitLogLine(text: string): string {
   }
   const color = resolveVirtualRouterHitColorToken(text);
   if (!color) {
-    return highlightHttpCodesInLogText(text);
+    return highlightImportantLogFields(text);
   }
-  return `${color}${highlightHttpCodesInLogText(stripAnsiCodes(text), color)}${ANSI_RESET}`;
+  return `${color}${highlightImportantLogFields(stripAnsiCodes(text), color)}${ANSI_RESET}`;
 }
 
 export function colorizeRequestScopedLogLine(text: string): string {
@@ -230,12 +230,12 @@ export function colorizeRequestScopedLogLine(text: string): string {
   }
   const color = resolveRegisteredRequestColorToken(resolveRequestScopedLogLineRequestKey(text));
   if (!color) {
-    return highlightHttpCodesInLogText(text);
+    return highlightImportantLogFields(text);
   }
   if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
-    return highlightHttpCodesInLogText(text, color);
+    return highlightImportantLogFields(text, color);
   }
-  return `${color}${highlightHttpCodesInLogText(stripAnsiCodes(text), color)}${ANSI_RESET}`;
+  return `${color}${highlightImportantLogFields(stripAnsiCodes(text), color)}${ANSI_RESET}`;
 }
 
 export function formatHighlightedFinishReasonLabel(finishReason?: string): string {
