@@ -1,7 +1,6 @@
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
 import {
   createToolCallIdTransformer,
   enforceToolCallIdStyle,
@@ -42,6 +41,7 @@ import {
   buildResponsesPayloadFromChatWithNative,
   consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
+  evaluateResponsesHostPolicyWithNative,
   planResponsesPayloadFromChatCloseoutWithNative,
 } from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
@@ -814,7 +814,10 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
 }
 
 function shouldStripHostManagedFields(context?: ResponsesRequestContext): boolean {
-  const result = evaluateResponsesHostPolicy(context, typeof context?.targetProtocol === 'string' ? context?.targetProtocol : undefined);
+  const result = evaluateResponsesHostPolicyWithNative(
+    context,
+    typeof context?.targetProtocol === 'string' ? context?.targetProtocol : undefined
+  );
   return result.shouldStripHostManagedFields;
 }
 
