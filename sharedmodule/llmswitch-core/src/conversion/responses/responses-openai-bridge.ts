@@ -32,6 +32,7 @@ import {
   unwrapResponsesDataWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 import {
+  buildChatResponseFromResponsesFullWithNative,
   buildProviderProtocolErrorWithNative,
   ensureBridgeInstructionsWithNative,
   mapChatToolsToBridgeWithNative
@@ -810,10 +811,20 @@ function shouldStripHostManagedFields(context?: ResponsesRequestContext): boolea
   return result.shouldStripHostManagedFields;
 }
 
+export function buildChatResponseFromResponses(payload: unknown): Record<string, unknown> | unknown {
+  if (!payload || typeof payload !== 'object') return payload;
+  const output = buildChatResponseFromResponsesFullWithNative({
+    payload: JSON.stringify(payload)
+  });
+  const parsed = JSON.parse(output) as { result?: string };
+  if (typeof parsed.result !== 'string') {
+    throw new Error('[responses-openai-bridge] native full conversion returned no result');
+  }
+  return JSON.parse(parsed.result);
+}
+
 export {
   buildResponsesPayloadFromChat,
   extractRequestIdFromResponse
 } from './responses-openai-bridge/response-payload.js';
-
-export { buildChatResponseFromResponses } from '../shared/responses-response-utils.js';
 // (imports moved to top)

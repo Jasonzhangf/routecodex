@@ -790,12 +790,20 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('responses response utils must not own response restore semantics in TS', () => {
-    const filePath = path.join(
+    const retiredPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    const bridgeSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+      'utf8',
+    );
+    const source = bridgeSource.slice(
+      bridgeSource.indexOf('export function buildChatResponseFromResponses'),
+      bridgeSource.indexOf('export {', bridgeSource.indexOf('export function buildChatResponseFromResponses')),
+    );
 
+    expect(fs.existsSync(retiredPath)).toBe(false);
     expect(source).toContain('buildChatResponseFromResponsesFullWithNative');
     expect(source).not.toContain('responses-reasoning-registry');
     expect(source).not.toContain('createBridgeActionState');
@@ -4641,6 +4649,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store-types.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.js.map',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.d.ts',

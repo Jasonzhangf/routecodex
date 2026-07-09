@@ -1955,7 +1955,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
-      - sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath
     forbidden_paths:
       - src/providers
@@ -1976,7 +1975,7 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "TS `responses-response-utils.ts` is native invocation and JSON parse glue only; unwrap, bridge response actions, passthrough/snapshot retention, and chat carrier projection belong to Rust."
+      - "The retired `responses-response-utils.ts` facade must stay deleted; `responses-openai-bridge.ts` may keep only the public bridge export and native invocation/JSON parse glue for `buildChatResponseFromResponses`."
       - "Zero-consumer TS wrappers for `collectToolCallsFromResponses` and `resolveFinishReason` must remain physically deleted from the shared response utility surface."
       - "Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must remain physically deleted from TS/native bridge/Rust NAPI public surfaces."
       - "Server response converter must not run provider-specific bridge bypasses or post-bridge TS shape predicates to rebuild Responses payloads."
