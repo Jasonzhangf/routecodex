@@ -3219,12 +3219,14 @@ describe('hub pipeline stage residue audit', () => {
 
   it('exec_command argument normalization must be native-owned', () => {
     const repoRoot = process.cwd();
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts'),
+    const shellPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts');
+    expect(fs.existsSync(shellPath)).toBe(false);
+
+    const requiredExportsSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
       'utf8'
     );
-
-    expect(source).toContain('normalizeExecCommandArgsWithNative');
+    expect(requiredExportsSource).toContain('"normalizeExecCommandArgsJson"');
     const forbiddenPatterns = [
       { label: 'local command key list', pattern: /COMMAND_KEYS/u },
       { label: 'local command field detector', pattern: /hasCommandField/u },
@@ -3237,9 +3239,21 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local escalated permission mapping', pattern: /with_escalated_permissions/u },
       { label: 'local alias field mapping', pattern: /timeoutMs|max_tokens|yield_ms|wait_ms|workDir/u },
     ];
-    const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source))
-      .map(({ label }) => label);
+    const helperRoots = [
+      'tests/sharedmodule/helpers',
+      'scripts/helpers',
+    ];
+    const findings = helperRoots.flatMap((root) => {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) return [];
+      return walkFiles(rootPath, ['.ts', '.js', '.mjs']).flatMap((filePath) => {
+        const source = fs.readFileSync(filePath, 'utf8');
+        const relativePath = path.relative(repoRoot, filePath);
+        return forbiddenPatterns
+          .filter(({ pattern }) => pattern.test(source))
+          .map(({ label }) => `${relativePath}:${label}`);
+      });
+    });
 
     expect(findings).toEqual([]);
   });
@@ -4562,10 +4576,15 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('tool args JSON artifact repair must be native-owned', () => {
-    const argsJsonPath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/tools/args-json.ts');
-    const source = fs.readFileSync(argsJsonPath, 'utf8');
+    const repoRoot = process.cwd();
+    const argsJsonPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/args-json.ts');
+    expect(fs.existsSync(argsJsonPath)).toBe(false);
 
-    expect(source).toContain('parseToolArgsJsonWithArtifactRepairWithNative');
+    const requiredExportsSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      'utf8'
+    );
+    expect(requiredExportsSource).toContain('"parseToolArgsJsonWithArtifactRepairJson"');
     const forbiddenPatterns = [
       { label: 'local arg key regex', pattern: /arg_key\\s\*|arg_key\\s\*>|<arg_key/u },
       { label: 'local arg value regex', pattern: /arg_value\\s\*|arg_value\\s\*>|<arg_value/u },
@@ -4576,9 +4595,21 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local recursive object repair', pattern: /repairArgKeyArtifactsInObject/u },
       { label: 'local parse fallback warning', pattern: /JSON\.parse failed after repair|console\.warn/u },
     ];
-    const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source))
-      .map(({ label }) => label);
+    const helperRoots = [
+      'tests/sharedmodule/helpers',
+      'scripts/helpers',
+    ];
+    const findings = helperRoots.flatMap((root) => {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) return [];
+      return walkFiles(rootPath, ['.ts', '.js', '.mjs']).flatMap((filePath) => {
+        const source = fs.readFileSync(filePath, 'utf8');
+        const relativePath = path.relative(repoRoot, filePath);
+        return forbiddenPatterns
+          .filter(({ pattern }) => pattern.test(source))
+          .map(({ label }) => `${relativePath}:${label}`);
+      });
+    });
 
     expect(findings).toEqual([]);
   });

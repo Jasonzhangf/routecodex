@@ -362,3 +362,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Residue audit now locks the validator shell as physically absent and scans helper surfaces for old TS hardcoded guard/policy logic.
 - Strict audit now reports `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=4`.
 - Verification passed: focused exec_command/residue Jest 205/205, script syntax checks, strict shell audit, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, exact source/package ref scan, and `git diff --check`.
+
+### 2026-07-09 exec_command parse/normalize shells deleted
+
+- Physically deleted `sharedmodule/llmswitch-core/src/tools/args-json.ts` and `sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts`.
+- `tests/sharedmodule/helpers/tool-validation-direct-native.ts` now calls direct Rust/NAPI `parseToolArgsJsonWithArtifactRepairJson` and `normalizeExecCommandArgsJson`.
+- Removed the deleted `args-json.ts` path from `docs/architecture/no-fallback-diff-rules.json`.
+- Residue audit now locks both paths physically absent and scans helper surfaces for old local parser/normalizer logic.
+- Strict audit now reports `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=4`.
+- Verification passed: focused exec_command/residue Jest 205/205, script syntax checks, strict shell audit, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, exact source/package ref scan, and `git diff --check`.

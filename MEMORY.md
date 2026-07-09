@@ -1785,3 +1785,9 @@
 - Exec command validation evidence should call direct Rust/NAPI exports: `normalizeExecCommandArgsJson` for compat/canonical argument normalization, `validateCanonicalClientToolCallJson` for canonical client tool-call shape, and `validateExecCommandGuardJson` for dangerous command/policy guard.
 - `validateCanonicalClientToolCallJson` is now part of `native-router-hotpath-required-exports.ts`; missing export is a binding contract failure, not a reason to restore a TS validator shell.
 - Current shell audit after this deletion is `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Exec command parse/normalize TS facades are retired
+
+- `sharedmodule/llmswitch-core/src/tools/args-json.ts` and `sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts` are physically deleted. Do not restore parse/normalize TS facades around Rust tool governance.
+- Test/script evidence should call direct Rust/NAPI `parseToolArgsJsonWithArtifactRepairJson` and `normalizeExecCommandArgsJson`; helper wrappers must remain test/script glue only and must not reimplement parser or normalization semantics.
+- Current shell audit after this deletion is `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

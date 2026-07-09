@@ -1,4 +1,3 @@
-import { parseToolArgsJson } from '../../../sharedmodule/llmswitch-core/src/tools/args-json.js';
 import { readNativeFunction } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -101,6 +100,19 @@ function parseNativeValidationResult(raw: string, capability: string): UnknownRe
   return parsed;
 }
 
+function parseToolArgsJsonDirectNative(input: unknown): unknown {
+  const capability = 'parseToolArgsJsonWithArtifactRepairJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    throw new Error(`[llmswitch-core] ${capability} not available`);
+  }
+  const raw = fn(JSON.stringify(typeof input === 'string' ? input : ''));
+  if (typeof raw !== 'string') {
+    throw new Error(`[llmswitch-core] ${capability} returned non-string result`);
+  }
+  return JSON.parse(raw) as unknown;
+}
+
 function normalizeExecCommandArgsDirectNative(
   args: unknown,
   schemaMode: 'compat' | 'canonical',
@@ -184,7 +196,7 @@ export function validateApplyPatchToolCallDirectNative(argsString: string): {
   message?: string;
   normalizedArgs?: string;
 } {
-  const rawArgsAny = parseToolArgsJson(typeof argsString === 'string' ? argsString : '{}');
+  const rawArgsAny = parseToolArgsJsonDirectNative(typeof argsString === 'string' ? argsString : '{}');
   const rawArgsWasObject = (() => {
     if (typeof argsString !== 'string') {
       return isRecord(rawArgsAny);
@@ -213,7 +225,7 @@ export function validateExecCommandToolCallDirectNative(
   argsString: string,
   options?: { execCommandGuard?: { enabled?: boolean; policyFile?: string }; schemaMode?: 'compat' | 'canonical' },
 ) {
-  const rawArgsAny = parseToolArgsJson(typeof argsString === 'string' ? argsString : '{}');
+  const rawArgsAny = parseToolArgsJsonDirectNative(typeof argsString === 'string' ? argsString : '{}');
   const guard = options?.execCommandGuard;
   const schemaMode = options?.schemaMode === 'canonical' ? 'canonical' : 'compat';
   const normalized = normalizeExecCommandArgsDirectNative(rawArgsAny, schemaMode);

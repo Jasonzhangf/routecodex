@@ -28166,3 +28166,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts` now locks `validateCanonicalClientToolCallJson` as required native binding surface.
 - Residue audit now locks the deleted validator path physically absent and scans helper surfaces for old TS hardcoded guard/policy logic.
 - Verification PASS: focused Jest 205/205; script syntax checks; strict shell audit `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=64`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan only found the absent-path residue assertion; `git diff --check`.
+
+# 2026-07-09: llmswitch exec_command parse/normalize thin shells deleted
+
+- Scope: continued zero-prod/no-host server-side tool shell deletion pass after validator deletion.
+- Deleted `sharedmodule/llmswitch-core/src/tools/args-json.ts` and `sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts`; both were native facades with no production importers.
+- `tests/sharedmodule/helpers/tool-validation-direct-native.ts` now calls direct Rust/NAPI `parseToolArgsJsonWithArtifactRepairJson` and `normalizeExecCommandArgsJson` instead of importing these shell facades.
+- Removed the deleted `args-json.ts` path from `docs/architecture/no-fallback-diff-rules.json`; residue audit now locks both paths physically absent and checks helper surfaces for old local parser/normalizer logic.
+- Verification PASS: focused Jest 205/205; script syntax checks; strict shell audit `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=62`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.
