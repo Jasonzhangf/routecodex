@@ -6,6 +6,11 @@
  * number formatting, and string normalization.
  */
 
+import {
+  colorizeHttpLogKeyValue,
+  highlightStandaloneHttpCodeTokens
+} from '../../../utils/http-log-code-color.js';
+
 // ---------------------------------------------------------------------------
 // ANSI constants
 // ---------------------------------------------------------------------------
@@ -129,15 +134,23 @@ export function colorize(text: string, color: string): string {
 }
 
 export function highlightLogKeyValues(text: string, baseColor: string): string {
-  return text.replace(
-    /([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g,
-    (_match, key: string, value: string, suffix = '') => {
+  const highlightedKeyValues = text.replace(
+    /(\x1b\[[0-9;]*m)?([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g,
+    (match: string, ansiPrefix: string | undefined, key: string, value: string, suffix = '') => {
+      if (ansiPrefix) {
+        return match;
+      }
+      const httpCodeValue = colorizeHttpLogKeyValue(key, value, suffix, baseColor);
+      if (httpCodeValue) {
+        return httpCodeValue;
+      }
       if (key !== 'finish_reason' && !/^[-+]?\d/.test(value)) {
         return `${key}=${value}${suffix}`;
       }
       return `${key}=${ANSI_WHITE}${value}${ANSI_RESET}${baseColor}${suffix}`;
     }
   );
+  return highlightStandaloneHttpCodeTokens(highlightedKeyValues, baseColor);
 }
 
 export function formatRoutePool(routeName: string, poolId: string): string {

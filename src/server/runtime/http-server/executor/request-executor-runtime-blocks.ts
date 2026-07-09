@@ -2,6 +2,7 @@ import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import type { ProviderHandle } from '../types.js';
 import type { ProviderRuntimeProfile } from '../../../../providers/core/api/provider-types.js';
 import { writeErrorsampleJson } from '../../../../utils/errorsamples.js';
+import { highlightHttpCodesInLogText } from '../../../utils/http-log-code-color.js';
 import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
 import { truncateReason } from './request-executor-error-shared.js';
 
@@ -282,7 +283,7 @@ export function logProviderRetrySwitchCompact(args: {
     `suppressed=${prior.suppressed}`,
       `windowMs=${args.throttleMs}`
     ];
-    console.warn(`[provider-switch] aggregated ${aggregateDetails.join(' ')}`);
+    console.warn(highlightHttpCodesInLogText(`[provider-switch] aggregated ${aggregateDetails.join(' ')}`));
   }
   args.providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
   const boundedAttempt = Math.max(1, Math.min(args.maxAttempts, args.attempt));
@@ -311,7 +312,7 @@ export function logProviderRetrySwitchCompact(args: {
       : []),
     ...(shouldPrintReason ? [`reason=${JSON.stringify(compactReason)}`] : [])
   ];
-  console.warn(`${retryTag} ${details.join(' ')}`);
+  console.warn(highlightHttpCodesInLogText(`${retryTag} ${details.join(' ')}`));
 }
 
 function hasMeaningfulStructuredReason(args: {

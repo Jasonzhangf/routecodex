@@ -352,7 +352,7 @@ describe('request log color registry', () => {
     expect(line.startsWith(String(resolveSessionAnsiColor('session-response-colored')))).toBe(true);
   });
 
-  it('keeps one outer request color without white numeric highlight', () => {
+  it('keeps one outer request color and highlights non-error HTTP status white', () => {
     const sessionId = 'session-highlighted-finish';
     const outerColor = resolveSessionAnsiColor(sessionId);
     const line = colorizeRequestLog(
@@ -362,9 +362,38 @@ describe('request log color registry', () => {
     );
 
     expect(line.startsWith(String(outerColor))).toBe(true);
+    expect(line).toContain(`\x1b[97mstatus=200\x1b[0m${outerColor}`);
     expect(line).toContain('finish_reason=tool_calls');
     expect(line).toContain('status=200');
-    expect(line.includes('\x1b[97m')).toBe(false);
+  });
+
+  it('highlights HTTP error codes red while preserving request session color', () => {
+    const sessionId = 'session-http-code-highlight';
+    const outerColor = resolveSessionAnsiColor(sessionId);
+    const line = colorizeRequestLog(
+      '❌ [/v1/responses] request req-http-code failed: upstream error (status=429 code=HTTP_429 upstreamCode=HTTP_200)',
+      'req-http-code',
+      { sessionId },
+      { isError: true }
+    );
+
+    expect(line.startsWith(String(outerColor))).toBe(true);
+    expect(line.startsWith('\x1b[31m')).toBe(false);
+    expect(line).toContain(`\x1b[31mstatus=429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[31mcode=HTTP_429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[97mupstreamCode=HTTP_200\x1b[0m${outerColor}`);
+    expect(stripAnsiCodes(line)).toContain('status=429 code=HTTP_429 upstreamCode=HTTP_200');
+  });
+
+  it('highlights HTTP codes in scoped console lines without request color context', () => {
+    const line = colorizeRequestScopedLogLine(
+      '[provider-switch] req=req-no-session status=500 code=HTTP_500 upstreamCode=HTTP_302'
+    );
+
+    expect(line).toContain('\x1b[31mstatus=500\x1b[0m');
+    expect(line).toContain('\x1b[31mcode=HTTP_500\x1b[0m');
+    expect(line).toContain('\x1b[97mupstreamCode=HTTP_302\x1b[0m');
+    expect(stripAnsiCodes(line)).toContain('status=500 code=HTTP_500 upstreamCode=HTTP_302');
   });
 
   it('uses the registered session color for failed request logs', () => {

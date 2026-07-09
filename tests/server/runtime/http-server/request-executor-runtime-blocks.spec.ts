@@ -50,7 +50,14 @@ describe('request-executor-runtime-blocks', () => {
       });
 
       const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
-      expect(lines.some((line) => line.includes('attempt=2/2 -> 2/2'))).toBe(true);
+      const line = lines.find((value) => value.includes('[provider-switch]'));
+      expect(line).toContain('attempt=2/2 -> 2/2');
+      expect(line).toContain('status=500');
+      expect(line).toContain('code=HTTP_500');
+      expect(line).toContain('upstreamCode=HTTP_500');
+      expect(line).toContain('\x1b[31mstatus=500\x1b[0m');
+      expect(line).toContain('\x1b[31mcode=HTTP_500\x1b[0m');
+      expect(line).toContain('\x1b[31mupstreamCode=HTTP_500\x1b[0m');
       expect(lines.some((line) => line.includes('3/2'))).toBe(false);
       expect(lines.some((line) => line.includes('4/2'))).toBe(false);
     } finally {

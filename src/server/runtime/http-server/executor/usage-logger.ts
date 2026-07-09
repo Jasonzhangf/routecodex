@@ -8,6 +8,7 @@ import { recordTokens } from './token-stats-store.js';
 import {
   formatProjectPort,
   formatRouteName,
+  highlightLogKeyValues,
   shortRequestIdTail,
 } from './log-rollup-format-blocks.js';
 
@@ -48,18 +49,7 @@ function hiMsPairIfSlow(key: string, valueMs: number, baseColor: string): string
 }
 
 function colorizeNumericValues(text: string, _baseColor: string): string {
-  if (!text) {
-    return '';
-  }
-  return text.replace(
-    /([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g,
-    (_match, key: string, value: string, suffix = '') => {
-      if (key !== 'finish_reason' && !/^[-+]?\d/.test(value)) {
-        return `${key}=${value}${suffix}`;
-      }
-      return `${key}=${ANSI_WHITE}${value}${ANSI_RESET}${_baseColor}${suffix}`;
-    }
-  );
+  return highlightLogKeyValues(text, _baseColor);
 }
 
 function readTopN(): number {
