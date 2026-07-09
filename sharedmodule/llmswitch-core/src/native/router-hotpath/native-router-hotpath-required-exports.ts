@@ -522,6 +522,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "mapReasoningContentToResponsesOutputJson",
   "validateExecCommandGuardJson",
   "normalizeExecCommandArgsJson",
+  "validateCanonicalClientToolCallJson",
   "parseToolArgsJsonWithArtifactRepairJson",
   "validateToolArgumentsJson",
   "repairToolCallsJson",

@@ -3135,12 +3135,16 @@ describe('hub pipeline stage residue audit', () => {
 
   it('exec_command hardcoded guard rules must be native-owned', () => {
     const repoRoot = process.cwd();
-    const validatorSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts'),
+    const validatorPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts');
+    expect(fs.existsSync(validatorPath)).toBe(false);
+
+    const requiredExportsSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
       'utf8'
     );
-
-    expect(validatorSource).toContain('validateExecCommandGuardWithNative');
+    expect(requiredExportsSource).toContain('"normalizeExecCommandArgsJson"');
+    expect(requiredExportsSource).toContain('"validateCanonicalClientToolCallJson"');
+    expect(requiredExportsSource).toContain('"validateExecCommandGuardJson"');
 
     const forbiddenValidatorPatterns = [
       { label: 'git reset hard TS regex', pattern: /GIT_RESET_HARD_PATTERN/u },
@@ -3158,10 +3162,24 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'hardcoded git reset reason in TS', pattern: /forbidden_git_reset_hard/u },
       { label: 'hardcoded git checkout reason in TS', pattern: /forbidden_git_checkout_scope/u },
     ];
+    const scanRoots = [
+      'sharedmodule/llmswitch-core/src/tools',
+      'tests/sharedmodule/helpers',
+      'scripts/helpers',
+    ];
     const findings = [
-      ...forbiddenValidatorPatterns
-        .filter(({ pattern }) => pattern.test(validatorSource))
-        .map(({ label }) => `validator:${label}`),
+      ...scanRoots.flatMap((root) => {
+        const rootPath = path.join(repoRoot, root);
+        if (!fs.existsSync(rootPath)) return [];
+        return walkFiles(rootPath, ['.ts', '.js', '.mjs'])
+          .flatMap((filePath) => {
+            const source = fs.readFileSync(filePath, 'utf8');
+            const relativePath = path.relative(repoRoot, filePath);
+            return forbiddenValidatorPatterns
+              .filter(({ pattern }) => pattern.test(source))
+              .map(({ label }) => `${relativePath}:${label}`);
+          });
+      }),
     ];
 
     expect(findings).toEqual([]);

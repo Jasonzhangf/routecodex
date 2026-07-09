@@ -28157,3 +28157,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Apply_patch and exec_command evidence now uses direct native/test helpers: `tests/sharedmodule/helpers/tool-validation-direct-native.ts` and `scripts/helpers/tool-validation-direct-native.mjs`; other server-side tool validation arms were dead shell business and were removed rather than migrated.
 - `scripts/scan-apply-patch-samples.mjs`, `scripts/scan-exec-command-samples.mjs`, `scripts/scan-tool-shape-samples.mjs`, `scripts/verify-apply-patch.mjs`, and `scripts/verify-apply-patch-regressions.mjs` no longer load `tools/tool-registry`.
 - Verification PASS: focused Jest 214/214; script syntax checks; strict shell audit `prodTsShellCount=65`, `shellsWithProdImporters=61`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=65`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.
+
+# 2026-07-09: llmswitch exec_command validator shell deletion
+
+- Scope: continued zero-prod/no-host server-side tool shell deletion pass after the aggregate tool registry deletion.
+- Deleted `sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts`; this shell had no production importer and was kept alive by helper/test/script/doc references only.
+- `tests/sharedmodule/helpers/tool-validation-direct-native.ts` and `scripts/helpers/tool-validation-direct-native.mjs` now call direct Rust/NAPI exports for exec_command validation: `normalizeExecCommandArgsJson`, `validateCanonicalClientToolCallJson`, and `validateExecCommandGuardJson`.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts` now locks `validateCanonicalClientToolCallJson` as required native binding surface.
+- Residue audit now locks the deleted validator path physically absent and scans helper surfaces for old TS hardcoded guard/policy logic.
+- Verification PASS: focused Jest 205/205; script syntax checks; strict shell audit `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=64`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan only found the absent-path residue assertion; `git diff --check`.

@@ -1778,3 +1778,10 @@
 - `sharedmodule/llmswitch-core/src/tools/tool-registry.ts` is physically deleted. Do not restore the broad server-side tool registry or migrate dead validation arms for shell/update_plan/view_image/MCP resource tools.
 - Remaining apply_patch and exec_command validation evidence should call direct native/test helpers or the dedicated exec-command validator, not the retired aggregate `validateToolCall` shell.
 - Current shell audit after this deletion is `prodTsShellCount=65`, `shellsWithProdImporters=61`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Exec command validator TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts` is physically deleted. Do not restore `validateExecCommandArgs` or a script/test loader for `dist/tools/exec-command/validator.js`.
+- Exec command validation evidence should call direct Rust/NAPI exports: `normalizeExecCommandArgsJson` for compat/canonical argument normalization, `validateCanonicalClientToolCallJson` for canonical client tool-call shape, and `validateExecCommandGuardJson` for dangerous command/policy guard.
+- `validateCanonicalClientToolCallJson` is now part of `native-router-hotpath-required-exports.ts`; missing export is a binding contract failure, not a reason to restore a TS validator shell.
+- Current shell audit after this deletion is `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

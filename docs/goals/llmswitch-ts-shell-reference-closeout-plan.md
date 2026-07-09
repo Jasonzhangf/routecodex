@@ -352,3 +352,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-vr-node-contracts.ts` was removed after tests were redirected to `src/modules/llmswitch/bridge/native-exports.ts`.
 - `native-exports.ts` now exposes the former contract-help functions from direct native binding wrappers, including server module help.
 - Added `verify:llmswitch-ts-shell-reference-audit` as the package script for the new strict reference gate.
+
+### 2026-07-09 exec_command validator shell deleted
+
+- Physically deleted `sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts`.
+- `tests/sharedmodule/helpers/tool-validation-direct-native.ts` and `scripts/helpers/tool-validation-direct-native.mjs` no longer import the deleted source/dist validator shell; they call direct Rust/NAPI `normalizeExecCommandArgsJson`, `validateCanonicalClientToolCallJson`, and `validateExecCommandGuardJson`.
+- Added `validateCanonicalClientToolCallJson` to `native-router-hotpath-required-exports.ts` so the native binding contract locks the direct validation path.
+- Removed the deleted validator path from `docs/architecture/no-fallback-diff-rules.json`.
+- Residue audit now locks the validator shell as physically absent and scans helper surfaces for old TS hardcoded guard/policy logic.
+- Strict audit now reports `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=4`.
+- Verification passed: focused exec_command/residue Jest 205/205, script syntax checks, strict shell audit, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, exact source/package ref scan, and `git diff --check`.

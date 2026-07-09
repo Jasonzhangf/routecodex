@@ -1528,11 +1528,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/cli/commands/init/basic.ts",
       "textContains": ""
     },
