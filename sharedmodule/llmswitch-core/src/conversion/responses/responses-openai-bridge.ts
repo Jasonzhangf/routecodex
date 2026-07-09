@@ -1,7 +1,6 @@
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-import { ensureBridgeInstructions } from '../bridge-instructions.js';
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
 import {
   convertMessagesToBridgeInput,
@@ -31,6 +30,7 @@ import {
   resolveResponsesBridgeToolsWithNative,
   runBridgeActionPipelineWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+import { ensureBridgeInstructionsWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,
@@ -128,6 +128,22 @@ function runNativeResponsesBridgePipeline(input: {
         ? (output.metadata as Record<string, unknown>)
         : undefined
   };
+}
+
+function ensureBridgeInstructions(payload: Record<string, unknown>): string | undefined {
+  const normalized = ensureBridgeInstructionsWithNative(payload);
+  if (normalized && typeof normalized === 'object') {
+    if (Object.prototype.hasOwnProperty.call(normalized, 'input')) {
+      payload.input = normalized.input;
+    }
+    if (Object.prototype.hasOwnProperty.call(normalized, 'instructions')) {
+      payload.instructions = normalized.instructions;
+    } else if (Object.prototype.hasOwnProperty.call(payload, 'instructions')) {
+      delete payload.instructions;
+    }
+  }
+  const instructions = payload.instructions;
+  return typeof instructions === 'string' && instructions.length ? instructions : undefined;
 }
 
 function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>): string {

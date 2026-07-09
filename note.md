@@ -28208,3 +28208,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `hub.request_stage_pipeline_bridge` owner moved from TS protocol shell `native-hub-pipeline-orchestration-semantics-protocol.ts` to Rust NAPI `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`; canonical builders are the Rust snake_case NAPI entrypoints.
 - Important gate lesson: `function-map` `allowed_paths` may include the exact owner file plus TS wrappers/tests, but not Rust implementation directories that also define canonical builders, or `verify-function-map-canonical-builder-definitions` reports duplicate owner definitions. Put broader Rust implementation coverage in `verification-map.yml` instead.
 - Verification PASS: `npm run verify:function-map-compile-gate`; `npm run verify:architecture-ts-owner-ban`; focused runtime/preselected/residue Jest 219/219; `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-rustification-audit` (`nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
+
+# 2026-07-09: bridge-instructions TS facade deleted
+
+- Scope: continued zero-prod/no-host Hub bridge shell deletion after owner-map rustification.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/bridge-instructions.ts` after strict shell audit showed one production importer only: `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now calls Rust native `ensureBridgeInstructionsWithNative` directly and keeps only local payload mutation/return-value IO glue.
+- Residue audit now locks `bridge-instructions.ts` physically absent.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=59`, `shellsWithProdImporters=58`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=59`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; focused Jest 204/204; `git diff --check`.

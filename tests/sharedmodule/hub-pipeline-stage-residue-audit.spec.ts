@@ -1263,6 +1263,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
+  it('bridge instructions TS facade must stay physically deleted', () => {
+    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/bridge-instructions.ts');
+
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
   it('servertool progress file shell must not retain zero-consumer event type shell', () => {
     const progressFilePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/log/progress-file.ts');
 

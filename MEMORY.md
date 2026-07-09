@@ -1818,3 +1818,8 @@
 - `hub.runtime_ingress_bridge` owner truth is Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs`; `src/modules/llmswitch/bridge/routing-integrations.ts` is host/native-call glue only.
 - `hub.request_stage_pipeline_bridge` owner truth is Rust NAPI `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`; `native-hub-pipeline-orchestration-semantics-protocol.ts` is native-call/JSON IO glue only.
 - For function-map canonical builder gates, do not list Rust implementation directories in `allowed_paths` when they define the same canonical builders as the owner module. Use exact owner file in `function-map.yml`; use `verification-map.yml` for broader Rust source coverage.
+
+# 2026-07-09: Bridge instructions TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/bridge-instructions.ts` is physically deleted. Do not restore the facade; `responses-openai-bridge.ts` should call Rust native `ensureBridgeInstructionsWithNative` directly and keep only local IO mutation glue.
+- Current shell audit after this deletion is `prodTsShellCount=59`, `shellsWithProdImporters=58`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
