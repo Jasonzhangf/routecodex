@@ -675,42 +675,30 @@ fn render_stopless_schema_guidance_text(
         .unwrap_or_default();
     let fields = required_fields.join(", ");
     let base = if fields.is_empty() {
-        "如果这一轮准备收尾，按条件填写 stop schema；本轮 CLI 输出没有提供缺失字段列表，不能假造字段全集。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n".to_string()
+        "按条件填写 stop schema；本轮 CLI 输出没有提供缺失字段列表，不能假造字段全集。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n".to_string()
     } else {
         format!(
-            "如果这一轮准备收尾，结尾按条件补齐这些字段：{fields}\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n"
+            "按上一轮反馈补齐这些字段：{fields}\nstopreason 取值：0=finished，1=blocked，2=continue_needed。\n"
         )
     };
     let conditional_rules =
-        "必填关系：stopreason 必须是数字 0/1/2；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。"
+        "必填关系：stopreason 必须是数字 0/1/2；stopreason=0 需要 has_evidence=1 且 evidence 非空；stopreason=1 需要 reason 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题。"
             .to_string();
     let hint = match trigger_hint {
         "no_schema" => {
             if used == 0 {
-                "继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段。".to_string()
+                "继续。".to_string()
             } else {
-                "如果当前任务已经完成，就按下面 schema 补齐收尾字段；如果还没完成，不要收尾，继续执行当前任务。".to_string()
+                "继续；按上一轮反馈补齐字段。".to_string()
             }
         }
-        "invalid_schema" => {
-            "把这轮的结论重新整理成下面格式：stopreason 只能是 0/1/2；能收尾就写 reason，不能收尾就写 next_step；缺的字段直接补齐，不要留空。".to_string()
-        }
-        "non_terminal_schema" => {
-            "继续往下做；如果现在已经能收尾，就把 stopreason 改成 0 或 1；如果还没收尾，就保持 stopreason=2 并把 next_step 写具体。".to_string()
-        }
-        "budget_exhausted" => format!(
-            "这次直接收尾。优先给出最终结论；如果确实卡住，就把卡点、原因和已完成动作写清楚。stopreason 用 0 表示完成，用 1 表示阻塞。"
-        ),
-        "stop" => {
-            "如果这轮要停，末尾按下面格式补完整；如果还没停稳，就继续推进并把 next_step 写具体。".to_string()
-        }
+        "invalid_schema" => "继续；按上一轮反馈修正字段。".to_string(),
+        "non_terminal_schema" => "继续。".to_string(),
+        "budget_exhausted" => "继续；按上一轮反馈处理。".to_string(),
+        "stop" => "继续。".to_string(),
         _ => String::new(),
     };
-    let sample = if trigger_hint == "budget_exhausted" {
-        "最小可复制样本：{\"stopreason\":1,\"reason\":\"需要用户确认上线策略\",\"has_evidence\":1,\"evidence\":\"缺少发布授权\",\"next_step\":\"请确认是否上线\",\"needs_user_input\":true}".to_string()
-    } else {
-        "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}".to_string()
-    };
+    let sample = "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前状态\",\"current_goal\":\"当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"下一步动作\",\"needs_user_input\":false}".to_string();
     let decision_rules = guidance
         .get("decisionRules")
         .or_else(|| guidance.get("decision_rules"))
@@ -796,63 +784,63 @@ fn render_stopless_schema_feedback_text(
         "stop_schema_missing" => {
             if repeat_count <= 1 {
                 if missing.is_empty() {
-                    "继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段。".to_string()
+                    "继续。".to_string()
                 } else {
-                    format!(
-                        "继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：{}。",
-                        missing_fields.join(", ")
-                    )
+                    format!("继续；按上一轮反馈补齐字段：{}。", missing_fields.join(", "))
                 }
             } else {
-                format!(
-                    "你上一轮缺少收尾 schema；如果任务已经完成，就按下面 schema 补齐缺失字段：{}；如果任务还没完成，不要停，继续执行当前任务。",
-                    missing_fields.join(", ")
-                )
+                format!("继续；按上一轮反馈补齐字段：{}。", missing_fields.join(", "))
             }
         }
         "stop_schema_stopreason_missing_or_non_numeric" => {
             "你上一轮的 stopreason 缺失或格式不对；改成数字 0/1/2，再继续。".to_string()
         }
         "stop_schema_reason_missing" | "stop_schema_forcestop_reason_missing" => {
-            "你已经表达要 finished/blocked，但还没有写清 reason；这轮只补 reason。".to_string()
+            "继续；按上一轮反馈补齐 reason。".to_string()
         }
         "stop_schema_terminal_missing_fields" => {
-            format!("你已经表达 finished/blocked，但还没收齐收尾信息；{}只补缺失字段，不要重写已正确部分。", missing)
+            format!("继续；按上一轮反馈补齐终态字段。{}", missing)
         }
         "stop_schema_needs_user_input_missing_next_step" => {
             "你表示需要用户输入，但 next_step 里还没有写出要问用户的具体问题；把问题直接写进 next_step。".to_string()
         }
         "stop_schema_next_step_missing" => {
-            format!("任务还没完成，但当前没有明确 next_step；{}把下一步写成这轮立刻执行的最小动作。", missing)
+            format!("继续；按上一轮反馈补齐 next_step。{}", missing)
         }
         "stop_schema_current_goal_missing" => {
-            "任务还没完成，但当前没有明确 current_goal；先写清你现在的任务目标是什么，再基于这个目标判断下一步并继续执行。".to_string()
+            "继续；按上一轮反馈补齐 current_goal。".to_string()
         }
         "stop_schema_continue_without_next_step" => {
-            "任务还没完成，但你没有给出明确 next_step；这轮必须补出最小下一步，或者直接给出最终收尾。".to_string()
+            "继续；按上一轮反馈补齐 next_step。".to_string()
         }
         "stop_schema_continue_next_step" => String::new(),
         _ => {
             if missing.is_empty() {
-                format!("上一轮收尾结果有问题（{}）；这轮按要求修正。", reason_code)
+                format!("上一轮 stop schema 有问题（{}）；这轮按要求修正。", reason_code)
             } else {
-                format!("上一轮收尾结果有问题（{}）；{}按要求修正。", reason_code, missing)
+                format!("上一轮 stop schema 有问题（{}）；{}按要求修正。", reason_code, missing)
             }
         }
     }
 }
 
 fn render_stopless_decision_rule_text(rule: &str) -> String {
-    if rule.contains("Only use stopreason=0") {
-        return "只有任务确实已经完成，而且没有剩余 next_step 时，才能写 stopreason=0。"
+    if rule.contains("Only use stopreason=0")
+        || rule.contains("stopreason=0 requires has_evidence=1")
+    {
+        return "stopreason=0 的条件：has_evidence=1、evidence 非空、next_step 为空。".to_string();
+    }
+    if rule.contains("use stopreason=2 instead of 0")
+        || rule.contains("stopreason=2 requires current_goal")
+    {
+        return "stopreason=2 的条件：current_goal 和 next_step 非空；next_step 会作为下一轮提示词。"
             .to_string();
     }
-    if rule.contains("use stopreason=2 instead of 0") {
-        return "只要还有明确 next_step、未完成 gate、待验证项或剩余实现工作，就不能写 0，必须写 stopreason=2。"
+    if rule.contains("Use stopreason=1 only when")
+        || rule.contains("stopreason=1 requires non-empty reason")
+    {
+        return "stopreason=1 的条件：reason 非空；needs_user_input=true 时 next_step 写用户问题。"
             .to_string();
-    }
-    if rule.contains("Use stopreason=1 only when") {
-        return "只有当前轮真的被阻塞，而且本轮无法自行消除时，才能写 stopreason=1。".to_string();
     }
     if rule.contains("reason must describe the real current state") {
         return "reason 和 next_step 必须与 stopreason 保持一致，不能互相矛盾。".to_string();
@@ -861,14 +849,21 @@ fn render_stopless_decision_rule_text(rule: &str) -> String {
 }
 
 fn render_stopless_invalid_example_text(example: &str) -> String {
-    if example.contains("stopreason=0 with next_step") {
+    if example.contains("stopreason=0 with next_step")
+        || example.contains("stopreason=0 with non-empty next_step")
+    {
         return "错误：还写着 next_step 要继续做事时，不能把 stopreason 写成 0。".to_string();
+    }
+    if example.contains("stopreason=0 with has_evidence=0") {
+        return "错误：has_evidence=0 或 evidence 为空时，不能把 stopreason 写成 0。".to_string();
     }
     if example.contains("unfinished work or missing verification") {
         return "错误：如果 issue_cause 里仍然表示有未完成工作或缺少验证，就不能把 stopreason 写成 0。".to_string();
     }
-    if example.contains("Valid unfinished pattern") {
-        return "正确未完成写法：用 stopreason=2，并给出具体 next_step。".to_string();
+    if example.contains("Valid continue_needed pattern")
+        || example.contains("Valid unfinished pattern")
+    {
+        return "正确 continue_needed 写法：用 stopreason=2，并给出具体 next_step。".to_string();
     }
     example.to_string()
 }
@@ -2094,7 +2089,7 @@ mod tests {
             {
               "type": "function_call_output",
               "call_id": "call_stop_cli_stop_1",
-              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；拿不到证据就再试一次；想停的时候直接告诉我一句'做完了'或'卡住了，需要你拍板'。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_terminal_missing_fields\",\"missingFields\":[\"evidence\",\"next_step\"]},\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\",\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"decisionRules\":[\"Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.\",\"If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.\"],\"invalidExamples\":[\"Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.\"]}}"
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_terminal_missing_fields\",\"missingFields\":[\"evidence\",\"next_step\"]},\"schemaGuidance\":{\"triggerHint\":\"invalid_schema\",\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"decisionRules\":[\"stopreason=0 requires has_evidence=1, non-empty evidence, and empty next_step.\",\"stopreason=2 requires current_goal and next_step; non-empty next_step keeps the continue_needed branch.\"],\"invalidExamples\":[\"Invalid: stopreason=0 with non-empty next_step.\"]}}"
             }
           ]
         });
@@ -2112,12 +2107,12 @@ mod tests {
         assert!(restored_output.contains("stop_schema_terminal_missing_fields"));
         assert_eq!(input[2]["role"], "user");
         let text = input[2]["content"][0]["text"].as_str().expect("text");
-        assert!(text.contains("继续做下一步"));
-        assert!(text.contains("按条件补齐这些字段"));
-        assert!(text.contains("你已经表达 finished/blocked，但还没收齐收尾信息"));
+        assert!(text.contains("继续。"));
+        assert!(text.contains("按上一轮反馈补齐这些字段"));
+        assert!(text.contains("继续；按上一轮反馈补齐终态字段"));
         assert!(text.contains("stopreason"));
         assert!(text.contains("0=finished"));
-        assert!(text.contains("必须写 stopreason=2"));
+        assert!(text.contains("stopreason=2 的条件"));
         assert!(text.contains("不能把 stopreason 写成 0"));
         assert!(text.contains("schema"));
         assert!(!text.contains("hook"));
@@ -2153,7 +2148,7 @@ mod tests {
             {
               "type": "function_call_output",
               "call_id": "call_stop_cli_stop_resume_1",
-              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。\",\"repeatCount\":2,\"maxRepeats\":3}"
+              "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3}"
             }
           ]
         });
@@ -2174,7 +2169,7 @@ mod tests {
             .contains("stop_message_auto"));
         assert_eq!(input[4]["role"], "user");
         let text = input[4]["content"][0]["text"].as_str().expect("text");
-        assert!(text.contains("继续往下做"));
+        assert!(text.contains("继续。"));
     }
 
     #[test]
@@ -2198,7 +2193,7 @@ mod tests {
               "role": "tool",
               "tool_call_id": "call_servertool_cli_live_1",
               "name": "reasoningStop",
-              "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}"
+              "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}"
             }
           ]
         });
@@ -2221,7 +2216,8 @@ mod tests {
             .as_str()
             .expect("guidance");
         assert!(guidance.contains("上一轮执行结果：repeatCount=1/3"));
-        assert!(guidance.contains("刚才那段我没看明白"));
+        assert!(guidance.contains("继续。"));
+        assert!(!guidance.contains("刚才那段我没看明白"));
         assert!(guidance.contains("stopreason"));
         assert!(!guidance.contains("stop_message_auto"));
     }
@@ -2903,7 +2899,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             &json!({
                 "toolName": "stop_message_auto",
-                "continuationPrompt": "继续做下一步；先把手头能确认的结果拿回来。",
+                "continuationPrompt": "继续。",
                 "schemaFeedback": {
                     "reasonCode": "stop_schema_reason_missing",
                     "missingFields": ["reason"]
@@ -2917,26 +2913,27 @@ mod tests {
                         "continueNeeded": 2
                     },
                     "decisionRules": [
-                        "Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute."
+                        "stopreason=0 requires has_evidence=1, non-empty evidence, and empty next_step."
                     ]
                 }
             })
             .to_string(),
         );
-        assert!(text.contains("继续做下一步"));
+        assert!(text.contains("继续。"));
         assert!(text.contains("reason"));
-        assert!(text.contains("只补 reason"));
+        assert!(text.contains("继续；按上一轮反馈补齐 reason。"));
         assert!(text.contains("stopreason"));
         assert!(text.contains("next_step"));
         assert!(text.contains("0=finished"));
-        assert!(text.contains("按条件补齐这些字段"));
-        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
-        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
+        assert!(text.contains("按上一轮反馈补齐这些字段"));
+        assert!(text.contains("stopreason=0 需要 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 需要 reason 非空"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
         assert!(text.contains("最小可复制样本："));
         assert!(text.contains("\"next_step\""));
-        assert!(text.contains("只有任务确实已经完成"));
+        assert!(text.contains("stopreason=0 的条件"));
+        assert!(!text.contains("任务确实已经完成"));
         assert!(!text.contains("servertool"));
         assert!(!text.contains("停止 JSON"));
         assert!(!text.contains("格式不对"));
@@ -2949,7 +2946,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             &json!({
                 "toolName": "stop_message_auto",
-                "continuationPrompt": "继续推进当前任务。",
+                "continuationPrompt": "继续。",
                 "repeatCount": 1,
                 "schemaFeedback": {
                     "reasonCode": "stop_schema_missing",
@@ -2967,18 +2964,18 @@ mod tests {
             })
             .to_string(),
         );
-        assert!(text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐收尾字段"));
-        assert!(
-            text.contains("继续执行；如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason")
-        );
-        assert!(!text.contains("如果任务还没完成，不要停，继续执行当前任务"));
+        assert!(text.contains("继续。"));
+        assert!(text.contains("继续；按上一轮反馈补齐字段：stopreason。"));
+        assert!(!text.contains("任务已经完成"));
+        assert!(!text.contains("不要停"));
         assert!(text.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
-        assert!(text.contains("按条件补齐这些字段"));
-        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
-        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
+        assert!(text.contains("按上一轮反馈补齐这些字段"));
+        assert!(text.contains("stopreason=0 需要 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 需要 reason 非空"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("最小可复制样本："));
         assert!(text.contains("\"needs_user_input\":false"));
+        assert!(text.contains("\"current_goal\":\"当前目标\""));
         assert!(!text.contains("样例："));
     }
 
@@ -2987,7 +2984,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             &json!({
                 "toolName": "stop_message_auto",
-                "continuationPrompt": "继续推进当前任务。",
+                "continuationPrompt": "继续。",
                 "repeatCount": 2,
                 "schemaFeedback": {
                     "reasonCode": "stop_schema_missing",
@@ -3005,15 +3002,16 @@ mod tests {
             })
             .to_string(),
         );
-        assert!(text.contains("如果当前任务已经完成，就按下面 schema 补齐收尾字段"));
-        assert!(text.contains("如果任务已经完成，就按下面 schema 补齐缺失字段：stopreason"));
-        assert!(text.contains("如果任务还没完成，不要停，继续执行当前任务"));
-        assert!(text.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
-        assert!(text.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
+        assert!(text.contains("继续；按上一轮反馈补齐字段。"));
+        assert!(text.contains("继续；按上一轮反馈补齐字段：stopreason。"));
+        assert!(!text.contains("任务已经完成"));
+        assert!(!text.contains("不要停"));
+        assert!(text.contains("stopreason=0 需要 has_evidence=1 且 evidence 非空"));
+        assert!(text.contains("stopreason=1 需要 reason 非空"));
         assert!(text.contains("stopreason=2 必须写 next_step"));
         assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
         assert!(text.contains("最小可复制样本："));
-        assert!(text.contains("\"next_step\":\"运行下一条验证命令\""));
+        assert!(text.contains("\"next_step\":\"下一步动作\""));
         assert!(!text.contains("样例："));
     }
 
@@ -3064,7 +3062,7 @@ mod tests {
                 "flowId": "stop_message_flow",
                 "repeatCount": 1,
                 "maxRepeats": 3,
-                "continuationPrompt": "继续做下一步；先把手头能确认的结果拿回来。",
+                "continuationPrompt": "继续。",
                 "input": {
                     "flowId": "stop_message_flow",
                     "repeatCount": 1,
@@ -3075,7 +3073,7 @@ mod tests {
             .to_string(),
         );
         assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
-        assert!(text.contains("继续做下一步；先把手头能确认的结果拿回来。"));
+        assert!(text.contains("继续。"));
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
@@ -3089,11 +3087,11 @@ mod tests {
                 "ok": true,
                 "kind": "stop_message_auto",
                 "tool": "stop_message_auto",
-                "summary": "停止检查需要继续",
+                "summary": "继续",
                 "toolName": "stop_message_auto",
                 "flowId": "stop_message_flow",
                 "routeHint": "thinking",
-                "continuationPrompt": "继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。",
+                "continuationPrompt": "继续。",
                 "repeatCount": 1,
                 "maxRepeats": 3,
                 "sessionId": "stopless-live-1782780421308",
@@ -3108,7 +3106,7 @@ mod tests {
             .to_string(),
         );
         assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
-        assert!(text.contains("继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。"));
+        assert!(text.contains("继续。"));
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal non_terminal_schema CLI output is legal and must not be treated as malformed: {text}"
@@ -3163,7 +3161,7 @@ mod tests {
                 "summary": "stopless budget exhausted",
                 "repeatCount": 3,
                 "maxRepeats": 3,
-                "continuationPrompt": "不要再继续执行了。现在直接收尾并给出最终结论；如果正常收尾已经做不到，就明确说明为什么必须停，并把最后卡点交代清楚。",
+                "continuationPrompt": "继续；按上一轮反馈处理。",
                 "schemaGuidance": {
                   "requiredFields": ["stopreason", "reason"],
                   "stopreasonValues": { "finished": 0, "blocked": 1, "continueNeeded": 2 },

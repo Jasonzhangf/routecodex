@@ -1977,3 +1977,11 @@
 - Anonymous local `/shutdown` must return `403 shutdown_caller_required` and must not call `process.kill`. Legitimate lifecycle callers must send `x-routecodex-stop-caller-pid`, `x-routecodex-stop-caller-ts`, `x-routecodex-stop-caller-cwd`, and `x-routecodex-stop-caller-cmd`.
 - The shutdown route exception path must fail visibly; it must not ACK success and self-terminate as a fallback.
 - Verified gates for the provenance fix: red test first confirmed anonymous `/shutdown` returned 200; after the fix, focused `/shutdown` provenance Jest, `port-utils` caller-header Jest, `stop-command` caller-header Jest, `verify:runtime-lifecycle-pid-rebase`, TypeScript compile, shell syntax checks for affected scripts, and read-only live health checks for 5520/5555 pass.
+
+# 2026-07-09: Stopless guidance must not judge task state
+
+- Stopless / reasoningStop guidance may describe the stop schema contract and field requiredness, but must not tell the model that the task is done, converged, ready to close, must stop, or should avoid continuing.
+- First no-schema continuation text is exactly `继续。`; invalid-schema continuation text is neutral feedback repair such as `继续；按上一轮反馈修正。`; budget/terminal repair text remains schema feedback only.
+- Non-terminal CLI `summary` is also neutral `继续`; do not reintroduce state-judging summaries.
+- `stopreason=2` next-turn provider-facing user prompt must be the model-provided `next_step` itself. The system should not synthesize "suggested next step" text.
+- Verified on installed `0.90.3707`: `routecodex hook run reasoningStop` for no-schema, invalid-schema, and budget-exhausted all emit neutral `summary`/`continuationPrompt`; runtime `dist` grep has no terminal-state judgment wording.

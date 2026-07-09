@@ -267,7 +267,7 @@ fn build_terminal_stopless_output(
         ok: true,
         kind: "stop_message_auto".to_string(),
         tool: "stop_message_auto".to_string(),
-        summary: "停止检查已收敛".to_string(),
+        summary: "继续".to_string(),
         model_guidance: continuation_prompt.clone(),
         tool_name: "stop_message_auto".to_string(),
         flow_id: "stop_message_flow".to_string(),
@@ -513,7 +513,7 @@ fn build_stop_message_auto_run_output(
         ok: true,
         kind: "stop_message_auto".to_string(),
         tool: "stop_message_auto".to_string(),
-        summary: "停止检查需要继续".to_string(),
+        summary: "继续".to_string(),
         model_guidance: String::new(),
         tool_name: input.tool_name,
         flow_id,
@@ -550,43 +550,29 @@ fn build_stopless_cli_model_guidance(
     current_repeat_count: u32,
 ) -> String {
     if current_repeat_count <= 1 {
-        return "继续执行，完成既定目标。".to_string();
+        return "继续。".to_string();
     }
 
     let mut parts = Vec::<String>::new();
-    parts.push("这是什么：stop schema 是模型在准备结束、暂停或继续时返回的收尾报告。".to_string());
-    parts.push(
-        "为什么要填：它把结论、证据、根因、排查顺序和下一步固定下来，让系统知道现在是 finished、blocked 还是 continue_needed。".to_string(),
-    );
-    parts.push(
-        "怎么理解这个 schema：它是 stop result 的结构化 JSON 约定，不是普通总结。".to_string(),
-    );
     parts.push(
         "字段怎么写：stopreason 是唯一无条件必填；完成 stopreason=0 时 has_evidence=1 且 evidence 非空；阻塞 stopreason=1 时 reason 非空即可停；继续 stopreason=2 时 current_goal 写当前目标，next_step 写下一步具体动作。".to_string(),
     );
-    parts.push(
-        "怎么填：按字段之间的逻辑关系填写；不是每个字段都必填，但触发条件下的字段不能留空。"
-            .to_string(),
-    );
     parts.push("stopreason 取值：0=finished，1=blocked，2=continue_needed。".to_string());
-    parts.push(
-        "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进，先继续执行\",\"current_goal\":\"完成当前用户请求\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"先看入口，再看链路，再看验证\",\"done_steps\":\"已完成现有排查\",\"next_step\":\"继续完成剩余验证并补最后一轮证据\",\"next_suggested_path\":\"按当前链路继续\",\"needs_user_input\":false,\"learned\":\"把真实结论写进 stop schema\"}".to_string(),
-    );
     if let Some(feedback) = schema_feedback {
         if feedback.reason_code == "stop_schema_missing" {
             if feedback.missing_fields.is_empty() {
-                parts.push("这次收尾未通过：缺少 stop schema 必填字段。".to_string());
+                parts.push("上一轮反馈：缺少 stop schema 字段。".to_string());
             } else {
                 parts.push(format!(
-                    "这次收尾未通过：缺少 stop schema 必填字段：{}。",
+                    "上一轮反馈：缺少 stop schema 字段：{}。",
                     feedback.missing_fields.join(", ")
                 ));
             }
         } else if feedback.missing_fields.is_empty() {
-            parts.push(format!("这次收尾未通过：{}。", feedback.reason_code));
+            parts.push(format!("上一轮反馈：{}。", feedback.reason_code));
         } else {
             parts.push(format!(
-                "这次收尾未通过：{}；缺少字段：{}。",
+                "上一轮反馈：{}；缺少字段：{}。",
                 feedback.reason_code,
                 feedback.missing_fields.join(", ")
             ));
@@ -610,23 +596,14 @@ fn build_stopless_cli_model_guidance(
             };
             if current_repeat_count <= 1 {
                 if missing.is_empty() {
-                    parts.push("继续执行；如果任务已经完成，就按 stop schema 收尾。".to_string());
+                    parts.push("继续。".to_string());
                 } else {
-                    parts.push(format!(
-                        "继续执行；如果任务已经完成，就补齐 stop schema：{}。",
-                        missing
-                    ));
+                    parts.push(format!("继续；按上一轮反馈补齐字段：{}。", missing));
                 }
             } else if missing.is_empty() {
-                parts.push(
-                    "如果任务已经完成，补齐 stop schema；如果任务还没完成，不要停，继续执行当前任务。"
-                        .to_string(),
-                );
+                parts.push("继续；按上一轮反馈补齐字段。".to_string());
             } else {
-                parts.push(format!(
-                    "如果任务已经完成，补齐 stop schema：{}；如果任务还没完成，不要停，继续执行当前任务。",
-                    missing
-                ));
+                parts.push(format!("继续；按上一轮反馈补齐字段：{}。", missing));
             }
         }
     }
@@ -656,7 +633,7 @@ fn build_stopless_missing_field_repair_lines(feedback: &StoplessSchemaFeedback) 
 fn stopless_field_repair_instruction(field: &str) -> Option<&'static str> {
     match field {
         "stopreason" => Some(
-            "stopreason：必填数字；0=finished，1=blocked，2=continue_needed。只有真的完成且没有剩余 next_step 时才能填 0。",
+            "stopreason：必填数字；0=finished，1=blocked，2=continue_needed；stopreason=0 需要 has_evidence=1、evidence 非空、next_step 为空。",
         ),
         "reason" => Some(
             "reason：用一句具体的话写清当前状态，说明为什么结束、为什么阻塞，或为什么还要继续。",
@@ -668,7 +645,7 @@ fn stopless_field_repair_instruction(field: &str) -> Option<&'static str> {
             "evidence：写真正支撑结论的证据，例如文件路径、日志片段、命令结果或测试结论；终态 stopreason=0/1 时不能留空。",
         ),
         "issue_cause" => Some(
-            "issue_cause：写根因或当前卡点；如果已经完成，也要说明本轮最终确认的问题原因是什么。",
+            "issue_cause：写根因或当前卡点；stopreason=0 时说明本轮最终确认的问题原因。",
         ),
         "excluded_factors" => Some(
             "excluded_factors：写已经排除掉的错误方向，避免只给结论不说明排除过程。",
@@ -695,7 +672,7 @@ fn stopless_field_repair_instruction(field: &str) -> Option<&'static str> {
             "learned：写这轮真正学到的可复用结论；如果暂时没有，也要明确填一个具体结论而不是留空。",
         ),
         "forcestop" => Some(
-            "forcestop：只有必须强制停止时才填 1，并且必须同时给非空 reason 说明为什么必须停。",
+            "forcestop：只有需要强制结束时才填 1，并且必须同时给非空 reason 说明为什么需要强制结束。",
         ),
         _ => None,
     }
@@ -817,9 +794,9 @@ pub fn stopless_schema_guidance_with_trigger(
     _used: u32,
     _max_repeats: u32,
 ) -> StoplessSchemaGuidance {
-    let sample = r#"{"stopreason":2,"simple_question":false,"reason":"当前还在推进，先继续执行","current_goal":"完成当前用户请求","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已完成现有排查","next_step":"继续完成剩余验证并补最后一轮证据","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
+    let sample = r#"{"stopreason":2,"simple_question":false,"reason":"当前状态","current_goal":"当前目标","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已执行的步骤","next_step":"下一步动作","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
     StoplessSchemaGuidance {
-        schema_overview: "stop schema 是模型在准备结束或暂停时返回的结构化 JSON 收尾报告。它不是普通文本总结，而是一份固定字段的结果，用来告诉系统这轮是已完成、被阻塞，还是还要继续执行。".to_string(),
+        schema_overview: "stop schema 是模型在停止、暂停或继续时返回的结构化 JSON。它不是普通文本总结，而是一份固定字段的结果，用来告诉系统读取 finished / blocked / continue_needed 分支。".to_string(),
         schema_purpose: "它的作用是把结束原因、证据、排查顺序、下一步动作固定成可机器判断的结构，并把每个字段的含义说清楚，避免模型只写泛泛的总结或漏字段。".to_string(),
         required_fields: vec!["stopreason".to_string()],
         field_descriptions: vec![
@@ -829,7 +806,7 @@ pub fn stopless_schema_guidance_with_trigger(
             },
             StoplessSchemaFieldDescription {
                 field: "stopreason".to_string(),
-                meaning: "0=真的做完了，1=卡住了，2=还要继续推进".to_string(),
+                meaning: "0=finished，1=blocked，2=continue_needed".to_string(),
             },
             StoplessSchemaFieldDescription {
                 field: "reason".to_string(),
@@ -877,7 +854,7 @@ pub fn stopless_schema_guidance_with_trigger(
             },
             StoplessSchemaFieldDescription {
                 field: "learned".to_string(),
-                meaning: "这轮收尾里真正学到的可复用结论".to_string(),
+                meaning: "这轮执行里真正学到的可复用结论".to_string(),
             },
         ],
         stopreason_values: StopreasonValues {
@@ -887,15 +864,15 @@ pub fn stopless_schema_guidance_with_trigger(
         },
         trigger_hint: stopless_trigger_hint(trigger).to_string(),
         decision_rules: vec![
-            "Only use stopreason=0 when the task is actually finished and there is no remaining next_step to execute.".to_string(),
-            "If there is still a concrete next_step, unfinished gate, pending verification, or more implementation work, use stopreason=2 instead of 0.".to_string(),
-            "Use stopreason=1 only when progress is blocked by a real blocker that cannot be resolved in the current turn.".to_string(),
+            "stopreason=0 requires has_evidence=1, non-empty evidence, and empty next_step.".to_string(),
+            "stopreason=2 requires current_goal and next_step; non-empty next_step keeps the continue_needed branch.".to_string(),
+            "stopreason=1 requires non-empty reason; needs_user_input=true requires next_step to be the user question.".to_string(),
             "reason must describe the real current state, and next_step must match that state instead of contradicting stopreason.".to_string(),
         ],
         invalid_examples: vec![
-            "Invalid: stopreason=0 with next_step saying continue writing remaining gates/manifests/package wiring.".to_string(),
-            "Invalid: stopreason=0 when issue_cause still says there is unfinished work or missing verification.".to_string(),
-            "Valid unfinished pattern: stopreason=2 plus a concrete next_step for the next action.".to_string(),
+            "Invalid: stopreason=0 with non-empty next_step.".to_string(),
+            "Invalid: stopreason=0 with has_evidence=0 or empty evidence.".to_string(),
+            "Valid continue_needed pattern: stopreason=2 with current_goal and next_step.".to_string(),
         ],
         sample: sample.to_string(),
     }
@@ -1656,7 +1633,7 @@ mod tests {
         .expect("stop_message_auto output");
         assert_eq!(output.tool_name, "stop_message_auto");
         assert_eq!(output.flow_id, "stop_message_flow");
-        assert_eq!(output.summary, "停止检查需要继续");
+        assert_eq!(output.summary, "继续");
         assert!(!output.summary.contains("stopless"));
         assert_eq!(output.repeat_count, 1);
         assert!(!output.continuation_prompt.is_empty());
@@ -2456,7 +2433,7 @@ mod tests {
         )
         .expect("over budget must return terminal output, not error");
         assert_eq!(repeat_over_budget.ok, true);
-        assert_eq!(repeat_over_budget.summary, "停止检查已收敛");
+        assert_eq!(repeat_over_budget.summary, "继续");
         assert_eq!(repeat_over_budget.repeat_count, 3);
         assert_eq!(repeat_over_budget.max_repeats, 3);
         assert!(!repeat_over_budget.continuation_prompt.is_empty());
@@ -2957,7 +2934,7 @@ mod tests {
             Value::String("schema_pass".to_string())
         );
         assert!(output.schema_feedback.is_none());
-        assert_eq!(output.summary, "停止检查需要继续");
+        assert_eq!(output.summary, "继续");
         assert!(!output.summary.contains("stopless"));
     }
 

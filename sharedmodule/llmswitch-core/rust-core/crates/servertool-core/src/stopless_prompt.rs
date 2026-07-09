@@ -26,7 +26,17 @@ pub const STOPLESS_PROMPT_FORBIDDEN_TOKENS: &[&str] = &[
     "用户目标",
     "已排除因素",
     "排查顺序",
+    "已收敛",
+    "停止检查已收敛",
     "stop_reason",
+    concat!("直接", "收尾"),
+    concat!("不要再", "继续"),
+    concat!("必须", "停"),
+    concat!("任务已经", "完成"),
+    concat!("任务确实已经", "完成"),
+    concat!("你当前的", "目标是"),
+    concat!("建议的", "下一步"),
+    concat!("确定你", "完成了吗"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,8 +87,8 @@ pub fn resolve_stopless_continuation_prompt(
     input: StoplessContinuationPromptInput,
 ) -> Result<StoplessContinuationPrompt, StoplessPromptError> {
     let StoplessContinuationPromptInput {
-        used,
-        max_repeats,
+        used: _used,
+        max_repeats: _max_repeats,
         trigger,
     } = input;
 
@@ -90,46 +100,12 @@ pub fn resolve_stopless_continuation_prompt(
         });
     }
 
-    let phase = if max_repeats == 0 || used + 1 >= max_repeats {
-        // Final guard round: ask the model to wrap up if it can.
-        "final"
-    } else if used == 0 {
-        "first"
-    } else if used == 1 {
-        "middle"
-    } else {
-        "final"
-    };
-
-    let text = match (trigger, phase) {
-        (StoplessContinuationTrigger::BudgetExhausted, _) => {
-            "不要再继续执行了。现在直接收尾并给出最终结论；如果正常收尾已经做不到，就明确说明为什么必须停，并把最后卡点交代清楚。"
-        }
-        (StoplessContinuationTrigger::InvalidSchema, _) => {
-            "刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。"
-        }
-        (StoplessContinuationTrigger::NonTerminalSchema, _) => {
-            "继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。"
-        }
-        (StoplessContinuationTrigger::Stop, "final") => {
-            "这次不要再泛泛地说了。把还能验证的文件、日志、命令都直接补完；如果还是收不住，就明确写清楚卡点、已经排除的路、以及还差我拍板的那一步。"
-        }
-        (StoplessContinuationTrigger::Stop, "middle") => {
-            "继续推进；缺哪块结果就补哪块，别停在概述上。"
-        }
-        (StoplessContinuationTrigger::Stop, _) => {
-            "继续做下一步；先把手头能确认的结果拿回来。"
-        }
-        (StoplessContinuationTrigger::NoSchema, "final") => {
-            "这次不要再泛泛地说了。把还能验证的文件、日志、命令都直接补完；如果还是收不住，就明确写清楚卡点、已经排除的路、以及还差我拍板的那一步。"
-        }
-        (StoplessContinuationTrigger::NoSchema, "middle") => {
-            "继续推进；缺哪块结果就补哪块，别停在概述上。"
-        }
-        (StoplessContinuationTrigger::NoSchema, _) => {
-            "继续做下一步；先把手头能确认的结果拿回来。"
-        }
-        (StoplessContinuationTrigger::SchemaPass, _) => "",
+    let text = match trigger {
+        StoplessContinuationTrigger::InvalidSchema => "继续；按上一轮反馈修正。",
+        StoplessContinuationTrigger::NonTerminalSchema => "继续。",
+        StoplessContinuationTrigger::BudgetExhausted => "继续；按上一轮反馈处理。",
+        StoplessContinuationTrigger::Stop | StoplessContinuationTrigger::NoSchema => "继续。",
+        StoplessContinuationTrigger::SchemaPass => "",
     };
 
     let prompt = StoplessContinuationPrompt {
@@ -141,14 +117,6 @@ pub fn resolve_stopless_continuation_prompt(
                 | StoplessContinuationTrigger::InvalidSchema
                 | StoplessContinuationTrigger::BudgetExhausted
         ),
-    };
-    let prompt = if matches!(trigger, StoplessContinuationTrigger::BudgetExhausted) {
-        StoplessContinuationPrompt {
-            require_stop_hook_call: true,
-            ..prompt
-        }
-    } else {
-        prompt
     };
     assert_no_forbidden_token(&prompt.client_visible_text)?;
     Ok(prompt)
@@ -181,7 +149,7 @@ mod tests {
         assert!(!prompt.client_visible_text.contains("stopless"));
         assert!(!prompt.client_visible_text.contains("servertool"));
         assert!(!prompt.client_visible_text.contains("第一轮"));
-        assert!(prompt.client_visible_text.contains("继续做下一步"));
+        assert_eq!(prompt.client_visible_text, "继续。");
         assert!(
             prompt.schema_guidance_required,
             "NoSchema stopless prompt must require schema guidance via CLI/tool contract"
@@ -196,7 +164,7 @@ mod tests {
             trigger: StoplessContinuationTrigger::NoSchema,
         })
         .expect("prompt");
-        assert!(prompt.client_visible_text.starts_with("继续推进"));
+        assert_eq!(prompt.client_visible_text, "继续。");
         assert_no_forbidden_token(&prompt.client_visible_text).expect("no forbidden");
     }
 
@@ -208,12 +176,7 @@ mod tests {
             trigger: StoplessContinuationTrigger::NoSchema,
         })
         .expect("prompt");
-        assert!(prompt
-            .client_visible_text
-            .starts_with("这次不要再泛泛地说了"));
-        assert!(prompt.client_visible_text.contains("文件、日志、命令"));
-        assert!(prompt.client_visible_text.contains("卡点"));
-        assert!(prompt.client_visible_text.contains("已经排除的路"));
+        assert_eq!(prompt.client_visible_text, "继续。");
         assert_no_forbidden_token(&prompt.client_visible_text).expect("no forbidden");
     }
 
@@ -225,7 +188,7 @@ mod tests {
             trigger: StoplessContinuationTrigger::InvalidSchema,
         })
         .expect("prompt");
-        assert!(prompt.client_visible_text.starts_with("刚才那段我没看明白"));
+        assert_eq!(prompt.client_visible_text, "继续；按上一轮反馈修正。");
         assert!(prompt.schema_guidance_required);
         assert_no_forbidden_token(&prompt.client_visible_text).expect("no forbidden");
     }
@@ -238,8 +201,22 @@ mod tests {
             trigger: StoplessContinuationTrigger::NonTerminalSchema,
         })
         .expect("prompt");
-        assert!(prompt.client_visible_text.starts_with("继续往下做"));
+        assert_eq!(prompt.client_visible_text, "继续。");
         assert_no_forbidden_token(&prompt.client_visible_text).expect("no forbidden");
+    }
+
+    #[test]
+    fn budget_exhausted_stays_neutral_and_does_not_claim_terminal_truth() {
+        let prompt = resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
+            used: 3,
+            max_repeats: 3,
+            trigger: StoplessContinuationTrigger::BudgetExhausted,
+        })
+        .expect("prompt");
+        assert_eq!(prompt.client_visible_text, "继续；按上一轮反馈处理。");
+        assert_no_forbidden_token(&prompt.client_visible_text).expect("no forbidden");
+        assert!(!prompt.require_stop_hook_call);
+        assert!(prompt.schema_guidance_required);
     }
 
     #[test]
