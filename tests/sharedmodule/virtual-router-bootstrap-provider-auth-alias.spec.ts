@@ -1,8 +1,41 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createRequire } from 'node:module';
 
-import { bootstrapProvidersWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.js';
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(
+  path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+) as Record<string, unknown>;
+
+type ProviderBootstrapResult = {
+  runtimeEntries: Record<string, { auth?: { tokenFile?: string } }>;
+  aliasIndex: Map<string, string[]>;
+};
+
+function bootstrapProvidersDirectNative(input: {
+  providersSource: Record<string, unknown>;
+}): ProviderBootstrapResult {
+  const fn = nativeBinding.bootstrapVirtualRouterProvidersJson;
+  if (typeof fn !== 'function') {
+    throw new Error('bootstrapVirtualRouterProvidersJson native export is required');
+  }
+  const raw = fn(JSON.stringify(input.providersSource ?? {}));
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error('bootstrapVirtualRouterProvidersJson returned invalid payload');
+  }
+  const parsed = JSON.parse(raw) as {
+    runtimeEntries?: Record<string, { auth?: { tokenFile?: string } }>;
+    aliasIndex?: Record<string, string[]>;
+  };
+  if (!parsed || typeof parsed !== 'object' || !parsed.runtimeEntries || !parsed.aliasIndex) {
+    throw new Error('bootstrapVirtualRouterProvidersJson returned invalid provider bootstrap payload');
+  }
+  return {
+    runtimeEntries: parsed.runtimeEntries,
+    aliasIndex: new Map(Object.entries(parsed.aliasIndex)),
+  };
+}
 
 describe('virtual-router native provider auth bootstrap', () => {
   const prevAuthDir = process.env.RCC_AUTH_DIR;
@@ -34,7 +67,7 @@ describe('virtual-router native provider auth bootstrap', () => {
   });
 
   it('keeps explicit apikey tokenFile providers single-entry instead of expanding the full pool', () => {
-    const result = bootstrapProvidersWithNative({
+    const result = bootstrapProvidersDirectNative({
       providersSource: {
         'provider-explicit': {
           type: 'openai',
@@ -56,7 +89,7 @@ describe('virtual-router native provider auth bootstrap', () => {
   });
 
   it('ignores empty auth.entries records instead of materializing phantom key aliases', () => {
-    const result = bootstrapProvidersWithNative({
+    const result = bootstrapProvidersDirectNative({
       providersSource: {
         'provider-entries': {
           type: 'openai',

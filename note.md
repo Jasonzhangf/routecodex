@@ -1,3 +1,11 @@
+# 2026-07-09: VR provider bootstrap shell deleted
+
+- Scope: delete `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts` after direct native provider bootstrap evidence replaced the TS wrapper.
+- Change: `tests/sharedmodule/virtual-router-bootstrap-provider-auth-alias.spec.ts` now calls direct `router_hotpath_napi.node` `bootstrapVirtualRouterProvidersJson`; `verify-vr-no-ts-runtime` and residue audit require the retired wrapper path to stay physically absent.
+- Rust owner fix: `provider_bootstrap.rs` now preserves provider/auth `tokenFile` / `token_file`, treats token files as effective auth material, and avoids generating placeholder `secretRef` when a token file is the credential source.
+- Verification PASS: focused Jest 201/201; `verify-vr-no-ts-runtime`; strict shell reference audit (`prodTsShellCount=61`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); zero-ts closeout; minimal TS surface; rustification audit (`nonNativeFileCount=0`); sharedmodule/root `tsc`; Rust `provider_bootstrap` tests 7/7; exact ref scan only found retired-path gates/docs; `git diff --check`.
+- Boundary: no live runtime replay claimed for this source/reference slice; unrelated dirty files in provider direct/router-direct path were preserved.
+
 # 2026-07-09: Gemini OpenAI codec TS shell deleted
 
 - Scope: delete zero-production-import `sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts`.

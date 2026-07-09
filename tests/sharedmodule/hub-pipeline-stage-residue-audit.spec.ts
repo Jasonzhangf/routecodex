@@ -2825,8 +2825,11 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired VR bootstrap and stop-message public wrappers must stay Rust-internal', () => {
     const repoRoot = process.cwd();
-    const scannedFiles = [
+    expect(fs.existsSync(path.join(
+      repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
+    ))).toBe(false);
+    const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',

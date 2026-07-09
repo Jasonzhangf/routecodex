@@ -47,6 +47,8 @@ const scanExtensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '
 const singletonExecutorShellPath = 'src/server/runtime/http-server/executor/request-executor-core-utils.ts';
 const bootstrapWrapperPaths = [
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts',
+];
+const retiredBootstrapWrapperPaths = [
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
 ];
 const tokenEstimatorWrapperPath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts';
@@ -202,6 +204,12 @@ for (const bootstrapWrapperPath of bootstrapWrapperPaths) {
     if (pattern.test(src)) {
       failures.push(`${bootstrapWrapperPath}: local native bootstrap call/error plumbing revived (${pattern})`);
     }
+  }
+}
+
+for (const retiredBootstrapWrapperPath of retiredBootstrapWrapperPaths) {
+  if (exists(retiredBootstrapWrapperPath)) {
+    failures.push(`${retiredBootstrapWrapperPath}: retired provider bootstrap wrapper must stay physically deleted`);
   }
 }
 

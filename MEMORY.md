@@ -1712,6 +1712,13 @@
 - Tests/scripts needing these semantics should call direct Rust/NAPI capabilities `buildRouterMetadataInputJson` and `coerceStandardizedRequestFromPayloadJson`.
 - Current shell audit after this deletion is `prodTsShellCount=75`, `shellsWithProdImporters=65`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
 
+# 2026-07-09: VR provider bootstrap TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts` is physically deleted. Do not restore `bootstrapProvidersWithNative` or the provider bootstrap TS facade.
+- Tests needing provider bootstrap evidence should call direct Rust/NAPI `bootstrapVirtualRouterProvidersJson`.
+- Rust `provider_bootstrap.rs` owns auth alias materialization, including `tokenFile` / `token_file`; token files count as effective auth material and must not trigger placeholder `secretRef` generation.
+- Current shell audit after this deletion is `prodTsShellCount=61`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
 # 2026-07-09: OpenAI codec TS shell is retired
 
 - `sharedmodule/llmswitch-core/src/conversion/codecs/openai-openai-codec.ts` is physically deleted. Do not restore `OpenAIOpenAIConversionCodec` or the wrapper-local request context map as runtime TS state.

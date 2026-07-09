@@ -179,6 +179,14 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-09 VR provider bootstrap wrapper deleted
+
+- Physically deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts`.
+- `tests/sharedmodule/virtual-router-bootstrap-provider-auth-alias.spec.ts` now uses direct `router_hotpath_napi.node` `bootstrapVirtualRouterProvidersJson` evidence instead of importing the retired TS wrapper.
+- Rust `provider_bootstrap.rs` now owns `tokenFile` / `token_file` auth material, treats token files as effective material, and does not synthesize placeholder `secretRef` when a token file is present.
+- `scripts/architecture/verify-vr-no-ts-runtime.mjs` and `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` lock the retired wrapper path as physically absent.
+- Verification passed: focused provider bootstrap/residue Jest 201/201, `verify-vr-no-ts-runtime`, strict shell reference audit (`prodTsShellCount=61`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`), zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, Rust `provider_bootstrap` tests 7/7, exact ref scan, and `git diff --check`.
+
 ### 2026-07-09 Responses SSE event payload wrapper deleted
 
 - Physically deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-responses-sse-event-payload.ts` after direct Rust NAPI tests replaced the old TS wrapper imports.

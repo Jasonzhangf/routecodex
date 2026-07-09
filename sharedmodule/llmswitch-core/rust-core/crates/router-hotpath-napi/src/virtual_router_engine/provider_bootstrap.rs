@@ -40,6 +40,8 @@ struct ProviderAuthConfigJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     raw_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    token_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     entries: Option<Vec<Value>>,
 }
 
@@ -228,6 +230,7 @@ struct AuthTypeInfo {
 #[derive(Debug, Clone, Default)]
 struct AuthFieldDefaults {
     secret_ref: Option<String>,
+    token_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -236,6 +239,7 @@ struct AuthCandidate {
     raw_type: Option<String>,
     value: Option<String>,
     secret_ref: Option<String>,
+    token_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -892,6 +896,8 @@ fn extract_provider_auth_entries(
             value: read_optional_string(auth.get("value")),
             raw_type: base_raw_type_source.clone(),
             secret_ref: read_optional_string(auth.get("secretRef")),
+            token_file: read_optional_string(auth.get("tokenFile"))
+                .or_else(|| read_optional_string(auth.get("token_file"))),
             ..Default::default()
         },
     );
@@ -934,6 +940,8 @@ fn extract_provider_auth_entries(
                 AuthCandidate {
                     raw_type: base_raw_type_source.clone(),
                     value: Some(String::new()),
+                    token_file: read_optional_string(auth.get("tokenFile"))
+                        .or_else(|| read_optional_string(auth.get("token_file"))),
                     ..Default::default()
                 },
             );
@@ -960,14 +968,18 @@ fn extract_provider_auth_entries(
 }
 
 fn auth_candidate_has_material(candidate: &AuthCandidate) -> bool {
-    candidate.value.is_some() || candidate.secret_ref.is_some()
+    candidate.value.is_some() || candidate.secret_ref.is_some() || candidate.token_file.is_some()
 }
 
 fn auth_candidate_has_effective_material(
     candidate: &AuthCandidate,
     defaults: &AuthFieldDefaults,
 ) -> bool {
-    candidate.value.is_some() || candidate.secret_ref.is_some() || defaults.secret_ref.is_some()
+    candidate.value.is_some()
+        || candidate.secret_ref.is_some()
+        || candidate.token_file.is_some()
+        || defaults.secret_ref.is_some()
+        || defaults.token_file.is_some()
 }
 
 fn push_auth_entry_from_record(
@@ -999,6 +1011,8 @@ fn push_auth_entry_from_record(
             value: read_optional_string(record.get("value"))
                 .or_else(|| read_optional_string(record.get("apiKey"))),
             secret_ref: read_optional_string(record.get("secretRef")),
+            token_file: read_optional_string(record.get("tokenFile"))
+                .or_else(|| read_optional_string(record.get("token_file"))),
             ..Default::default()
         },
     );
@@ -1080,10 +1094,17 @@ fn push_auth_entry(
             .secret_ref
             .clone()
             .or_else(|| defaults.secret_ref.clone()),
+        token_file: candidate
+            .token_file
+            .clone()
+            .or_else(|| defaults.token_file.clone()),
         entries: None,
     };
 
-    if normalized.auth_type == "apiKey" && normalized.secret_ref.is_none() {
+    if normalized.auth_type == "apiKey"
+        && normalized.secret_ref.is_none()
+        && normalized.token_file.is_none()
+    {
         normalized.secret_ref = Some(format!("{}.{}", provider_id, alias));
     }
 
@@ -1099,6 +1120,8 @@ fn collect_auth_defaults(auth: &Map<String, Value>) -> AuthFieldDefaults {
     AuthFieldDefaults {
         secret_ref: read_optional_string(auth.get("secretRef"))
             .or_else(|| read_optional_string(auth.get("file"))),
+        token_file: read_optional_string(auth.get("tokenFile"))
+            .or_else(|| read_optional_string(auth.get("token_file"))),
     }
 }
 
