@@ -58,15 +58,14 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   });
 
   it('does not keep coverage-only responses tool utils wrapper exports', () => {
-    const source = readFileSync(responsesToolUtilsPath, 'utf8');
-    const coverageSource = readFileSync(responsesToolUtilsCoverageScriptPath, 'utf8');
+    const bridgeSource = readFileSync(bridgePath, 'utf8');
 
-    expect(source).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
-    expect(source).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
-    expect(source).not.toContain('normalizeResponsesToolCallIdsWithNative');
-    expect(source).not.toContain('resolveToolCallIdStyleWithNative');
-    expect(coverageSource).not.toMatch(/\bnormalizeResponsesToolCallIds\b/);
-    expect(coverageSource).not.toMatch(/\bresolveToolCallIdStyle\b/);
+    expect(existsSync(responsesToolUtilsPath)).toBe(false);
+    expect(existsSync(responsesToolUtilsCoverageScriptPath)).toBe(false);
+    expect(bridgeSource).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
+    expect(bridgeSource).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
+    expect(bridgeSource).not.toContain('normalizeResponsesToolCallIdsWithNative');
+    expect(bridgeSource).not.toContain('resolveToolCallIdStyleWithNative');
   });
 
   it('does not keep public native wrapper exports for deleted responses tool id helpers', () => {

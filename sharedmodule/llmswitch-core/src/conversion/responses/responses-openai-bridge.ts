@@ -2,15 +2,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 import {
-  createToolCallIdTransformer,
-  enforceToolCallIdStyle,
-  stripInternalToolingMetadata
-} from '../shared/responses-tool-utils.js';
-import { ensureRuntimeMetadata } from '../runtime-metadata.js';
+  createToolCallIdTransformerWithNative,
+  normalizeFunctionCallIdWithNative,
+  normalizeFunctionCallOutputIdWithNative,
+  normalizeResponsesCallIdWithNative,
+  stripInternalToolingMetadataWithNative
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
 } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
   buildBridgeHistoryWithNative,
@@ -54,6 +56,13 @@ export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;
 type ProviderErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
+type ToolCallIdStyle = 'preserve' | 'fc';
+
+interface CallIdTransformer {
+  normalizeCallId(raw: unknown): string;
+  normalizeItemId(raw: unknown, callId: string): string;
+  normalizeOutputId(callId: string, raw: unknown): string;
+}
 
 type BridgeContentPart = {
   type: string;
@@ -143,6 +152,91 @@ function jsonClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function assertResponsesBridgeToolNativeAvailable(): void {
+  if (
+    typeof createToolCallIdTransformerWithNative !== 'function' ||
+    typeof normalizeFunctionCallIdWithNative !== 'function' ||
+    typeof normalizeFunctionCallOutputIdWithNative !== 'function' ||
+    typeof normalizeResponsesCallIdWithNative !== 'function' ||
+    typeof stripInternalToolingMetadataWithNative !== 'function'
+  ) {
+    throw new Error('[responses-openai-bridge] responses tool native bindings unavailable');
+  }
+}
+
+function createToolCallIdTransformer(style: ToolCallIdStyle): CallIdTransformer | null {
+  assertResponsesBridgeToolNativeAvailable();
+  if (style !== 'fc') {
+    return null;
+  }
+  const state = createToolCallIdTransformerWithNative(style);
+  return {
+    normalizeCallId(raw: unknown): string {
+      return normalizeResponsesCallIdWithNative({
+        callId: typeof raw === 'string' && raw.trim().length ? raw.trim() : undefined,
+        fallback: transformCounter(state, 'call')
+      });
+    },
+    normalizeItemId(raw: unknown, callId: string): string {
+      return normalizeFunctionCallIdWithNative({
+        callId: typeof raw === 'string' && raw.trim().length ? raw.trim() : callId,
+        fallback: transformCounter(state, 'item')
+      });
+    },
+    normalizeOutputId(callId: string, raw: unknown): string {
+      return normalizeFunctionCallOutputIdWithNative({
+        callId,
+        fallback: typeof raw === 'string' && raw.trim().length ? raw.trim() : transformCounter(state, 'tool')
+      });
+    }
+  };
+}
+
+function transformCounter(state: Record<string, unknown>, prefix: string): string {
+  const current = typeof state.__counter === 'number' ? state.__counter : 0;
+  const next = current + 1;
+  state.__counter = next;
+  return `${prefix}_${next}`;
+}
+
+function replaceMutableRecord(target: Record<string, unknown>, next: Record<string, unknown>): void {
+  for (const key of Object.keys(target)) {
+    delete target[key];
+  }
+  Object.assign(target, next);
+}
+
+function stripInternalToolingMetadata(metadata: unknown): void {
+  assertResponsesBridgeToolNativeAvailable();
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return;
+  const normalized = stripInternalToolingMetadataWithNative(metadata);
+  if (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) {
+    replaceMutableRecord(metadata as Record<string, unknown>, normalized);
+  }
+}
+
+function enforceToolCallIdStyle(input: BridgeInputItem[], transformer: CallIdTransformer): void {
+  assertResponsesBridgeToolNativeAvailable();
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') continue;
+    const type = typeof (entry as any).type === 'string' ? (entry as any).type.toLowerCase() : '';
+    if (type === 'function_call') {
+      const normalizedCallId = transformer.normalizeCallId((entry as any).call_id ?? (entry as any).id);
+      (entry as any).call_id = normalizedCallId;
+      (entry as any).id = transformer.normalizeItemId((entry as any).id ?? normalizedCallId, normalizedCallId);
+      continue;
+    }
+    if (type === 'function_call_output' || type === 'tool_result' || type === 'tool_message') {
+      const normalizedCallId = transformer.normalizeCallId(
+        (entry as any).call_id ?? (entry as any).tool_call_id ?? (entry as any).id
+      );
+      (entry as any).call_id = normalizedCallId;
+      (entry as any).tool_call_id = normalizedCallId;
+      (entry as any).id = transformer.normalizeOutputId(normalizedCallId, (entry as any).id);
+    }
+  }
+}
+
 export interface ResponsesRequestContext extends Unknown {
   requestId?: string;
   targetProtocol?: string;
@@ -157,7 +251,7 @@ export interface ResponsesRequestContext extends Unknown {
   toolsNormalized?: Array<Record<string, unknown>>;
   parameters?: Record<string, unknown>;
   systemInstruction?: string;
-  toolCallIdStyle?: import('../shared/responses-tool-utils.js').ToolCallIdStyle;
+  toolCallIdStyle?: ToolCallIdStyle;
 }
 
 export interface BuildChatRequestResult {

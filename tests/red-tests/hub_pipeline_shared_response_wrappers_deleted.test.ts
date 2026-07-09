@@ -46,15 +46,14 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   });
 
   it('keeps zero-consumer responses tool utility wrappers deleted', () => {
-    const source = read('sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts');
-    const coverage = read('sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs');
+    const bridge = read('sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts');
 
-    expect(source).toContain('createToolCallIdTransformerWithNative');
-    expect(source).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
-    expect(source).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
-    expect(source).not.toContain('normalizeResponsesToolCallIdsWithNative');
-    expect(source).not.toContain('resolveToolCallIdStyleWithNative');
-    expect(coverage).not.toMatch(/\bnormalizeResponsesToolCallIds\b/);
-    expect(coverage).not.toMatch(/\bresolveToolCallIdStyle\b/);
+    expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts')).toThrow();
+    expect(() => read('sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs')).toThrow();
+    expect(bridge).toContain('createToolCallIdTransformerWithNative');
+    expect(bridge).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
+    expect(bridge).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
+    expect(bridge).not.toContain('normalizeResponsesToolCallIdsWithNative');
+    expect(bridge).not.toContain('resolveToolCallIdStyleWithNative');
   });
 });

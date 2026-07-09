@@ -4426,7 +4426,6 @@ describe('hub pipeline stage residue audit', () => {
     });
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/shared/anthropic-message-utils-core.ts',
-      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-shell-utils.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
@@ -4678,6 +4677,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.js.map',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.js',
+      'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.js.map',
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/types.d.ts',
