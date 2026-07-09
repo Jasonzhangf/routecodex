@@ -19,15 +19,12 @@ import type {
 } from './virtual-router-contracts.js';
 import { VirtualRouterError, VirtualRouterErrorCode } from './native-router-hotpath-loader.js';
 import {
-  createVirtualRouterEngineProxy,
-  type NativeVirtualRouterEngineProxy
-} from './native-virtual-router-engine-proxy.js';
-import {
   extractVirtualRouterNativeErrorMessage,
   parseVirtualRouterNativeError,
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './native-router-hotpath-loader.js';
 import { callNativeJson } from './native-router-hotpath.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 import { failNativeRequired } from './native-router-hotpath-loader.js';
 
 export type {
@@ -52,6 +49,48 @@ type TokenEstimateOutput = {
 };
 
 type NativeRouterRequest = Record<string, unknown>;
+
+
+// Inlined from retired native-virtual-router-engine-proxy.ts
+export interface NativeVirtualRouterEngineProxy {
+  initialize(configJson: string): void;
+  updateDeps(deps: object): void;
+  updateVirtualRouterConfig(configJson: string): void;
+  route(requestJson: string, metadataJson: string): string;
+  diagnoseRoute?(requestJson: string, metadataJson: string): string;
+  getStopMessageState(metadataJson: string): string;
+  getPreCommandState(metadataJson: string): string;
+  markProviderCooldown(providerKey: string, cooldownMs?: number): void;
+  clearProviderCooldown(providerKey: string): void;
+  handleProviderFailure(eventJson: string): void;
+  handleProviderError(eventJson: string): void;
+  handleProviderSuccess(eventJson: string): void;
+  getStatus(): string;
+  resetProviderQuota?(providerKey: string): void;
+  recoverProviderQuota?(providerKey: string): void;
+  disableProviderQuota?(providerKey: string, mode: string, durationMs?: number): void;
+  applyKeepPoolCooldownQuota?(providerKey: string, cooldownUntilMs: number, lastErrorCode?: string): void;
+  markConcurrencyScopeBusy?(scopeKey: string): void;
+  markConcurrencyScopeIdle?(scopeKey: string): void;
+  registerProviderRuntimeIngress?(): void;
+  unregisterProviderRuntimeIngress?(): void;
+}
+
+type ProxyConstructor = new (engine?: object) => NativeVirtualRouterEngineProxy;
+
+function resolveProxyConstructor(): ProxyConstructor {
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const ctor = binding?.VirtualRouterEngineProxy;
+  if (typeof ctor !== 'function') {
+    return failNativeRequired<ProxyConstructor>('VirtualRouterEngineProxy', 'missing native proxy constructor');
+  }
+  return ctor as ProxyConstructor;
+}
+
+export function createVirtualRouterEngineProxy(engine?: object): NativeVirtualRouterEngineProxy {
+  const Ctor = resolveProxyConstructor();
+  return new Ctor(engine);
+}
 
 export type VirtualRouterRuntimeDeps = {
   healthStore?: VirtualRouterHealthStore;

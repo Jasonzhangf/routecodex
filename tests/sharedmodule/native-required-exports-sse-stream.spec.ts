@@ -39,7 +39,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
       )
     )) as Record<string, unknown>;
     expect(typeof mod.captureReqInboundResponsesContextSnapshotWithNative).toBe('function');
@@ -49,7 +49,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {
@@ -106,7 +106,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {
@@ -165,7 +165,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics-responses.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {
