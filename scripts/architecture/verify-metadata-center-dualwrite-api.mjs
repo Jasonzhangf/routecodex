@@ -20,7 +20,6 @@ const manifest = read('docs/architecture/metadata-center-manifest.yml');
 const dualwriteApi = read('src/server/runtime/http-server/metadata-center/dualwrite-api.ts');
 const metadataCenter = read('src/server/runtime/http-server/metadata-center/metadata-center.ts');
 const dualwriteTest = read('tests/server/runtime/http-server/metadata-center/metadata-center-dualwrite.spec.ts');
-const runtimeControlWriter = read('sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts');
 const rustDirectDecision = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 const rustReqGovernance = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs');
 const rustStoplessSignals = read('sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_decision_context_signals.rs');
@@ -30,7 +29,6 @@ const sourceRoots = ['src', 'sharedmodule/llmswitch-core/src', 'scripts'];
 const directWriteCallPattern = /\b(?:\w+\.)?write(?:RequestTruth|ContinuationContext|RuntimeControl|ProviderObservation|ResponseObservation|CloseoutStatus|DebugSnapshot)\??\s*\(/g;
 const allowedDirectWriteFiles = new Set([
   'src/server/runtime/http-server/metadata-center/dualwrite-api.ts',
-  'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts',
 ]);
 
 function walkSourceFiles(dir, out = []) {
@@ -159,16 +157,6 @@ for (const needle of requiredTestNeedles) {
   if (!dualwriteTest.includes(needle)) {
     fail(`dualwrite contract test missing coverage needle: ${needle}`);
   }
-}
-
-if (!runtimeControlWriter.includes('writeMetadataCenterSlot')) {
-  fail('runtime-control writer must use unified writeMetadataCenterSlot API');
-}
-if (!runtimeControlWriter.includes('function writeMetadataCenterSlot')) {
-  fail('runtime-control writer must keep runtime-control writes behind a local writeMetadataCenterSlot shell');
-}
-if (runtimeControlWriter.includes('for (const [key, value] of Object.entries(args.runtimeControl)) {\n    if (value === undefined) {\n      continue;\n    }\n    bound.center.writeRuntimeControl')) {
-  fail('runtime-control writer must not call center.writeRuntimeControl directly from the write loop');
 }
 
 const forbiddenRustTruthResidueNeedles = [

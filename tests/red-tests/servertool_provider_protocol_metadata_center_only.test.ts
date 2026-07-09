@@ -1,5 +1,4 @@
 import { describe, expect, it } from '@jest/globals';
-import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,10 +18,6 @@ describe('servertool providerProtocol metadata center only boundary', () => {
   });
 
   it('does not read flat providerProtocol shadows outside bound metadata center runtime_control', () => {
-    const source = readFileSync(runtimeControlWriterPath, 'utf8');
-
-    expect(source).not.toContain('const flat = target?.providerProtocol');
-    expect(source).not.toContain('const nestedFlat = nested?.providerProtocol');
-    expect(source).not.toContain('const nestedProtocol = nestedRuntimeControl?.providerProtocol');
+    expect(existsSync(runtimeControlWriterPath)).toBe(false);
   });
 });

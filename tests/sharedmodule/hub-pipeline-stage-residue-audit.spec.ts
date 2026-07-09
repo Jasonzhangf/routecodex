@@ -2377,6 +2377,10 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-generic-marker-strip.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-node-result.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/process/client-inject-readiness.ts',
+      'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/metadata-center-runtime-control-writer.js',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/metadata-center-runtime-control-writer.d.ts',
+      'sharedmodule/llmswitch-core/dist/conversion/hub/metadata-center-runtime-control-writer.js.map',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/chat-response-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-observation.ts',
       'sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts',
@@ -5248,16 +5252,15 @@ describe('hub pipeline stage residue audit', () => {
 
   it('metadata write plan runtime-control projection must stay native-owned', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'filters learnedNote in TS metadata write projector', pattern: /key\s*===\s*['"]learnedNote['"]/ },
-      { label: 'filters null values in TS metadata write projector', pattern: /value\s*===\s*null/ },
-      { label: 'iterates write plan entries in TS metadata write projector', pattern: /Object\.entries\(plan\)/ },
-    ]);
+    const nativeOwnerPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts',
+    );
+    const nativeOwnerSource = fs.readFileSync(nativeOwnerPath, 'utf8');
 
-    expect(source).toContain('projectMetadataWritePlanToRuntimeControlWithNative');
-    expect(source).toContain('projectMetadataWritePlanToRuntimeControlWritePlanWithNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
+    expect(nativeOwnerSource).toContain('projectMetadataWritePlanToRuntimeControlWithNative');
+    expect(nativeOwnerSource).toContain('projectMetadataWritePlanToRuntimeControlWritePlanWithNative');
   });
 
   it('hub pipeline request providerProtocol selection must stay native-owned', () => {

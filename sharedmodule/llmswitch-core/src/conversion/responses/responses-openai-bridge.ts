@@ -49,17 +49,14 @@ import {
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
 } from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
-import {
-  METADATA_CENTER_SYMBOL,
-  RUST_SNAPSHOT_SYMBOL
-} from '../hub/metadata-center-runtime-control-writer.js';
-
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;
 type ProviderErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
 type ToolCallIdStyle = 'preserve' | 'fc';
 type RuntimeMetadataCarrier = Record<string, unknown> & { __rt?: JsonObject };
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 interface CallIdTransformer {
   normalizeCallId(raw: unknown): string;

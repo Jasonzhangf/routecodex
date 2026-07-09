@@ -5,18 +5,95 @@ import {
   buildRequestStageRuntimeControlWritePlanWithNative,
   runHubPipelineLibWithNative,
 } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import {
-  applyNativeRuntimeControlWritePlan,
-  readContinuationContextFromBoundMetadataCenter,
-  readRequestTruthFromBoundMetadataCenter,
-  readRuntimeControlFromBoundMetadataCenter,
-} from '../../../sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.js';
 
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   module: 'tests/sharedmodule/helpers/request-stage-direct-native.ts',
   symbol: 'executeRequestStagePipelineDirectNative',
   stage: 'HubReqChatProcess03Governed',
 } as const;
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
+
+type RuntimeControlWriter = typeof REQUEST_STAGE_RUNTIME_CONTROL_WRITER;
+type MetadataCenterLike = {
+  writeRuntimeControl?: (
+    key: string,
+    value: unknown,
+    writtenBy: RuntimeControlWriter,
+    reason?: string
+  ) => void;
+  readRuntimeControl?: () => Record<string, unknown>;
+  readRequestTruth?: () => Record<string, unknown>;
+  readContinuationContext?: () => Record<string, unknown>;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readBoundMetadataCenterTarget(target: Record<string, unknown>): {
+  target: Record<string, unknown>;
+  center: MetadataCenterLike;
+} | undefined {
+  const direct = Reflect.get(target, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  if (direct && typeof direct.writeRuntimeControl === 'function') {
+    return { target, center: direct };
+  }
+  const nested = asRecord(target.metadata);
+  if (!nested) {
+    return undefined;
+  }
+  const nestedCenter = Reflect.get(nested, METADATA_CENTER_SYMBOL) as MetadataCenterLike | undefined;
+  return nestedCenter && typeof nestedCenter.writeRuntimeControl === 'function'
+    ? { target: nested, center: nestedCenter }
+    : undefined;
+}
+
+function readBoundMetadataCenter(target: Record<string, unknown>): MetadataCenterLike | undefined {
+  return readBoundMetadataCenterTarget(target)?.center;
+}
+
+function readRuntimeControlFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const runtimeControl = readBoundMetadataCenter(target)?.readRuntimeControl?.();
+  return asRecord(runtimeControl) ? { ...runtimeControl } : {};
+}
+
+function readRequestTruthFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const requestTruth = readBoundMetadataCenter(target)?.readRequestTruth?.();
+  return asRecord(requestTruth) ? { ...requestTruth } : {};
+}
+
+function readContinuationContextFromBoundMetadataCenter(target: Record<string, unknown>): Record<string, unknown> {
+  const continuationContext = readBoundMetadataCenter(target)?.readContinuationContext?.();
+  return asRecord(continuationContext) ? { ...continuationContext } : {};
+}
+
+function applyNativeRuntimeControlWritePlan(args: {
+  metadata: unknown;
+  runtimeControl: Record<string, unknown>;
+  writer: RuntimeControlWriter;
+  reason: string;
+}): void {
+  const metadata = asRecord(args.metadata);
+  const bound = metadata ? readBoundMetadataCenterTarget(metadata) : undefined;
+  if (!bound) {
+    throw new Error('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
+  }
+  for (const [key, value] of Object.entries(args.runtimeControl)) {
+    if (value === undefined) {
+      continue;
+    }
+    bound.center.writeRuntimeControl?.(key, value, args.writer, args.reason);
+    const currentSnapshot = asRecord(Reflect.get(bound.target, RUST_SNAPSHOT_SYMBOL));
+    const nextSnapshot = currentSnapshot ? { ...currentSnapshot } : {};
+    const runtimeControl = asRecord(nextSnapshot.runtimeControl) ?? {};
+    runtimeControl[key] = structuredClone(value);
+    nextSnapshot.runtimeControl = runtimeControl;
+    Reflect.set(bound.target, RUST_SNAPSHOT_SYMBOL, nextSnapshot);
+  }
+}
 
 // feature_id: hub.request_stage_pipeline_bridge
 function syncRequestStageRuntimeControlToMetadataCenter(args: {

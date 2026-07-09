@@ -1,4 +1,3 @@
-import { readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter } from '../../../sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -16,6 +15,14 @@ const nativeBinding = nodeRequire(
 
 type AdapterContext = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
+const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
+
+type MetadataCenterLike = {
+  readRuntimeControl?: () => Record<string, unknown>;
+  readRequestTruth?: () => Record<string, unknown>;
+  readContinuationContext?: () => Record<string, unknown>;
+  readProviderObservation?: () => Record<string, unknown>;
+};
 
 function nativeFn(name: string): (...args: unknown[]) => unknown {
   const fn = nativeBinding[name];
@@ -34,6 +41,46 @@ function parseNativeRecord(raw: unknown, capability: string): Record<string, unk
     throw new Error(`${capability} returned non-object payload`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readMetadataCenterSnapshot(target: unknown): { metadataCenterSnapshot: Record<string, unknown> } | undefined {
+  const targetRecord = asRecord(target);
+  const metadata = asRecord(targetRecord?.metadata);
+  const center = (
+    targetRecord
+      ? Reflect.get(targetRecord, METADATA_CENTER_SYMBOL)
+      : undefined
+  ) as MetadataCenterLike | undefined;
+  const nestedCenter = (
+    metadata
+      ? Reflect.get(metadata, METADATA_CENTER_SYMBOL)
+      : undefined
+  ) as MetadataCenterLike | undefined;
+  const bound = center ?? nestedCenter;
+  if (!bound) {
+    return undefined;
+  }
+  const runtimeControl = asRecord(bound.readRuntimeControl?.());
+  const requestTruth = asRecord(bound.readRequestTruth?.());
+  const continuationContext = asRecord(bound.readContinuationContext?.());
+  const providerObservation = asRecord(bound.readProviderObservation?.());
+  if (!runtimeControl && !requestTruth && !continuationContext && !providerObservation) {
+    return undefined;
+  }
+  return {
+    metadataCenterSnapshot: {
+      requestTruth: requestTruth ?? {},
+      continuationContext: continuationContext ?? {},
+      runtimeControl: runtimeControl ?? {},
+      providerObservation: providerObservation ?? {},
+    },
+  };
 }
 
 export interface CompatApplicationResult {
@@ -57,7 +104,7 @@ function toCompatResult(payload: JsonObject, appliedProfile?: string): CompatApp
 export function buildNativeReqOutboundCompatAdapterContextDirectNative(adapterContext?: AdapterContext) {
   const row = (adapterContext ?? {}) as Record<string, unknown>;
   const metadataCenterSnapshot =
-    readRuntimeMetadataSnapshotFromAnyBoundMetadataCenter(row)?.metadataCenterSnapshot;
+    readMetadataCenterSnapshot(row)?.metadataCenterSnapshot;
   return parseNativeRecord(
     nativeFn('buildNativeReqOutboundCompatAdapterContextJson')(JSON.stringify({
       metadataCenterSnapshot: metadataCenterSnapshot ?? null,
