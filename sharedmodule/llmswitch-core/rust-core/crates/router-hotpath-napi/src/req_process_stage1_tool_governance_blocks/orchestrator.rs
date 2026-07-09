@@ -692,7 +692,17 @@ fn build_stopless_runtime_control_from_cli(
         .or(reason_code)
         .map(|token| normalize_stopless_runtime_trigger_hint(&token).to_string());
     let continuation_prompt = read_trimmed_string(row.get("continuationPrompt"))
-        .or_else(|| read_trimmed_string(row.get("continuation_prompt")));
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
+        .or_else(|| {
+            metadata_center
+                .runtime_control
+                .stopless
+                .continuation_prompt
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        });
     let schema_feedback = row
         .get("schemaFeedback")
         .or_else(|| row.get("schema_feedback"))
@@ -770,6 +780,14 @@ fn clone_stopless_runtime_control_from_snapshot(snapshot: &Value) -> Option<Valu
     {
         cloned.insert("triggerHint".to_string(), Value::String(trigger_hint));
     }
+    if let Some(continuation_prompt) = read_trimmed_string(stopless.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(stopless.get("continuation_prompt")))
+    {
+        cloned.insert(
+            "continuationPrompt".to_string(),
+            Value::String(continuation_prompt),
+        );
+    }
     if let Some(schema_feedback) = stopless
         .get("schemaFeedback")
         .or_else(|| stopless.get("schema_feedback"))
@@ -778,6 +796,69 @@ fn clone_stopless_runtime_control_from_snapshot(snapshot: &Value) -> Option<Valu
         cloned.insert("schemaFeedback".to_string(), schema_feedback.clone());
     }
     Some(Value::Object(cloned))
+}
+
+fn value_contains_text(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(text) => text.contains(needle),
+        Value::Array(items) => items.iter().any(|item| value_contains_text(item, needle)),
+        Value::Object(row) => row.values().any(|item| value_contains_text(item, needle)),
+        _ => false,
+    }
+}
+
+fn inject_stopless_live_continuation_prompt(
+    request: &mut Map<String, Value>,
+    metadata: &Map<String, Value>,
+) {
+    let Some(stopless) = metadata
+        .get("runtime_control")
+        .and_then(Value::as_object)
+        .and_then(|runtime_control| runtime_control.get("stopless"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let reason_code = stopless
+        .get("schemaFeedback")
+        .or_else(|| stopless.get("schema_feedback"))
+        .and_then(Value::as_object)
+        .and_then(|feedback| {
+            read_trimmed_string(feedback.get("reasonCode"))
+                .or_else(|| read_trimmed_string(feedback.get("reason_code")))
+        });
+    let trigger_hint = read_trimmed_string(stopless.get("triggerHint"))
+        .or_else(|| read_trimmed_string(stopless.get("trigger_hint")));
+    if reason_code.as_deref() != Some("stop_schema_continue_next_step")
+        && trigger_hint.as_deref() != Some("non_terminal_schema")
+    {
+        return;
+    }
+    let Some(prompt) = read_trimmed_string(stopless.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(stopless.get("continuation_prompt")))
+    else {
+        return;
+    };
+    if value_contains_text(&Value::Object(request.clone()), &prompt) {
+        return;
+    }
+    if let Some(input) = request.get_mut("input").and_then(Value::as_array_mut) {
+        input.push(serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": prompt
+            }]
+        }));
+        return;
+    }
+    if let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) {
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": prompt
+        }));
+    }
 }
 
 fn write_stopless_runtime_control(metadata: &mut Map<String, Value>, stopless: Value) {
@@ -915,18 +996,15 @@ pub fn apply_req_process_tool_governance(
         || metadata_has_terminal_stopless_runtime_control(&metadata);
     let stopless_cli_output = latest_stopless_cli_output(&request)
         .or_else(|| latest_stopless_cli_output_from_request_semantics(&request));
-    if let Some(stopless) = stopless_cli_output
-        .as_ref()
-        .and_then(|row| {
-            build_stopless_runtime_control_from_cli(
-                row,
-                &metadata_center,
-                input
-                    .has_active_stop_message_for_continue_execution
-                    .unwrap_or(false),
-            )
-        })
-    {
+    if let Some(stopless) = stopless_cli_output.as_ref().and_then(|row| {
+        build_stopless_runtime_control_from_cli(
+            row,
+            &metadata_center,
+            input
+                .has_active_stop_message_for_continue_execution
+                .unwrap_or(false),
+        )
+    }) {
         write_stopless_runtime_control(&mut metadata, stopless);
     } else if !has_terminal_stopless_turn
         && metadata
@@ -955,6 +1033,7 @@ pub fn apply_req_process_tool_governance(
         && should_inject_stopless_system_instruction(&metadata_center)
         && !has_terminal_stopless_turn
     {
+        inject_stopless_live_continuation_prompt(&mut request, &metadata);
         inject_stopless_system_instruction(&mut request);
         inject_reasoning_stop_tool(&mut request);
     }

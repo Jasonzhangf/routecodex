@@ -33,6 +33,42 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
     });
   });
 
+  it('router-direct JSON dispatch bypasses Responses client projection even with requestContext', async () => {
+    const body = {
+      id: 'resp_direct_passthrough_with_context',
+      object: 'response',
+      status: 'completed',
+      model: 'provider-visible-model',
+      output: [
+        {
+          id: 'rs_direct_passthrough_with_context',
+          type: 'reasoning',
+          status: 'completed',
+          content: [{ type: 'reasoning_text', text: 'provider direct payload' }],
+        },
+      ],
+    };
+
+    const output = await prepareResponsesJsonClientDispatchPlanForHttp({
+      entryEndpoint: '/v1/responses',
+      continuationOwner: 'direct',
+      body,
+      metadata: {},
+      requestContext: {
+        payload: {
+          model: 'router-visible-model',
+          tools: [],
+        },
+        context: { toolsRaw: [] },
+      },
+    });
+
+    expect(output).toEqual({
+      clientBody: body,
+      sanitizedBody: body,
+    });
+  });
+
   it('RED: direct owner side-channel must not skip Responses replay-safe client projection', async () => {
     const output = await normalizeResponsesClientPayloadForHttp({
       entryEndpoint: '/v1/responses',

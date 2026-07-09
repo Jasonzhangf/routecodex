@@ -7,6 +7,7 @@ import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-meta
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
+import { applyMetadataCenterRustWriteResult, type MetadataCenterRustSnapshot } from '../metadata-center/dualwrite-api.js';
 import {
   attachRuntimeCarrier,
   bindSingleRuntimeCarrierFromSources,
@@ -21,6 +22,12 @@ const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   stage: 'request_executor_attempt_runtime_control'
 } as const;
 
+const ATTEMPT_STATE_PIPELINE_METADATA_WRITER = {
+  module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
+  symbol: 'finalizeRequestExecutorAttemptMetadata',
+  stage: 'request_executor_attempt_runtime_control'
+} as const;
+
 function readTrimmedString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
@@ -29,6 +36,22 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+function applyPipelineMetadataCenterSnapshot(args: {
+  target: Record<string, unknown>;
+  pipelineMetadata: Record<string, unknown> | undefined;
+}): void {
+  const snapshot = readRecord(args.pipelineMetadata?.metadataCenterSnapshot);
+  if (!snapshot) {
+    return;
+  }
+  applyMetadataCenterRustWriteResult({
+    target: args.target,
+    snapshot: snapshot as MetadataCenterRustSnapshot,
+    writer: ATTEMPT_STATE_PIPELINE_METADATA_WRITER,
+    reason: 'hub pipeline metadata center writeback'
+  });
 }
 
 function resolveAttemptRetryProviderKey(args: {
@@ -164,6 +187,10 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
     target: mergedMetadata,
     sources: [args.metadataForAttempt, pipelineMetadataRecord],
     conflictMessage: 'request-executor attempt metadata violated single-center contract: pipeline result returned a second runtime carrier'
+  });
+  applyPipelineMetadataCenterSnapshot({
+    target: mergedMetadata,
+    pipelineMetadata: pipelineMetadataRecord
   });
   if (requestTruth.requestId) {
     mergedMetadata.requestId = requestTruth.requestId;

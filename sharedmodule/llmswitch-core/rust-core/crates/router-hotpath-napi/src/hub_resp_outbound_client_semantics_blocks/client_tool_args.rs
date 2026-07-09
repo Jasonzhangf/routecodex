@@ -1251,11 +1251,6 @@ pub(crate) fn plan_responses_json_client_dispatch(input: &Value) -> Value {
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default();
-    let has_request_context_tools_raw = record
-        .and_then(|row| row.get("hasRequestContextToolsRaw"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-
     if entry_endpoint != "/v1/responses" && entry_endpoint != "/v1/responses.submit_tool_outputs" {
         return serde_json::json!({
             "action": "direct_passthrough",
@@ -1263,10 +1258,10 @@ pub(crate) fn plan_responses_json_client_dispatch(input: &Value) -> Value {
         });
     }
 
-    if continuation_owner == "direct" && !has_request_context_tools_raw {
+    if continuation_owner == "direct" {
         return serde_json::json!({
             "action": "direct_passthrough",
-            "reason": "direct_continuation_without_projection_context"
+            "reason": "direct_continuation_passthrough"
         });
     }
 

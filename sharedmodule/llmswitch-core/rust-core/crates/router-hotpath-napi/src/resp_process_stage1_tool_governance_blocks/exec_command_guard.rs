@@ -52,8 +52,6 @@ const DANGEROUS_COMMAND_RULES: &[DangerousCommandRule] = &[
 
 const GIT_CHECKOUT_SCOPE_MESSAGE: &str =
     "Command blocked: git checkout is allowed only as a standalone single-file restore. Use `git checkout -- <file>` or `git checkout <ref> -- <file>`.";
-const SHELL_WRITE_MESSAGE: &str =
-    "Command blocked: shell write redirection and bulk in-place writers are not allowed through tool governance.";
 const INVALID_SHELL_WRAPPER_MESSAGE: &str =
     "Malformed shell wrapper: shell -c/-lc requires a balanced closing single quote. Closing-quote or tail-truncated wrappers are not auto-repaired when ambiguous.";
 
@@ -197,86 +195,6 @@ fn detect_git_checkout_scope_violation(cmd: &str) -> bool {
     path.is_empty() || matches!(path, "." | "/" | "*") || path.ends_with('/')
 }
 
-fn detect_shell_write_violation(cmd: &str) -> bool {
-    let normalized = cmd.to_ascii_lowercase();
-    if normalized.trim().is_empty() {
-        return false;
-    }
-    has_persistent_redirect(normalized.as_str())
-        || Regex::new(r"\bsed\b[^\n]*-i\b")
-            .map(|re| re.is_match(normalized.as_str()))
-            .unwrap_or(false)
-        || Regex::new(r"\bed\b[^\n]*-s\b")
-            .map(|re| re.is_match(normalized.as_str()))
-            .unwrap_or(false)
-        || Regex::new(r"\btee\b\s+")
-            .map(|re| re.is_match(normalized.as_str()))
-            .unwrap_or(false)
-}
-
-fn has_persistent_redirect(command: &str) -> bool {
-    let bytes = command.as_bytes();
-    let mut idx = 0usize;
-    let mut quote: Option<u8> = None;
-    let mut escaped = false;
-    while idx < bytes.len() {
-        let ch = bytes[idx];
-        if escaped {
-            escaped = false;
-            idx += 1;
-            continue;
-        }
-        if ch == b'\\' {
-            escaped = true;
-            idx += 1;
-            continue;
-        }
-        if let Some(active_quote) = quote {
-            if ch == active_quote {
-                quote = None;
-            }
-            idx += 1;
-            continue;
-        }
-        if ch == b'\'' || ch == b'"' || ch == b'`' {
-            quote = Some(ch);
-            idx += 1;
-            continue;
-        }
-        if bytes[idx] != b'>' {
-            idx += 1;
-            continue;
-        }
-        if idx > 0 && bytes[idx - 1] == b'=' {
-            idx += 1;
-            continue;
-        }
-        let mut fd_start = idx;
-        while fd_start > 0 && bytes[fd_start - 1].is_ascii_digit() {
-            fd_start -= 1;
-        }
-        let mut target_start = idx + 1;
-        if target_start < bytes.len() && bytes[target_start] == b'>' {
-            target_start += 1;
-        }
-        while target_start < bytes.len() && bytes[target_start].is_ascii_whitespace() {
-            target_start += 1;
-        }
-        let mut target_end = target_start;
-        while target_end < bytes.len() && !bytes[target_end].is_ascii_whitespace() {
-            target_end += 1;
-        }
-        let target = &command[target_start..target_end];
-        let fd_prefix = &command[fd_start..idx];
-        if target.starts_with("/dev/null") || (fd_prefix.len() == 1 && target.starts_with('&')) {
-            idx = target_end.max(idx + 1);
-            continue;
-        }
-        return true;
-    }
-    false
-}
-
 fn detect_dangerous_command_candidate(cmd: &str) -> Option<(&'static str, &'static str)> {
     for rule in DANGEROUS_COMMAND_RULES {
         if let Ok(re) = Regex::new(rule.pattern) {
@@ -287,9 +205,6 @@ fn detect_dangerous_command_candidate(cmd: &str) -> Option<(&'static str, &'stat
     }
     if detect_git_checkout_scope_violation(cmd) {
         return Some(("forbidden_git_checkout_scope", GIT_CHECKOUT_SCOPE_MESSAGE));
-    }
-    if detect_shell_write_violation(cmd) {
-        return Some(("forbidden_shell_write", SHELL_WRITE_MESSAGE));
     }
     None
 }
@@ -543,29 +458,11 @@ mod tests {
     }
 
     #[test]
-    fn shell_writes_are_blocked() {
-        assert_eq!(
-            detect_dangerous_command("printf hello > src/out.txt")
-                .unwrap()
-                .0,
-            "forbidden_shell_write"
-        );
-        assert_eq!(
-            detect_dangerous_command("sed -i '' 's/a/b/' src/a.ts")
-                .unwrap()
-                .0,
-            "forbidden_shell_write"
-        );
-        assert_eq!(
-            detect_dangerous_command("cat <<EOF > file\nx\nEOF")
-                .unwrap()
-                .0,
-            "forbidden_shell_write"
-        );
-        assert_eq!(
-            detect_dangerous_command("echo ok | tee file").unwrap().0,
-            "forbidden_shell_write"
-        );
+    fn shell_writes_are_allowed_for_client_feedback_loop() {
+        assert!(detect_dangerous_command("printf hello > src/out.txt").is_none());
+        assert!(detect_dangerous_command("sed -i '' 's/a/b/' src/a.ts").is_none());
+        assert!(detect_dangerous_command("cat <<EOF > file\nx\nEOF").is_none());
+        assert!(detect_dangerous_command("echo ok | tee file").is_none());
     }
 
     #[test]

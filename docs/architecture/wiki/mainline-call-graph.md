@@ -197,7 +197,7 @@ flowchart LR
 | req-02 | `HubReqInbound02Standardized -> HubReqChatProcess03Governed` | anchored | `captureReqInboundResponsesContextSnapshot -> captureReqInboundResponsesContextSnapshotWithNative` |  | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse |
 | req-03 | `HubReqChatProcess03Governed -> VrRoute04SelectedTarget` | anchored | `execute -> run_vr_route_04_selected_target_entrypoint` |  | `hub.route_selection_bridge`<br/>Hub req-03 Rust bridge that seals virtual-router decisions into `VrRoute04SelectedTarget` |
 | req-04 | `VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic` | anchored | `execute -> run_hub_req_outbound_05_provider_semantic_entrypoint` |  | `hub.req_outbound_provider_semantic`<br/>Hub req-04 Rust bridge that applies `VrRoute04SelectedTarget` to `HubReqOutbound05ProviderSemantic` |
-| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | anchored | `runReqOutboundStage3CompatWithNative -> run_req_outbound_stage3_compat_json` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
+| req-05 | `HubReqOutbound05ProviderSemantic -> ProviderReqOutbound06WirePayload` | anchored | `execute -> run_req_outbound_stage3_compat` |  | `responses.request_compat_normalization`<br/>Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only |
 
 ## responses.direct_passthrough.mainline
 
@@ -695,6 +695,7 @@ Entry contract: `StageAOwnerBoundary` via `docs/goal-prompts/2026-07-03-rust-hub
 
 ```mermaid
 flowchart LR
+  ResponsesRequestInbound["ResponsesRequestInbound"]
   HubRespInbound02Parsed["HubRespInbound02Parsed"]
   HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
   HubReqInbound02Standardized["HubReqInbound02Standardized"]
@@ -708,6 +709,7 @@ flowchart LR
   HubRespChatProcess03Governed -->|stage-a-p0-03| ResponsesContinuationStore
   HubReqInbound02Standardized -->|stage-a-p0-04| HubReqChatProcess03Governed
   HubRespInbound02Parsed -->|stage-a-p0-05| HubRespChatProcess03Governed
+  ResponsesRequestInbound -->|stage-a-p0-06| OpenAiChatCanonical
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -719,6 +721,7 @@ flowchart LR
   class HubReqInbound02Standardized anchored;
   class HubReqChatProcess03Governed anchored;
   class HubRespInbound02Parsed anchored;
+  class ResponsesRequestInbound anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |

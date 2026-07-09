@@ -44,9 +44,7 @@ import {
 import {
   buildResponsesSseIncompleteError,
   buildResponsesSseProviderError,
-  inspectResponsesSseBlockForProviderRateLimit,
-  isResponsesSseAdvisoryRateLimitsBlock,
-  isResponsesSseTerminalBlock
+  inspectResponsesSseBlockForProviderRateLimit
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
@@ -270,45 +268,22 @@ async function readDirectResponsesChunkWithSemanticTimeout(
   }
 }
 
-function readDataOnlyDirectResponseEventName(block: string): string | undefined {
-  const lines = block.split(/\r?\n/);
-  if (lines.some((line) => line.startsWith('event:'))) {
+function takeNextSseBlock(buffer: string): {
+  block: string;
+  rawFrame: string;
+  rest: string;
+} | undefined {
+  const match = /\r?\n\r?\n/.exec(buffer);
+  if (!match) {
     return undefined;
   }
-  const dataText = lines
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice('data:'.length).trim())
-    .join('\n');
-  if (!dataText || dataText === '[DONE]') {
-    return undefined;
-  }
-  try {
-    const data = JSON.parse(dataText) as unknown;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      return undefined;
-    }
-    const type = (data as Record<string, unknown>).type;
-    if (typeof type !== 'string' || !type.startsWith('response.')) {
-      return undefined;
-    }
-    return type;
-  } catch {
-    return undefined;
-  }
+  const endIndex = match.index + match[0].length;
+  return {
+    block: buffer.slice(0, match.index),
+    rawFrame: buffer.slice(0, endIndex),
+    rest: buffer.slice(endIndex),
+  };
 }
-
-function prefixDataOnlyDirectResponseEventName(block: string): string {
-  const eventType = readDataOnlyDirectResponseEventName(block);
-  return eventType ? `event: ${eventType}\n${block}` : block;
-}
-
-function isDirectResponsesSseDoneTokenBlock(block: string): boolean {
-  return block
-    .split(/\r?\n/)
-    .some((line) => line.trim() === 'data: [DONE]');
-}
-
-const DIRECT_RESPONSES_SSE_DONE_FRAME = Buffer.from('data: [DONE]\n\n');
 
 async function prepareDirectResponsesSsePassthroughStream(
   stream: NodeJS.ReadableStream,
@@ -318,17 +293,15 @@ async function prepareDirectResponsesSsePassthroughStream(
   }
 ): Promise<NodeJS.ReadableStream> {
   const iterator = stream[Symbol.asyncIterator]();
-  const bufferedFrames: Buffer[] = [];
+  const bufferedFrames: string[] = [];
   let pending = '';
   let sawSemanticFrame = false;
-  let sawTerminalFrame = false;
-  let sawDoneTokenFrame = false;
   let lastSemanticActivityAt = Date.now();
 
-  const processBlock = async (part: string): Promise<Buffer | null> => {
+  const processBlock = async (part: string): Promise<boolean> => {
     const trimmed = part.trim();
     if (!trimmed || trimmed.startsWith(':')) {
-      return Buffer.from(`${part}\n\n`);
+      return false;
     }
     const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
     if (rateLimitPayload) {
@@ -337,18 +310,9 @@ async function prepareDirectResponsesSsePassthroughStream(
       }
       throw buildResponsesSseProviderError(rateLimitPayload);
     }
-    if (isResponsesSseAdvisoryRateLimitsBlock(part)) {
-      return null;
-    }
-    if (isDirectResponsesSseDoneTokenBlock(part)) {
-      sawDoneTokenFrame = true;
-    }
-    if (isResponsesSseTerminalBlock(part)) {
-      sawTerminalFrame = true;
-    }
     sawSemanticFrame = true;
     lastSemanticActivityAt = Date.now();
-    return Buffer.from(`${prefixDataOnlyDirectResponseEventName(part)}\n\n`);
+    return true;
   };
 
   const startStreamingRemainder = (output: PassThrough): void => {
@@ -373,28 +337,25 @@ async function prepareDirectResponsesSsePassthroughStream(
             ? next.value
             : Buffer.from(String(next.value));
           pending += chunk.toString('utf8');
-          const parts = pending.split(/\r?\n\r?\n/);
-          pending = parts.pop() ?? '';
-          for (const part of parts) {
-            const frame = await processBlock(part);
-            if (frame && !closed) {
-              output.write(frame);
+          while (true) {
+            const nextFrame = takeNextSseBlock(pending);
+            if (!nextFrame) {
+              break;
+            }
+            await processBlock(nextFrame.block);
+            pending = nextFrame.rest;
+            if (!closed) {
+              output.write(nextFrame.rawFrame);
             }
           }
         }
         if (pending) {
-          const frame = await processBlock(pending);
+          await processBlock(pending);
+          const tail = pending;
           pending = '';
-          if (frame && !closed) {
-            output.write(frame);
+          if (!closed) {
+            output.write(tail);
           }
-        }
-        if (!sawTerminalFrame) {
-          output.destroy(buildResponsesSseIncompleteError());
-          return;
-        }
-        if (!sawDoneTokenFrame && !closed) {
-          output.write(DIRECT_RESPONSES_SSE_DONE_FRAME);
         }
         if (!closed) {
           output.end();
@@ -419,46 +380,37 @@ async function prepareDirectResponsesSsePassthroughStream(
       ? next.value
       : Buffer.from(String(next.value));
     pending += chunk.toString('utf8');
-    const parts = pending.split(/\r?\n\r?\n/);
-    pending = parts.pop() ?? '';
-    let readyToStream = false;
-    for (const part of parts) {
-      const frame = await processBlock(part);
-      if (frame) {
-        bufferedFrames.push(frame);
+    while (true) {
+      const nextFrame = takeNextSseBlock(pending);
+      if (!nextFrame) {
+        break;
       }
-      readyToStream = readyToStream || sawSemanticFrame;
+      const semantic = await processBlock(nextFrame.block);
+      bufferedFrames.push(nextFrame.rawFrame);
+      pending = nextFrame.rest;
+      if (semantic) {
+        const output = new PassThrough();
+        for (const frame of bufferedFrames) {
+          output.write(frame);
+        }
+        startStreamingRemainder(output);
+        return output;
+      }
     }
-    if (readyToStream) {
+  }
+  if (pending) {
+    const semantic = await processBlock(pending);
+    const tail = pending;
+    pending = '';
+    bufferedFrames.push(tail);
+    if (semantic) {
       const output = new PassThrough();
       for (const frame of bufferedFrames) {
         output.write(frame);
       }
-      startStreamingRemainder(output);
+      output.end();
       return output;
     }
-  }
-  if (pending) {
-    const frame = await processBlock(pending);
-    pending = '';
-    if (frame) {
-      bufferedFrames.push(frame);
-    }
-  }
-  if (sawSemanticFrame) {
-    const output = new PassThrough();
-    for (const frame of bufferedFrames) {
-      output.write(frame);
-    }
-    if (!sawTerminalFrame) {
-      output.destroy(buildResponsesSseIncompleteError());
-      return output;
-    }
-    if (!sawDoneTokenFrame) {
-      output.write(DIRECT_RESPONSES_SSE_DONE_FRAME);
-    }
-    output.end();
-    return output;
   }
   throw buildResponsesSseIncompleteError();
 }
@@ -640,12 +592,9 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (model) {
       builtBody.model = model;
     }
-    const overriddenBody = await this.sanitizeResponsesProviderOutboundBody(builtBody, context, {
-      enforceLayout: false
-    });
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
-        ? extractSubmitToolOutputsPayload(overriddenBody)
+        ? extractSubmitToolOutputsPayload(builtBody)
         : null;
     if (submitPayload) {
       const submitEndpoint = buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
@@ -662,6 +611,7 @@ export class ResponsesProvider extends HttpTransportProvider {
           entryEndpoint,
           providerStream,
           httpClient: this.httpClient,
+          skipSanitize: true,
         }) as UnknownObject;
       } catch (error) {
         const normalizedError = this.normalizeConfiguredUpstreamError(error, context);
@@ -680,12 +630,12 @@ export class ResponsesProvider extends HttpTransportProvider {
         throw normalizedError;
       }
     }
-    const explicitStream = extractStreamFlagFromBody(overriddenBody);
+    const explicitStream = extractStreamFlagFromBody(builtBody);
 
     try {
       if (explicitStream === true) {
         return await this.sendDirectSsePassthroughRequest({
-          body: overriddenBody,
+          body: builtBody,
           headers,
           context,
           targetUrl,
@@ -696,7 +646,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
       return await this.sendJsonRequest({
         endpoint,
-        body: overriddenBody,
+        body: builtBody,
         headers,
         context,
         targetUrl,

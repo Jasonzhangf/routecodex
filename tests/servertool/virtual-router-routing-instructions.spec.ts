@@ -1,12 +1,20 @@
 import { bootstrapVirtualRouterConfig, type ProviderProfile, type RouterMetadataInput, type VirtualRouterBootstrapInput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
-import type {
-  StandardizedMessage,
-  StandardizedRequest
-} from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+
+type StandardizedMessage = Record<string, unknown> & {
+  role: string;
+  content: string;
+};
+type StandardizedRequest = Record<string, unknown> & {
+  model: string;
+  messages: StandardizedMessage[];
+  tools: Array<Record<string, unknown>>;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
 
 function buildEngine(): VirtualRouterEngine {
   const input: VirtualRouterBootstrapInput = {

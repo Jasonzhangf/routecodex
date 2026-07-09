@@ -3,12 +3,25 @@ import type { HubPipelineExecutionResult, HubPipelineHandle } from './types.js';
 import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
-import { buildMetadataCenterTransportSnapshot } from './metadata-center/dualwrite-api.js';
-import { resolveEntryProtocolFromEndpointNative } from '../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  applyMetadataCenterRustWriteResult,
+  buildMetadataCenterTransportSnapshot,
+  type MetadataCenterRustSnapshot
+} from './metadata-center/dualwrite-api.js';
+import {
+  buildRequestStageRuntimeControlWritePlanNative,
+  resolveEntryProtocolFromEndpointNative
+} from '../../../modules/llmswitch/bridge/native-exports.js';
 import { executeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
 import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
+
+const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
+  module: 'src/server/runtime/http-server/executor-pipeline.ts',
+  symbol: 'runHubPipeline',
+  stage: 'HubReqChatProcess03Governed'
+} as const;
 
 function resolveEntryProtocolFromEndpoint(entryEndpoint: string): 'openai-responses' | 'anthropic-messages' | 'openai-chat' {
   return resolveEntryProtocolFromEndpointNative(entryEndpoint) as 'openai-responses' | 'anthropic-messages' | 'openai-chat';
@@ -81,6 +94,45 @@ function buildHubPipelineMetadata(
   return pipelineMetadata;
 }
 
+function syncRequestStageRuntimeControlToMetadataCenter(args: {
+  sourceMetadata: Record<string, unknown>;
+  outputMetadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  const writePlan = buildRequestStageRuntimeControlWritePlanNative({
+    outputMetadata: args.outputMetadata,
+  });
+  const runtimeControl = asRecord(writePlan.runtimeControl);
+  if (!runtimeControl || Object.keys(runtimeControl).length === 0) {
+    return args.outputMetadata;
+  }
+  if (!MetadataCenter.read(args.sourceMetadata)) {
+    throw new Error('MetadataCenter runtime_control write failed: bound MetadataCenter missing');
+  }
+  const currentSnapshot = buildMetadataCenterTransportSnapshot(args.sourceMetadata) as MetadataCenterRustSnapshot | undefined;
+  const nextRuntimeControl = {
+    ...asRecord(currentSnapshot?.runtimeControl),
+    ...runtimeControl,
+  };
+  const nextSnapshot: MetadataCenterRustSnapshot = {
+    ...(currentSnapshot ?? {}),
+    runtimeControl: nextRuntimeControl,
+  };
+  applyMetadataCenterRustWriteResult({
+    target: args.sourceMetadata,
+    snapshot: nextSnapshot,
+    writer: REQUEST_STAGE_RUNTIME_CONTROL_WRITER,
+    reason: 'rust request chatprocess runtime control'
+  });
+  const metadataCenterSnapshot = buildMetadataCenterTransportSnapshot(args.sourceMetadata);
+  const outputMetadata = { ...args.outputMetadata };
+  if (metadataCenterSnapshot) {
+    outputMetadata.metadataCenterSnapshot = metadataCenterSnapshot;
+  } else {
+    delete outputMetadata.metadataCenterSnapshot;
+  }
+  return outputMetadata;
+}
+
 export async function runHubPipeline(
   hubPipeline: HubPipelineHandle,
   input: PipelineExecutionInput,
@@ -132,7 +184,14 @@ export async function runHubPipeline(
       requestId: input.requestId
     });
   }
-  const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
+  const resultMetadata =
+    result.metadata && typeof result.metadata === 'object' && !Array.isArray(result.metadata)
+      ? syncRequestStageRuntimeControlToMetadataCenter({
+        sourceMetadata: metadata,
+        outputMetadata: result.metadata as Record<string, unknown>,
+      })
+      : {};
+  const processMode = (resultMetadata.processMode as string | undefined) ?? 'chat';
   return {
     providerPayload: result.providerPayload,
     standardizedRequest:
@@ -150,6 +209,6 @@ export async function runHubPipeline(
         ? (result.routingDiagnostics as Record<string, unknown>)
         : undefined,
     processMode,
-    metadata: result.metadata ?? {}
+    metadata: resultMetadata
   };
 }

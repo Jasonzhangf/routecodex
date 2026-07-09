@@ -5,9 +5,7 @@ use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
     normalize_exec_command_text, read_command_from_args,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
-use crate::resp_process_stage1_tool_governance_blocks::requested_tools::{
-    collect_requested_tool_name_keys, read_tool_call_name_key,
-};
+use crate::resp_process_stage1_tool_governance_blocks::requested_tools::collect_requested_tool_name_keys;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_extract::looks_like_exec_command_candidate;
 use crate::resp_process_stage1_tool_governance_blocks::text_harvest_strict::harvest_explicit_wrapper_only_tool_calls_from_payload;
 use crate::resp_process_stage1_tool_governance_blocks::tool_args::normalize_tool_args_preserving_raw_shape;
@@ -63,54 +61,9 @@ pub(crate) fn normalize_apply_patch_tool_calls(payload: &mut Value) -> i64 {
     repaired
 }
 
-pub(crate) fn drop_disallowed_tool_calls_from_payload(payload: &mut Value) -> i64 {
-    let requested_tool_name_keys = collect_requested_tool_name_keys(payload);
-    if requested_tool_name_keys.is_empty() {
-        return drop_apply_patch_shell_fallback_tool_calls_from_payload(payload);
-    }
-
-    let mut dropped = drop_apply_patch_shell_fallback_tool_calls_from_payload(payload);
-    let Some(choices) = payload.get_mut("choices").and_then(|v| v.as_array_mut()) else {
-        return dropped;
-    };
-
-    for choice in choices {
-        let Some(choice_row) = choice.as_object_mut() else {
-            continue;
-        };
-        let Some(message) = choice_row
-            .get_mut("message")
-            .and_then(|v| v.as_object_mut())
-        else {
-            continue;
-        };
-        let Some(tool_calls) = message.get_mut("tool_calls").and_then(|v| v.as_array_mut()) else {
-            continue;
-        };
-
-        let before = tool_calls.len();
-        tool_calls.retain(|entry| {
-            read_tool_call_name_key(entry)
-                .map(|key| {
-                    key == "reasoningstop" || requested_tool_name_keys.contains(key.as_str())
-                })
-                .unwrap_or(false)
-        });
-        dropped += (before.saturating_sub(tool_calls.len())) as i64;
-        if before > 0 && tool_calls.is_empty() {
-            let finish_reason = read_trimmed_string(choice_row.get("finish_reason"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if finish_reason == "tool_calls" {
-                choice_row.insert(
-                    "finish_reason".to_string(),
-                    Value::String("stop".to_string()),
-                );
-            }
-        }
-    }
-
-    dropped
+pub(crate) fn preserve_client_tool_calls_for_feedback(payload: &mut Value) -> i64 {
+    let _ = payload;
+    0
 }
 
 pub(crate) fn strip_visible_content_from_tool_call_rounds(
@@ -178,122 +131,6 @@ fn looks_like_harvest_transcript_residue(text: &str) -> bool {
         let trimmed = line.trim();
         trimmed.starts_with('›') || trimmed.contains('│')
     })
-}
-
-fn read_message_content_text(message: &Map<String, Value>) -> String {
-    match message.get("content") {
-        Some(Value::String(text)) => text.to_string(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .filter_map(|item| {
-                item.as_object()
-                    .and_then(|row| row.get("text").or_else(|| row.get("content")))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .collect::<Vec<String>>()
-            .join("\n"),
-        _ => String::new(),
-    }
-}
-
-fn looks_like_apply_patch_shell_fallback_text(text: &str) -> bool {
-    let lowered = text.to_ascii_lowercase();
-    (lowered.contains("apply_patch") || lowered.contains("patch tool"))
-        && (lowered.contains("fallback write")
-            || lowered.contains("fall back")
-            || lowered.contains("patch tool is non-functional")
-            || lowered.contains("tool is broken")
-            || lowered.contains("tee`/`cat")
-            || lowered.contains("cat <<eof"))
-}
-
-fn looks_like_shell_file_write_command(command: &str) -> bool {
-    let lowered = command.to_ascii_lowercase();
-    lowered.contains("cat >")
-        || lowered.contains("cat  >")
-        || lowered.contains("tee ")
-        || lowered.contains("tee -a")
-        || lowered.contains("<<'eof'")
-        || lowered.contains("<<eof")
-        || lowered.contains("printf ")
-        || lowered.contains(" > tmp/")
-        || lowered.contains(">tmp/")
-}
-
-fn read_tool_call_function_mut(tool_call: &mut Value) -> Option<&mut Map<String, Value>> {
-    tool_call.get_mut("function").and_then(Value::as_object_mut)
-}
-
-fn is_shell_like_apply_patch_fallback_tool_call(tool_call: &mut Value) -> bool {
-    let Some(function) = read_tool_call_function_mut(tool_call) else {
-        return false;
-    };
-    let Some(name) = read_trimmed_string(function.get("name")) else {
-        return false;
-    };
-    let lowered = name.to_ascii_lowercase();
-    if !matches!(
-        lowered.as_str(),
-        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
-    ) {
-        return false;
-    }
-    let args = parse_json_record(function.get("arguments")).unwrap_or_default();
-    read_command_from_args(&args)
-        .map(|command| looks_like_shell_file_write_command(command.as_str()))
-        .unwrap_or(false)
-}
-
-fn drop_apply_patch_shell_fallback_tool_calls_from_payload(payload: &mut Value) -> i64 {
-    let mut dropped = 0i64;
-    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
-        return dropped;
-    };
-
-    for choice in choices {
-        let Some(choice_row) = choice.as_object_mut() else {
-            continue;
-        };
-        let Some(message) = choice_row.get_mut("message").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        let content = read_message_content_text(message);
-        if !looks_like_apply_patch_shell_fallback_text(content.as_str()) {
-            continue;
-        }
-        let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
-            continue;
-        };
-        let before = tool_calls.len();
-        tool_calls.retain_mut(|entry| !is_shell_like_apply_patch_fallback_tool_call(entry));
-        let removed = before.saturating_sub(tool_calls.len());
-        let tool_calls_empty = tool_calls.is_empty();
-        if removed == 0 {
-            continue;
-        }
-        dropped += removed as i64;
-        if tool_calls_empty {
-            message.remove("tool_calls");
-        }
-        message.insert(
-            "content".to_string(),
-            Value::String("APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt; for temporary tests use tmp/... under the workspace, never /tmp/.... Do not switch to exec_command or shell writes.".to_string()),
-        );
-        if tool_calls_empty {
-            let finish_reason = read_trimmed_string(choice_row.get("finish_reason"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if finish_reason == "tool_calls" {
-                choice_row.insert(
-                    "finish_reason".to_string(),
-                    Value::String("stop".to_string()),
-                );
-            }
-        }
-    }
-
-    dropped
 }
 
 fn should_preserve_structured_tool_name(

@@ -1017,7 +1017,7 @@ chains:
         caller_symbol: buildChatRequestFromResponses
         caller_file: sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts
         callee_symbol: convertBridgeInputToChatMessages
-        callee_file: sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts
+        callee_file: sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
         semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn, with legacy shell-projected `reasoningStop` / `reasoning_stop` history physically removed instead of replayed"

@@ -3,6 +3,17 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const createSnapshotRecorderMock = jest.fn();
 const executeHubPipelineNativeMock = jest.fn();
+const buildRequestStageRuntimeControlWritePlanNativeMock = jest.fn((input: {
+  outputMetadata?: Record<string, unknown>;
+}) => {
+  const runtimeControl = input.outputMetadata?.runtime_control;
+  return {
+    runtimeControl:
+      runtimeControl && typeof runtimeControl === 'object' && !Array.isArray(runtimeControl)
+        ? runtimeControl as Record<string, unknown>
+        : null
+  };
+});
 const resolveEntryProtocolFromEndpointNativeMock = jest.fn((entryEndpoint: string) => {
   if (entryEndpoint === '/v1/chat/completions') {
     return 'openai-chat';
@@ -25,6 +36,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/routing-in
 }));
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  buildRequestStageRuntimeControlWritePlanNative: buildRequestStageRuntimeControlWritePlanNativeMock,
   resolveEntryProtocolFromEndpointNative: resolveEntryProtocolFromEndpointNativeMock
 }));
 
@@ -46,6 +58,7 @@ describe('executor-pipeline stage recorder injection', () => {
   beforeEach(() => {
     createSnapshotRecorderMock.mockReset();
     executeHubPipelineNativeMock.mockReset();
+    buildRequestStageRuntimeControlWritePlanNativeMock.mockClear();
     resolveEntryProtocolFromEndpointNativeMock.mockClear();
   });
 
@@ -255,5 +268,99 @@ describe('executor-pipeline stage recorder injection', () => {
       }
     });
     expect(metadata.metadataCenterSnapshot).toBeUndefined();
+  });
+
+  it('writes Rust request-stage stopless runtime control back to the bound MetadataCenter', async () => {
+    const recorder = { record: jest.fn() };
+    createSnapshotRecorderMock.mockResolvedValue(recorder);
+
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    const continuationPrompt = '运行 cargo test 验证 stopless next_step';
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses'
+      },
+      processMode: 'chat',
+      metadata: {
+        runtime_control: {
+          stopless: {
+            active: true,
+            flowId: 'stop_message_flow',
+            repeatCount: 1,
+            maxRepeats: 3,
+            triggerHint: 'non_terminal_schema',
+            continuationPrompt,
+            schemaFeedback: {
+              reasonCode: 'stop_schema_continue_next_step',
+              missingFields: []
+            }
+          }
+        }
+      }
+    });
+
+    const metadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(metadata);
+    center.writeRequestTruth(
+      'requestId',
+      'req_stopless_next_step_writeback',
+      {
+        module: 'tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts',
+        symbol: 'writes Rust request-stage stopless runtime control back to the bound MetadataCenter',
+        stage: 'test'
+      }
+    );
+    center.writeRequestTruth(
+      'sessionId',
+      'sess_stopless_next_step_writeback',
+      {
+        module: 'tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts',
+        symbol: 'writes Rust request-stage stopless runtime control back to the bound MetadataCenter',
+        stage: 'test'
+      }
+    );
+
+    const result = await runHubPipeline(
+      'mock_hub_pipeline_handle',
+      {
+        requestId: 'req_stopless_next_step_writeback',
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: { input: 'hi' },
+        metadata: {}
+      } as any,
+      metadata
+    );
+
+    expect(buildRequestStageRuntimeControlWritePlanNativeMock).toHaveBeenCalledWith({
+      outputMetadata: expect.objectContaining({
+        runtime_control: expect.objectContaining({
+          stopless: expect.objectContaining({
+            continuationPrompt
+          })
+        })
+      })
+    });
+    expect(MetadataCenter.read(metadata)?.readRuntimeControl().stopless).toEqual(expect.objectContaining({
+      continuationPrompt,
+      schemaFeedback: expect.objectContaining({
+        reasonCode: 'stop_schema_continue_next_step'
+      })
+    }));
+    expect(result.metadata.metadataCenterSnapshot).toMatchObject({
+      requestTruth: {
+        requestId: 'req_stopless_next_step_writeback',
+        sessionId: 'sess_stopless_next_step_writeback'
+      },
+      runtimeControl: {
+        stopless: expect.objectContaining({
+          continuationPrompt
+        })
+      }
+    });
   });
 });

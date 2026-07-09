@@ -1,3 +1,10 @@
+# 2026-07-09: exec_command/tool governance only blocks dangerous operations
+
+- Verified rule: response-side tool governance must not silently drop client-visible tool calls only because they are absent from `requestedToolNames`; preserve them so client execution or client error becomes the next-turn model feedback.
+- Verified rule: `exec_command` guard must not classify ordinary shell writes (`>`, heredoc, `tee`, `sed -i`, `ed -s`) as dangerous. Dangerous intercept remains for destructive/broad operations such as `rm -rf`, `pkill/killall`, `git clean -f`, `git reset --hard`, and scoped `git checkout` violations.
+- Verified rule: apply_patch shell fallback attempts must not be rewritten into `APPLY_PATCH_ERROR` by response governance; if the command is not dangerous, let the client execute it and carry the result back to the model.
+- Evidence: Rust focused `resp_process_stage1_tool_governance` passed 215/215 selected; touched-file `rustfmt --check`; touched-file `git diff --check`; `verify:servertool-rust-only` passed; `npm run build:native-hotpath` passed; `npm run build:min` passed; `npm run install:global` passed and restarted port 5555; `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `http://127.0.0.1:5555/health` all reported version `0.90.3683`.
+
 # 2026-07-08: servertool server-side registry defaults are retired
 
 - Verified rule: CLI-owned servertools must not remain in the default server-side skeleton registry. Default `servertool_skeleton_config.rs` keeps `internalTools`, primary auto-hook order, progress flow map, and followup profiles empty.

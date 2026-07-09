@@ -32,6 +32,7 @@ use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04
 use crate::hub_resp_outbound_sse_stream::{process_sse_stream, SseStreamInput};
 use crate::metadata_center::{
     build_metadata_center_from_snapshot, build_stopless_metadata_center_reset_write_plan,
+    MetadataCenterReader,
 };
 use crate::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -1101,7 +1102,8 @@ fn run_servertool_resp_stopless_hook_skeleton(
     request_id: &str,
 ) -> HubPipelineResult<Option<ServertoolRespStoplessHookOutput>> {
     let runtime_active = is_stopless_runtime_active(metadata, metadata_center_snapshot);
-    let response_runtime_enabled = is_stop_message_response_runtime_enabled(metadata);
+    let response_runtime_enabled =
+        is_stop_message_response_runtime_enabled(metadata, metadata_center_snapshot);
     let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
@@ -1373,31 +1375,46 @@ fn has_active_stopless_runtime_control(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn is_stop_message_response_runtime_enabled(metadata: &Value) -> bool {
-    metadata
+fn has_stop_message_response_runtime_enabled_value(value: &Value) -> bool {
+    value
         .get("stopMessageEnabled")
+        .or_else(|| value.get("routecodexPortStopMessageEnabled"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
-        || metadata
-            .get("routecodexPortStopMessageEnabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || metadata
-            .get("__rt")
-            .and_then(|rt| rt.get("stopMessageEnabled"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || metadata
-            .get("__rt")
-            .and_then(|rt| rt.get("routecodexPortStopMessageEnabled"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || metadata
-            .get("runtimeControl")
-            .and_then(|runtime| runtime.get("stopless"))
+        || value
+            .get("stopless")
             .and_then(|stopless| stopless.get("active"))
             .and_then(Value::as_bool)
             .unwrap_or(false)
+        || value
+            .get("__rt")
+            .is_some_and(has_stop_message_response_runtime_enabled_value)
+        || value
+            .get("runtimeControl")
+            .is_some_and(|runtime| {
+                runtime
+                    .get("stopMessageEnabled")
+                    .or_else(|| runtime.get("routecodexPortStopMessageEnabled"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    || has_active_stopless_runtime_control(value)
+            })
+        || value
+            .get("requestTruth")
+            .is_some_and(has_stop_message_response_runtime_enabled_value)
+        || value
+            .get("metadataCenterSnapshot")
+            .is_some_and(has_stop_message_response_runtime_enabled_value)
+}
+
+fn is_stop_message_response_runtime_enabled(
+    metadata: &Value,
+    metadata_center_snapshot: &Value,
+) -> bool {
+    let center = build_metadata_center_from_snapshot(metadata_center_snapshot);
+    center.stop_message_enabled().unwrap_or(false)
+        || has_stop_message_response_runtime_enabled_value(metadata_center_snapshot)
+        || has_stop_message_response_runtime_enabled_value(metadata)
 }
 
 fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {

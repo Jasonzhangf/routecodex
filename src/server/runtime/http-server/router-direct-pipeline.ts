@@ -9,11 +9,9 @@
  * Hooks applied:
  * - Model override: if VR selected a target modelId different from the inbound
  *   model, override payload.model → targetModelId. Original client model is
- *   written to metadata center for response restoration.
+ *   written to metadata center for observation.
  * - Thinking effort override: if route params specify a thinking level, override
  *   reasoning_effort and reasoning.effort.
- * - Response restore: after provider returns, restore response.body.model back to
- *   original client model via metadata center clientModelId.
  *
  * Contract: payload passthrough is preserved for all other fields, but error
  * policy passthrough is explicitly NOT preserved. All router-direct failures
@@ -24,13 +22,11 @@
 
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
-import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
 import { extractResponseStatus } from './executor/provider-response-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
-import { stripDirectTargetUnsupportedMedia } from './router-direct-media-capability.js';
 import {
   attachProviderRuntimeMetadata,
   extractProviderRuntimeMetadata
@@ -41,12 +37,6 @@ const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   symbol: 'executeRouterDirectPipeline:modelOverride',
   stage: 'router_direct_model_override',
 };
-const HTTP_DIRECT_MODEL_RESTORE_WRITER: MetadataCenterWriter = {
-  module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
-  symbol: 'executeRouterDirectPipeline:modelRestore',
-  stage: 'router_direct_model_restore',
-};
-
 /** Context snapshot for a single router-direct request — feeds snapshot hooks and logs. */
 export interface RouterDirectAuditContext {
   /** Current request payload object used for direct send. This is not cloned. */
@@ -193,7 +183,6 @@ export async function executeRouterDirectPipeline(
     input.requestPayload,
     target.modelId,
     target.routeParams,
-    providerHandle.runtime,
   );
   if (typeof hookResult.payload.model === 'string' && hookResult.payload.model.trim()) {
     auditContext.providerModelId = hookResult.payload.model.trim();
@@ -274,11 +263,6 @@ export async function executeRouterDirectPipeline(
   }
   const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
 
-  // Restore response model to original client model (non-SSE body only; SSE chunks restored by postprocessor)
-  if (auditContext.originalClientModel) {
-    response = restoreResponseModel(response, auditContext.originalClientModel);
-  }
-
   input.onSnapshotAfter?.(response, auditContext);
 
   return {
@@ -313,7 +297,6 @@ function applyDirectRouteHooks(
   payload: Record<string, unknown>,
   targetModelId?: string,
   routeParams?: Record<string, unknown>,
-  providerRuntime?: ProviderRuntimeProfile,
 ): DirectRouteHookResult {
   let result = payload;
   let originalClientModel: string | undefined;
@@ -345,113 +328,7 @@ function applyDirectRouteHooks(
     };
   }
 
-  result = applyTargetModelRequestCapabilityHook(result, effectiveModelId, providerRuntime);
-
   return { payload: result, originalClientModel };
-}
-
-function applyTargetModelRequestCapabilityHook(
-  payload: Record<string, unknown>,
-  targetModelId: string,
-  providerRuntime?: ProviderRuntimeProfile,
-): Record<string, unknown> {
-  if (!targetModelId) {
-    return payload;
-  }
-  const capabilities = providerRuntime?.modelCapabilities?.[targetModelId];
-  if (Array.isArray(capabilities) && !hasVisualModelCapability(capabilities)) {
-    payload = applyTargetModelMediaCapabilityHook(payload);
-  }
-  if (!Array.isArray(capabilities) || !capabilities.includes('no_reasoning_summary')) {
-    return payload;
-  }
-  const reasoning = payload.reasoning;
-  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) {
-    return payload;
-  }
-  if (!Object.prototype.hasOwnProperty.call(reasoning, 'summary')) {
-    return payload;
-  }
-  const nextReasoning = { ...(reasoning as Record<string, unknown>) };
-  delete nextReasoning.summary;
-  return {
-    ...payload,
-    reasoning: nextReasoning,
-  };
-}
-
-function hasVisualModelCapability(capabilities: string[]): boolean {
-  return capabilities.some((capability) =>
-    capability === 'multimodal' || capability === 'vision' || capability === 'video'
-  );
-}
-
-function applyTargetModelMediaCapabilityHook(payload: Record<string, unknown>): Record<string, unknown> {
-  const input = payload.input;
-  if (!Array.isArray(input)) {
-    return payload;
-  }
-  if (!containsResponsesInputMedia(input)) {
-    return payload;
-  }
-  const stripped = stripDirectTargetUnsupportedMedia(input, '[Image omitted]');
-  if (!stripped.changed) {
-    return payload;
-  }
-  return {
-    ...payload,
-    input: stripped.messages,
-  };
-}
-
-function containsResponsesInputMedia(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsResponsesInputMedia);
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const type = typeof record.type === 'string' ? record.type.toLowerCase() : '';
-  if (type.includes('image') || type.includes('video')) {
-    return true;
-  }
-  if (Object.prototype.hasOwnProperty.call(record, 'image_url')) {
-    return true;
-  }
-  if (Object.prototype.hasOwnProperty.call(record, 'video_url')) {
-    return true;
-  }
-  return Object.values(record).some(containsResponsesInputMedia);
-}
-
-// ---------------------------------------------------------------------------
-// Response: Model restore (non-SSE body)
-// ---------------------------------------------------------------------------
-
-/**
- * Restore the model field in the provider response body back to the original
- * client model. Only applies to non-streaming (non-SSE) response bodies.
- * SSE stream chunk model restoration is handled by the SSE stream postprocessor
- * which reads originalClientModel from the auditContext.
- */
-function restoreResponseModel(response: unknown, originalClientModel: string): unknown {
-  if (!response || typeof response !== 'object') {
-    return response;
-  }
-  const record = response as Record<string, unknown>;
-  // Provider response shape: { body, headers, status, sseStream? }
-  if (record.body && typeof record.body === 'object' && !Array.isArray(record.body)) {
-    const body = record.body as Record<string, unknown>;
-    if (typeof body.model === 'string') {
-      body.model = originalClientModel;
-    }
-  }
-  // Raw response passthrough (if provider returns body directly without wrapper)
-  if (typeof record.model === 'string' && record.body === undefined) {
-    record.model = originalClientModel;
-  }
-  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +403,7 @@ export function resolveRouterSameProtocolBehavior(portConfig: PortConfig): 'dire
 
 /**
  * Read the original client model from a direct-route audit context.
- * Used by SSE stream postprocessor to restore model per-chunk.
+ * Used by observability code that needs both client model and provider model.
  */
 export function readOriginalClientModel(auditContext: RouterDirectAuditContext): string | undefined {
   return auditContext.originalClientModel;

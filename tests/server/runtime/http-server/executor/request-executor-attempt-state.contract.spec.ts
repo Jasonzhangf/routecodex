@@ -3,6 +3,11 @@ import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
+  buildMetadataCenterTransportSnapshot,
+  readMetadataCenterSlot,
+  writeMetadataCenterSlot
+} from '../../../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
+import {
   finalizeRequestExecutorAttemptMetadata,
   prepareRequestExecutorAttemptState
 } from '../../../../../src/server/runtime/http-server/executor/request-executor-attempt-state.js';
@@ -234,6 +239,90 @@ describe('request-executor attempt-state contract', () => {
     ).toThrow(
       'request-executor attempt metadata violated single-center contract: pipeline result returned a second runtime carrier'
     );
+  });
+
+  it('applies Rust pipeline metadataCenterSnapshot onto the bound MetadataCenter without creating a second center', () => {
+    const attemptMetadata: Record<string, unknown> = {};
+    writeMetadataCenterSlot({
+      target: attemptMetadata,
+      family: 'request_truth',
+      key: 'requestId',
+      value: 'req-stopless-pipeline-writeback',
+      writer: {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'applies Rust pipeline metadataCenterSnapshot onto the bound MetadataCenter without creating a second center',
+        stage: 'test_setup'
+      }
+    });
+    writeMetadataCenterSlot({
+      target: attemptMetadata,
+      family: 'request_truth',
+      key: 'sessionId',
+      value: 'sess-stopless-pipeline-writeback',
+      writer: {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'applies Rust pipeline metadataCenterSnapshot onto the bound MetadataCenter without creating a second center',
+        stage: 'test_setup'
+      }
+    });
+    const pipelineMetadata = {
+      metadataCenterSnapshot: {
+        runtimeControl: {
+          stopless: {
+            active: true,
+            flowId: 'stop_message_flow',
+            sessionId: 'sess-stopless-pipeline-writeback',
+            repeatCount: 1,
+            maxRepeats: 3,
+            triggerHint: 'invalid_schema',
+            continuationPrompt: '运行下一步',
+            schemaFeedback: {
+              reasonCode: 'stop_schema_next_step_missing',
+              missingFields: ['next_step']
+            }
+          }
+        }
+      }
+    };
+
+    const result = finalizeRequestExecutorAttemptMetadata({
+      requestId: 'req-stopless-pipeline-writeback',
+      metadataForAttempt: attemptMetadata,
+      pipelineResult: {
+        providerPayload: {},
+        target: {
+          providerKey: 'provider.test',
+          providerType: 'openai',
+          outboundProfile: 'default',
+        },
+        processMode: 'chat',
+        metadata: pipelineMetadata,
+      },
+      clientHeadersForAttempt: undefined,
+      clientRequestId: 'client-stopless-pipeline-writeback',
+    });
+
+    expect(readMetadataCenterSlot({
+      source: result.mergedMetadata,
+      family: 'runtime_control',
+      key: 'stopless',
+      expectedScope: {
+        requestId: 'req-stopless-pipeline-writeback',
+        sessionId: 'sess-stopless-pipeline-writeback'
+      }
+    })).toEqual(expect.objectContaining({
+      repeatCount: 1,
+      maxRepeats: 3,
+      continuationPrompt: '运行下一步'
+    }));
+    expect(buildMetadataCenterTransportSnapshot(result.mergedMetadata)?.runtimeControl)
+      .toEqual(expect.objectContaining({
+        stopless: expect.objectContaining({
+          repeatCount: 1,
+          maxRepeats: 3,
+          continuationPrompt: '运行下一步'
+        })
+      }));
   });
 
   it('does not reintroduce second-center merge logic into finalizeRequestExecutorAttemptMetadata', () => {

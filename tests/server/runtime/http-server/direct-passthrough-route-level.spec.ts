@@ -462,6 +462,85 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
+  it('router same-protocol direct stays direct for responses target with chat process mode', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    let sentPayload: Record<string, unknown> | undefined;
+    const providerHandle = {
+      runtimeKey: 'cc.key1',
+      providerId: 'cc',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: jest.fn(),
+        processIncomingDirect: jest.fn(async (payload: Record<string, unknown>) => {
+          sentPayload = payload;
+          return { status: 200, body: { id: 'resp_same_protocol_process_chat_direct', direct: true } };
+        }),
+      },
+    };
+
+    const routerRoute = jest.fn(() => ({
+      target: {
+        providerKey: 'cc.key1.gpt-5.5',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        processMode: 'chat',
+        runtimeKey: providerHandle.runtimeKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: { routeName: 'default', pool: ['cc.key1.gpt-5.5'] },
+      diagnostics: {},
+    }));
+    (server as any).providerHandles = new Map([[providerHandle.runtimeKey, providerHandle]]);
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', routerRoute);
+
+    const directResult = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '0.0.0.0',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_same_protocol_process_chat_direct',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.4',
+          input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+        },
+        metadata: {},
+      },
+    );
+
+    expect(directResult.used).toBe(true);
+    expect(directResult.auditContext.providerKey).toBe('cc.key1.gpt-5.5');
+    expect(sentPayload).toEqual({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+    });
+    expect(providerHandle.instance.processIncomingDirect).toHaveBeenCalledTimes(1);
+    expect(providerHandle.instance.processIncoming).not.toHaveBeenCalled();
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
+  });
+
   it('router same-protocol direct sends route-safe metadata for cyclic image requests before VR', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

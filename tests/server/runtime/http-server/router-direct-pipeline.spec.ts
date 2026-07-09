@@ -2,22 +2,6 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import type { PortConfig } from '../../../../src/server/runtime/http-server/port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from '../../../../src/server/runtime/http-server/types.js';
 
-const stripResponsesStoredContextInputMediaNativeMock = jest.fn((inputEntries: unknown) => ({
-  changed: true,
-  messages: [{
-    type: 'message',
-    role: 'user',
-    content: [
-      { type: 'input_text', text: 'describe' },
-      { type: 'input_text', text: '[Image omitted]' },
-    ],
-  }],
-}));
-
-jest.unstable_mockModule('../../../../src/server/runtime/http-server/router-direct-media-capability.js', () => ({
-  stripDirectTargetUnsupportedMedia: stripResponsesStoredContextInputMediaNativeMock,
-}));
-
 const {
   executeRouterDirectPipeline,
   isRouterDirectEligible,
@@ -99,7 +83,6 @@ describe('router-direct-pipeline', () => {
     let openaiHandle: ProviderHandle;
     beforeEach(() => {
       openaiHandle = createMockProviderHandle('openai-chat');
-      stripResponsesStoredContextInputMediaNativeMock.mockClear();
     });
 
     it('uses direct when protocols match', async () => {
@@ -498,7 +481,7 @@ describe('router-direct-pipeline', () => {
       });
     });
 
-    it('strips reasoning.summary only when target model marks no_reasoning_summary', async () => {
+    it('preserves reasoning.summary on direct even when target model marks no_reasoning_summary', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
         providerId: 'openai',
@@ -535,11 +518,11 @@ describe('router-direct-pipeline', () => {
       const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
       expect(sentPayload).not.toBe(requestPayload);
       expect(sentPayload.model).toBe('gpt-5.3-codex-spark');
-      expect(sentPayload.reasoning).toEqual({ effort: 'high' });
+      expect(sentPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
       expect(requestPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
     });
 
-    it('replaces real image input with placeholder when direct target lacks visual capability', async () => {
+    it('preserves real image input on direct even when target lacks visual capability', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
         providerId: 'openai',
@@ -587,10 +570,10 @@ describe('router-direct-pipeline', () => {
         role: 'user',
         content: [
           { type: 'input_text', text: 'describe' },
-          { type: 'input_text', text: '[Image omitted]' },
+          { type: 'input_image', image_url: 'data:image/png;base64,AAAA' },
         ],
       }]);
-      expect(JSON.stringify(sentPayload)).not.toContain('data:image/png;base64,AAAA');
+      expect(JSON.stringify(sentPayload)).toContain('data:image/png;base64,AAAA');
       expect(JSON.stringify(requestPayload)).toContain('data:image/png;base64,AAAA');
     });
 
@@ -730,6 +713,50 @@ describe('router-direct-pipeline', () => {
         code: 'HTTP_403',
       });
       expect(onProviderError).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes direct provider response body through without model rewrite', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'openai',
+        providerFamily: 'openai',
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: jest.fn(async () => ({
+            status: 200,
+            body: {
+              id: 'resp_router_direct_body_passthrough_model',
+              model: 'gpt-5.3-codex-spark',
+              output_text: 'ok',
+            },
+          })),
+        },
+      } as ProviderHandle;
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.3-codex-spark' },
+        requestPayload,
+        target: {
+          providerKey: 'openai.key.gpt-5.3-codex-spark',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.3-codex-spark',
+        },
+        routingDecision: { routeName: 'thinking' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      expect((result as any).response.body.model).toBe('gpt-5.3-codex-spark');
     });
 
     it('keeps reasoning.summary by default for direct responses target models', async () => {

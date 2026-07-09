@@ -183,6 +183,9 @@ type NativeRouterHotpathJsonBinding = {
     payloadJson: string,
     contextJson?: string
   ) => string;
+  buildRequestStageRuntimeControlWritePlanJson?: (
+    inputJson: string
+  ) => string;
   projectResponsesClientPayloadForClientJson?: (
     payloadJson: string,
     toolsRawJson?: string,
@@ -832,6 +835,33 @@ export function buildResponsesPayloadFromChatNative(
     context ?? null,
   ]);
   return assertNativeObject('buildResponsesPayloadFromChatJson', parsed);
+}
+
+export function buildRequestStageRuntimeControlWritePlanNative(input: {
+  outputMetadata: Record<string, unknown>;
+}): {
+  runtimeControl?: Record<string, unknown> | null;
+} {
+  const parsed = invokeRouterHotpathJsonCapability('buildRequestStageRuntimeControlWritePlanJson', [
+    {
+      outputMetadata: input.outputMetadata ?? {},
+    },
+  ]);
+  const row = assertNativeObject('buildRequestStageRuntimeControlWritePlanJson', parsed);
+  const runtimeControl = row.runtimeControl;
+  if (
+    runtimeControl !== undefined
+    && runtimeControl !== null
+    && (
+      typeof runtimeControl !== 'object'
+      || Array.isArray(runtimeControl)
+    )
+  ) {
+    throw new Error('[llmswitch-bridge] buildRequestStageRuntimeControlWritePlanJson returned invalid runtimeControl');
+  }
+  return {
+    runtimeControl: runtimeControl as Record<string, unknown> | null | undefined,
+  };
 }
 
 export function projectResponsesClientPayloadForClientNative(args: {

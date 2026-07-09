@@ -2,9 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from '@jest/globals';
 
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 import { coerceStandardizedRequestFromPayloadDirectNative } from './helpers/hub-pipeline-builders-direct-native.js';
+
+type StandardizedRequest = Record<string, unknown> & {
+  messages: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string) {
   const preselectedRoute = {

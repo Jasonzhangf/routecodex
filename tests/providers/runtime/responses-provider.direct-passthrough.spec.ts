@@ -3,6 +3,10 @@ import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, jest, test } from '@jest/globals';
 
+const sanitizeProviderOutboundPayloadMock = jest.fn(async (input: { payload: Record<string, unknown> }) =>
+  JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>
+);
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   reportProviderErrorToRouterPolicy: async () => {},
@@ -12,8 +16,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     messages: payload.messages ?? [],
     tools: payload.tools
   }),
-  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) =>
-    JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>,
+  sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
   buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
   createResponsesSseToJsonConverter: async () => ({
     convertSseToJson: async () => ({ status: 'completed', output: [] })
@@ -53,6 +56,7 @@ describe('ResponsesProvider direct passthrough', () => {
   beforeEach(() => {
     writeProviderSnapshot.mockClear();
     attachProviderSseSnapshotStream.mockClear();
+    sanitizeProviderOutboundPayloadMock.mockClear();
     captureProviderSseSnapshots = false;
   });
 
@@ -92,7 +96,8 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).not.toBe(inbound);
+    expect(capturedBody).toBe(inbound);
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
     expect(capturedBody).toEqual({
       model: 'gpt-5.5',
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
@@ -146,7 +151,8 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
-    expect(capturedBody).not.toBe(inbound);
+    expect(capturedBody).toBe(inbound);
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
     expect(capturedBody.input[1].type).toBe('reasoning');
     expect(capturedBody.input[1].content).toEqual([
       { type: 'reasoning_text', text: 'must not reach provider runtime' },
@@ -216,7 +222,8 @@ describe('ResponsesProvider direct passthrough', () => {
     });
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
     expect(capturedHeaders?.Accept).toBe('text/event-stream');
-    expect(capturedBody).not.toBe(inbound);
+    expect(capturedBody).toBe(inbound);
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
     expect(capturedBody.model).toBe('gpt-5.4');
     expect(capturedBody.previous_response_id).toBe('resp_prev_turn');
     expect(capturedBody.input).toEqual(inbound.input);
@@ -395,6 +402,7 @@ describe('ResponsesProvider direct passthrough', () => {
     });
 
     await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
     expect(capturedUrl).toBe('https://example.invalid/v1/responses/resp_submit_direct_1/submit_tool_outputs');
     expect(capturedHeaders?.Accept).toBe('text/event-stream');
     expect(capturedBody).toEqual({
@@ -944,7 +952,7 @@ describe('ResponsesProvider direct passthrough', () => {
     });
   });
 
-  test('replays direct HTTP 200 SSE normal frames after filtering advisory codex rate-limit frames', async () => {
+  test('replays direct HTTP 200 SSE normal frames without filtering advisory codex rate-limit frames', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-normal',
       type: 'responses-http-provider',
@@ -988,13 +996,14 @@ describe('ResponsesProvider direct passthrough', () => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const text = Buffer.concat(chunks).toString('utf8');
-    expect(text).not.toContain('event: codex.rate_limits');
+    expect(text).toContain('event: codex.rate_limits');
+    expect(text).toContain('"limit_reached":false');
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
     expect(text).toContain('resp_ok');
   });
 
-  test('normalizes data-only direct Responses SSE frames into named event frames', async () => {
+  test('passes data-only direct Responses SSE frames through without synthesizing event names', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-data-only-sse-event-names',
       type: 'responses-http-provider',
@@ -1064,17 +1073,22 @@ describe('ResponsesProvider direct passthrough', () => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const text = Buffer.concat(chunks).toString('utf8');
-    expect(text).toContain('event: response.created');
-    expect(text).toContain('event: response.output_item.added');
-    expect(text).toContain('event: response.function_call_arguments.done');
-    expect(text).toContain('event: response.completed');
-    expect(text).toContain('event: response.done');
+    expect(text).not.toContain('event: response.created');
+    expect(text).not.toContain('event: response.output_item.added');
+    expect(text).not.toContain('event: response.function_call_arguments.done');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('event: response.done');
+    expect(text).toContain('"type":"response.created"');
+    expect(text).toContain('"type":"response.output_item.added"');
+    expect(text).toContain('"type":"response.function_call_arguments.done"');
+    expect(text).toContain('"type":"response.completed"');
+    expect(text).toContain('"type":"response.done"');
     expect(text).toContain('call_apply_patch_data_only');
     expect(text).toContain('tmp/direct-data-only.txt');
     expect(text).not.toContain('event: message');
   });
 
-  test('appends direct Responses SSE done token when upstream ends after completed event only', async () => {
+  test('does not append a direct Responses SSE done token when upstream omits it', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-completed-needs-done-token',
       type: 'responses-http-provider',
@@ -1120,9 +1134,9 @@ describe('ResponsesProvider direct passthrough', () => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     const text = Buffer.concat(chunks).toString('utf8');
-    expect(text).toContain('event: response.completed');
-    expect(text).toContain('data: [DONE]');
-    expect(text.match(/data: \[DONE\]/g)).toHaveLength(1);
+    expect(text).toContain('"type":"response.completed"');
+    expect(text).not.toContain('event: response.completed');
+    expect(text).not.toContain('data: [DONE]');
     expect(text).not.toContain('event: response.done');
   });
 });

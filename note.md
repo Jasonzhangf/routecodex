@@ -1,3 +1,12 @@
+# 2026-07-09: exec_command/tool governance overblocking narrowed
+
+- Scope: response-side Chat Process tool governance only; servertool lifecycle not changed.
+- Change: `exec_command` guard no longer treats shell writes (`>`, heredoc, `tee`, `sed -i`, `ed -s`) as dangerous; only destructive/broad operations such as `rm -rf`, `pkill/killall`, `git clean -f`, `git reset --hard`, and scoped `git checkout` violations remain intercepted.
+- Change: response governance no longer drops tool calls merely because they were not in `requestedToolNames`, and no longer rewrites apply_patch shell fallback attempts into `APPLY_PATCH_ERROR`; client tool execution/result remains the feedback path for the next model turn.
+- Verification PASS: Rust focused `cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml resp_process_stage1_tool_governance --lib -- --nocapture` passed 215/215 selected; touched-file `rustfmt --check`; touched-file `git diff --check`; `verify:servertool-rust-only`.
+- Broader verification PASS after restoring required source anchors: `npm run build:native-hotpath`; `npm run build:min`; `ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_DEV_RESTART_PORT=5555 npm run install:global`.
+- Live install evidence: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `http://127.0.0.1:5555/health` all reported version `0.90.3683`; `/health` returned `ready=true` and `pipelineReady=true`.
+
 # 2026-07-09: VR provider bootstrap shell deleted
 
 - Scope: delete `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts` after direct native provider bootstrap evidence replaced the TS wrapper.

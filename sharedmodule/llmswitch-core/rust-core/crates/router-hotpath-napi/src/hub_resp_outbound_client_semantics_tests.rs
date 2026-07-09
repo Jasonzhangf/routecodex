@@ -1307,29 +1307,31 @@ fn plan_responses_json_client_dispatch_bypasses_direct_without_projection_contex
     }));
 
     assert_eq!(plan["action"], json!("direct_passthrough"));
-    assert_eq!(
-        plan["reason"],
-        json!("direct_continuation_without_projection_context")
-    );
+    assert_eq!(plan["reason"], json!("direct_continuation_passthrough"));
 }
 
 #[test]
-fn plan_responses_json_client_dispatch_projects_relay_and_direct_with_context() {
+fn plan_responses_json_client_dispatch_bypasses_direct_even_with_projection_context() {
     let direct_with_context = plan_responses_json_client_dispatch(&json!({
         "entryEndpoint": "/v1/responses",
         "continuationOwner": "direct",
         "hasRequestContextToolsRaw": true
     }));
+    assert_eq!(direct_with_context["action"], json!("direct_passthrough"));
+    assert_eq!(
+        direct_with_context["reason"],
+        json!("direct_continuation_passthrough")
+    );
+}
+
+#[test]
+fn plan_responses_json_client_dispatch_projects_relay_with_context() {
     let relay = plan_responses_json_client_dispatch(&json!({
         "entryEndpoint": "/v1/responses.submit_tool_outputs",
         "continuationOwner": "relay",
         "hasRequestContextToolsRaw": true
     }));
 
-    assert_eq!(
-        direct_with_context["action"],
-        json!("project_client_payload")
-    );
     assert_eq!(relay["action"], json!("project_client_payload"));
 }
 

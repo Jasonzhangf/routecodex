@@ -417,6 +417,8 @@ fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<V
         .or_else(|| row.get("schema_feedback"))
         .and_then(Value::as_object)
         .map(|feedback| Value::Object(feedback.clone()));
+    let continuation_prompt = read_trimmed_string(row.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")));
 
     let mut stopless = Map::new();
     stopless.insert("flowId".to_string(), Value::String(flow_id));
@@ -428,6 +430,12 @@ fn build_stopless_runtime_control_from_cli(row: &Map<String, Value>) -> Option<V
     stopless.insert("active".to_string(), Value::Bool(true));
     if let Some(trigger_hint) = trigger_hint {
         stopless.insert("triggerHint".to_string(), Value::String(trigger_hint));
+    }
+    if let Some(continuation_prompt) = continuation_prompt {
+        stopless.insert(
+            "continuationPrompt".to_string(),
+            Value::String(continuation_prompt),
+        );
     }
     if let Some(schema_feedback) = schema_feedback {
         stopless.insert("schemaFeedback".to_string(), schema_feedback);
@@ -900,6 +908,58 @@ mod tests {
         assert_eq!(
             semantics_input[0]["tool_call_id"],
             json!("call_stopless_round1")
+        );
+    }
+
+    #[test]
+    fn responses_standardization_preserves_stopreason_next_step_continuation_prompt_in_runtime_control(
+    ) {
+        let next_step = "运行 cargo test 验证 stopless next_step";
+        let stopless_output = json!({
+            "ok": true,
+            "toolName": "stop_message_auto",
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "continuationPrompt": next_step,
+            "schemaFeedback": {
+                "reasonCode": "stop_schema_continue_next_step",
+                "missingFields": []
+            },
+            "input": {
+                "flowId": "stop_message_flow",
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "triggerHint": "non_terminal_schema"
+            }
+        });
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "previous_response_id": "resp_prev",
+                "tool_outputs": [{
+                    "tool_call_id": "call_stopless_next_step",
+                    "output": stopless_output.to_string()
+                }]
+            },
+            "normalized": {
+                "id": "req_submit_tool_outputs_next_step",
+                "entryEndpoint": "/v1/responses.submit_tool_outputs",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        assert_eq!(
+            output["standardizedRequest"]["metadata"]["runtime_control"]["stopless"]
+                ["continuationPrompt"],
+            json!(next_step)
+        );
+        assert_eq!(
+            output["standardizedRequest"]["metadata"]["runtime_control"]["stopless"]
+                ["schemaFeedback"]["reasonCode"],
+            json!("stop_schema_continue_next_step")
         );
     }
 

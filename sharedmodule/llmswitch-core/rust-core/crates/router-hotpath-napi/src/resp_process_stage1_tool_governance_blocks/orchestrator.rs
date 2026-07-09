@@ -24,8 +24,8 @@ use crate::resp_process_stage1_tool_governance_blocks::text_harvest_detection::{
 };
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_entry::ensure_payload_tool_call_ids;
 use crate::resp_process_stage1_tool_governance_blocks::tool_call_governance::{
-    count_normalized_tool_calls, drop_disallowed_tool_calls_from_payload,
-    maybe_harvest_empty_tool_calls_from_json_content, normalize_apply_patch_tool_calls,
+    count_normalized_tool_calls, maybe_harvest_empty_tool_calls_from_json_content,
+    normalize_apply_patch_tool_calls, preserve_client_tool_calls_for_feedback,
     remap_tool_calls_for_client_protocol, strip_visible_content_from_tool_call_rounds,
 };
 use crate::stop_message_auto_blocks;
@@ -145,7 +145,7 @@ fn govern_prepared_payload(
     let terminal_stop_normalized = normalize_terminal_reasoning_stop_payload(&mut payload);
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
-    let disallowed_tool_calls_dropped = drop_disallowed_tool_calls_from_payload(&mut payload);
+    let disallowed_tool_calls_dropped = preserve_client_tool_calls_for_feedback(&mut payload);
     let preserve_harvested_visible_text = preparation_summary
         .map(|summary| summary.harvested_tool_calls > 0)
         .unwrap_or(false)

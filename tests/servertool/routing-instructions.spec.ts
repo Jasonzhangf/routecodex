@@ -1,4 +1,3 @@
-import type { StandardizedMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import * as fs from 'node:fs';
 import os from 'node:os';
 import * as path from 'node:path';
@@ -13,6 +12,11 @@ import {
   applyRoutingInstructionsWithNative,
   parseRoutingInstructions
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+
+type StandardizedMessage = Record<string, unknown> & {
+  role: string;
+  content: string;
+};
 
 function buildMessages(content: string): StandardizedMessage[] {
   return [

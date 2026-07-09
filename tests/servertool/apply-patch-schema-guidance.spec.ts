@@ -1,5 +1,11 @@
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+type StandardizedRequest = Record<string, unknown> & {
+  messages: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
   const result = runHubPipelineLibWithNative({
@@ -60,7 +66,7 @@ describe('apply_patch provider-facing schema guidance', () => {
       { originalEndpoint: '/v1/chat/completions', __rt: { applyPatch: { mode: 'servertool' } } },
       'req-apply-patch-schema-guidance',
     ) as any;
-    const applyPatch = processed.tools.find((tool: any) => tool?.function?.name === 'apply_patch');
+    const applyPatch = (processed.tools ?? []).find((tool: any) => tool?.function?.name === 'apply_patch') as any;
     expect(applyPatch).toBeTruthy();
     const description = String(applyPatch.function.description || '');
     const patchDescription = String(applyPatch.function.parameters.properties.patch?.description || '');

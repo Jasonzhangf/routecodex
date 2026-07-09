@@ -2,14 +2,26 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
-import type { AdapterContext, ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import {
   chatEnvelopeToStandardizedDirectNative as chatEnvelopeToStandardized,
   standardizedToChatEnvelopeDirectNative as standardizedToChatEnvelope,
 } from './helpers/standardized-bridge-direct-native.js';
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+type AdapterContext = Record<string, unknown>;
+type ChatEnvelope = Record<string, unknown> & {
+  messages: Array<Record<string, unknown>>;
+  parameters?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  semantics?: Record<string, unknown>;
+};
+type StandardizedRequest = Record<string, unknown> & {
+  messages: Array<Record<string, unknown>>;
+  metadata: Record<string, unknown>;
+  semantics?: any;
+  tools?: Array<Record<string, any>>;
+};
 
 const adapterContext: AdapterContext = {
   requestId: 'req-semantics',
@@ -17,7 +29,7 @@ const adapterContext: AdapterContext = {
   providerProtocol: 'openai-chat'
 };
 
-function hasUserDirective(messages: StandardizedRequest['messages'], marker: string): boolean {
+function hasUserDirective(messages: Array<Record<string, unknown>>, marker: string): boolean {
   return messages.some((message) => {
     if (message?.role !== 'user') {
       return false;
@@ -38,7 +50,7 @@ function hasUserDirective(messages: StandardizedRequest['messages'], marker: str
   });
 }
 
-function buildSemantics(): NonNullable<ChatEnvelope['semantics']> {
+function buildSemantics(): Record<string, unknown> {
   return {
     session: { previousResponseId: 'resp-123' },
     system: { textBlocks: ['sys-0'] },

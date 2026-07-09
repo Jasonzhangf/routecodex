@@ -813,6 +813,51 @@ fn reasoning_stop_raw_partial_schema_derives_missing_schema_feedback() {
 }
 
 #[test]
+fn reasoning_stop_raw_continue_schema_uses_next_step_as_continuation_prompt() {
+    let (session_id, request_id) = unique_identity("reasoning-raw-continue");
+    let next_step = "运行 cargo test 验证修复";
+    let input_json = serde_json::json!({
+        "stopreason": 2,
+        "reason": "任务还没完成",
+        "has_evidence": 0,
+        "evidence": "",
+        "next_step": next_step,
+        "needs_user_input": false
+    })
+    .to_string();
+    let output = Command::new(bin())
+        .args([
+            "run",
+            "reasoningStop",
+            "--session-id",
+            &session_id,
+            "--request-id",
+            &request_id,
+            "--input-json",
+            &input_json,
+        ])
+        .output()
+        .expect("run routecodex-servertool reasoningStop");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["flowId"], "stop_message_flow");
+    assert_eq!(value["input"]["triggerHint"], "non_terminal_schema");
+    assert_eq!(
+        value["schemaFeedback"]["reasonCode"],
+        "stop_schema_continue_next_step"
+    );
+    assert_eq!(value["continuationPrompt"], next_step);
+    assert!(value["input"].get("continuationPrompt").is_none());
+    assert!(value.get("modelGuidance").is_none());
+    assert!(value.get("schemaGuidance").is_none());
+    assert_no_internal_or_restoration_carrier(&value);
+}
+
+#[test]
 fn reasoning_stop_control_envelope_keeps_invalid_schema_feedback() {
     let (session_id, request_id) = unique_identity("reasoning-control-envelope");
     let output = Command::new(bin())

@@ -1,5 +1,11 @@
-import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
+
+type StandardizedRequest = Record<string, unknown> & {
+  messages: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+  parameters: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
 
 function runRequestPipeline(request: StandardizedRequest, metadata: Record<string, unknown>, requestId: string): StandardizedRequest {
   const result = runHubPipelineLibWithNative({
@@ -30,7 +36,7 @@ function runRequestPipeline(request: StandardizedRequest, metadata: Record<strin
   return result.payload as unknown as StandardizedRequest;
 }
 
-function buildRequest(messages: StandardizedRequest['messages']): StandardizedRequest {
+function buildRequest(messages: Array<Record<string, unknown>>): StandardizedRequest {
   return {
     model: 'gpt-test',
     messages,

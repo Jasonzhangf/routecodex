@@ -339,8 +339,7 @@ fn derive_stopless_feedback_from_raw_reasoning_stop_input(
     input: &Value,
     current_repeat_count: u32,
     current_max_repeats: u32,
-) -> Result<Option<(StoplessContinuationTrigger, Option<StoplessSchemaFeedback>)>, ServertoolCliError>
-{
+) -> Result<Option<DerivedReasoningStopInput>, ServertoolCliError> {
     if !input_looks_like_raw_reasoning_stop_schema(input) {
         return Ok(None);
     }
@@ -361,6 +360,12 @@ fn derive_stopless_feedback_from_raw_reasoning_stop_input(
     let trigger = read_stopless_trigger_hint(&serde_json::json!({
         "triggerHint": decision.reason_code
     }));
+    let followup_text = decision
+        .followup_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
     let feedback = match decision.action {
         StopSchemaGateAction::AllowStop => None,
         StopSchemaGateAction::Followup | StopSchemaGateAction::FailFast => {
@@ -370,7 +375,18 @@ fn derive_stopless_feedback_from_raw_reasoning_stop_input(
             })
         }
     };
-    Ok(Some((trigger, feedback)))
+    Ok(Some(DerivedReasoningStopInput {
+        trigger,
+        schema_feedback: feedback,
+        followup_text,
+    }))
+}
+
+#[derive(Debug, Clone)]
+struct DerivedReasoningStopInput {
+    trigger: StoplessContinuationTrigger,
+    schema_feedback: Option<StoplessSchemaFeedback>,
+    followup_text: Option<String>,
 }
 
 fn build_stop_message_auto_run_output(
@@ -401,7 +417,7 @@ fn build_stop_message_auto_run_output(
     };
     let derived_trigger = derived_schema_feedback
         .as_ref()
-        .map(|(trigger, _)| *trigger);
+        .map(|derived| derived.trigger);
     if current_max_repeats == 0
         || (current_repeat_count >= current_max_repeats
             && derived_trigger != Some(StoplessContinuationTrigger::SchemaPass))
@@ -436,10 +452,11 @@ fn build_stop_message_auto_run_output(
     }
     let trigger = derived_schema_feedback
         .as_ref()
-        .map(|(trigger, _)| *trigger)
+        .map(|derived| derived.trigger)
         .unwrap_or_else(|| read_stopless_trigger_hint(&input.input));
     let schema_feedback = derived_schema_feedback
-        .and_then(|(_, feedback)| feedback)
+        .as_ref()
+        .and_then(|derived| derived.schema_feedback.clone())
         .or_else(|| read_stopless_schema_feedback(&input.input));
     let canonical_input = serde_json::json!({
         "flowId": flow_id,
@@ -447,8 +464,13 @@ fn build_stop_message_auto_run_output(
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
-    let continuation_prompt =
-        resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)?;
+    let continuation_prompt = derived_schema_feedback
+        .as_ref()
+        .and_then(|derived| derived.followup_text.clone())
+        .map(Ok)
+        .unwrap_or_else(|| {
+            resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)
+        })?;
     let _model_guidance = build_stopless_cli_model_guidance(
         &continuation_prompt,
         schema_feedback.as_ref(),

@@ -166,6 +166,94 @@ fn test_req_chatprocess_restores_stopless_count_from_responses_resume_tool_outpu
 }
 
 #[test]
+fn test_req_chatprocess_stopreason_continue_uses_next_step_as_live_prompt() {
+    let live_next_step =
+        "运行 cargo test -p router-hotpath-napi req_process_stage1_tool_governance";
+    let stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "continuationPrompt": live_next_step,
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_continue_next_step",
+            "missingFields": []
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "non_terminal_schema"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-4o",
+          "input": [
+            {
+              "type": "function_call",
+              "id": "call_stopless_live_prompt",
+              "call_id": "call_stopless_live_prompt",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"non_terminal_schema\\\"}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_stopless_live_prompt",
+              "output": stopless_stdout.to_string()
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs",
+          "responsesResume": {
+            "previousRequestId": "req_prev",
+            "restoredFromResponseId": "resp_prev",
+            "routeHint": "thinking",
+            "toolOutputsDetailed": [
+              {
+                "callId": "call_stopless_live_prompt",
+                "outputText": stopless_stdout.to_string()
+              }
+            ]
+          }
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_chatprocess_stopless_live_prompt".to_string(),
+        has_active_stop_message_for_continue_execution: None,
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_chatprocess_stopless_live_prompt",
+            "sessionId": "sess_chatprocess_stopless_live_prompt"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let serialized = serde_json::to_string(&result.processed_request).unwrap();
+    assert!(
+        serialized.contains(live_next_step),
+        "provider-facing request must include the exact stopreason=2 next_step as the live continuation prompt: {serialized}"
+    );
+    assert!(
+        !serialized.contains("继续执行你给出的 next_step"),
+        "provider-facing continuation must not replace the live next_step with generic guidance: {serialized}"
+    );
+    assert_eq!(
+        result.metadata["runtime_control"]["stopless"]["continuationPrompt"].as_str(),
+        Some(live_next_step),
+        "runtime control must preserve the live next_step prompt"
+    );
+}
+
+#[test]
 fn test_req_chatprocess_restores_stopless_count_from_semantics_input_tool_output() {
     let stopless_stdout = serde_json::json!({
         "ok": true,

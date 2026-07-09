@@ -1295,6 +1295,71 @@ fn stopless_non_stop_response_resets_error_streak_before_next_missing_schema_sto
 }
 
 #[test]
+fn stopless_repeated_missing_schema_increments_cli_projection_repeat_count() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-repeat-next-stop".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_repeat_next_stop",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "第二轮仍然 plain stop。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-stopless-repeat-next-stop",
+                    "sessionId": "sess-stopless-repeat-next-stop"
+                },
+                "runtimeControl": {
+                    "stopMessage": {
+                        "enabled": true
+                    },
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "sessionId": "sess-stopless-repeat-next-stop",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "triggerHint": "invalid_schema",
+                        "continuationPrompt": "上一轮缺少 next_step",
+                        "schemaFeedback": {
+                            "reasonCode": "stop_schema_next_step_missing",
+                            "missingFields": ["next_step"]
+                        }
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = stopless_exec_arguments(payload).expect("stopless exec args");
+    assert!(
+        args.contains("\\\"repeatCount\\\":2") || args.contains("\"repeatCount\":2"),
+        "repeated missing-schema stop must advance to repeatCount=2, got: {args}"
+    );
+    let write_plan = stopless_metadata_write(&output).expect("stopless write plan");
+    assert_eq!(write_plan["stopless"]["repeatCount"], json!(2));
+}
+
+#[test]
 fn stopless_missing_session_id_does_not_intercept_and_reports_alarm() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
@@ -1405,6 +1470,130 @@ fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_an
                 == Some("stopless_missing_session_id")
         })
     }));
+}
+
+#[test]
+fn stop_message_enabled_from_metadata_center_snapshot_reports_missing_session_alarm() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stop-message-snapshot-enabled-missing-session-alarm".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stop_message_snapshot_enabled_missing_session",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "snapshot stopMessage enabled but session missing." },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-stop-message-snapshot-enabled-missing-session-alarm"
+                },
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat",
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": false
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("completed"));
+    assert!(
+        stopless_exec_arguments(payload).is_none(),
+        "missing sessionId must not project stopless CLI"
+    );
+    assert!(
+        stopless_metadata_write(&output).is_none(),
+        "missing sessionId must not write stopless state"
+    );
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "snapshot stopMessage enablement must suppress legacy servertool runtime action",
+    );
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.details.as_ref().is_some_and(|details| {
+            details.get("alarm").and_then(serde_json::Value::as_str)
+                == Some("stopless_missing_session_id")
+        })
+    }));
+}
+
+#[test]
+fn stop_message_enabled_from_metadata_center_snapshot_projects_reasoning_stop_cli() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stop-message-snapshot-enabled-reasoning-stop-cli".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stop_message_snapshot_enabled_cli",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "I need another round before final evidence." },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-stop-message-snapshot-enabled-reasoning-stop-cli",
+                    "sessionId": "sess-stop-message-snapshot-enabled-reasoning-stop-cli"
+                },
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat",
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": false
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    let args = stopless_exec_arguments(payload).expect("stopless exec args");
+    assert!(
+        args.contains("routecodex hook run reasoningStop"),
+        "snapshot stopMessage enablement must project client-visible reasoningStop CLI, got: {args}"
+    );
+    assert!(
+        args.contains("\\\"repeatCount\\\":1") || args.contains("\"repeatCount\":1"),
+        "first snapshot-enabled missing-schema stop must start at repeatCount=1, got: {args}"
+    );
+    assert!(
+        stopless_metadata_write(&output).is_some(),
+        "snapshot-enabled stopless CLI projection must return a runtime write plan"
+    );
+    assert_no_legacy_servertool_runtime_actions(
+        &output,
+        "snapshot stopMessage enablement must use CLI projection, not legacy server-side actions",
+    );
 }
 
 #[test]

@@ -1785,7 +1785,7 @@ fn test_parse_tool_args_json_artifact_repair_is_native_owned() {
 }
 
 #[test]
-fn test_normalize_tool_args_exec_command_blocks_large_heredoc_file_generation() {
+fn test_normalize_tool_args_exec_command_allows_large_heredoc_file_generation() {
     let large_body = "x".repeat(5000);
     let command = format!(
         "cat > /tmp/FileSheet.tsx << 'ENDOFFILE'\n{}\nENDOFFILE",
@@ -1798,9 +1798,7 @@ fn test_normalize_tool_args_exec_command_blocks_large_heredoc_file_generation() 
     let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
     let parsed: Value = serde_json::from_str(&out).unwrap();
     let cmd = parsed["cmd"].as_str().unwrap_or("");
-    assert!(cmd.contains("blocked by exec_command guard"));
-    assert!(cmd.contains("forbidden_shell_write"));
-    assert!(cmd.contains("exit 2"));
+    assert_eq!(cmd, command);
     assert_eq!(parsed["workdir"], "/workspace");
 }
 
@@ -3828,7 +3826,7 @@ fn test_govern_response_json_js_function_coverage() {
 }
 
 #[test]
-fn test_govern_response_drops_structured_tool_calls_not_in_requested_allowlist() {
+fn test_govern_response_preserves_structured_tool_calls_not_in_requested_allowlist() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
@@ -3853,20 +3851,21 @@ fn test_govern_response_drops_structured_tool_calls_not_in_requested_allowlist()
     };
 
     let result = govern_response(input).unwrap();
-    assert_eq!(result.summary.disallowed_tool_calls_dropped, 1);
-    assert_eq!(result.summary.tool_calls_normalized, 0);
+    assert_eq!(result.summary.disallowed_tool_calls_dropped, 0);
+    assert_eq!(result.summary.tool_calls_normalized, 1);
     assert_eq!(
         result.governed_payload["choices"][0]["finish_reason"],
-        "stop"
+        "tool_calls"
     );
     let tool_calls = result.governed_payload["choices"][0]["message"]["tool_calls"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    assert!(tool_calls.is_empty());
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0]["function"]["name"], "mailbox.status");
     assert_eq!(
         result.governed_payload["choices"][0]["message"]["content"],
-        "保持正文"
+        Value::Null
     );
     assert!(result
         .governed_payload
@@ -4635,7 +4634,7 @@ fn test_govern_response_preserves_allowed_multi_tool_calls() {
 }
 
 #[test]
-fn test_govern_response_blocks_apply_patch_shell_fallback_write_from_live_minimax_shape() {
+fn test_govern_response_preserves_apply_patch_shell_fallback_write_for_client_feedback() {
     let input = ToolGovernanceInput {
         payload: serde_json::json!({
             "__rcc_tool_governance": {
@@ -4664,15 +4663,14 @@ fn test_govern_response_blocks_apply_patch_shell_fallback_write_from_live_minima
     let result = govern_response(input).unwrap();
     let choice = &result.governed_payload["choices"][0];
     let message = &choice["message"];
-    let content = message["content"].as_str().unwrap_or("");
-    assert_eq!(result.summary.disallowed_tool_calls_dropped, 1);
-    assert_eq!(choice["finish_reason"], "stop");
-    assert!(message.get("tool_calls").is_none());
-    assert!(content.contains("APPLY_PATCH_ERROR"));
-    assert!(content.contains("Retry with apply_patch only"));
-    assert!(content.contains("tmp/..."));
-    assert!(content.contains("never /tmp/"));
-    assert!(content.contains("Do not switch to exec_command"));
+    assert_eq!(result.summary.disallowed_tool_calls_dropped, 0);
+    assert_eq!(choice["finish_reason"], "tool_calls");
+    let tool_calls = message["tool_calls"].as_array().unwrap();
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0]["function"]["name"], "exec_command");
+    assert_eq!(message["content"], Value::Null);
+    let arguments = tool_calls[0]["function"]["arguments"].as_str().unwrap();
+    assert!(arguments.contains("cat > tmp/ap_probe5.txt"));
 }
 
 #[test]
