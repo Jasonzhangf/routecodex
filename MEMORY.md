@@ -1853,3 +1853,9 @@
 - `sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts` is physically deleted. Do not restore it as the Responses bridge tool mapping facade.
 - `responses-openai-bridge.ts` may keep local tool type aliases and small native-call glue, but chat-tools-to-Responses-tools mapping truth must stay in Rust native `mapChatToolsToBridgeWithNative` with explicit `sanitizeMode: 'responses'`.
 - Current shell audit after this deletion is `prodTsShellCount=55`, `shellsWithProdImporters=54`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Chat request filter native wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts` is physically deleted. Do not restore it as a standalone native wrapper.
+- `sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts` may own small native binding/load/stringify/parse fail-fast glue for `buildGovernedFilterPayloadJson` / `buildGovernedFilterPayloadWithContextJson`; actual governed filter semantics remain Rust native truth.
+- Current shell audit after this deletion is `prodTsShellCount=43`, `shellsWithProdImporters=42`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

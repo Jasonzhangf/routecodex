@@ -28257,3 +28257,13 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `responses-openai-bridge.ts` now keeps local tool type aliases and calls Rust native `mapChatToolsToBridgeWithNative(..., { sanitizeMode: 'responses' })` directly; unused TS wrapper exports `mapBridgeToolsToChat` and `flattenChatToolsForFunctionCalling` were not preserved.
 - Residue/red tests now lock `tool-mapping.ts` physically absent instead of requiring a native-only wrapper.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=55`, `shellsWithProdImporters=54`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 210/210; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=55`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
+
+# 2026-07-09: chat request filter native wrapper deleted
+
+- Scope: continued single-import native wrapper deletion after `tool-mapping.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts`; strict shell audit showed one production importer only: `chat-request-filters.ts`.
+- `chat-request-filters.ts` now owns the small native binding/load/stringify/parse fail-fast call glue for `buildGovernedFilterPayloadJson` / `buildGovernedFilterPayloadWithContextJson`; request filtering semantics remain Rust native truth.
+- `no-fallback-diff-rules.json` no longer references the deleted wrapper path; residue audit now locks the wrapper physically absent.
+- Verification PASS: current worktree `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=43`, `shellsWithProdImporters=42`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); current worktree focused residue Jest 202/202; current worktree `verify:llmswitch-rustification-audit` (`prodTsFileCount=43`, `nonNativeFileCount=0`); current worktree `verify:llmswitch-minimal-ts-surface`; `verify:architecture-fallback-denylist`; `git diff --check`.
+- Verification PASS in clean detached worktree with this patch and linked node/native artifacts: `npm run verify:llmswitch-core-tsc`; focused Jest `hub-pipeline-stage-residue-audit.spec.ts` + `openai-message-normalize.spec.ts` 205/205.
+- Current worktree full `verify:llmswitch-core-tsc` is blocked by unrelated staged deletion of native split wrappers in parallel work; not caused by this patch.

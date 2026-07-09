@@ -1217,6 +1217,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
 
     expect(fs.existsSync(conversionIndexPath)).toBe(false);
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts'))).toBe(false);
     expect(rootIndexSource).not.toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
     expect(rootIndexSource).not.toContain("export * from './telemetry/stats-center.js';");
     expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/virtual-router-contracts.js';");
