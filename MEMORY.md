@@ -1931,3 +1931,49 @@
 - `native-hub-pipeline-resp-semantics-shared.ts` and `native-hub-bridge-action-semantics-shared.ts` are retired split helpers. Do not restore them as facades.
 - If active source still imports a retired `native-*-shared.js`, move only binding/stringify/parse/error glue to an existing aggregate/core owner. Current owner for these helper surfaces is `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts`.
 - Verification lock: active source grep for the retired helper paths must return no hits, `npm run verify:llmswitch-core-tsc` must pass, and `npm run build:base` must pass.
+
+# 2026-07-09: MetadataCenter runtime-control writer TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts` is physically deleted. Do not restore it as a shared TS facade for MetadataCenter symbol reads, runtime-control writes, or metadata snapshot reads.
+- Production bridge code may use local `Symbol.for('routecodex.metadataCenter')` / `Symbol.for('routecodex.metadataCenter.rustSnapshot')` binding-preservation glue only when calling Rust native metadata carrier functions; write/project semantics remain Rust/native owned.
+- Test-only direct-native helpers may carry local MetadataCenter read/write glue to exercise native stage boundaries, but active production source must not import this retired facade.
+- Current shell audit after this deletion is `prodTsShellCount=29`, `shellsWithProdImporters=25`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: VR stop-message native TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts` is physically deleted. Do not restore it as a public TS wrapper for `parseResolvedStopMessageInstructionJson`.
+- The live host boundary already owns local fail-fast parsing glue in `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts`; Rust export `parseResolvedStopMessageInstructionJson` remains required through the native export gate.
+
+# 2026-07-09: VR routing-instructions native TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts` is physically deleted. Do not restore it as a public TS wrapper for routing instruction parsing/application.
+- Active production source had no importer. Servertool routing tests use `tests/servertool/routing-instructions-direct-native.ts` as test-only direct-native glue for `parseRoutingInstructionsJson` and `applyRoutingInstructionsJson`.
+- Current shell audit after this deletion pair is `prodTsShellCount=27`, `shellsWithProdImporters=24`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: VR routing-state native TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts` is physically deleted. Do not restore it as a public TS wrapper for routing-state keying, persistence, stop-message merge, or chat-process session usage.
+- Routing-state persistence truth remains Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs`; `src/lib.rs` is only the NAPI bridge, not a second canonical builder owner.
+- Tests that need routing-state helpers should call Rust JSON exports through `tests/servertool/routing-instructions-direct-native.ts` as test-only glue. Active production source must not import a replacement routing-state wrapper.
+- Current shell audit after this deletion is `prodTsShellCount=26`, `shellsWithProdImporters=24`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Hub pipeline orchestration protocol TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts` is physically deleted from production source. Do not restore it as a public runtime wrapper for Hub Pipeline orchestration or request-stage native plans.
+- Tests that need direct NAPI glue should use `tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts`. That helper is test-only; production owner truth remains Rust `router-hotpath-napi/src/lib.rs` and `hub_pipeline_lib`.
+- `function-map.yml` / `verification-map.yml` may point to the test helper only as coverage/test glue. It must not become a production allowed runtime path.
+- Current shell audit after this deletion is `prodTsShellCount=25`, `shellsWithProdImporters=24`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses bridge closed-loop runner is test-only
+
+- `sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts` is retired from production source and moved to `tests/sharedmodule/responses-bridge-closed-loop.ts`.
+- Do not reintroduce closed-loop/test runners under `sharedmodule/llmswitch-core/src/`; shell-reference audit treats `src/` as production and this creates false production importers.
+- `responses-openai-bridge.ts` has `prodImportRefs=0` after this move. Keep future Responses bridge evidence in root tests/scripts/docs unless there is a real runtime consumer.
+- Current shell audit after this move is `prodTsShellCount=25`, `shellsWithProdImporters=23`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Local shutdown requires caller provenance
+
+- `/shutdown` is lifecycle control-plane. Localhost alone is not enough authorization because a single accepted shutdown stops every listener in the managed multi-port process (`5520`, `10000`, `5555`, `4444`).
+- Anonymous local `/shutdown` must return `403 shutdown_caller_required` and must not call `process.kill`. Legitimate lifecycle callers must send `x-routecodex-stop-caller-pid`, `x-routecodex-stop-caller-ts`, `x-routecodex-stop-caller-cwd`, and `x-routecodex-stop-caller-cmd`.
+- The shutdown route exception path must fail visibly; it must not ACK success and self-terminate as a fallback.
+- Verified gates for the provenance fix: red test first confirmed anonymous `/shutdown` returned 200; after the fix, focused `/shutdown` provenance Jest, `port-utils` caller-header Jest, `stop-command` caller-header Jest, `verify:runtime-lifecycle-pid-rebase`, TypeScript compile, shell syntax checks for affected scripts, and read-only live health checks for 5520/5555 pass.

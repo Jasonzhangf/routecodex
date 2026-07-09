@@ -551,6 +551,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let projectionState = createResponsesSseClientProjectionStateForHttp();
   let sseTransportTerminalState: Record<string, unknown> | undefined;
   let sseSemanticTerminalObserved = false;
+  let sseDoneSentinelObserved = false;
   let pendingSseFrameBuffer = '';
   const detachOutboundStream = () => {
     try {
@@ -721,6 +722,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   let sseFinishReason: string | undefined;
   const writeProjectedClientSseFrame = (frame: string) => {
     const parsed = parseClientSseProjectionFrame(frame);
+    if (frame.includes('data: [DONE]')) {
+      sseDoneSentinelObserved = true;
+    }
     const usageFrame = readSseFrameUsage(parsed);
     if (usageFrame.usage && result.usageLogInfo) {
       result.usageLogInfo.usage = usageFrame.usage as unknown as Record<string, unknown>;
@@ -858,14 +862,25 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     recordSseTransportStreamEnd(requestLabel, {
       finishReason: sseFinishReason,
     });
-    ended = true;
     if (!res.writableEnded && !res.destroyed) {
       try {
+        if (
+          isResponsesSseEndpoint(entryEndpoint)
+          && !isDirectPassthrough
+          && sseSemanticTerminalObserved
+          && !sseDoneSentinelObserved
+        ) {
+          writeClientSseFrame('data: [DONE]\n\n', 'response.sse.stream.write_done_sentinel');
+          sseDoneSentinelObserved = true;
+        }
+        ended = true;
         res.end();
       } catch (endError) {
         logResponseNonBlockingError(`response.sse.stream.end:${requestLabel}`, endError);
       }
       clientSseSnapshotRecorder?.flush();
+    } else {
+      ended = true;
     }
   });
 

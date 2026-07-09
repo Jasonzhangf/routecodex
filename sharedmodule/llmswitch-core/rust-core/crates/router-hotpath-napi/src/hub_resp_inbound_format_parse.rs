@@ -235,6 +235,13 @@ fn materialize_openai_responses_response_payload(payload: &Value) -> Result<Valu
             normalize_openai_responses_tool_calls_arrays(&mut materialized);
             return Ok(materialized);
         }
+        if let Some(nested_payload) = body.get("payload") {
+            if is_openai_responses_response_payload(nested_payload) {
+                let mut materialized = nested_payload.clone();
+                normalize_openai_responses_tool_calls_arrays(&mut materialized);
+                return Ok(materialized);
+            }
+        }
         if let Some(body_text) = body
             .get("bodyText")
             .and_then(Value::as_str)

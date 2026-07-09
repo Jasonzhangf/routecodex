@@ -2668,6 +2668,94 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
 }
 
 #[test]
+fn openai_responses_wrapped_bare_continue_schema_missing_current_goal_projects_cli() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-openai-responses-wrapped-bare-schema-current-goal".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "body": {
+                    "clientStream": false,
+                    "mode": "sse",
+                    "payload": {
+                        "id": "resp_wrapped_bare_schema_current_goal",
+                        "object": "response",
+                        "status": "completed",
+                        "model": "gpt-5.5",
+                        "output": [
+                            {
+                                "id": "rs_wrapped_bare_schema_current_goal",
+                                "type": "reasoning",
+                                "summary": [],
+                                "content": []
+                            },
+                            {
+                                "id": "msg_wrapped_bare_schema_current_goal",
+                                "type": "message",
+                                "role": "assistant",
+                                "status": "completed",
+                                "content": [{
+                                    "type": "output_text",
+                                    "text": "{\"stopreason\":2,\"reason\":\"第一轮还没做完\",\"next_step\":\"等待 stop_message_auto 工具结果后继续第二轮验证\"}"
+                                }]
+                            }
+                        ],
+                        "usage": { "input_tokens": 10, "output_tokens": 8, "total_tokens": 18 }
+                    }
+                }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "runtimeEffects": { "providerInvoker": true }
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": { "sessionId": "sess-openai-responses-wrapped-bare-schema-current-goal" },
+                "runtimeControl": {
+                    "stopless": {
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "active": true,
+                        "triggerHint": "non_terminal_schema"
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert_eq!(payload["status"], json!("requires_action"));
+    assert_eq!(
+        payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]["name"],
+        json!("exec_command")
+    );
+    let args = payload["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+        ["arguments"]
+        .as_str()
+        .expect("exec args");
+    assert!(
+        args.contains("routecodex hook run reasoningStop"),
+        "missing client-visible reasoningStop CLI projection: {args}"
+    );
+    assert!(
+        args.contains("stop_schema_current_goal_missing"),
+        "missing current_goal feedback in CLI projection args: {args}"
+    );
+    assert!(output.effect_plan.effects.iter().any(|effect| {
+        serde_json::to_value(&effect.kind).unwrap() == json!("stoplessMetadataCenterWrite")
+    }));
+}
+
+#[test]
 fn response_stream_path_returns_stream_pipe_effect_plan() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine

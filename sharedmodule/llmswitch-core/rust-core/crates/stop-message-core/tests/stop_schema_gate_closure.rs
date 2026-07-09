@@ -5,7 +5,7 @@
 //! 2. `<rcc_stop_schema>` 带完整 stopreason=1 → AllowStop
 //! 3. `<rcc_stop_schema>` 带完整 stopreason=2 + next_step → Followup
 //! 4. 无 schema → Followup + 字段提示
-//! 5. 连续 3 次无 schema → FailFast
+//! 5. 连续 3 次无 schema → Followup，不静默终止
 //! 6. fence 内非法 JSON → invalid_json
 //! 7. forcestop=1 → AllowStop bypass budget
 //! 8. needs_user_input=true → AllowStop
@@ -41,13 +41,16 @@ fn t1_blocked_schema_allows_stop() {
 #[test]
 fn t1_continue_with_next_step_follows_up() {
     let input = r#"<rcc_stop_schema>
-{"stopreason":2,"reason":"需验证","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"运行 cargo test 验证修复","next_suggested_path":"","needs_user_input":false,"learned":""}
+{"stopreason":2,"reason":"需验证","current_goal":"完成 stop schema gate 验证","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"运行 cargo test 验证修复","next_suggested_path":"","needs_user_input":false,"learned":""}
 </rcc_stop_schema>"#;
     let d = evaluate_stop_schema_gate(input, 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
     assert_eq!(d.missing_fields, Vec::<String>::new());
-    assert_eq!(d.followup_text.as_deref(), Some("运行 cargo test 验证修复"));
+    assert_eq!(
+        d.followup_text.as_deref(),
+        Some("你当前的目标是：完成 stop schema gate 验证。你要确定你完成了吗？建议的下一步是：运行 cargo test 验证修复。")
+    );
     assert!(!d.count_budget);
 }
 
@@ -55,7 +58,7 @@ fn t1_continue_with_next_step_follows_up() {
 fn t1_continue_with_json_code_fence_follows_up() {
     let input = r#"继续执行。
 ```json
-{"stopreason":2,"reason":"需验证","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"运行 cargo test 验证修复","next_suggested_path":"","needs_user_input":false,"learned":""}
+{"stopreason":2,"reason":"需验证","current_goal":"完成 stop schema gate 验证","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"运行 cargo test 验证修复","next_suggested_path":"","needs_user_input":false,"learned":""}
 ```"#;
     let d = evaluate_stop_schema_gate(input, 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
@@ -85,7 +88,7 @@ fn t2_no_schema_returns_followup() {
 }
 
 #[test]
-fn t2_no_schema_repeated_three_times_fails_fast() {
+fn t2_no_schema_repeated_three_times_still_returns_followup() {
     let d1 = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
     assert_eq!(d1.reason_code, "stop_schema_missing");
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
@@ -109,8 +112,8 @@ fn t2_no_schema_repeated_three_times_fails_fast() {
         d2.observation_hash.as_str(),
         d2.no_change_count,
     );
-    assert_eq!(d3.action, StopSchemaGateAction::FailFast);
-    assert_eq!(d3.reason_code, "stop_schema_budget_exhausted");
+    assert_eq!(d3.action, StopSchemaGateAction::Followup);
+    assert_eq!(d3.reason_code, "stop_schema_missing");
     assert_eq!(d3.no_change_count, 3);
 }
 
@@ -137,10 +140,10 @@ fn t2_stopreason_non_numeric_returns_followup() {
     );
 }
 
-// ── T3: 连续 3 次 → FailFast ────────────────────────────────────────────────
+// ── T3: 连续 3 次 → Followup，不静默终止 ─────────────────────────────────────
 
 #[test]
-fn t3_three_no_schema_fails_fast() {
+fn t3_three_no_schema_still_returns_followup() {
     let d1 = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
     assert_eq!(d1.no_change_count, 1);
@@ -164,14 +167,14 @@ fn t3_three_no_schema_fails_fast() {
     );
     assert_eq!(
         d3.action,
-        StopSchemaGateAction::FailFast,
-        "3rd consecutive must FailFast"
+        StopSchemaGateAction::Followup,
+        "3rd consecutive missing schema must still feed back to the model"
     );
-    assert_eq!(d3.reason_code, "stop_schema_budget_exhausted");
+    assert_eq!(d3.reason_code, "stop_schema_missing");
 }
 
 #[test]
-fn t3_three_invalid_schema_fails_fast() {
+fn t3_three_invalid_schema_still_returns_followup() {
     let bad = "<rcc_stop_schema>{bad json}</rcc_stop_schema>";
     let d1 = evaluate_stop_schema_gate(bad, 0, 3, "", 0);
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
@@ -187,11 +190,11 @@ fn t3_unclosed_json_fence_is_invalid_json_not_missing() {
 }
 
 #[test]
-fn t3_bare_json_in_assistant_text_is_not_accepted_as_terminal_schema() {
+fn t3_bare_json_in_assistant_text_is_accepted_as_terminal_schema() {
     let bare = r#"{"stopreason":0,"reason":"done","has_evidence":1,"evidence":"ok","issue_cause":"none","excluded_factors":"none","diagnostic_order":"1","done_steps":"done","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"ok"}"#;
     let decision = evaluate_stop_schema_gate(bare, 0, 3, "", 0);
-    assert_eq!(decision.action, StopSchemaGateAction::Followup);
-    assert_eq!(decision.reason_code, "stop_schema_missing");
+    assert_eq!(decision.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(decision.reason_code, "stop_schema_finished");
 }
 
 #[test]
@@ -223,8 +226,11 @@ fn t3_invalid_schema_with_empty_arguments_fails_fast_after_three_rounds() {
         &d2.observation_hash,
         d2.no_change_count,
     );
-    assert_eq!(d3.action, StopSchemaGateAction::FailFast);
-    assert_eq!(d3.reason_code, "stop_schema_budget_exhausted");
+    assert_eq!(d3.action, StopSchemaGateAction::Followup);
+    assert_eq!(
+        d3.reason_code,
+        "stop_schema_stopreason_missing_or_non_numeric"
+    );
 }
 
 // ── T4: 不同错误 → no_change_count 重置 ─────────────────────────────────────
@@ -317,8 +323,8 @@ fn t6_needs_user_input_without_next_step_reports_only_next_step() {
 }
 
 #[test]
-fn t6_continue_with_has_evidence_one_requires_evidence_only() {
-    let input = r#"{"stopreason":2,"reason":"继续验证","has_evidence":1,"next_step":"运行下一条验证命令","needs_user_input":false}"#;
+fn t6_continue_with_has_evidence_one_keeps_current_goal_next_step_feedback() {
+    let input = r#"{"stopreason":2,"reason":"继续验证","current_goal":"完成 stop schema gate 验证","has_evidence":1,"next_step":"运行下一条验证命令","needs_user_input":false}"#;
     let d = evaluate_stop_schema_gate_with_reasoning_stop_arguments("", Some(input), 0, 3, "", 0);
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");

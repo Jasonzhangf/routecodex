@@ -9,6 +9,7 @@ import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/in
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
 import { writeDaemonLoginRecord } from '../../../src/server/runtime/http-server/daemon-admin/auth-store.js';
 import { registerApiKeyAuthMiddleware } from '../../../src/server/runtime/http-server/middleware.js';
+import { buildShutdownCallerHeaders } from '../../../src/utils/shutdown-caller-headers.js';
 
 function setEnv(name: string, value: string | undefined): () => void {
   const original = process.env[name];
@@ -42,6 +43,26 @@ function createTestConfig(port: number, apikey?: string, host = '127.0.0.1'): Se
   };
 }
 
+function createRawUserConfig(port: number, apikey?: string, host = '127.0.0.1'): Record<string, unknown> {
+  return {
+    version: '1.0.0',
+    httpserver: {
+      host,
+      port,
+      ...(apikey ? { apikey } : {}),
+      ports: [
+        {
+          host,
+          port,
+          mode: 'router',
+          routingPolicyGroup: 'default',
+          ...(apikey ? { apikey } : {})
+        }
+      ]
+    }
+  };
+}
+
 async function startTestServer(
   apikey?: string,
   host = '127.0.0.1'
@@ -57,6 +78,7 @@ async function startTestServer(
     }
   };
   const server = new RouteCodexHttpServer(createTestConfig(0, apikey, host));
+  server.seedUserConfigForBootstrap(createRawUserConfig(0, apikey, host));
   try {
     await server.start();
     const raw = (server as unknown as { server?: http.Server }).server;
@@ -103,6 +125,36 @@ async function startStubMiddlewareServer(apikey: string): Promise<{ raw: http.Se
     throw new Error('Failed to resolve stub server port');
   }
   return { raw, baseUrl: `http://127.0.0.1:${addr.port}` };
+}
+
+async function postShutdownWithNodeHttp(baseUrl: string, headers: Record<string, string>): Promise<{ status: number; body: any }> {
+  const url = new URL('/shutdown', baseUrl);
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      url,
+      { method: 'POST', headers },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let body: any = text;
+          try {
+            body = text ? JSON.parse(text) : null;
+          } catch {
+            body = text;
+          }
+          resolve({ status: res.statusCode ?? 0, body });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function shutdownCallerHeaders(): Record<string, string> {
+  return buildShutdownCallerHeaders();
 }
 
 async function getJson(
@@ -190,13 +242,12 @@ describe('HTTP apikey auth (optional)', () => {
     }
   });
 
-  it('keeps /shutdown reachable from localhost so cli stop can work on apikey-protected servers', async () => {
+  it('keeps provenance-bearing /shutdown reachable from localhost so cli stop can work on apikey-protected servers', async () => {
     const expected = 'test-apikey';
     const { raw, baseUrl } = await startStubMiddlewareServer(expected);
     try {
-      const res = await fetch(`${baseUrl}/shutdown`, { method: 'POST' });
-      expect(res.status).toBe(200);
-      const body = await res.json();
+      const { status, body } = await postShutdownWithNodeHttp(baseUrl, shutdownCallerHeaders());
+      expect(status).toBe(200);
       expect(body).toMatchObject({ ok: true });
     } finally {
       await new Promise<void>((resolve) => raw.close(() => resolve()));

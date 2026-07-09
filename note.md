@@ -28359,3 +28359,75 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - During commit review, `build:base` first failed because `native-hub-pipeline-resp-semantics-shared.js` and then `native-hub-bridge-action-semantics-shared.js` had been deleted while live TS imports remained.
 - Fixed without restoring the split helper facades: `native-shared-conversion-semantics-core.ts` now owns the small binding/stringify/parse/error glue, and active imports point there.
 - Verification PASS: active source grep for both retired helper paths returns no hits; `npm run verify:llmswitch-core-tsc` PASS; `npm run build:base` PASS.
+
+# 2026-07-09: metadata-center runtime-control writer TS facade deleted
+
+- Scope: continued Hub Pipeline TS facade contraction after `runtime-metadata.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/metadata-center-runtime-control-writer.ts`; removed its only production import from `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now owns only local metadata-center symbol binding preservation around Rust native `ensureRuntimeMetadataCarrierWithNative`.
+- Test-only direct-native helpers now carry local MetadataCenter read/write glue instead of importing the production facade; residue and red tests lock the facade absent.
+- `verify:metadata-center-dualwrite-api` no longer allows a production migration shell outside `src/server/runtime/http-server/metadata-center/dualwrite-api.ts`.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused Jest 205/205; `npm run verify:metadata-center-dualwrite-api`; `npm run verify:servertool-rust-only`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=29`, `shellsWithProdImporters=25`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=29`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run verify:function-map-compile-gate`; targeted active import scan; targeted trailing-whitespace scan 0 matches.
+- Known non-target issue: adding `tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts` to this Jest invocation fails before tests run because that spec contains top-level `await` under the current Jest transform; the three target specs pass.
+
+# 2026-07-09: virtual-router stop-message native TS wrapper deleted
+
+- Scope: continued zero-production-import native wrapper deletion after MetadataCenter runtime-control writer facade.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts`; strict shell audit showed no production importer.
+- Live parsing glue for `parseResolvedStopMessageInstructionJson` was already local in `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts`, so no runtime source needed to import this wrapper.
+- Also deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts`; servertool routing tests now use test-only `tests/servertool/routing-instructions-direct-native.ts` to call Rust native parse/apply exports directly.
+- Removed both deleted wrappers from `no-fallback-diff-rules.json`; residue audit now asserts both wrapper paths remain absent.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused Jest `tests/servertool/routing-instructions.spec.ts` + `tests/servertool/stop-message-sample-replay.spec.ts` + `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` 243/243 with 9 skipped sample-dependent cases; `npm run verify:architecture-fallback-denylist`; `npm run verify:function-map-compile-gate`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=27`, `shellsWithProdImporters=24`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=27`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; targeted active import scan; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: 5555 GPT provider scope narrowed to asxs/55ai/cc/1token
+
+- Runtime config changed at `~/.rcc/config.toml`; backup: `~/.rcc/config.toml.before-provider-scope-5555-20260709T172448.bak`.
+- Provider model audit: `asxs`, `55ai`, and `1token` expose `gpt-5.4-mini`; `cc` exposes only `gpt-5.5`; none of these four exposes `gpt-5.3-codex-spark`. `ykk` exposes Spark but is outside the allowed provider scope, so Spark was removed from 5555 tools routing.
+- Live verification PASS after global `routecodex restart --port 5555`: `routecodex config validate`; `/health` returned `ready=true`, `pipelineReady=true`, `version=0.90.3689`; `routecodex port status 5555 --json` showed `fwd.paid.gpt-5.4-mini` targets only `asxs.crsa`, `asxs.crsb`, `55ai.key1`, `1token.key1`, and Spark forwarder absent.
+- Tools dry-run PASS: routeHint `tools` selected `asxs.crsa.gpt-5.4-mini`; candidate list had mini + MiniMax only and no `ykk` / `llmtoken` / Spark.
+
+# 2026-07-09: 5555 Spark corrected by provider baseURL audit
+
+- Correction: local provider config was insufficient evidence for model availability. Direct baseURL `/models` checks showed `55ai` and `asxs` expose `gpt-5.3-codex-spark`; `cc` exposes only `gpt-5.5`; `1token` `/v1/models` returned `INVALID_API_KEY`, so it was not added as Spark evidence.
+- Config fix: added `gpt-5.3-codex-spark` model entries to `~/.rcc/provider/55ai/config.v2.toml` and `~/.rcc/provider/asxs/config.v2.toml`; restored `fwd.paid.gpt-5.3-codex-spark` in `~/.rcc/config.toml` with targets only `asxs` and `55ai`; 5555 tools priority 240 uses Spark, priority 200 falls back to GPT mini/MiniMax.
+- Backups: `~/.rcc/config.toml.before-spark-baseurl-fix-5555-20260709T173514.bak`, `~/.rcc/provider/55ai/config.v2.toml.before-spark-baseurl-fix-20260709T173514.bak`, `~/.rcc/provider/asxs/config.v2.toml.before-spark-baseurl-fix-20260709T173514.bak`.
+- Verification PASS: TOML parse for all three files; `routecodex config validate`; global `routecodex restart --port 5555`; `/health` returned `ready=true`, `pipelineReady=true`, `version=0.90.3689`; live status showed Spark targets `asxs.crsa`, `asxs.crsb`, `55ai.key1`; short tools dry-run selected `asxs.crsa.gpt-5.3-codex-spark` with `maxContextTokens=128000`; 130K tools dry-run skipped Spark and selected `asxs.crsa.gpt-5.4-mini`.
+
+# 2026-07-09: 5555 longcontext GPT / GLM 400 audit
+
+- Live 5555 truth after global `routecodex restart --port 5555`: `/health` ready on version `0.90.3689`; `gateway_priority_5555:longcontext` high pool already has GPT with targets `fwd.glm.glm-5.2`, `fwd.free.gpt-5.5`, `fwd.paid.gpt-5.5`, and available GPT providers `cc`, `asxs`, `55ai`, `1token`. So "longcontext has no GPT" is not the current config problem; weighted selection can still choose GLM first.
+- Exact 400 lines in `~/.rcc/logs/server-4444.log` show route `longcontext/gateway-priority-5555-weighted-longcontext -> orangeai[key1].glm-5.2`, `stage=provider.send`, `HTTP_400`, then provider-switch reroute. Same window also has successful GLM longcontext/tool_calls requests, so GLM is not globally broken.
+- Direct orangeai GLM probes to `/v1/chat/completions` passed for simple, large plain text, `reasoning_content`, tool messages with extra `id/name`, and assistant tool calls with extra `call_id/tool_call_id`. Upstream probes found raw Responses shapes can break GLM chat: top-level `messages[]` item `{type:"function_call_output"...}` returned upstream 524, and `content:[{type:"reasoning", content:[...]}]` returned upstream 524. This supports the illegal-history-shape direction but does not prove the exact 400 body.
+- Rust/bridge local conversion checks did not reproduce raw Responses item leakage: `buildChatRequestFromResponses` via native bridge dropped/normalized crafted `function_call_output` and reasoning-array inputs instead of emitting them as top-level chat messages. Current code evidence therefore does not yet prove a source bug in bridge conversion.
+- Snapshot gap: current live samples for the exact 400 request IDs are missing; default snapshot captured only client-request oversize summary and provider-response, not provider-request. Attempting `ROUTECODEX_SNAPSHOT_STAGES=client-request,provider-request,provider-response,client-response ROUTECODEX_SNAPSHOT_PAYLOAD_MAX_BYTES=2097152 routecodex restart --port 5555` used in-place signal restart and did not propagate those env vars into the live process; a subsequent GLM `pong` probe succeeded but still wrote no `provider-request.json`.
+- Closeout status: no root-cause code fix yet. Next valid step is to start/restart 5555 with provider-request snapshot env actually present in the server process, capture the next GLM 400 provider body, then fix the unique owner (`buildChatRequestFromResponses`/Rust bridge if raw Responses leaks, or GLM provider runtime compat if chat wire is valid OpenAI but GLM-specific invalid).
+
+# 2026-07-09: VR routing-state native TS wrapper deleted
+
+- Scope: continued llmswitch-core TS shell contraction after VR stop-message/routing-instructions wrapper deletion.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts`; active production graph has no importer. Routing-state persistence truth remains Rust `router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs` plus required NAPI exports.
+- Tests that previously imported the production TS wrapper now use `tests/servertool/routing-instructions-direct-native.ts` as test-only direct native glue for `resolveVirtualRouterRoutingStateKeyJson`, routing-state serialize/deserialize/load/save, stop-message merge, and state-store helpers.
+- Function-map/verification-map no longer allow the deleted wrapper for `hub.chat_process_session_usage`; owner is marked file-scoped Rust to avoid treating `src/lib.rs` NAPI bridge as a second canonical builder owner.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused Jest routing/servertool/routing-state slice 255/255 with 9 skipped sample-dependent cases; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-fallback-denylist`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=26`, `shellsWithProdImporters=24`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=26`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; active stale import scan 0 hits; targeted trailing-whitespace scan 0 matches.
+
+# 2026-07-09: Hub pipeline orchestration protocol wrapper deleted
+
+- Scope: continued zero-production-import llmswitch-core TS shell contraction after routing-state wrapper deletion.
+- Moved `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.ts` out of production source and into test-only `tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts` via `git mv`.
+- Updated direct test imports, function-map/verification-map, servertool ownership wiki, residue gates, servertool rust-only gate, thin-wrapper gate, and rustification audit row. Production active import scan for the old wrapper returned 0 hits.
+- Test adjustments: marker/schema tests now use real Rust direct helper with explicit preselected route + metadataCenterSnapshot; apply_patch assertion follows current provider-facing custom grammar tool shape.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-fallback-denylist`; `npm run verify:servertool-rust-only`; `npm run verify:architecture-thin-wrapper-only`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=25`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=25`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run build:base`; focused executable Jest slice shows 208 passing tests.
+- Known Jest runner gap: broader selected Jest command still exits 1 for existing transform issues in suites using top-level await/import.meta/CJS ESM interop; this slice's executable tests pass and build:base passes.
+
+# 2026-07-09: Responses bridge closed-loop runner moved out of llmswitch-core src
+
+- Scope: continued TS shell reference contraction after Hub orchestration wrapper deletion.
+- Moved `sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts` to `tests/sharedmodule/responses-bridge-closed-loop.ts` because it is integration/test evidence, not production source.
+- Updated function-map/verification-map integration references. This removes the false production importer from `responses-openai-bridge.ts` without changing bridge semantics.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` shows `responses-openai-bridge.ts prodImportRefs=0` and total `shellsWithProdImporters=23`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; active stale path scan only hits architecture backups; `git diff --check` PASS.
+## 2026-07-09 21:50 runtime lifecycle silent-stop audit
+
+- Latest live health: `127.0.0.1:5520/health` and `127.0.0.1:5555/health` both return `ready=true`, `pipelineReady=true`, version `0.90.3699`.
+- Process lifecycle evidence shows prior full-port stops were not OOM/crash: `/shutdown` was accepted from localhost, including a bad sample with empty `callerPid/callerCmd`, then `SIGINT/SIGTERM` stopped the single multi-port process (`5520/10000/5555/4444`).
+- Owner locked via `runtime.lifecycle.mainline`: HTTP shutdown route is local admin control surface; CLI start/stop/port-utils are allowed callers only when they attach caller audit headers. Plain start remains non-disruptive by memory rule.
+- Fix direction: reject anonymous local `/shutdown` requests, keep CLI stop/restart/start supervisor requests working with provenance headers, and update tests/scripts that own child runtimes.

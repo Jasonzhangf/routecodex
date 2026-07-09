@@ -210,8 +210,8 @@ describe('stop-message native decision (blackbox)', () => {
       prevObservationHash: second.observation_hash,
       prevNoChangeCount: second.no_change_count,
     });
-    expect(gate.action).toBe('fail_fast');
-    expect(gate.reason_code).toBe('stop_schema_budget_exhausted');
+    expect(gate.action).toBe('followup');
+    expect(gate.reason_code).toBe('stop_schema_missing');
     expect(gate.count_budget).toBe(true);
     expect(gate.no_change_count).toBe(3);
   });
@@ -358,8 +358,8 @@ describe('stop-message native decision (blackbox)', () => {
       prevObservationHash: invalid2.observation_hash,
       prevNoChangeCount: invalid2.no_change_count,
     });
-    expect(invalid3.action).toBe('fail_fast');
-    expect(invalid3.reason_code).toBe('stop_schema_budget_exhausted');
+    expect(invalid3.action).toBe('followup');
+    expect(invalid3.reason_code).toBe('stop_schema_invalid_json');
     expect(invalid3.count_budget).toBe(true);
 
     const valid = evaluateStopSchemaGateDirectNative({

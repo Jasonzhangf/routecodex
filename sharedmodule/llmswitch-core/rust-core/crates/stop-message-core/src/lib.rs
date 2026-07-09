@@ -889,21 +889,6 @@ fn schema_invalid_followup(
     observation_hash: String,
     feedback_history: Vec<SchemaErrorFeedback>,
 ) -> StopSchemaGateDecision {
-    if no_change_count >= STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS {
-        return StopSchemaGateDecision {
-            max_repeats: effective_max,
-            action: StopSchemaGateAction::FailFast,
-            reason_code: "stop_schema_budget_exhausted".to_string(),
-            summary_prefix: None,
-            followup_text: None,
-            count_budget: true,
-            missing_fields,
-            no_change_count,
-            observation_hash,
-            parsed: Some(parsed),
-            feedback_history,
-        };
-    }
     schema_followup(
         _assistant_text,
         reason_code,
@@ -930,21 +915,6 @@ fn schema_missing_followup(
     observation_hash: String,
     feedback_history: Vec<SchemaErrorFeedback>,
 ) -> StopSchemaGateDecision {
-    if no_change_count >= STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS {
-        return StopSchemaGateDecision {
-            max_repeats: effective_max,
-            action: StopSchemaGateAction::FailFast,
-            reason_code: "stop_schema_budget_exhausted".to_string(),
-            summary_prefix: None,
-            followup_text: None,
-            count_budget: true,
-            missing_fields,
-            no_change_count,
-            observation_hash,
-            parsed: None,
-            feedback_history,
-        };
-    }
     schema_followup(
         _assistant_text,
         reason_code,
@@ -1345,6 +1315,12 @@ fn parse_stop_schema_from_assistant_text(text: &str) -> StopSchemaParseResult {
             None => StopSchemaParseResult::InvalidJson,
         };
     }
+    if let Some(result) = parse_bare_stop_schema_json_object(text) {
+        return match result.and_then(parse_stop_schema_value) {
+            Some(parsed) => StopSchemaParseResult::Parsed(parsed),
+            None => StopSchemaParseResult::InvalidJson,
+        };
+    }
     StopSchemaParseResult::Missing
 }
 
@@ -1446,6 +1422,18 @@ fn parse_fenced_stop_schema_json_object(text: &str) -> Option<Option<Value>> {
         rest = &after[end + marker.len()..];
     }
     None
+}
+
+fn parse_bare_stop_schema_json_object(text: &str) -> Option<Option<Value>> {
+    let candidate = text.trim();
+    if candidate.is_empty() || !candidate.starts_with('{') || !candidate.ends_with('}') {
+        return None;
+    }
+    match serde_json::from_str::<Value>(candidate) {
+        Ok(value) if value.is_object() && looks_like_stop_schema_value(&value) => Some(Some(value)),
+        Ok(_) => None,
+        Err(_) => Some(None),
+    }
 }
 
 fn looks_like_stop_schema_value(value: &Value) -> bool {
@@ -2164,7 +2152,7 @@ mod tests {
     fn stop_schema_continue_needed_with_next_step_follows_up_to_execute_next_step() {
         let decision = evaluate_stop_schema_gate(
             r#"```json
-{"stopreason":2,"reason":"还没完成","has_evidence":0,"next_step":"运行 targeted tests"}
+{"stopreason":2,"reason":"还没完成","current_goal":"完成 stop schema gate 验证","has_evidence":0,"next_step":"运行 targeted tests"}
 ```"#,
             1,
             3,
@@ -2174,12 +2162,44 @@ mod tests {
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
         let text = decision.followup_text.unwrap();
-        assert_eq!(text, "运行 targeted tests");
+        assert_eq!(
+            text,
+            "你当前的目标是：完成 stop schema gate 验证。你要确定你完成了吗？建议的下一步是：运行 targeted tests。"
+        );
         assert!(
             !decision.count_budget,
             "valid stopreason=2 + next_step is progress control and must not consume loop budget"
         );
         assert!(decision.missing_fields.is_empty());
+    }
+
+    #[test]
+    fn bare_stop_schema_json_is_valid_schema_input() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"还没完成","current_goal":"完成 stop schema gate 验证","has_evidence":0,"next_step":"运行 targeted tests"}"#,
+            1,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
+        assert!(!decision.count_budget);
+    }
+
+    #[test]
+    fn bare_stop_schema_json_missing_current_goal_is_corrective_followup() {
+        let decision = evaluate_stop_schema_gate(
+            r#"{"stopreason":2,"reason":"第一轮还没做完","next_step":"等待 stop_message_auto 工具结果后继续第二轮验证"}"#,
+            1,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_current_goal_missing");
+        assert_eq!(decision.missing_fields, vec!["current_goal"]);
+        assert!(decision.count_budget);
     }
 
     #[test]
@@ -2316,7 +2336,7 @@ mod tests {
         // 只有 no_change_count 达到 3 才封顶；正常推进不应因 used=2/3 直接终止。
         let still_followup = evaluate_stop_schema_gate(
             tagged_stop_schema(
-                r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+                r#"{"stopreason":2,"reason":"继续","current_goal":"完成 stop schema gate 验证","has_evidence":0,"next_step":"运行测试"}"#,
             )
             .as_str(),
             2,
@@ -2329,7 +2349,7 @@ mod tests {
 
         let still_followup_again = evaluate_stop_schema_gate(
             tagged_stop_schema(
-                r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+                r#"{"stopreason":2,"reason":"继续","current_goal":"完成 stop schema gate 验证","has_evidence":0,"next_step":"运行测试"}"#,
             )
             .as_str(),
             3,
@@ -2348,7 +2368,7 @@ mod tests {
     fn stop_schema_continue_next_step_does_not_exhaust_budget_and_valid_stop_does_not() {
         let continue_next_step = evaluate_stop_schema_gate(
             tagged_stop_schema(
-                r#"{"stopreason":2,"reason":"继续","has_evidence":0,"next_step":"运行测试"}"#,
+                r#"{"stopreason":2,"reason":"继续","current_goal":"完成 stop schema gate 验证","has_evidence":0,"next_step":"运行测试"}"#,
             )
             .as_str(),
             3,
@@ -2615,7 +2635,7 @@ mod tests {
         assert_eq!(second.no_change_count, 2);
         assert_eq!(second.action, StopSchemaGateAction::Followup);
 
-        // Third call with same hash -> no_change_count = 3 -> fail_fast
+        // Third call with same hash still feeds back instead of silently terminal.
         let third = evaluate_stop_schema_gate(
             "普通停止文本",
             0,
@@ -2624,8 +2644,8 @@ mod tests {
             second.no_change_count,
         );
         assert_eq!(third.no_change_count, 3);
-        assert_eq!(third.action, StopSchemaGateAction::FailFast);
-        assert_eq!(third.reason_code, "stop_schema_budget_exhausted");
+        assert_eq!(third.action, StopSchemaGateAction::Followup);
+        assert_eq!(third.reason_code, "stop_schema_missing");
     }
 
     /// Different schema texts get different hashes -> no_change_count resets
@@ -2704,7 +2724,7 @@ mod tests {
             &second.observation_hash,
             second.no_change_count,
         );
-        assert_eq!(third.action, StopSchemaGateAction::FailFast);
+        assert_eq!(third.action, StopSchemaGateAction::Followup);
         assert!(third.observation_hash.len() > 0);
     }
 

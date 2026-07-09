@@ -35,14 +35,18 @@ fn build_stopless_exec_command(
     repeat_count: u32,
     max_repeats: u32,
     public_trigger_hint: Option<&str>,
+    schema_feedback: Option<&Value>,
 ) -> String {
     let trigger = cli_contract::normalize_stopless_trigger_hint_for_metadata(public_trigger_hint);
-    let input_json = serde_json::json!({
+    let mut input_json = serde_json::json!({
         "flowId": "stop_message_flow",
         "repeatCount": repeat_count,
         "maxRepeats": max_repeats,
         "triggerHint": trigger,
     });
+    if let (Some(record), Some(feedback)) = (input_json.as_object_mut(), schema_feedback) {
+        record.insert("schemaFeedback".to_string(), feedback.clone());
+    }
     let input_str = input_json.to_string();
     let quoted = input_str.replace('\'', "'\\''");
     let mut cmd = format!(
@@ -359,6 +363,7 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
             ctx.repeat_count,
             ctx.max_repeats,
             ctx.public_trigger_hint.as_deref(),
+            ctx.schema_feedback.as_ref(),
         );
         if let Some(obj) = stamped.as_object_mut() {
             obj.insert("execCommand".to_string(), Value::String(cmd));

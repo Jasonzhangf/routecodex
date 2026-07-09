@@ -232,22 +232,10 @@ pub fn plan_stop_message_auto_handler(
 // ── Skip path ───────────────────────────────────────────────────────────────
 
 fn handle_skip(
-    input: &StopMessageAutoHandlerInput,
-    decision: &StopMessageDecision,
+    _input: &StopMessageAutoHandlerInput,
+    _decision: &StopMessageDecision,
     compare: &mut StopMessageCompareContext,
 ) -> StopMessageAutoHandlerPlan {
-    // Budget exhausted
-    if decision.skip_reason.as_deref() == Some("skip_reached_max_repeats") {
-        let prefixed = build_terminal_visible_payload(&input.base, "");
-        compare.reason = "stop_schema_budget_exhausted".to_string();
-        return StopMessageAutoHandlerPlan {
-            action: StopMessageAutoPlanAction::ReturnTerminalFinal,
-            compare_context: compare.clone(),
-            terminal_chat_response: Some(prefixed),
-            ..Default::default()
-        };
-    }
-
     null_plan(compare.clone())
 }
 
@@ -385,20 +373,6 @@ fn handle_trigger(
     compare.max_repeats = persist_plan.compare_max_repeats as i32;
     compare.remaining = persist_plan.compare_remaining as i32;
 
-    // Budget terminal check
-    let should_count = schema_gate.count_budget.unwrap_or(true);
-    if should_count && effective_max > 0 && persist_plan.next_used >= persist_plan.next_max_repeats
-    {
-        compare.reason = "stop_schema_budget_exhausted".to_string();
-        compare.remaining = 0;
-        return StopMessageAutoHandlerPlan {
-            action: StopMessageAutoPlanAction::ReturnTerminalFinal,
-            compare_context: compare.clone(),
-            terminal_chat_response: Some(build_terminal_visible_payload(&input.base, "")),
-            ..Default::default()
-        };
-    }
-
     let stopless_trigger_hint = normalize_trigger_hint(schema_gate.reason_code.as_deref());
     let finalize_stopless = build_finalize_stopless(
         &persist_plan,
@@ -490,10 +464,6 @@ fn decide_from_context(ctx: &Value) -> StopMessageDecision {
                 .unwrap_or("继续执行")
         })
         .to_string();
-
-    if rt_used >= rt_max {
-        return skip("skip_reached_max_repeats");
-    }
 
     StopMessageDecision {
         action: "trigger".to_string(),
@@ -893,26 +863,6 @@ fn plan_stop_message_persist_snapshot_with_input(
 
 // ── Helper functions ────────────────────────────────────────────────────────
 
-fn empty_plan() -> StopMessageAutoHandlerPlan {
-    StopMessageAutoHandlerPlan {
-        action: StopMessageAutoPlanAction::ReturnNull,
-        compare_context: StopMessageCompareContext::default_skip(),
-        terminal_chat_response: None,
-        should_write_learned_note: Some(false),
-        learned_note: None,
-        flow_id: None,
-        effective_decision: None,
-        schema_gate: None,
-        persist_plan: None,
-        stopless_trigger_hint: None,
-        schema_feedback: None,
-        assistant_stop_text: None,
-        native_handler_result: None,
-        finalize_context: None,
-        finalize_stopless: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1074,7 +1024,7 @@ mod tests {
 
     #[test]
     fn uses_metadata_previous_compare_for_observation_loop() {
-        let schema = r#"<rcc_stop_schema>{"stopreason":2,"reason":"same","has_evidence":0,"next_step":"x","needs_user_input":false}</rcc_stop_schema>"#;
+        let schema = r#"<rcc_stop_schema>{"stopreason":2,"reason":"same","current_goal":"完成当前 stopless 修复","has_evidence":0,"next_step":"x","needs_user_input":false}</rcc_stop_schema>"#;
         let first_gate = evaluate_stop_schema_gate(schema, None, 1, 3, "", 0);
         assert_eq!(
             first_gate.reason_code.as_deref(),
@@ -1280,7 +1230,74 @@ mod tests {
     }
 
     #[test]
-    fn budget_exhausted_followup_path_preserves_original_visible_text() {
+    fn responses_completed_bare_continue_schema_missing_current_goal_is_followup() {
+        let schema = r#"{"stopreason":2,"reason":"第一轮还没做完","next_step":"等待 stop_message_auto 工具结果后继续第二轮验证"}"#;
+        let base = json!({
+            "status": "completed",
+            "output_text": schema,
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{ "type": "output_text", "text": schema }]
+            }]
+        });
+        let extracted = extract_current_assistant_stop_text(&base);
+        let gate = evaluate_stop_schema_gate(&extracted, None, 1, 3, "", 0);
+        assert_eq!(gate.action, "followup", "extracted={extracted}");
+        assert_eq!(
+            gate.reason_code.as_deref(),
+            Some("stop_schema_current_goal_missing")
+        );
+
+        let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
+            base,
+            request_id: "req-bare-continue-schema-missing-current-goal".to_string(),
+            should_run_vision_flow: false,
+            should_bypass_stop_message_for_media: false,
+            metadata_runtime_control: Some(json!({
+                "stopless": {
+                    "flowId": "stop_message_flow",
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "active": true
+                }
+            })),
+            metadata_previous_compare: None,
+            default_config: StopMessageDefaultConfigPlan {
+                enabled: true,
+                text: "continue".to_string(),
+                max_repeats: 3,
+            },
+            decision_signals: StoplessDecisionContextSignals {
+                port_stop_message_disabled: false,
+                has_responses_submit_tool_outputs_resume: true,
+                plan_mode_active: false,
+            },
+            effective_runtime_loop_state: Some(json!({
+                "repeatCount": 1,
+                "maxRepeats": 3,
+                "continuationPrompt": "keep going"
+            })),
+            provider_key: None,
+        });
+
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(
+            plan.stopless_trigger_hint.as_deref(),
+            Some("stop_schema_current_goal_missing")
+        );
+        assert_eq!(
+            plan.compare_context.reason,
+            "stop_schema_current_goal_missing"
+        );
+        let feedback = plan.schema_feedback.as_ref().expect("schema feedback");
+        assert_eq!(feedback.reason_code, "stop_schema_current_goal_missing");
+        assert_eq!(feedback.missing_fields, vec!["current_goal"]);
+    }
+
+    #[test]
+    fn budget_boundary_plain_stop_still_projects_visible_correction() {
         let plan = plan_stop_message_auto_handler(&StopMessageAutoHandlerInput {
             base: json!({
                 "choices": [{
@@ -1324,34 +1341,13 @@ mod tests {
             })),
             provider_key: None,
         });
-        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnTerminalFinal);
-        assert_eq!(plan.compare_context.reason, "stop_schema_budget_exhausted");
-        let terminal = plan
-            .terminal_chat_response
-            .as_ref()
-            .expect("terminal response");
-        let content = terminal["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("");
-        assert!(
-            content.contains("继续执行中"),
-            "terminal budget exhausted path must preserve original visible text, got: {content}"
-        );
-        assert!(!content.contains("stopless"));
-        let output_text = terminal["output_text"].as_str().unwrap_or("");
-        assert!(
-            output_text.contains("继续执行中"),
-            "responses output_text must preserve original visible text, got: {output_text}"
-        );
-        assert!(!output_text.contains("stopless"));
-        let nested_output_text = terminal["output"][0]["content"][0]["text"]
-            .as_str()
-            .unwrap_or("");
-        assert!(
-            nested_output_text.contains("继续执行中"),
-            "responses nested output must preserve original visible text, got: {nested_output_text}"
-        );
-        assert!(!nested_output_text.contains("stopless"));
+        assert_eq!(plan.action, StopMessageAutoPlanAction::ReturnHandlerPlan);
+        assert_eq!(plan.compare_context.reason, "stop_schema_missing");
+        assert_eq!(plan.stopless_trigger_hint.as_deref(), Some("no_schema"));
+        let persist_plan = plan.persist_plan.as_ref().expect("persist plan");
+        assert_eq!(persist_plan.next_used, 3);
+        assert_eq!(persist_plan.next_max_repeats, 3);
+        assert!(plan.terminal_chat_response.is_none());
     }
 
     #[test]
@@ -1425,7 +1421,7 @@ mod tests {
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
+                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"current_goal\":\"完成当前 stopless 修复\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
                 }]
             }),
             request_id: "req-10".to_string(),
@@ -1473,7 +1469,7 @@ mod tests {
                 "choices": [{
                     "index": 0,
                     "finish_reason": "stop",
-                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
+                    "message": { "role": "assistant", "content": "<rcc_stop_schema>{\"stopreason\":2,\"reason\":\"working\",\"current_goal\":\"完成当前 stopless 修复\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"verify\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>" }
                 }]
             }),
             request_id: "req-11".to_string(),

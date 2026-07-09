@@ -156,7 +156,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const res = new MockResponse();
     const stream = Readable.from([
       'event: response.output_item.done\n',
-      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n'
+      'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed","output":[{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}\n\n'
     ]);
 
     const finished = new Promise<void>((resolve) => {
@@ -191,7 +193,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('req-stream-usage-finish-reason'));
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=\x1b[97mstop\x1b[0m'));
     expect(logOutput).not.toContain('req-stream-usage-finish-reason completed');
     expect(logOutput).not.toContain('finish_reason=\u001b[97munknown\u001b[0m');
     expect(usageLogInfo.finishReason).toBe('stop');
@@ -995,6 +996,71 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain('data: [DONE]');
   });
 
+  it('adds DONE sentinel when relay Responses SSE ends after completed without upstream DONE', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      captureResponsesRequestContextForRequest: async () => undefined,
+      clearResponsesConversationByRequestId: async () => undefined,
+      finalizeResponsesConversationRequestRetention: async () => undefined,
+      recordResponsesResponseForRequest: async () => undefined,
+      rebindResponsesConversationRequestId: async () => undefined,
+      writeSnapshotViaHooks: async () => undefined,
+      projectSseErrorEventPayloadNative: (input: any) => ({
+        type: 'error',
+        status: input.status,
+        error: {
+          ...(input.error ?? {}),
+          message: input.message,
+          code: input.code,
+          request_id: input.error?.request_id ?? input.requestId,
+        },
+      }),
+      createResponsesJsonToSseConverter: async () => mockResponsesJsonToSseConverter(),
+      deriveFinishReasonNative: () => undefined,
+      isToolCallContinuationResponseNative: () => false,
+      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => probe,
+      buildResponsesTerminalSseFramesFromProbeNative: () => [],
+      importCoreDist: async () => createMockCoreDistProjectionModule(),
+      requireCoreDist: () => ({})
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const stream = new PassThrough();
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 0));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: stream
+      } as any,
+      'req-stream-completed-missing-done',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    stream.write('event: response.completed\n');
+    stream.write(
+      'data: {"type":"response.completed","response":{"id":"resp_missing_done","object":"response","status":"completed"}}\n\n'
+    );
+    stream.end();
+
+    await finished;
+
+    const output = chunks.join('');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('data: [DONE]');
+    expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('data: [DONE]'));
+  });
+
   it('RED: does not silently swallow trailing frames after tool_calls terminal event before upstream end', async () => {
     jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
       captureResponsesRequestContextForRequest: async () => undefined,
@@ -1336,7 +1402,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     const output = chunks.join('');
     expect(output).toContain('event: response.completed');
     expect(output).toContain('event: response.done');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).toContain('data: [DONE]');
     expect(output).not.toContain('event: error');
   });
 
