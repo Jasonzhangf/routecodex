@@ -11,7 +11,7 @@ import {
 import {
   applyRoutingInstructionsWithNative,
   parseRoutingInstructions
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+} from './routing-instructions-direct-native.js';
 
 type StandardizedMessage = Record<string, unknown> & {
   role: string;

@@ -2865,8 +2865,11 @@ describe('hub pipeline stage residue audit', () => {
       repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts',
     ))).toBe(false);
-    const scannedFiles = [
+    expect(fs.existsSync(path.join(
+      repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts',
+    ))).toBe(false);
+    const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_instruction.rs',
@@ -3613,8 +3616,11 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired routing-instruction public helpers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
-    const scannedFiles = [
+    expect(fs.existsSync(path.join(
+      repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts',
+    ))).toBe(false);
+    const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
     ];

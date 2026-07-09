@@ -61,7 +61,7 @@
 | native-virtual-router-bootstrap-routing.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
 | native-snapshot-hooks.ts | 113 | 3 | 2 |
 | native-stop-message-auto-semantics.ts | 已删：2026-07-09 direct `decideStopMessageAction` / `evaluateStopSchemaGateJson` test evidence | 0 | 0 |
-| native-virtual-router-routing-instructions-semantics.ts | 144 | 3 | 2 |
+| native-virtual-router-routing-instructions-semantics.ts | 已删：2026-07-09 zero-production-import wrapper; servertool routing tests use local direct-native helper and Rust exports remain required | 0 | 0 |
 | native-chat-process-governed-filter-semantics.ts | 78 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-process-post-governed-normalization-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-process-web-search-intent-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
@@ -71,7 +71,7 @@
 | native-shared-conversion-semantics-shell-utils.ts | 183 | 6 | 7 |
 | native-shared-conversion-semantics-tool-definitions.ts | 199 | 6 | 7 |
 | native-virtual-router-stop-message-actions-semantics.ts | 102 | 0 | 已删：2026-06-07 Phase 8F-6 |
-| native-virtual-router-stop-message-semantics.ts | 97 | 2 | 2 |
+| native-virtual-router-stop-message-semantics.ts | 已删：2026-07-09 zero-production-import wrapper; live parsing glue is local in `virtual-router-host-effects.ts` and Rust export remains required | 0 | 0 |
 | native-virtual-router-stop-message-state-semantics.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
 | native-router-hotpath.ts | 199 | 11 | 2 |
 | native-hub-pipeline-req-inbound-semantics-tools.ts | 284 | 8 | 3 |
