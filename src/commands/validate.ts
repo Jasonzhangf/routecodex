@@ -4,6 +4,7 @@ const fetch = globalThis.fetch;
 import { resolveRouteCodexConfigPath } from '../config/config-paths.js';
 import { decodeUserConfigFileSync } from '../config/user-config-codec.js';
 import { formatUnknownError, isRecord } from '../utils/common-utils.js';
+import { buildShutdownCallerHeaders } from '../utils/shutdown-caller-headers.js';
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
@@ -109,7 +110,7 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
   }
   const stop = async (): Promise<void> => {
     try {
-      await fetch(`${base}/shutdown`, { method: 'POST' } as any).catch((error) => {
+      await fetch(`${base}/shutdown`, { method: 'POST', headers: buildShutdownCallerHeaders() } as any).catch((error) => {
         if (verbose) {
           console.warn(`[validate] shutdown request failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
         }

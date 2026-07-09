@@ -40,7 +40,12 @@ run_one() {
   claude --version || true
   (claude --print "$PROMPT" || true) | head -n 24
   # Stop server gracefully
-  curl -s -X POST "http://$host:$port/shutdown" >/dev/null 2>&1 || true
+  curl -s -X POST "http://$host:$port/shutdown" \
+    -H "x-routecodex-stop-caller-pid: $$" \
+    -H "x-routecodex-stop-caller-ts: $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -H "x-routecodex-stop-caller-cwd: ${PWD}" \
+    -H "x-routecodex-stop-caller-cmd: scripts/claude-e2e-listdir-per-config.sh" \
+    >/dev/null 2>&1 || true
   if [ -n "$pid" ]; then kill -TERM "$pid" >/dev/null 2>&1 || true; fi
 }
 

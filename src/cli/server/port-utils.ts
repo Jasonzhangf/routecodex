@@ -6,6 +6,7 @@ import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 import { probeRouteCodexHealth, type RouteCodexHealthProbeResult } from '../../utils/http-health-probe.js';
 import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { buildShutdownCallerHeaders } from '../../utils/shutdown-caller-headers.js';
 
 
 function logPortUtilsNonBlockingError(
@@ -230,7 +231,7 @@ export async function ensurePortAvailableImpl(args: {
               });
             }
           }, 700);
-          const callerTs = new Date().toISOString();
+          const callerHeaders = buildShutdownCallerHeaders();
           logProcessLifecycle({
             event: 'port_http_shutdown',
             source: 'cli.ensurePortAvailable',
@@ -238,21 +239,16 @@ export async function ensurePortAvailableImpl(args: {
               result: 'attempt',
               host: h,
               port,
-              callerTs,
-              callerPid: process.pid,
-              callerCwd: process.cwd(),
-              callerCmd: process.argv.join(' ').slice(0, 1024)
+              callerTs: callerHeaders['x-routecodex-stop-caller-ts'],
+              callerPid: callerHeaders['x-routecodex-stop-caller-pid'],
+              callerCwd: callerHeaders['x-routecodex-stop-caller-cwd'],
+              callerCmd: callerHeaders['x-routecodex-stop-caller-cmd']
             }
           });
           await args.fetchImpl(`http://${h}:${port}/shutdown`, {
             method: 'POST',
             signal: controller.signal,
-            headers: {
-              'x-routecodex-stop-caller-pid': String(process.pid),
-              'x-routecodex-stop-caller-ts': callerTs,
-              'x-routecodex-stop-caller-cwd': process.cwd(),
-              'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024)
-            }
+            headers: callerHeaders
           }).then((response) => {
             accepted = accepted || Boolean((response as { ok?: boolean })?.ok);
           }).catch((error) => {

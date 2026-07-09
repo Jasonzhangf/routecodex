@@ -267,7 +267,12 @@ NODE
     local previous_version="$1"
     echo "🔁 检测到 live runtime version=${previous_version}，执行 release snapshot 单端口接管: ${VERIFY_HOST}:${VERIFY_PORT}"
     write_release_adoption_stop_intent
-    curl -fsS --max-time 3 -X POST "${VERIFY_BASE_URL}/shutdown" >/dev/null
+    curl -fsS --max-time 3 -X POST "${VERIFY_BASE_URL}/shutdown" \
+      -H "x-routecodex-stop-caller-pid: $$" \
+      -H "x-routecodex-stop-caller-ts: $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      -H "x-routecodex-stop-caller-cwd: ${PWD}" \
+      -H "x-routecodex-stop-caller-cmd: scripts/install-release.sh" \
+      >/dev/null
     if ! wait_until_health_unavailable; then
       fail "旧 runtime 未在 stop-intent + /shutdown 后释放 ${VERIFY_HOST}:${VERIFY_PORT}"
     fi

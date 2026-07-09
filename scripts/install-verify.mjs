@@ -45,6 +45,15 @@ function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function buildShutdownCallerHeaders() {
+  return {
+    'x-routecodex-stop-caller-pid': String(process.pid),
+    'x-routecodex-stop-caller-ts': new Date().toISOString(),
+    'x-routecodex-stop-caller-cwd': process.cwd(),
+    'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024),
+  };
+}
+
 function resolveConfigSecret(value) {
   const trimmed = normalizeString(value);
   if (!trimmed) {
@@ -820,7 +829,9 @@ async function stopServer() {
   const proc = state.serverProc;
   const baseUrl = state.baseUrl;
   if (state.ownsServer && baseUrl) {
-    try { await fetch(`${baseUrl}/shutdown`, { method: 'POST' }).catch(() => {}); } catch { /* ignore */ }
+    try {
+      await fetch(`${baseUrl}/shutdown`, { method: 'POST', headers: buildShutdownCallerHeaders() }).catch(() => {});
+    } catch { /* ignore */ }
   }
   if (!state.ownsServer) {
     return;

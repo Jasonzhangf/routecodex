@@ -369,6 +369,7 @@ describe('cli server port-utils', () => {
     };
     const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
     const calls: string[] = [];
+    const shutdownHeaders: Array<Record<string, string>> = [];
     let closed = false;
     const closeProbe = async () => {
       if (closed) {
@@ -383,9 +384,10 @@ describe('cli server port-utils', () => {
         port: occupiedPort,
         parentSpinner: spinner,
         opts: { restart: true },
-        fetchImpl: (async (url: string | URL | Request) => {
+        fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           calls.push(`fetch:${String(url)}`);
           if (String(url).endsWith('/shutdown')) {
+            shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
             await closeProbe();
             return { ok: true, status: 200 };
           }
@@ -404,6 +406,12 @@ describe('cli server port-utils', () => {
       });
 
       expect(calls.some((call) => call.includes('/shutdown'))).toBe(true);
+      expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
+        'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
+        'x-routecodex-stop-caller-ts': expect.any(String),
+        'x-routecodex-stop-caller-cwd': expect.any(String),
+        'x-routecodex-stop-caller-cmd': expect.any(String),
+      }));
       expect(calls.some((call) => call.startsWith('kill:'))).toBe(false);
     } finally {
       await closeProbe();
@@ -430,6 +438,7 @@ describe('cli server port-utils', () => {
     };
     const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
     const calls: string[] = [];
+    const shutdownHeaders: Array<Record<string, string>> = [];
     let closed = false;
     let managedPidAlive = true;
     const closeProbe = async () => {
@@ -446,8 +455,11 @@ describe('cli server port-utils', () => {
         port: occupiedPort,
         parentSpinner: spinner,
         opts: { restart: true },
-        fetchImpl: (async (url: string | URL | Request) => {
+        fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           calls.push(`fetch:${String(url)}`);
+          if (String(url).endsWith('/shutdown')) {
+            shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
+          }
           return { ok: String(url).endsWith('/shutdown'), status: String(url).endsWith('/shutdown') ? 200 : 503 };
         }) as any,
         sleep: async () => {
@@ -470,6 +482,12 @@ describe('cli server port-utils', () => {
       const shutdownIndex = calls.findIndex((call) => call.includes('/shutdown'));
       const sigtermIndex = calls.findIndex((call) => call === 'kill:12345:SIGTERM');
       expect(shutdownIndex).toBeGreaterThanOrEqual(0);
+      expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
+        'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
+        'x-routecodex-stop-caller-ts': expect.any(String),
+        'x-routecodex-stop-caller-cwd': expect.any(String),
+        'x-routecodex-stop-caller-cmd': expect.any(String),
+      }));
       expect(sigtermIndex).toBeGreaterThan(shutdownIndex);
       expect(calls).not.toContain('kill:12345:SIGKILL');
     } finally {

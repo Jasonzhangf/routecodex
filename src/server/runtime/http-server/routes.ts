@@ -45,6 +45,21 @@ function readVirtualRouterRuntimeDryRun(
   return handle ? diagnoseHubPipelineVirtualRouterNative(handle, request, metadata) : null;
 }
 
+function hasShutdownCallerProvenance(audit: {
+  callerPid: string;
+  callerTs: string;
+  callerCwd: string;
+  callerCmd: string;
+}): boolean {
+  const pid = Number(audit.callerPid);
+  const tsMs = Date.parse(audit.callerTs);
+  return Number.isInteger(pid)
+    && pid > 0
+    && Number.isFinite(tsMs)
+    && audit.callerCwd.length > 0
+    && audit.callerCmd.length > 0;
+}
+
 interface RouteOptions {
   app: Application;
   config: ServerConfigV2;
@@ -720,7 +735,21 @@ export function registerHttpRoutes(options: RouteOptions): void {
           source: 'http.routes.shutdown',
           details: { result: 'forbidden', ...shutdownAudit }
         });
-        res.status(403).json({ error: { message: 'forbidden' , code: 'forbidden' } });
+        res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+        return;
+      }
+      if (!hasShutdownCallerProvenance(shutdownAudit)) {
+        logProcessLifecycleSync({
+          event: 'shutdown_route',
+          source: 'http.routes.shutdown',
+          details: { result: 'forbidden_missing_caller', ...shutdownAudit }
+        });
+        res.status(403).json({
+          error: {
+            message: 'RouteCodex shutdown requires caller provenance headers',
+            code: 'shutdown_caller_required'
+          }
+        });
         return;
       }
 
@@ -782,40 +811,13 @@ export function registerHttpRoutes(options: RouteOptions): void {
         details: { result: 'exception', requestTs: new Date().toISOString(), error }
       });
       try {
-        res.status(200).json({ ok: true });
+        res.status(500).json({ error: { message: 'shutdown route failed', code: 'shutdown_route_failed' } });
       } catch (responseError) {
-        logRoutesNonBlockingError('shutdownRoute.sendAckOnException', responseError, {
+        logRoutesNonBlockingError('shutdownRoute.sendErrorOnException', responseError, {
           path: req.path,
           method: req.method
         });
       }
-      setTimeout(() => {
-        try {
-          logProcessLifecycleSync({
-            event: 'self_termination',
-            source: 'http.routes.shutdown',
-            details: {
-              result: 'intent',
-              reason: 'shutdown_route_exception_fallback',
-              signal: 'SIGTERM',
-              targetPid: process.pid
-            }
-          });
-          logProcessLifecycleSync({
-            event: 'kill_attempt',
-            source: 'http.routes.shutdown',
-            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'attempt' }
-          });
-          process.kill(process.pid, 'SIGTERM');
-        } catch (innerError) {
-          logProcessLifecycleSync({
-            event: 'kill_attempt',
-            source: 'http.routes.shutdown',
-            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'failed', error: innerError }
-          });
-          return;
-        }
-      }, 50);
     }
   });
 

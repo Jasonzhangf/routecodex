@@ -36,6 +36,7 @@ import {
 } from '../../utils/snapshot-stage-policy.js';
 import type { StartCommandContext, StartCommandOptions } from './start-types.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { buildShutdownCallerHeaders } from '../../utils/shutdown-caller-headers.js';
 
 export type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
@@ -1423,7 +1424,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               try {
                 await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, {
                   method: 'POST',
-                  signal: controller.signal
+                  signal: controller.signal,
+                  headers: buildShutdownCallerHeaders()
                 }).catch((error) => {
                   ctx.logger.warning(
                     `[start] shutdown request failed (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`

@@ -183,6 +183,7 @@ describe('cli stop command', () => {
     const program = new Command();
     let pidChecks = 0;
     const shutdownPorts: number[] = [];
+    const shutdownHeaders: Array<Record<string, string>> = [];
     createStopCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5520,
@@ -200,10 +201,11 @@ describe('cli stop command', () => {
       reportGuardianLifecycle: async () => {
         throw new Error('guardian lifecycle unavailable');
       },
-      fetchImpl: (async (url: string | URL | Request) => {
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
         const text = String(url);
         if (text.endsWith('/shutdown')) {
           shutdownPorts.push(Number(new URL(text).port));
+          shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
           return { ok: true, status: 200 };
         }
         throw new Error('server stopped');
@@ -216,12 +218,19 @@ describe('cli stop command', () => {
 
     await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
     expect(shutdownPorts).toEqual([5520]);
+    expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
+      'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
+      'x-routecodex-stop-caller-ts': expect.any(String),
+      'x-routecodex-stop-caller-cwd': expect.any(String),
+      'x-routecodex-stop-caller-cmd': expect.any(String),
+    }));
   });
 
   it('falls back to explicit managed PID SIGTERM when HTTP shutdown does not release the port', async () => {
     const program = new Command();
     let alive = true;
     const shutdownPorts: number[] = [];
+    const shutdownHeaders: Array<Record<string, string>> = [];
     const killCalls: Array<{ pid: number; force: boolean }> = [];
 
     createStopCommand(program, {
@@ -237,10 +246,11 @@ describe('cli stop command', () => {
         }
       },
       sleep: async () => {},
-      fetchImpl: (async (url: string | URL | Request) => {
+      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
         const text = String(url);
         if (text.endsWith('/shutdown')) {
           shutdownPorts.push(Number(new URL(text).port));
+          shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
           return { ok: true, status: 200 };
         }
         return { ok: true, status: 200 };
@@ -253,6 +263,12 @@ describe('cli stop command', () => {
 
     await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).resolves.toBe(program);
     expect(shutdownPorts).toContain(5520);
+    expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
+      'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
+      'x-routecodex-stop-caller-ts': expect.any(String),
+      'x-routecodex-stop-caller-cwd': expect.any(String),
+      'x-routecodex-stop-caller-cmd': expect.any(String),
+    }));
     expect(killCalls).toEqual([{ pid: 12345, force: false }]);
   });
 
@@ -280,6 +296,7 @@ port = 10000
     process.env.ROUTECODEX_CONFIG_PATH = configPath;
     const program = new Command();
     const shutdownPorts: number[] = [];
+    const shutdownHeaders: Array<Record<string, string>> = [];
 
     try {
       createStopCommand(program, {
@@ -294,10 +311,11 @@ port = 10000
         fsImpl: fs,
         pathImpl: { join: (...parts: string[]) => parts.join('/') },
         getHomeDir: () => '/home/test',
-        fetchImpl: (async (url: string | URL | Request) => {
+        fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           const text = String(url);
           if (text.endsWith('/shutdown')) {
             shutdownPorts.push(Number(new URL(text).port));
+            shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
             return { ok: true, status: 200 };
           }
           throw new Error('server stopped');
@@ -309,6 +327,13 @@ port = 10000
 
       await program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' });
       expect(shutdownPorts).toEqual([4444, 5520, 5555, 10000]);
+      expect(shutdownHeaders).toHaveLength(4);
+      expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
+        'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
+        'x-routecodex-stop-caller-ts': expect.any(String),
+        'x-routecodex-stop-caller-cwd': expect.any(String),
+        'x-routecodex-stop-caller-cmd': expect.any(String),
+      }));
     } finally {
       if (previousConfig === undefined) {
         delete process.env.ROUTECODEX_CONFIG_PATH;
