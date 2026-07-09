@@ -974,7 +974,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-followup-mainline-semantics.ts`
+- `sharedmodule/llmswitch-core/src/servertool/types.d.ts` (registration type declarations only)
 - `docs`
 
 Forbidden paths:
