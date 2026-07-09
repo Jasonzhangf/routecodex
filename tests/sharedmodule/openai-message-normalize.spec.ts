@@ -1,4 +1,8 @@
-import { normalizeChatRequest } from '../../sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js';
+import { normalizeOpenaiChatRequestWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js';
+
+function normalizeChatRequest(payload: unknown): unknown {
+  return normalizeOpenaiChatRequestWithNative(payload, false);
+}
 
 describe('normalizeChatRequest', () => {
   it('fails fast when chat messages contain synthetic RouteCodex local control text', () => {

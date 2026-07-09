@@ -1,4 +1,3 @@
-import { normalizeChatRequest } from './openai-message-normalize.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
 import {
   failNativeRequired,
@@ -6,6 +5,7 @@ import {
 } from '../../native/router-hotpath/native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../../native/router-hotpath/native-router-hotpath.js';
 import { pruneChatRequestPayloadWithNative } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { normalizeOpenaiChatRequestWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 
 type ChatRequestFilterProfile = {
   incomingProtocol: string;
@@ -82,6 +82,15 @@ function buildGovernedFilterPayloadWithNative(
   }
 }
 
+function isShellCoerceDisabled(): boolean {
+  const raw = String(
+    process?.env?.RCC_DISABLE_SHELL_COERCE
+    ?? process?.env?.ROUTECODEX_DISABLE_SHELL_COERCE
+    ?? ''
+  ).toLowerCase();
+  return raw === '1' || raw === 'true';
+}
+
 /**
  * Native-primary Chat request filters.
  */
@@ -123,7 +132,10 @@ export async function runStandardChatRequestFilters(
   });
   snapshotStage('req_process_filters_native_payload', nativeGovernedPayload);
 
-  let normalized = normalizeChatRequest(nativeGovernedPayload);
+  const normalized = normalizeOpenaiChatRequestWithNative(
+    nativeGovernedPayload,
+    isShellCoerceDisabled()
+  ) as Record<string, unknown>;
   snapshotStage('req_process_filters_normalized', normalized);
 
   const preserveStreamField =

@@ -4127,8 +4127,12 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('shared openai message normalize must not inject MCP tools or swallow native failures in TS', () => {
-    const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
+    const repoRoot = process.cwd();
+    const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts');
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts'),
+      'utf8',
+    );
     const findings = collectMatches(source, [
       { label: 'imports MCP injection helper in TS normalize path', pattern: /injectMcpToolsForChat|mcp-injection/ },
       { label: 'reads MCP env flags in TS normalize path', pattern: /ROUTECODEX_MCP_ENABLE|RCC_MCP_SERVERS|__rcc_disable_mcp_tools/ },
@@ -4142,6 +4146,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'calls message-array native wrapper from TS normalize path', pattern: /normalizeOpenaiChatMessagesWithNative/ },
     ]);
 
+    expect(fs.existsSync(retiredPath)).toBe(false);
     expect(source).toContain('normalizeOpenaiChatRequestWithNative');
     expect(findings).toEqual([]);
   });
@@ -4593,6 +4598,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js',
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.js.map',
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js.map',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.d.ts',
@@ -5092,7 +5098,7 @@ describe('hub pipeline stage residue audit', () => {
   it('shared normalize and responses bridge must not run TS tool-history inspectors', () => {
     const repoRoot = process.cwd();
     const files = [
-      'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts',
+      'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     ];
     const findings: string[] = [];
