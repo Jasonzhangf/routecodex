@@ -2212,7 +2212,7 @@ owners:
     status: active
     summary: "Rust single source of truth for global request counter, local-day reset, and requestId generation"
     owner_kind: rust_ssot
-    owner_scope: "Rust plan_chat_process_session_usage owns global counter tick, local-midnight reset, and `req_{total}_{daily}` requestId generation"
+    owner_scope: "file-scoped Rust plan_chat_process_session_usage owns global counter tick, local-midnight reset, and `req_{total}_{daily}` requestId generation"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
     canonical_types:
       - GlobalRequestCounter
@@ -2225,7 +2225,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
       - src/server/runtime/http-server/http-server-runtime-setup.ts
     forbidden_paths:
       - src/providers

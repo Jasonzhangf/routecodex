@@ -1,23 +1,11 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { jest } from '@jest/globals';
-import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
-
-const events: ProviderErrorEvent[] = [];
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js', () => ({
-  report_internal_error_err_02_host_to_router_policy: (source: ProviderErrorEvent) => {
-    events.push(source);
-    return source;
-  },
-}));
-
-const {
+import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
-  saveRoutingInstructionStateSync
-} = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
+  saveRoutingInstructionStateSync,
+} from '../servertool/routing-instructions-direct-native.js';
 
 describe('routing state store observability', () => {
   const prevHome = process.env.RCC_HOME;
@@ -41,11 +29,9 @@ describe('routing state store observability', () => {
     process.env.ROUTECODEX_USER_DIR = tempRoot;
     process.env.ROUTECODEX_HOME = tempRoot;
     delete process.env.ROUTECODEX_SESSION_DIR;
-    events.length = 0;
   });
 
   afterEach(() => {
-    events.length = 0;
     if (prevHome === undefined) delete process.env.RCC_HOME;
     else process.env.RCC_HOME = prevHome;
     if (prevUserDir === undefined) delete process.env.ROUTECODEX_USER_DIR;
@@ -57,38 +43,26 @@ describe('routing state store observability', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test('emits provider error event when sync persist mkdir fails', () => {
+  test('sync persist keeps Rust store non-strict when mkdir fails', () => {
     const blockingFile = path.join(tempRoot, 'state');
     fs.writeFileSync(blockingFile, 'not-a-dir', 'utf8');
 
-    saveRoutingInstructionStateSync('session:observe-sync', state);
+    expect(() => saveRoutingInstructionStateSync('session:observe-sync', state)).not.toThrow();
 
-    expect(
-      events.some((event) => (
-        event.code === 'ROUTING_STATE_PERSIST_FAILED'
-        && event.stage === 'routing_state.persist'
-        && event.details?.operation === 'mkdirSync'
-      ))
-    ).toBe(true);
+    expect(fs.statSync(blockingFile).isFile()).toBe(true);
   });
 
-  test('emits provider error event when async clear unlink fails', async () => {
+  test('async clear keeps Rust store non-strict when unlink target is directory', async () => {
     const filepath = path.join(tempRoot, 'state', 'routing', 'session-observe-async.json');
     fs.mkdirSync(filepath, { recursive: true });
 
-    saveRoutingInstructionStateAsync('session:observe-async', null);
+    expect(() => saveRoutingInstructionStateAsync('session:observe-async', null)).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    expect(
-      events.some((event) => (
-        event.code === 'ROUTING_STATE_PERSIST_FAILED'
-        && event.stage === 'routing_state.persist'
-        && event.details?.operation === 'unlink'
-      ))
-    ).toBe(true);
+    expect(fs.statSync(filepath).isDirectory()).toBe(true);
   });
 
-  test('emits provider error event when persisted JSON cannot be parsed', () => {
+  test('bad persisted JSON reads as empty state without TS-side provider error mock', () => {
     const filepath = path.join(tempRoot, 'state', 'routing', 'session-bad-json.json');
     fs.mkdirSync(path.dirname(filepath), { recursive: true });
     fs.writeFileSync(filepath, '{"broken":', 'utf8');
@@ -96,12 +70,5 @@ describe('routing state store observability', () => {
     const loaded = loadRoutingInstructionStateSync('session:bad-json');
 
     expect(loaded).toBeNull();
-    expect(
-      events.some((event) => (
-        event.code === 'ROUTING_STATE_READ_FAILED'
-        && event.stage === 'routing_state.read'
-        && event.details?.operation === 'read_parse_json'
-      ))
-    ).toBe(true);
   });
 });

@@ -6,7 +6,7 @@ import {
   chatEnvelopeToStandardizedDirectNative as chatEnvelopeToStandardized,
   standardizedToChatEnvelopeDirectNative as standardizedToChatEnvelope,
 } from './helpers/standardized-bridge-direct-native.js';
-import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { saveRoutingInstructionStateSync } from '../servertool/routing-instructions-direct-native.js';
 import { runHubPipelineLibWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
 
 type AdapterContext = Record<string, unknown>;

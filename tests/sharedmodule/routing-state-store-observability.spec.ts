@@ -1,25 +1,21 @@
-import { jest } from '@jest/globals';
 import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
+import {
+  getRoutingInstructionState,
+  setRoutingInstructionStateErrorReporter,
+} from '../servertool/routing-instructions-direct-native.js';
 
 const events: ProviderErrorEvent[] = [];
-
-jest.unstable_mockModule('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js', () => ({
-  report_internal_error_err_02_host_to_router_policy: (source: ProviderErrorEvent) => {
-    events.push(source);
-    return source;
-  },
-}));
-
-const {
-  getRoutingInstructionState
-} = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js');
 
 describe('routing state store observability', () => {
   beforeEach(() => {
     events.length = 0;
+    setRoutingInstructionStateErrorReporter((event: ProviderErrorEvent) => {
+      events.push(event);
+    });
   });
 
   afterEach(() => {
+    setRoutingInstructionStateErrorReporter(undefined);
     events.length = 0;
   });
 

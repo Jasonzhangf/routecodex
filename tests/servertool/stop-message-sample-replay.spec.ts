@@ -12,11 +12,9 @@ process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = path.join(
 import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState,
-  type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts';
-import {
   applyRoutingInstructionsWithNative,
-  parseRoutingInstructions
+  parseRoutingInstructions,
+  type RoutingInstructionState
 } from './routing-instructions-direct-native.js';
 
 type StandardizedMessage = Record<string, unknown> & {

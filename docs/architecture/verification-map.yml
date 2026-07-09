@@ -1469,7 +1469,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.ts
       - src/server/runtime/http-server/http-server-runtime-setup.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs

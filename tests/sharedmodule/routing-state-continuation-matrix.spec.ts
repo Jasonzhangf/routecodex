@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { resolveRoutingStateKey } from '../servertool/routing-instructions-direct-native.js';
 
 describe('routing-state continuation matrix', () => {
   it('uses continuation request_chain across non-responses protocols', () => {
@@ -64,7 +64,7 @@ describe('routing-state continuation matrix', () => {
     ).toBe('req_scope_only_1');
   });
 
-  it('keeps legacy responses resume only as migration fallback', () => {
+  it('does not derive routing state key from legacy responses resume residue', () => {
     expect(
       resolveRoutingStateKey({
         requestId: 'req_responses_legacy_1',
@@ -74,6 +74,6 @@ describe('routing-state continuation matrix', () => {
           previousRequestId: 'req_chain_legacy_1'
         }
       } as any)
-    ).toBe('req_chain_legacy_1');
+    ).toBe('req_responses_legacy_1');
   });
 });

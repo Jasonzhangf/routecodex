@@ -6,11 +6,9 @@ import {
   deserializeRoutingInstructionState,
   persistRoutingInstructionState,
   saveRoutingInstructionStateSync,
-  type RoutingInstructionState
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
-import {
   applyRoutingInstructionsWithNative,
-  parseRoutingInstructions
+  parseRoutingInstructions,
+  type RoutingInstructionState
 } from './routing-instructions-direct-native.js';
 
 type StandardizedMessage = Record<string, unknown> & {

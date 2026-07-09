@@ -1,4 +1,4 @@
-import { resolveRoutingStateKey } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js';
+import { resolveRoutingStateKey } from '../servertool/routing-instructions-direct-native.js';
 import { buildRouterMetadataInputDirectNative } from './helpers/hub-pipeline-builders-direct-native.js';
 
 describe('hub pipeline router metadata builder', () => {

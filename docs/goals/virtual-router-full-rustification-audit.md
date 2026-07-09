@@ -73,6 +73,7 @@
 | native-virtual-router-stop-message-actions-semantics.ts | 102 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-virtual-router-stop-message-semantics.ts | 已删：2026-07-09 zero-production-import wrapper; live parsing glue is local in `virtual-router-host-effects.ts` and Rust export remains required | 0 | 0 |
 | native-virtual-router-stop-message-state-semantics.ts | 0 | 0 | 已删：2026-06-09 0-consumer wrapper |
+| native-virtual-router-routing-state.ts | 已删：2026-07-09 zero-production-import wrapper; tests use direct native helper and Rust routing_state_store remains required | 0 | 0 |
 | native-router-hotpath.ts | 199 | 11 | 2 |
 | native-hub-pipeline-req-inbound-semantics-tools.ts | 284 | 8 | 3 |
 | native-hub-pipeline-req-outbound-semantics-parsers.ts | 308 | 1 | 1 |

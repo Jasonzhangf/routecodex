@@ -89,7 +89,7 @@ Stop-message / stopless control clarification:
 As of 2026-06-30, the implementation contracts are now explicit:
 
 - `sharedmodule/llmswitch-core/src/servertool/pending-session.ts` and `pending-injection-block.ts` are physically retired; they must not be restored as stopless/session truth.
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.{ts,js}` now passes an explicit "no override" sentinel when caller does not provide `sessionDir`, and `router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs` no longer reads `ROUTECODEX_SESSION_DIR` as a storage override. Persistent routing-state owner now accepts only explicit override input or canonical `~/.rcc` roots.
+- The retired `native-virtual-router-routing-state.{ts,js}` wrapper must stay deleted. `router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs` owns the explicit "no override" sentinel and no longer reads `ROUTECODEX_SESSION_DIR` as a storage fallback; tests that need this surface call the native JSON functions through test-only direct helpers.
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs` now reads runtime path overrides only from `metadata.__rt.*`; top-level `metadata.sessionDir/rccUserDir` no longer count as legal fallback.
 
 ## Request / Response Flow

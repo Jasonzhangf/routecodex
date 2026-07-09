@@ -2,8 +2,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-let loadRoutingInstructionStateSync: typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js').loadRoutingInstructionStateSync;
-let saveRoutingInstructionStateSync: typeof import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js').saveRoutingInstructionStateSync;
+let loadRoutingInstructionStateSync: typeof import('../servertool/routing-instructions-direct-native.js').loadRoutingInstructionStateSync;
+let saveRoutingInstructionStateSync: typeof import('../servertool/routing-instructions-direct-native.js').saveRoutingInstructionStateSync;
 
 describe('routing state store paths', () => {
   const prevHome = process.env.RCC_HOME;
@@ -22,7 +22,7 @@ describe('routing state store paths', () => {
     ({
       loadRoutingInstructionStateSync,
       saveRoutingInstructionStateSync
-    } = await import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-state.js'));
+    } = await import('../servertool/routing-instructions-direct-native.js'));
   });
 
   beforeEach(() => {
