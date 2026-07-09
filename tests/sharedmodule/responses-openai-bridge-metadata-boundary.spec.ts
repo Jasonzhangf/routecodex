@@ -1,4 +1,4 @@
-import { buildResponsesPayloadFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.js';
+import { buildResponsesPayloadFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 
 describe('responses-openai bridge metadata boundary', () => {
   it('does not project source retention metadata into client Responses payload', () => {

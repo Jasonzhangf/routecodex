@@ -820,11 +820,18 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('responses response payload bridge must call native pipeline without TS wrapper or swallowed errors', () => {
-    const filePath = path.join(
+    const retiredPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    const bridgeSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+      'utf8',
+    );
+    const source = bridgeSource.slice(
+      bridgeSource.indexOf('export function buildResponsesPayloadFromChat'),
+      bridgeSource.indexOf('export function extractRequestIdFromResponse'),
+    );
     const findings = collectMatches(source, [
       { label: 'uses TS bridge action state wrapper', pattern: /createBridgeActionState/ },
       { label: 'uses TS bridge action pipeline wrapper', pattern: /runBridgeActionPipeline\(/ },
@@ -833,16 +840,24 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'keeps ignored bridge logging failure catch', pattern: /ignore logging failures/ },
     ]);
 
+    expect(fs.existsSync(retiredPath)).toBe(false);
     expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
     expect(findings).toEqual([]);
   });
 
   it('responses response payload reasoning normalization must be native fail-fast', () => {
-    const filePath = path.join(
+    const retiredPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    const bridgeSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+      'utf8',
+    );
+    const source = bridgeSource.slice(
+      bridgeSource.indexOf('export function buildResponsesPayloadFromChat'),
+      bridgeSource.indexOf('export function extractRequestIdFromResponse'),
+    );
     const findings = collectMatches(source, [
       { label: 'uses shared TS reasoning normalizer wrapper', pattern: /normalizeMessageReasoningTools\b/ },
       { label: 'keeps response reasoning pre-normalization owner in TS', pattern: /normalizeMessageReasoningToolsWithNative/ },
@@ -851,6 +866,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'swallows reasoning normalization errors', pattern: /catch\s*\{\s*\/\/ best-effort reasoning normalization/s },
     ]);
 
+    expect(fs.existsSync(retiredPath)).toBe(false);
     expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
     expect(findings).toEqual([]);
   });
@@ -911,8 +927,11 @@ describe('hub pipeline stage residue audit', () => {
   it('responses bridge files must not import deleted TS bridge wrappers', () => {
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
-      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
     ];
+    expect(fs.existsSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+    ))).toBe(false);
     const findings = files.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
       return collectMatches(source, [
@@ -4631,6 +4650,9 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/mcp-injection.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-host-policy.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.d.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.js',
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.js.map',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.d.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/types.d.ts',
