@@ -38,13 +38,13 @@
 - 规范化入口仍然是响应侧工具治理：
   - 文本中的结构化 payload（unified diff / JSON changes 等）通过
     Rust/native text markup normalizer 变成标准 `tool_calls`。
-- 逻辑正确性由 `validateToolCall('apply_patch', args)`（`tools/tool-registry.ts`）
+- 逻辑正确性由 direct native apply_patch validator
   负责：
   - 单元层面已有测试：
     - `tests/sharedmodule/apply-patch-validator.spec.ts`
     - `tests/sharedmodule/apply-patch-full.spec.ts`
   - 矩阵层面建议：
-    - 在 active root/sharedmodule 回归中，对所有 `function.name === 'apply_patch'` 的 `tool_calls` 调用 `validateToolCall('apply_patch', args)`。
+    - 在 active root/sharedmodule 回归中，对所有 `function.name === 'apply_patch'` 的 `tool_calls` 调用 direct native apply_patch validator。
     - 断言 `ok === true`，并对 `normalizedArgs` 中生成的 `patch` 做基本形状检查（例如是否包含 `*** Begin Patch` / `*** (Add|Update) File:`）。
 
 ## 四、如何为新问题补样本 / 补测试
@@ -58,11 +58,11 @@
    - 只在以下模块扩展逻辑：
      - Rust/native text markup normalizer（文本 → tool_calls）；
      - Rust/native tool canonicalizer（tool_calls 形状统一）；
-     - 必要时更新 `tools/tool-registry.ts` 或相关 compat；
+     - 必要时更新 Rust/native validator 或相关 compat；
    - **不要**在 Host / Provider / 测试代码里写第二套解析逻辑。
 3. **更新单元测试**
    - 在 `tests/sharedmodule/*` 下新增/扩展 spec，直接调核心函数（例如
-     `normalizeAssistantTextToToolCalls`、`validateToolCall`）。
+     `normalizeAssistantTextToToolCalls`、direct native apply_patch validator）。
 4. **将样本纳入矩阵测试**
    - 把捕获的快照放进 `~/.rcc/codex-samples/openai-chat`；
    - 根据需要在 `tool-processing-test` 里增加对特定工具的断言：

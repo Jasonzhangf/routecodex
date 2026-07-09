@@ -11,9 +11,7 @@
  *
  * Notes:
  * - This script validates "shape/type/format" only. Context mismatch is not handled here.
- * - For apply_patch, validateToolCall() may capture regressions automatically into:
- *     ~/.routecodex/golden_samples/ci-regression/apply_patch
- *   Use --to-repo to write into repo CI goldens (_regressions/apply_patch).
+ * - apply_patch and exec_command are validated through direct native helpers.
  *
  * Usage:
  *   node scripts/scan-tool-shape-samples.mjs
@@ -24,13 +22,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { validateToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 
 const HOME = os.homedir();
 const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
@@ -134,15 +130,7 @@ function extractToolArgs(doc, toolNames, { allowRegressionOriginalArgs } = { all
 }
 
 async function loadValidator() {
-  if (!(await fileExists(coreLoaderPath))) {
-    throw new Error(`core-loader missing at ${coreLoaderPath} (run npm run build:dev first)`);
-  }
-  const { importCoreModule } = await import(coreLoaderUrl);
-  const { validateToolCall } = await importCoreModule('tools/tool-registry');
-  if (typeof validateToolCall !== 'function') {
-    throw new Error('validateToolCall not found in llmswitch-core tools/tool-registry');
-  }
-  return { validateToolCall };
+  return { validateToolCall: validateToolCallDirectNative };
 }
 
 async function scanRoot(label, rootDir, validateToolCall) {
@@ -288,4 +276,3 @@ main().catch((error) => {
   console.error('[scan-tool-shape-samples] failed:', error?.stack || error?.message || String(error ?? 'unknown'));
   process.exit(2);
 });
-

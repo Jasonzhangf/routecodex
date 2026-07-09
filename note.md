@@ -28149,3 +28149,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts`; exact symbol scan showed only the file itself plus residue/docs references, no runtime importer.
 - Removed the deleted file from `docs/architecture/no-fallback-diff-rules.json`; residue audit now locks the aggregate shell path physically absent and ignores historical fixtures that only preserve old sample text.
 - Verification PASS: focused residue Jest 198/198; strict shell audit `prodTsShellCount=66`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=66`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.
+
+# 2026-07-09: llmswitch tool registry aggregate shell deletion
+
+- Scope: continued zero-prod/no-host server-side tool shell deletion pass.
+- Deleted `sharedmodule/llmswitch-core/src/tools/tool-registry.ts` and the broad `tests/sharedmodule/tool-registry-tools.spec.ts`; the registry had no production importer or host bridge text reference, only scripts/tests/docs.
+- Apply_patch and exec_command evidence now uses direct native/test helpers: `tests/sharedmodule/helpers/tool-validation-direct-native.ts` and `scripts/helpers/tool-validation-direct-native.mjs`; other server-side tool validation arms were dead shell business and were removed rather than migrated.
+- `scripts/scan-apply-patch-samples.mjs`, `scripts/scan-exec-command-samples.mjs`, `scripts/scan-tool-shape-samples.mjs`, `scripts/verify-apply-patch.mjs`, and `scripts/verify-apply-patch-regressions.mjs` no longer load `tools/tool-registry`.
+- Verification PASS: focused Jest 214/214; script syntax checks; strict shell audit `prodTsShellCount=65`, `shellsWithProdImporters=61`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=65`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.

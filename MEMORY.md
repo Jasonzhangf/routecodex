@@ -1772,3 +1772,9 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-compat-action-semantics.ts` is physically deleted. Do not restore it as an aggregate native wrapper or broad compat-action TS call surface.
 - Deleted-wrapper references in historical fixtures are sample text only; active source/tests/scripts/docs architecture surfaces must not reference the retired path except the absent-path residue gate.
 - Current shell audit after this deletion is `prodTsShellCount=66`, `shellsWithProdImporters=62`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=8`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Tool registry aggregate TS shell is retired
+
+- `sharedmodule/llmswitch-core/src/tools/tool-registry.ts` is physically deleted. Do not restore the broad server-side tool registry or migrate dead validation arms for shell/update_plan/view_image/MCP resource tools.
+- Remaining apply_patch and exec_command validation evidence should call direct native/test helpers or the dedicated exec-command validator, not the retired aggregate `validateToolCall` shell.
+- Current shell audit after this deletion is `prodTsShellCount=65`, `shellsWithProdImporters=61`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

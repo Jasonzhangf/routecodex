@@ -3139,13 +3139,8 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts'),
       'utf8'
     );
-    const registrySource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/tool-registry.ts'),
-      'utf8'
-    );
 
     expect(validatorSource).toContain('validateExecCommandGuardWithNative');
-    expect(registrySource).toContain('validateExecCommandGuardWithNative');
 
     const forbiddenValidatorPatterns = [
       { label: 'git reset hard TS regex', pattern: /GIT_RESET_HARD_PATTERN/u },
@@ -3163,21 +3158,44 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'hardcoded git reset reason in TS', pattern: /forbidden_git_reset_hard/u },
       { label: 'hardcoded git checkout reason in TS', pattern: /forbidden_git_checkout_scope/u },
     ];
-    const forbiddenRegistryPatterns = [
-      { label: 'TS shell write detector', pattern: /detectForbiddenWrite/u },
-      { label: 'TS write-redirection reason', pattern: /forbidden_write_redirection/u },
-      { label: 'TS sed in-place write regex', pattern: /\\bsed\\b\[\\\^\\n\]\*-i\\b/u },
-      { label: 'TS tee write regex', pattern: /\\btee\\b\\s\+/u },
-    ];
     const findings = [
       ...forbiddenValidatorPatterns
         .filter(({ pattern }) => pattern.test(validatorSource))
         .map(({ label }) => `validator:${label}`),
-      ...forbiddenRegistryPatterns
-        .filter(({ pattern }) => pattern.test(registrySource))
-        .map(({ label }) => `registry:${label}`),
     ];
 
+    expect(findings).toEqual([]);
+  });
+
+  it('tool registry aggregate TS shell must stay physically deleted', () => {
+    const repoRoot = process.cwd();
+    const shellPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/tools/tool-registry.ts');
+    const refRoots = [
+      'sharedmodule/llmswitch-core/src',
+      'scripts',
+      'tests',
+      'docs/architecture',
+    ];
+    const findings: string[] = [];
+    for (const root of refRoots) {
+      const rootPath = path.join(repoRoot, root);
+      if (!fs.existsSync(rootPath)) continue;
+      for (const filePath of walkFiles(rootPath, ['.ts', '.js', '.mjs', '.md', '.yml', '.json'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (
+          relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts'
+          || relativePath === 'tests/fixtures/errorsamples/goal-request-user-input-real-samples/provider-request.goal.nested-after-fix.json'
+          || relativePath === 'tests/fixtures/errorsamples/metadata-center-baseline/request.json'
+          || relativePath === 'tests/fixtures/errorsamples/metadata-center-replay-nested-after-fix/request.json'
+        ) continue;
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('tools/tool-registry') || source.includes('tool-registry.ts')) {
+          findings.push(relativePath);
+        }
+      }
+    }
+
+    expect(fs.existsSync(shellPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

@@ -16,13 +16,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { validateExecCommandToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 
 const HOME = os.homedir();
 const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
@@ -112,15 +110,7 @@ function extractExecCommandArgs(doc, { allowRegressionOriginalArgs } = { allowRe
 }
 
 async function loadValidator() {
-  if (!(await fileExists(coreLoaderPath))) {
-    throw new Error(`core-loader missing at ${coreLoaderPath} (run npm run build:dev first)`);
-  }
-  const { importCoreModule } = await import(coreLoaderUrl);
-  const { validateToolCall } = await importCoreModule('tools/tool-registry');
-  if (typeof validateToolCall !== 'function') {
-    throw new Error('validateToolCall not found in llmswitch-core tools/tool-registry');
-  }
-  return { validateToolCall };
+  return { validateToolCall: (_toolName, args) => validateExecCommandToolCallDirectNative(args) };
 }
 
 async function scanRoot(label, rootDir, validateToolCall) {
@@ -266,4 +256,3 @@ main().catch((error) => {
   console.error('[scan-exec-command-samples] failed:', error?.stack || error?.message || String(error ?? 'unknown'));
   process.exit(2);
 });
-

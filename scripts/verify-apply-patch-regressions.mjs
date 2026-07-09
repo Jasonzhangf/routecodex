@@ -11,23 +11,13 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
 const REG_ROOT = path.join(repoRoot, 'samples', 'ci-goldens', '_regressions', 'apply_patch');
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
-const sourceToolRegistryPath = path.join(
-  repoRoot,
-  'sharedmodule',
-  'llmswitch-core',
-  'dist',
-  'tools',
-  'tool-registry.js'
-);
-const sourceToolRegistryUrl = pathToFileURL(sourceToolRegistryPath).href;
 
 async function fileExists(p) {
   try {
@@ -57,25 +47,10 @@ async function* walkJsonFiles(root) {
 }
 
 async function loadValidator() {
-  if (await fileExists(coreLoaderPath)) {
-    try {
-      const { importCoreModule } = await import(coreLoaderUrl);
-      const { validateToolCall } = await importCoreModule('tools/tool-registry');
-      return { validateToolCall, source: 'dist-core-loader' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
-      console.warn(
-        `[verify:apply-patch-regressions] dist core-loader unavailable, fallback to source validator: ${message}`
-      );
-    }
-  }
-  if (!(await fileExists(sourceToolRegistryPath))) {
-    throw new Error(
-      `tool-registry missing at both dist and source paths: ${coreLoaderPath} :: ${sourceToolRegistryPath}`
-    );
-  }
-  const { validateToolCall } = await import(sourceToolRegistryUrl);
-  return { validateToolCall, source: 'source-tool-registry' };
+  return {
+    validateToolCall: (_toolName, args) => validateApplyPatchToolCallDirectNative(args),
+    source: 'direct-native-apply-patch',
+  };
 }
 
 async function main() {

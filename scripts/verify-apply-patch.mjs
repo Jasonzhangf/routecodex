@@ -8,6 +8,7 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import chalk from 'chalk';
+import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -25,6 +26,13 @@ async function loadCoreModule(subpath) {
   return importCoreModule(subpath);
 }
 
+function validateToolCall(toolName, argsString) {
+  if (toolName !== 'apply_patch') {
+    return { ok: false, reason: 'unsupported_tool' };
+  }
+  return validateApplyPatchToolCallDirectNative(argsString);
+}
+
 async function runApplyPatchTextCase(label, payloadText) {
   let canonicalizeChatResponseTools = null;
   try {
@@ -35,8 +43,6 @@ async function runApplyPatchTextCase(label, payloadText) {
   } catch {
     canonicalizeChatResponseTools = null;
   }
-  const { validateToolCall } = await loadCoreModule('tools/tool-registry');
-
   const message = {
     role: 'assistant',
     content: payloadText
@@ -124,7 +130,6 @@ async function runApplyPatchTextCase(label, payloadText) {
 }
 
 async function runApplyPatchArgsCase(label, argsString) {
-  const { validateToolCall } = await loadCoreModule('tools/tool-registry');
   const validation = validateToolCall('apply_patch', argsString);
   if (!validation?.ok) {
     throw new Error(
@@ -171,7 +176,6 @@ async function main() {
   }
 
   try {
-    const { validateToolCall } = await loadCoreModule('tools/tool-registry');
     const escapeNewlines = (value) => String(value || '').replace(/\n/g, '\\n');
 
     // Regression: tolerate newline-escaped patch text (e.g. "*** Begin Patch\\n...") and

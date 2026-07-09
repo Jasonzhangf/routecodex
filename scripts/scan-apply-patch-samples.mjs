@@ -18,13 +18,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 
 const HOME = os.homedir();
 const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
@@ -219,15 +217,7 @@ async function captureFailure({
 }
 
 async function loadValidator() {
-  if (!(await fileExists(coreLoaderPath))) {
-    throw new Error(`core-loader missing at ${coreLoaderPath} (run npm run build:dev first)`);
-  }
-  const { importCoreModule } = await import(coreLoaderUrl);
-  const { validateToolCall } = await importCoreModule('tools/tool-registry');
-  if (typeof validateToolCall !== 'function') {
-    throw new Error('validateToolCall not found in llmswitch-core tools/tool-registry');
-  }
-  return { validateToolCall };
+  return { validateToolCall: (_toolName, args) => validateApplyPatchToolCallDirectNative(args) };
 }
 
 async function scanRoot(label, rootDir, validateToolCall, capture) {
