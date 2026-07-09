@@ -368,9 +368,10 @@ function assertProviderGuidance(body, reasonCode, missingFields, label) {
     `${label}: provider request must render exact missingFields order for the model: ${text}`
   );
   assert.ok(
-    text.includes('任务还没完成，但当前没有明确 next_step')
-      && text.includes('把下一步写成这轮立刻执行的最小动作'),
-    `${label}: provider request must include next_step repair guidance: ${text}`
+    (text.includes('任务还没完成，但当前没有明确 next_step')
+      && text.includes('把下一步写成这轮立刻执行的最小动作'))
+      || text.includes('任务还没完成，但当前没有明确 current_goal'),
+    `${label}: provider request must include current_goal/next_step repair guidance: ${text}`
   );
   assert.ok(
     text.includes('按条件补齐这些字段') || text.includes('按字段之间的逻辑关系填写'),
@@ -382,7 +383,8 @@ function assertProviderGuidance(body, reasonCode, missingFields, label) {
     `${label}: provider request must include has_evidence/evidence relation: ${text}`
   );
   assert.ok(
-    text.includes('stopreason=2 必须写 next_step'),
+    text.includes('stopreason=2 必须写 current_goal 和 next_step')
+      || text.includes('stopreason=2 表示继续，必须写 current_goal 和 next_step'),
     `${label}: provider request must include stopreason=2 relation: ${text}`
   );
   assert.ok(
@@ -522,7 +524,7 @@ async function main() {
 
     const firstProjectionInput = extractInputJson(execTool1.command);
     assert.equal(firstProjectionInput.repeatCount, 1, `expected first repeatCount=1, command=${execTool1.command}`);
-    const missingRound1 = ['next_step'];
+    const missingRound1 = ['current_goal', 'next_step'];
     const cliOutput1 = runCliCommand(buildReasoningStopCommand({
       stopreason: 2,
       reason: '还没完成'
@@ -562,6 +564,7 @@ async function main() {
     const cliOutput2 = runCliCommand(buildReasoningStopCommand({
       stopreason: 2,
       reason: '只剩下一步字段未补齐',
+      current_goal: '完成 invalid schema 缺字段反馈验证',
       has_evidence: 1,
       evidence: 'round1 provider request already carried all missing fields',
       issue_cause: 'schema 仍缺 next_step',

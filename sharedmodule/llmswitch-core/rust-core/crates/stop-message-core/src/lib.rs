@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
-{"stopreason":2,"simple_question":false,"reason":"当前状态原因","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
-字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 表示任务完成，必须 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 表示阻塞/无法继续，必须 reason 非空，提供 reason 即可停止；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 表示任务未完成但需要继续，必须 next_step 非空，下一轮只执行 next_step 的内容；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
+{"stopreason":2,"simple_question":false,"reason":"当前状态原因","current_goal":"当前要完成的目标","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
+字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 表示任务完成，必须 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 表示阻塞/无法继续，必须 reason 非空，提供 reason 即可停止；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 表示任务未完成但需要继续，必须 current_goal 和 next_step 非空，下一轮会先围绕 current_goal 判断是否完成，再执行 next_step；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +151,7 @@ pub struct StopSchemaParsed {
     pub has_evidence: Option<u8>,
     pub forcestop: Option<u8>,
     pub reason: Option<String>,
+    pub current_goal: Option<String>,
     pub next_step: Option<String>,
     pub next_suggested_path: Option<String>,
     pub evidence: Option<String>,
@@ -635,6 +636,39 @@ fn evaluate_stop_schema_gate_from_parsed(
         .map(str::trim)
         .unwrap_or("");
     if !next_step.is_empty() {
+        let current_goal = parsed.current_goal.as_deref().map(str::trim).unwrap_or("");
+        if current_goal.is_empty() {
+            let missing_fields = vec!["current_goal".to_string()];
+            let observation_hash = compute_schema_observation_hash(
+                "stop_schema_current_goal_missing",
+                parsed.stopreason,
+                parsed.reason.as_deref(),
+                parsed.next_step.as_deref(),
+                &missing_fields,
+            );
+            let no_change_count = resolve_no_change_count(
+                "stop_schema_current_goal_missing",
+                parsed.stopreason,
+                parsed.reason.as_deref(),
+                parsed.next_step.as_deref(),
+                &missing_fields,
+                prev_observation_hash,
+                prev_no_change_count,
+            );
+            return schema_followup(
+                assistant_text,
+                "stop_schema_current_goal_missing",
+                used,
+                provided_cap,
+                "你还没有写 current_goal。先明确你现在的任务目标是什么，再基于这个目标判断下一步要做什么，然后继续执行。",
+                Some(parsed),
+                true,
+                missing_fields,
+                no_change_count,
+                observation_hash,
+                feedback_history,
+            );
+        }
         let missing_fields = remaining_missing_fields(&parsed);
         let observation_hash = compute_schema_observation_hash(
             "stop_schema_continue_next_step",
@@ -657,7 +691,7 @@ fn evaluate_stop_schema_gate_from_parsed(
             "stop_schema_continue_next_step",
             used,
             provided_cap,
-            next_step.as_str(),
+            &build_continue_goal_next_step_prompt(current_goal, next_step.as_str()),
             Some(parsed),
             false,
             missing_fields,
@@ -1075,6 +1109,14 @@ fn schema_followup(
     }
 }
 
+fn build_continue_goal_next_step_prompt(current_goal: &str, next_step: &str) -> String {
+    format!(
+        "你当前的目标是：{}。你要确定你完成了吗？建议的下一步是：{}。",
+        current_goal.trim(),
+        next_step.trim()
+    )
+}
+
 fn build_stop_message_followup_text(
     snapshot: &StopMessageSnapshot,
     effective_max_repeats: u32,
@@ -1183,6 +1225,15 @@ fn remaining_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
         }
         2 => {
             if parsed
+                .current_goal
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            {
+                missing.push("current_goal".to_string());
+            }
+            if parsed
                 .next_step
                 .as_deref()
                 .map(str::trim)
@@ -1268,6 +1319,7 @@ fn parse_stop_schema_value(value: Value) -> Option<StopSchemaParsed> {
         has_evidence: read_u8(row.get("has_evidence")),
         forcestop: read_u8(row.get("forcestop")),
         reason: read_string(row.get("reason")),
+        current_goal: read_string(row.get("current_goal")),
         next_step: read_string(row.get("next_step")),
         next_suggested_path: read_string(row.get("next_suggested_path")),
         evidence: read_string(row.get("evidence")),
@@ -1405,6 +1457,7 @@ fn looks_like_stop_schema_value(value: &Value) -> bool {
         "simple_question",
         "forcestop",
         "reason",
+        "current_goal",
         "has_evidence",
         "next_step",
         "needs_user_input",
@@ -2398,7 +2451,10 @@ mod tests {
         assert!(!decision.count_budget);
         assert!(decision.missing_fields.is_empty());
         assert_eq!(
-            decision.parsed.as_ref().and_then(|parsed| parsed.simple_question),
+            decision
+                .parsed
+                .as_ref()
+                .and_then(|parsed| parsed.simple_question),
             Some(true)
         );
     }
@@ -2432,6 +2488,50 @@ mod tests {
             "stop_schema_stopreason_missing_or_non_numeric"
         );
         assert!(decision.missing_fields.contains(&"stopreason".to_string()));
+    }
+
+    #[test]
+    fn continue_with_goal_and_next_step_builds_goal_prompt() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(
+                r#"{"stopreason":2,"reason":"还没完成","current_goal":"完成 stopless schema 目标回填","next_step":"运行 stopless 黑盒验证","needs_user_input":false}"#,
+            )
+            .as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
+        assert!(!decision.count_budget);
+        assert!(decision.missing_fields.is_empty());
+        let followup = decision.followup_text.as_ref().expect("followup");
+        assert!(followup.contains("你当前的目标是：完成 stopless schema 目标回填。"));
+        assert!(followup.contains("你要确定你完成了吗？"));
+        assert!(followup.contains("建议的下一步是：运行 stopless 黑盒验证。"));
+    }
+
+    #[test]
+    fn continue_next_step_without_goal_requires_current_goal() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(
+                r#"{"stopreason":2,"reason":"还没完成","next_step":"运行 stopless 黑盒验证","needs_user_input":false}"#,
+            )
+            .as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_current_goal_missing");
+        assert!(decision.count_budget);
+        assert_eq!(decision.missing_fields, vec!["current_goal".to_string()]);
+        let followup = decision.followup_text.as_ref().expect("followup");
+        assert!(followup.contains("你还没有写 current_goal"));
+        assert!(followup.contains("你现在的任务目标是什么"));
+        assert!(!followup.contains("建议的下一步是：运行 stopless 黑盒验证"));
     }
 
     #[test]

@@ -298,6 +298,7 @@ fn stop_schema_field_keys() -> &'static [&'static str] {
         "stopreason",
         "simple_question",
         "reason",
+        "current_goal",
         "has_evidence",
         "evidence",
         "issue_cause",
@@ -561,7 +562,7 @@ fn build_stopless_cli_model_guidance(
         "怎么理解这个 schema：它是 stop result 的结构化 JSON 约定，不是普通总结。".to_string(),
     );
     parts.push(
-        "字段怎么写：stopreason 是唯一无条件必填；完成 stopreason=0 时 has_evidence=1 且 evidence 非空；阻塞 stopreason=1 时 reason 非空即可停；继续 stopreason=2 时 next_step 写下一步具体动作。".to_string(),
+        "字段怎么写：stopreason 是唯一无条件必填；完成 stopreason=0 时 has_evidence=1 且 evidence 非空；阻塞 stopreason=1 时 reason 非空即可停；继续 stopreason=2 时 current_goal 写当前目标，next_step 写下一步具体动作。".to_string(),
     );
     parts.push(
         "怎么填：按字段之间的逻辑关系填写；不是每个字段都必填，但触发条件下的字段不能留空。"
@@ -569,7 +570,7 @@ fn build_stopless_cli_model_guidance(
     );
     parts.push("stopreason 取值：0=finished，1=blocked，2=continue_needed。".to_string());
     parts.push(
-        "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进，先继续执行\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"先看入口，再看链路，再看验证\",\"done_steps\":\"已完成现有排查\",\"next_step\":\"继续完成剩余验证并补最后一轮证据\",\"next_suggested_path\":\"按当前链路继续\",\"needs_user_input\":false,\"learned\":\"把真实结论写进 stop schema\"}".to_string(),
+        "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进，先继续执行\",\"current_goal\":\"完成当前用户请求\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"先看入口，再看链路，再看验证\",\"done_steps\":\"已完成现有排查\",\"next_step\":\"继续完成剩余验证并补最后一轮证据\",\"next_suggested_path\":\"按当前链路继续\",\"needs_user_input\":false,\"learned\":\"把真实结论写进 stop schema\"}".to_string(),
     );
     if let Some(feedback) = schema_feedback {
         if feedback.reason_code == "stop_schema_missing" {
@@ -680,6 +681,9 @@ fn stopless_field_repair_instruction(field: &str) -> Option<&'static str> {
         ),
         "next_step" => Some(
             "next_step：如果 stopreason=2，必须写下一步要执行的具体动作；如果 stopreason=0/1，通常留空字符串即可。",
+        ),
+        "current_goal" => Some(
+            "current_goal：如果 stopreason=2，必须写清当前要完成的目标；先明确目标，再判断下一步。",
         ),
         "next_suggested_path" => Some(
             "next_suggested_path：写下一轮最合适的继续路径，告诉系统后面应该沿哪条线推进。",
@@ -813,7 +817,7 @@ pub fn stopless_schema_guidance_with_trigger(
     _used: u32,
     _max_repeats: u32,
 ) -> StoplessSchemaGuidance {
-    let sample = r#"{"stopreason":2,"simple_question":false,"reason":"当前还在推进，先继续执行","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已完成现有排查","next_step":"继续完成剩余验证并补最后一轮证据","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
+    let sample = r#"{"stopreason":2,"simple_question":false,"reason":"当前还在推进，先继续执行","current_goal":"完成当前用户请求","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"先看入口，再看链路，再看验证","done_steps":"已完成现有排查","next_step":"继续完成剩余验证并补最后一轮证据","next_suggested_path":"按当前链路继续","needs_user_input":false,"learned":"把真实结论写进 stop schema"}"#;
     StoplessSchemaGuidance {
         schema_overview: "stop schema 是模型在准备结束或暂停时返回的结构化 JSON 收尾报告。它不是普通文本总结，而是一份固定字段的结果，用来告诉系统这轮是已完成、被阻塞，还是还要继续执行。".to_string(),
         schema_purpose: "它的作用是把结束原因、证据、排查顺序、下一步动作固定成可机器判断的结构，并把每个字段的含义说清楚，避免模型只写泛泛的总结或漏字段。".to_string(),
@@ -830,6 +834,10 @@ pub fn stopless_schema_guidance_with_trigger(
             StoplessSchemaFieldDescription {
                 field: "reason".to_string(),
                 meaning: "stopreason=1 阻塞时必填；其它情况可写当前状态说明".to_string(),
+            },
+            StoplessSchemaFieldDescription {
+                field: "current_goal".to_string(),
+                meaning: "stopreason=2 继续时必填；写清当前要完成的目标".to_string(),
             },
             StoplessSchemaFieldDescription {
                 field: "has_evidence".to_string(),
@@ -918,6 +926,7 @@ pub fn normalize_stopless_trigger_hint_for_metadata(reason_code: Option<&str>) -
         "stop_schema_terminal_missing_fields" => "invalid_schema",
         "stop_schema_stopreason_missing_or_non_numeric" => "invalid_schema",
         "stop_schema_needs_user_input_missing_next_step" => "invalid_schema",
+        "stop_schema_current_goal_missing" => "invalid_schema",
         "stop_schema_next_step_missing" => "invalid_schema",
         "stop_schema_forcestop_reason_missing" => "invalid_schema",
         "stop_schema_continue_without_next_step" => "non_terminal_schema",
@@ -953,6 +962,7 @@ fn read_stopless_trigger_hint(input: &Value) -> StoplessContinuationTrigger {
         "stop_schema_needs_user_input_missing_next_step" => {
             StoplessContinuationTrigger::InvalidSchema
         }
+        "stop_schema_current_goal_missing" => StoplessContinuationTrigger::InvalidSchema,
         "stop_schema_next_step_missing" => StoplessContinuationTrigger::InvalidSchema,
         "stop_schema_forcestop_reason_missing" => StoplessContinuationTrigger::InvalidSchema,
         "stop_schema_continue_without_next_step" => StoplessContinuationTrigger::NonTerminalSchema,
@@ -2596,6 +2606,10 @@ mod tests {
             "non_terminal_schema"
         );
         assert_eq!(
+            normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_current_goal_missing")),
+            "invalid_schema"
+        );
+        assert_eq!(
             normalize_stopless_trigger_hint_for_metadata(Some("stop_schema_budget_exhausted")),
             "budget_exhausted"
         );
@@ -2845,7 +2859,7 @@ mod tests {
             Value::String("budget_exhausted".to_string())
         );
         let feedback = output.schema_feedback.as_ref().expect("schema feedback");
-        assert_missing_fields_eq(&feedback.missing_fields, &["next_step"]);
+        assert_missing_fields_eq(&feedback.missing_fields, &["current_goal", "next_step"]);
         assert!(output.input.get("schemaFeedback").is_none());
         assert_eq!(
             output
@@ -2905,7 +2919,7 @@ mod tests {
                 .as_ref()
                 .expect("schema feedback")
                 .missing_fields,
-            &["next_step"],
+            &["current_goal", "next_step"],
         );
     }
 

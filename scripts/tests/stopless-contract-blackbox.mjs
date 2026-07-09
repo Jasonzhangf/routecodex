@@ -229,6 +229,32 @@ function findTool(tools, toolName) {
   return tools.find((tool) => (tool?.name ?? tool?.function?.name) === toolName) ?? null;
 }
 
+function collectMessageTexts(items, role) {
+  const texts = [];
+  if (!Array.isArray(items)) {
+    return texts;
+  }
+  for (const item of items) {
+    if (role && item?.role !== role) {
+      continue;
+    }
+    const content = item?.content;
+    if (typeof content === 'string' && content.trim()) {
+      texts.push(content);
+      continue;
+    }
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const part of content) {
+      if (typeof part?.text === 'string' && part.text.trim()) {
+        texts.push(part.text);
+      }
+    }
+  }
+  return texts;
+}
+
 function assertStoplessSystemInstructionContract(text, label) {
   const value = String(text || '');
   assert.ok(value.includes('<rcc_stop_schema>'), `${label} missing rcc_stop_schema tag: ${value}`);
@@ -245,7 +271,7 @@ function assertStoplessSystemInstructionContract(text, label) {
     `${label} missing blocked/reason relation: ${value}`
   );
   assert.ok(
-    value.includes('stopreason=2') && value.includes('next_step'),
+    value.includes('stopreason=2') && value.includes('current_goal') && value.includes('next_step'),
     `${label} missing continue/next_step relation: ${value}`
   );
   assert.ok(
@@ -269,7 +295,7 @@ function assertReasoningStopToolContract(tool, label) {
     `${label} missing blocked/reason tool description: ${description}`
   );
   assert.ok(
-    description.includes('stopreason=2 continue_needed requires next_step'),
+    description.includes('stopreason=2 continue_needed requires current_goal and next_step'),
     `${label} missing continue/next_step tool description: ${description}`
   );
   assert.ok(
@@ -388,7 +414,7 @@ const CASES = [
     expectedTriggerHint: 'invalid_schema',
     expectCliSchemaFeedback: true,
     expectedProviderText: 'stop_schema_next_step_missing',
-    expectedMissingFields: ['next_step']
+    expectedMissingFields: ['current_goal', 'next_step']
   },
   {
     id: 'next_step',
@@ -397,6 +423,7 @@ const CASES = [
       return runCliCommand(buildReasoningStopCommand({
         stopreason: 2,
         reason: '还没收尾',
+        current_goal: '完成 stopless continuation prompt 验证',
         has_evidence: 1,
         evidence: 'have logs',
         issue_cause: '',
@@ -412,7 +439,7 @@ const CASES = [
     expectedReasonCode: 'stop_schema_continue_next_step',
     expectedTriggerHint: 'non_terminal_schema',
     expectCliSchemaFeedback: true,
-    expectedProviderText: 'rerun failing command',
+    expectedProviderText: '你当前的目标是：完成 stopless continuation prompt 验证。你要确定你完成了吗？建议的下一步是：rerun failing command。',
     forbiddenProviderText: '继续执行你给出的 next_step',
     expectCurrentTurnGuidance: false
   }
@@ -573,7 +600,9 @@ async function runCase(testCase) {
     const secondProviderPayload = upstreamHits[1] ?? {};
     const secondProviderText = JSON.stringify(secondProviderPayload);
     const secondProviderInput = Array.isArray(secondProviderPayload.input) ? secondProviderPayload.input : [];
-    const secondProviderCurrentTurnText = JSON.stringify(secondProviderInput.slice(-2));
+    const secondProviderCurrentTurnItems = secondProviderInput.slice(-2);
+    const secondProviderCurrentTurnText = JSON.stringify(secondProviderCurrentTurnItems);
+    const secondProviderCurrentTurnUserTexts = collectMessageTexts(secondProviderCurrentTurnItems, 'user');
     const secondProviderTools = extractToolNames(secondProviderPayload.tools);
 
     assert.equal(submit.status, 200, `case=${testCase.id} expected submit_tool_outputs 200, body=${submitText}`);
@@ -601,9 +630,10 @@ async function runCase(testCase) {
         `case=${testCase.id} second provider-request must rewrite CLI output into current-turn model-visible stopless guidance: ${secondProviderCurrentTurnText}`
       );
     } else {
-      assert.ok(
-        secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
-        `case=${testCase.id} second provider-request must expose continuation prompt as current-turn text: ${secondProviderCurrentTurnText}`
+      assert.deepEqual(
+        secondProviderCurrentTurnUserTexts,
+        [testCase.expectedProviderText],
+        `case=${testCase.id} second provider-request current-turn user prompt must be the exact next_step text: ${secondProviderCurrentTurnText}`
       );
     }
     assert.ok(

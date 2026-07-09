@@ -566,6 +566,7 @@ fn derive_stopless_trigger_hint_from_reason(reason_code: &str) -> Option<&'stati
         | "stop_schema_forcestop_reason_missing"
         | "stop_schema_terminal_missing_fields"
         | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_current_goal_missing"
         | "stop_schema_next_step_missing"
         | "stop_schema_continue_without_next_step" => Some("invalid_schema"),
         _ => None,
@@ -824,16 +825,13 @@ fn render_stopless_schema_feedback_text(
         "stop_schema_next_step_missing" => {
             format!("任务还没完成，但当前没有明确 next_step；{}把下一步写成这轮立刻执行的最小动作。", missing)
         }
+        "stop_schema_current_goal_missing" => {
+            "任务还没完成，但当前没有明确 current_goal；先写清你现在的任务目标是什么，再基于这个目标判断下一步并继续执行。".to_string()
+        }
         "stop_schema_continue_without_next_step" => {
             "任务还没完成，但你没有给出明确 next_step；这轮必须补出最小下一步，或者直接给出最终收尾。".to_string()
         }
-        "stop_schema_continue_next_step" => {
-            if missing.is_empty() {
-                String::new()
-            } else {
-                format!("任务还没收尾，先执行 next_step；同时别忘了后面还缺：{}。", missing_fields.join(", "))
-            }
-        }
+        "stop_schema_continue_next_step" => String::new(),
         _ => {
             if missing.is_empty() {
                 format!("上一轮收尾结果有问题（{}）；这轮按要求修正。", reason_code)

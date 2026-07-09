@@ -49,16 +49,16 @@ const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
     "当你准备结束当前轮时，必须使用唯一 stop schema 合同。\n",
     "优先路径：直接调用名为 reasoningStop 的 function tool，并把完整 JSON schema 放进该 tool call 的 arguments。\n",
     "禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n",
-    "字段不是全局必填，而是关系必填：stopreason 是唯一无条件必填字段；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 表示继续，必须写 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。\n",
+    "字段不是全局必填，而是关系必填：stopreason 是唯一无条件必填字段；stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空；stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止；stopreason=2 表示继续，必须写 current_goal 和 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题并停止等待。\n",
     "如果你直接 finish_reason=stop，正文末尾必须附：\n",
     "<rcc_stop_schema>\n",
-    "{\"stopreason\":2,\"reason\":\"当前状态原因\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
+    "{\"stopreason\":2,\"reason\":\"当前状态原因\",\"current_goal\":\"当前要完成的目标\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"如果仍需继续，写立刻执行的下一步；否则写无\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
     "</rcc_stop_schema>\n",
-    "标准 JSON 字段：stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\n",
+    "标准 JSON 字段：stopreason, reason, current_goal, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\n",
     "stopreason 取值：0=finished，1=blocked，2=continue_needed。\n",
-    "finished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须继续推进并给 next_step。\n",
+    "finished：表示已经完成，可停止；blocked：表示确实卡住且需要停止；continue_needed：表示还不能停，必须明确 current_goal 并给 next_step。\n",
     "needs_user_input 只能是 true/false；true 只用于真的需要向用户提一个问题。\n",
-    "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}。\n",
+    "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前还在推进\",\"current_goal\":\"完成当前用户请求\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}。\n",
     "无 arguments 且无 <rcc_stop_schema> 时，不允许停止。"
 );
 
@@ -630,6 +630,7 @@ fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
         | "stop_schema_terminal_missing_fields"
         | "stop_schema_stopreason_missing_or_non_numeric"
         | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_current_goal_missing"
         | "stop_schema_next_step_missing"
         | "stop_schema_forcestop_reason_missing"
         | "stop_schema_continue_without_next_step"
@@ -881,13 +882,13 @@ fn build_reasoning_stop_tool() -> Value {
             "description": concat!(
                 "Use this tool every time you want to stop. ",
                 "Schema means the structured JSON contract for the stop result: it tells the system what is finished, what is blocked, and what still needs to continue. ",
-                "Provide the real stop schema as JSON arguments. Fields are conditionally required, not globally required: stopreason is the only unconditional required field; stopreason=0 finished requires has_evidence=1 and non-empty evidence; stopreason=1 blocked requires non-empty reason and may stop with reason only; stopreason=2 continue_needed requires next_step; needs_user_input=true requires next_step to be the exact user question. ",
+                "Provide the real stop schema as JSON arguments. Fields are conditionally required, not globally required: stopreason is the only unconditional required field; stopreason=0 finished requires has_evidence=1 and non-empty evidence; stopreason=1 blocked requires non-empty reason and may stop with reason only; stopreason=2 continue_needed requires current_goal and next_step; needs_user_input=true requires next_step to be the exact user question. ",
                 "If you do not call this tool and still stop, the assistant text must end with <rcc_stop_schema>...</rcc_stop_schema>. ",
                 "stopreason values: 0=finished, 1=blocked, 2=continue_needed. ",
-                "If work remains, use stopreason=2 and write next_step. ",
-                "Field meanings: stopreason, reason, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned. ",
+                "If work remains, use stopreason=2 and write current_goal plus next_step. ",
+                "Field meanings: stopreason, reason, current_goal, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned. ",
                 "Minimal continue sample: ",
-                "{\"stopreason\":2,\"reason\":\"当前还在推进\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}. ",
+                "{\"stopreason\":2,\"reason\":\"当前还在推进\",\"current_goal\":\"完成当前用户请求\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"运行下一条验证命令\",\"needs_user_input\":false}. ",
                 "Minimal finished sample: ",
                 "{\"stopreason\":0,\"reason\":\"已完成并验证\",\"has_evidence\":1,\"evidence\":\"列出已验证日志/测试/文件\",\"needs_user_input\":false}"
             ),
@@ -908,6 +909,10 @@ fn build_reasoning_stop_tool() -> Value {
                         "type": "integer",
                         "enum": [0, 1],
                         "description": "Required as 1 only when stopreason=0 finished."
+                    },
+                    "current_goal": {
+                        "type": "string",
+                        "description": "Required when stopreason=2 continue_needed; write the current objective before choosing next_step."
                     },
                     "evidence": {
                         "type": "string",

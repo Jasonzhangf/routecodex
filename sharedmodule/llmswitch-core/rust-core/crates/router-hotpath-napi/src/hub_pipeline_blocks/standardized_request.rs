@@ -470,6 +470,7 @@ fn normalize_stopless_runtime_trigger_hint(token: &str) -> &'static str {
         | "stop_schema_terminal_missing_fields"
         | "stop_schema_stopreason_missing_or_non_numeric"
         | "stop_schema_needs_user_input_missing_next_step"
+        | "stop_schema_current_goal_missing"
         | "stop_schema_next_step_missing"
         | "stop_schema_forcestop_reason_missing"
         | "stop_schema_continue_without_next_step"

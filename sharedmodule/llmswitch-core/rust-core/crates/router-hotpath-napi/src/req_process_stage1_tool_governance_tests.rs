@@ -429,7 +429,7 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     assert!(instructions.contains("字段不是全局必填，而是关系必填"));
     assert!(instructions.contains("stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空"));
     assert!(instructions.contains("stopreason=1 表示阻塞，必须 reason 非空，提供 reason 即可停止"));
-    assert!(instructions.contains("stopreason=2 表示继续，必须写 next_step"));
+    assert!(instructions.contains("stopreason=2 表示继续，必须写 current_goal 和 next_step"));
     assert!(instructions.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
     assert!(instructions.contains("最小可复制样本"));
     assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"));
@@ -450,7 +450,9 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
     assert!(description.contains("Fields are conditionally required, not globally required"));
     assert!(description.contains("stopreason=1 blocked requires non-empty reason"));
     assert!(description.contains("may stop with reason only"));
-    assert!(description.contains("stopreason=2 continue_needed requires next_step"));
+    assert!(
+        description.contains("stopreason=2 continue_needed requires current_goal and next_step")
+    );
     assert!(description.contains("needs_user_input=true requires next_step"));
     assert!(description.contains("Minimal continue sample"));
     assert!(!description.contains("fill every field"));
@@ -1303,6 +1305,7 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
     );
     assert!(properties.contains_key("stopreason"));
     assert!(properties.contains_key("reason"));
+    assert!(properties.contains_key("current_goal"));
     assert!(properties.contains_key("next_step"));
     assert!(properties.contains_key("learned"));
     assert!(required
