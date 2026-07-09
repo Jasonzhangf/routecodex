@@ -1828,3 +1828,9 @@
 
 - `sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.ts` is physically deleted. Do not restore the facade; `responses-openai-bridge.ts` should call Rust native `buildProviderProtocolErrorWithNative` directly and construct only the JS `Error` carrier locally.
 - Current shell audit after this deletion is `prodTsShellCount=58`, `shellsWithProdImporters=57`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses OpenAI bridge utils TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.ts` is physically deleted. Do not restore the facade; `responses-openai-bridge.ts` should call native Hub bridge action semantics helpers directly for the old utility surface.
+- The remaining local functions in `responses-openai-bridge.ts` are IO/native-call glue only; request parameter selection, passthrough field selection, slim context/metadata projection, captured input sanitize, metadata extra field extraction, tool-control stripping, retained parameter merge, and data unwrap remain Rust native truth.
+- Current shell audit after this deletion is `prodTsShellCount=57`, `shellsWithProdImporters=56`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

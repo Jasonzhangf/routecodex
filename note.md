@@ -28224,3 +28224,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `responses-openai-bridge.ts` now calls Rust native `buildProviderProtocolErrorWithNative` directly and constructs only the JS `Error` carrier locally.
 - Residue audit now locks `provider-protocol-error.ts` physically absent.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=58`, `shellsWithProdImporters=57`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=58`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; focused Jest 205/205; `git diff --check`.
+
+# 2026-07-09: responses-openai-bridge utils TS facade deleted
+
+- Scope: continued single-import conversion facade deletion after `provider-protocol-error.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.ts`; strict shell audit showed one production importer only: `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now calls Rust native helpers from `native-hub-bridge-action-semantics.js` directly for request parameter picking, passthrough fields, slim bridge context/metadata, captured input sanitize, metadata extra fields, tool-control stripping, retained parameter merge, and data unwrap.
+- Residue audit now locks `responses-openai-bridge/utils.ts` physically absent and asserts the main bridge directly references the native helper calls.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=57`, `shellsWithProdImporters=56`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 205/205; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=57`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.

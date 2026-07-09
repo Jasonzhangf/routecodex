@@ -22,12 +22,21 @@ import {
 } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
+  buildSlimResponsesBridgeContextWithNative,
+  extractResponsesMetadataExtraFieldsWithNative,
   filterBridgeInputForUpstreamWithNative,
+  mergeRetainedResponsesRequestParametersWithNative,
   normalizeBridgeHistorySeedWithNative,
+  pickResponsesBridgeDecisionMetadataWithNative,
+  pickResponsesRequestParametersWithNative,
+  pickResponsesToolPassthroughFieldsWithNative,
   prepareResponsesRequestEnvelopeWithNative,
   resolveResponsesRequestBridgeDecisionsWithNative,
   resolveResponsesBridgeToolsWithNative,
-  runBridgeActionPipelineWithNative
+  runBridgeActionPipelineWithNative,
+  sanitizeCapturedResponsesInputWithNative,
+  stripResponsesToolControlFieldsWithNative,
+  unwrapResponsesDataWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
 import {
   buildProviderProtocolErrorWithNative,
@@ -38,19 +47,6 @@ import {
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
 } from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
-
-import {
-  buildSlimBridgeDecisionMetadata,
-  buildSlimResponsesBridgeContext,
-  collectResponsesRequestParameters,
-  extractMetadataExtraFields,
-  mergeRetainedResponsesRequestParameters,
-  pickResponsesToolPassthroughFields,
-  sanitizeCapturedResponsesInput,
-  stripToolControlFieldsFromContextMetadata,
-  stripToolControlFieldsFromParameterObject,
-  unwrapData
-} from './responses-openai-bridge/utils.js';
 
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
@@ -184,6 +180,83 @@ function createProviderProtocolError(message: string, options: {
   error.category = (native.category as ProviderErrorCategory) || options.category || 'EXTERNAL_ERROR';
   error.details = (native.details as Record<string, unknown> | undefined) ?? options.details;
   return error;
+}
+
+export function collectResponsesRequestParameters(
+  payload: Record<string, unknown> | undefined,
+  options?: {
+    streamHint?: boolean | undefined;
+  }
+): Record<string, unknown> | undefined {
+  return pickResponsesRequestParametersWithNative({
+    payload,
+    streamHint: options?.streamHint
+  });
+}
+
+function pickResponsesToolPassthroughFields(
+  value: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return pickResponsesToolPassthroughFieldsWithNative({ value });
+}
+
+function buildSlimResponsesBridgeContext(
+  context: ResponsesRequestContext | undefined
+): Record<string, unknown> | undefined {
+  return buildSlimResponsesBridgeContextWithNative(context as Record<string, unknown> | undefined);
+}
+
+function buildSlimBridgeDecisionMetadata(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return pickResponsesBridgeDecisionMetadataWithNative(metadata);
+}
+
+function sanitizeCapturedResponsesInput(
+  input: BridgeInputItem[] | undefined
+): BridgeInputItem[] | undefined {
+  if (!Array.isArray(input) || input.length === 0) {
+    return input;
+  }
+  return sanitizeCapturedResponsesInputWithNative({ input }).input as BridgeInputItem[];
+}
+
+function extractMetadataExtraFields(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  return extractResponsesMetadataExtraFieldsWithNative(metadata);
+}
+
+function stripToolControlFieldsFromContextMetadata(
+  metadata: JsonObject | undefined
+): JsonObject | undefined {
+  return stripResponsesToolControlFieldsWithNative({
+    value: metadata,
+    nestedExtraFields: true
+  }) as JsonObject | undefined;
+}
+
+function stripToolControlFieldsFromParameterObject(
+  value: JsonObject | undefined
+): JsonObject | undefined {
+  return stripResponsesToolControlFieldsWithNative({
+    value,
+    nestedExtraFields: false
+  }) as JsonObject | undefined;
+}
+
+function mergeRetainedResponsesRequestParameters(
+  request: Record<string, unknown>,
+  retainedParameters: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return mergeRetainedResponsesRequestParametersWithNative({
+    request,
+    retainedParameters
+  });
+}
+
+function unwrapData(value: Record<string, unknown>): Record<string, unknown> {
+  return unwrapResponsesDataWithNative({ value });
 }
 
 function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>): string {
@@ -635,5 +708,4 @@ export {
 } from './responses-openai-bridge/response-payload.js';
 
 export { buildChatResponseFromResponses } from '../shared/responses-response-utils.js';
-export { collectResponsesRequestParameters } from './responses-openai-bridge/utils.js';
 // (imports moved to top)
