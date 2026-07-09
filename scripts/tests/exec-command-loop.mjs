@@ -14,16 +14,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
+const nativeExportsPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
+const nativeExportsUrl = pathToFileURL(nativeExportsPath).href;
 
-const { importCoreModule } = await import(coreLoaderUrl);
+const { buildResponsesPayloadFromChatNative } = await import(nativeExportsUrl);
 
 async function main() {
-  const { buildResponsesPayloadFromChat } = await importCoreModule(
-    'conversion/responses/responses-openai-bridge'
-  );
-
   // 构造一条模拟的 chat 响应，其中 exec_command 直接使用 JSON 编码参数。
   const chatPayload = {
     id: 'chatcmpl_exec_args',
@@ -104,7 +100,7 @@ async function main() {
 
   // 延伸验证：基于 chat 结果构建 Responses payload，确保 /v1/responses 视图中的
   // function_call.arguments 同样保持 exec_command JSON 语义，而不会重新出现 toon。
-  const responsesPayload = buildResponsesPayloadFromChat(chatPayload, {
+  const responsesPayload = buildResponsesPayloadFromChatNative(chatPayload, {
     requestId: 'verify_exec_command_args'
   });
   const outputItems = Array.isArray(responsesPayload?.output) ? responsesPayload.output : [];
