@@ -1701,6 +1701,9 @@ fn read_stopless_schema_feedback_text(
                 .collect::<Vec<String>>()
         })
         .unwrap_or_default();
+    if reason_code == "stop_schema_continue_next_step" {
+        return None;
+    }
     if missing_fields.is_empty() && reason_code != "stop_schema_continue_next_step" {
         return None;
     }
@@ -1716,7 +1719,7 @@ fn read_stopless_schema_feedback_text(
         "stop_schema_reason_missing" => Some(format!("这次先把 reason 补齐：{joined}。")),
         "stop_schema_continue_next_step" => {
             if joined.is_empty() {
-                Some("任务还没收尾，继续执行你给出的 next_step，并在收尾时再补全结论与证据。".to_string())
+                None
             } else {
                 Some(format!("任务还没收尾，先执行 next_step；同时别忘了后面还缺：{joined}。"))
             }
@@ -1898,6 +1901,9 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             .or_else(|| read_trimmed_string(row.get("tool_name")))
             .unwrap_or_default();
         if tool_name == "stop_message_auto" {
+            if let Some(prompt) = read_continue_next_step_prompt(&row) {
+                return prompt;
+            }
             let mut parts = Vec::<String>::new();
             let repeat_count = row
                 .get("repeatCount")
@@ -1956,6 +1962,20 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
+    let feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))?
+        .as_object()?;
+    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
+        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
+    if reason_code != "stop_schema_continue_next_step" {
+        return None;
+    }
+    read_trimmed_string(row.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
 }
 
 fn is_legal_minimal_stopless_output(row: &Map<String, Value>) -> bool {
@@ -6160,8 +6180,8 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_continue_next_step\",\"missingFields\":[]},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"non_terminal_schema\"}}"
         );
-        assert!(text.contains("reasonCode=stop_schema_continue_next_step"));
-        assert!(text.contains("任务还没收尾，继续执行你给出的 next_step"));
+        assert_eq!(text, "继续往下做。");
+        assert!(!text.contains("任务还没收尾，继续执行你给出的 next_step"));
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "continue_next_step with empty missing fields is legal: {text}"

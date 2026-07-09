@@ -389,6 +389,39 @@ struct DerivedReasoningStopInput {
     followup_text: Option<String>,
 }
 
+fn resolve_reasoning_stop_continuation_prompt(
+    derived: Option<&DerivedReasoningStopInput>,
+    trigger: StoplessContinuationTrigger,
+    used_for_prompt: u32,
+    current_max_repeats: u32,
+) -> Result<String, ServertoolCliError> {
+    if let Some(derived) = derived {
+        if derived
+            .schema_feedback
+            .as_ref()
+            .is_some_and(|feedback| feedback.reason_code == "stop_schema_continue_next_step")
+        {
+            return derived
+                .followup_text
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or(ServertoolCliError::MissingField("next_step"));
+        }
+        if let Some(prompt) = derived
+            .followup_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok(prompt.to_string());
+        }
+    }
+
+    resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)
+}
+
 fn build_stop_message_auto_run_output(
     input: ServertoolCliRunInput,
     invoked_public_reasoning_stop: bool,
@@ -464,13 +497,12 @@ fn build_stop_message_auto_run_output(
         "maxRepeats": current_max_repeats,
         "triggerHint": stopless_trigger_hint(trigger)
     });
-    let continuation_prompt = derived_schema_feedback
-        .as_ref()
-        .and_then(|derived| derived.followup_text.clone())
-        .map(Ok)
-        .unwrap_or_else(|| {
-            resolve_stopless_cli_continuation_prompt(trigger, used_for_prompt, current_max_repeats)
-        })?;
+    let continuation_prompt = resolve_reasoning_stop_continuation_prompt(
+        derived_schema_feedback.as_ref(),
+        trigger,
+        used_for_prompt,
+        current_max_repeats,
+    )?;
     let _model_guidance = build_stopless_cli_model_guidance(
         &continuation_prompt,
         schema_feedback.as_ref(),

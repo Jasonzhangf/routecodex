@@ -412,7 +412,9 @@ const CASES = [
     expectedReasonCode: 'stop_schema_continue_next_step',
     expectedTriggerHint: 'non_terminal_schema',
     expectCliSchemaFeedback: true,
-    expectedProviderText: 'stop_schema_continue_next_step'
+    expectedProviderText: 'rerun failing command',
+    forbiddenProviderText: '继续执行你给出的 next_step',
+    expectCurrentTurnGuidance: false
   }
 ];
 
@@ -580,17 +582,30 @@ async function runCase(testCase) {
     assert.ok(hasStopSchemaContractText(secondProviderText), `case=${testCase.id} missing stop schema guidance in second provider-request: ${secondProviderText}`);
     assert.ok(secondProviderText.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop semantics in second provider-request: ${secondProviderText}`);
     assert.ok(secondProviderText.includes(testCase.expectedProviderText), `case=${testCase.id} missing expected provider feedback ${testCase.expectedProviderText}: ${secondProviderText}`);
+    if (testCase.forbiddenProviderText) {
+      assert.ok(
+        !secondProviderText.includes(testCase.forbiddenProviderText),
+        `case=${testCase.id} provider request must not include fixed continuation text ${testCase.forbiddenProviderText}: ${secondProviderText}`
+      );
+    }
     assert.ok(secondProviderTools.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop tool in second provider-request: ${JSON.stringify(secondProviderPayload)}`);
     assert.ok(secondProviderTools.includes('exec_command'), `case=${testCase.id} missing exec_command tool in second provider-request: ${JSON.stringify(secondProviderPayload)}`);
     assert.ok(!JSON.stringify(submitBody).includes('"reasoningStop"'), `case=${testCase.id} client submit_tool_outputs response leaked raw reasoningStop: ${submitText}`);
     assert.equal(secondInput.triggerHint, 'no_schema', `case=${testCase.id} unexpected client exec_command triggerHint: ${JSON.stringify(secondInput)}`);
     assert.equal(secondInput.repeatCount, 2, `case=${testCase.id} unexpected client exec_command repeatCount: ${JSON.stringify(secondInput)}`);
     assert.equal(secondInput.maxRepeats, 3, `case=${testCase.id} unexpected client exec_command maxRepeats: ${JSON.stringify(secondInput)}`);
-    assert.ok(
-      secondProviderCurrentTurnText.includes('上一轮执行结果：repeatCount=1/3')
-        && secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
-      `case=${testCase.id} second provider-request must rewrite CLI output into current-turn model-visible stopless guidance: ${secondProviderCurrentTurnText}`
-    );
+    if (testCase.expectCurrentTurnGuidance !== false) {
+      assert.ok(
+        secondProviderCurrentTurnText.includes('上一轮执行结果：repeatCount=1/3')
+          && secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
+        `case=${testCase.id} second provider-request must rewrite CLI output into current-turn model-visible stopless guidance: ${secondProviderCurrentTurnText}`
+      );
+    } else {
+      assert.ok(
+        secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
+        `case=${testCase.id} second provider-request must expose continuation prompt as current-turn text: ${secondProviderCurrentTurnText}`
+      );
+    }
     assert.ok(
       !secondProviderCurrentTurnText.includes('"name":"exec_command"')
         && !secondProviderCurrentTurnText.includes('stop_message_auto')

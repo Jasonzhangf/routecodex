@@ -403,6 +403,9 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             .or_else(|| read_trimmed_string(row.get("tool_name")))
             .unwrap_or_default();
         if tool_name == "stop_message_auto" {
+            if let Some(prompt) = read_continue_next_step_prompt(&row) {
+                return prompt;
+            }
             let mut parts = Vec::<String>::new();
             let repeat_count = row
                 .get("repeatCount")
@@ -491,6 +494,20 @@ pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
         }
     }
     trimmed.to_string()
+}
+
+fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
+    let feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))?
+        .as_object()?;
+    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
+        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
+    if reason_code != "stop_schema_continue_next_step" {
+        return None;
+    }
+    read_trimmed_string(row.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
 }
 
 fn is_legal_minimal_stopless_output(row: &Map<String, Value>) -> bool {
@@ -754,6 +771,9 @@ fn read_stopless_schema_feedback_text(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    if reason_code == "stop_schema_continue_next_step" {
+        return None;
+    }
     Some(render_stopless_schema_feedback_text(
         reason_code,
         &missing_fields,
@@ -809,7 +829,7 @@ fn render_stopless_schema_feedback_text(
         }
         "stop_schema_continue_next_step" => {
             if missing.is_empty() {
-                "任务还没收尾，继续执行你给出的 next_step，并在收尾时再补全结论与证据。".to_string()
+                String::new()
             } else {
                 format!("任务还没收尾，先执行 next_step；同时别忘了后面还缺：{}。", missing_fields.join(", "))
             }
@@ -3119,8 +3139,8 @@ mod tests {
             })
             .to_string(),
         );
-        assert!(text.contains("reasonCode=stop_schema_continue_next_step"));
-        assert!(text.contains("任务还没收尾，继续执行你给出的 next_step"));
+        assert_eq!(text, "继续往下做。");
+        assert!(!text.contains("任务还没收尾，继续执行你给出的 next_step"));
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "continue_next_step with empty missing fields is legal: {text}"
