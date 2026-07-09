@@ -3,7 +3,6 @@ use serde_json::Value;
 use super::protocol::{
     resolve_hub_client_protocol, resolve_provider_protocol_from_metadata_snapshot,
 };
-use crate::metadata_center::{build_metadata_center_from_snapshot, MetadataCenterReader};
 
 fn as_object_map(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
     value.and_then(Value::as_object)
@@ -444,7 +443,7 @@ fn find_responses_function_call_output_content_violation(payload: &Value) -> Opt
 
 fn evaluate_responses_direct_route_decision(
     payload: &Value,
-    metadata: &Value,
+    _metadata: &Value,
     inbound_protocol: &str,
     apply_patch_mode: &str,
 ) -> Result<Value, String> {
@@ -460,40 +459,12 @@ fn evaluate_responses_direct_route_decision(
             }));
         }
     }
-    if inbound_protocol == "openai-responses" && stop_message_requires_hub_relay(metadata) {
-        return Ok(serde_json::json!({
-            "providerWireValid": true,
-            "requiresHubRelay": true,
-            "reason": "servertool_followup_requires_hub_relay",
-            "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
-        }));
-    }
     Ok(serde_json::json!({
         "providerWireValid": true,
         "requiresHubRelay": false,
         "reason": null,
         "hasDeclaredApplyPatchTool": has_declared_apply_patch_tool
     }))
-}
-
-fn stop_message_requires_hub_relay(metadata: &Value) -> bool {
-    let Some(root) = metadata.as_object() else {
-        return false;
-    };
-    let center = root
-        .get("metadataCenterSnapshot")
-        .map(build_metadata_center_from_snapshot);
-    let stop_message_enabled = center
-        .as_ref()
-        .and_then(MetadataCenterReader::stop_message_enabled)
-        .unwrap_or(false);
-    if !stop_message_enabled {
-        return false;
-    }
-    !center
-        .as_ref()
-        .and_then(MetadataCenterReader::stop_message_exclude_direct)
-        .unwrap_or(true)
 }
 
 fn read_trimmed_lower(value: Option<&Value>) -> Option<String> {
@@ -944,7 +915,7 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn responses_request_requires_hub_relay_when_stop_message_includes_direct() {
+    fn responses_request_stays_direct_when_stop_message_includes_direct() {
         let decision = evaluate_responses_direct_route_decision(
             &serde_json::json!({
                 "model": "gpt-5.5",
@@ -970,11 +941,11 @@ mod responses_direct_route_decision_tests {
             "openai-responses",
             "client",
         )
-        .expect("stopless includeDirect requires relay into Hub Chat Process");
+        .expect("same-protocol direct must not relay into Hub Chat Process for stopless");
 
         assert_eq!(decision["providerWireValid"], true);
-        assert_eq!(decision["requiresHubRelay"], true);
-        assert_eq!(decision["reason"], "servertool_followup_requires_hub_relay");
+        assert_eq!(decision["requiresHubRelay"], false);
+        assert_eq!(decision["reason"], Value::Null);
     }
 
     #[test]

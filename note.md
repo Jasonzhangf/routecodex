@@ -28191,3 +28191,12 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `tests/sharedmodule/helpers/tool-validation-direct-native.ts` now calls direct Rust/NAPI `parseToolArgsJsonWithArtifactRepairJson` and `normalizeExecCommandArgsJson` instead of importing these shell facades.
 - Removed the deleted `args-json.ts` path from `docs/architecture/no-fallback-diff-rules.json`; residue audit now locks both paths physically absent and checks helper surfaces for old local parser/normalizer logic.
 - Verification PASS: focused Jest 205/205; script syntax checks; strict shell audit `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`; zero-ts closeout; minimal TS surface; rustification audit `prodTsFileCount=62`, `nonNativeFileCount=0`; sharedmodule/root `tsc`; exact source/package ref scan; `git diff --check`.
+
+# 2026-07-09: responses router-direct no-relay closeout
+
+- User-facing failure checked: 5520 log showed `[router-direct] failed_no_relay {"reason":"responses_chat_process_requires_hub_relay"}` at 09:44-09:45. Contract: same-protocol direct/provider-direct must not enter Hub relay for tool/chat-process/stopless semantics.
+- Source change reviewed: Rust direct decision no longer returns servertool-followup relay for stop-message includeDirect; HTTP server no longer treats client-tools or stopless-servertool skip reasons as relayable; architecture gate now forbids the four direct->relay reason strings in `http-server/index.ts`.
+- Current active release checked: `routecodex --version` and `rcc --version` are `0.90.3682`; `/Users/fanzhang/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` are `0.90.3682`; 5520 and 5555 `/health` both `ready=true pipelineReady=true`.
+- Active dist scan: both current install roots have zero matches for `client_tools_require_hub_relay`, `stopless_servertool_requires_hub_relay`, `responses_chat_process_requires_hub_relay`, and `servertool_followup_requires_hub_relay`.
+- Verification PASS: `npm run verify:responses-direct-tool-shape-contract`; focused router-direct protocol-boundary Jest red/green case; `cargo test -p router-hotpath-napi direct_decision`; targeted diff check.
+- Live log proof after fix: 5520 request `openai-responses-router-gpt-5.4-20260709T104149598-483057-4906` and 5555 request `openai-responses-router-gpt-5.5-20260709T104150528-483058-4907` both completed and wrote `[usage]`; no new direct relay failure after those live probes.

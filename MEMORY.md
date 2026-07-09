@@ -1804,3 +1804,11 @@
 - `sharedmodule/llmswitch-core/src/tools/args-json.ts` and `sharedmodule/llmswitch-core/src/tools/exec-command/normalize.ts` are physically deleted. Do not restore parse/normalize TS facades around Rust tool governance.
 - Test/script evidence should call direct Rust/NAPI `parseToolArgsJsonWithArtifactRepairJson` and `normalizeExecCommandArgsJson`; helper wrappers must remain test/script glue only and must not reimplement parser or normalization semantics.
 - Current shell audit after this deletion is `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Responses router-direct must not relay for tool/chat-process reasons
+
+- Same-protocol `/v1/responses` router-direct/provider-direct is provider passthrough plus hooks only. It must not enter Hub relay because of client tools, stopless/servertool state, or chat-process needs.
+- The old failure signature was `[router-direct] failed_no_relay {"reason":"responses_chat_process_requires_hub_relay"}` followed by `router-direct failed without relay`; this came from direct decision/HTTP skip handling that treated tool/chat-process semantics as Hub-relay reasons.
+- Fixed source truth: Rust direct decision no longer returns `servertool_followup_requires_hub_relay` for stop-message includeDirect, and `src/server/runtime/http-server/index.ts` no longer marks `client_tools_require_hub_relay` or `stopless_servertool_requires_hub_relay` as relayable skip reasons.
+- Gate truth: `verify:responses-direct-tool-shape-contract` forbids `client_tools_require_hub_relay`, `stopless_servertool_requires_hub_relay`, `responses_chat_process_requires_hub_relay`, and `servertool_followup_requires_hub_relay` from becoming router-direct Hub relay reasons again.
+- Verified in global installed `routecodex/rcc 0.90.3682`: active install dist has zero matches for those four reasons, `/health` is ready on 5520/5555, and live tool-bearing `/v1/responses` samples on both ports completed with `[response] completed` and `[usage]` instead of direct-relay failure.

@@ -416,8 +416,6 @@ function buildRouterDirectFailureError(reason: unknown): Error {
 function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
   return message.startsWith('protocol mismatch:')
-    || message === 'client_tools_require_hub_relay'
-    || message === 'stopless_servertool_requires_hub_relay'
     || message === 'target_outbound_profile_requires_hub_relay'
     || message === 'relay_owned_responses_continuation';
 }

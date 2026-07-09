@@ -2,9 +2,75 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { readRuntimeControlProjection } from '../../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js';
 
+type NativeRouteMock = (request: Record<string, unknown>, metadata: Record<string, unknown>) => unknown;
+
+let activeNativeRouteMock: NativeRouteMock | undefined;
+
+const executeHubPipelineNativeMock = jest.fn(() => {
+  throw new Error('router-direct protocol-boundary test must not enter native HubPipeline execute');
+});
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  bootstrapVirtualRouterConfig: jest.fn(async (input: Record<string, unknown>) => ({ config: input, targetRuntime: {} })),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({ pipelineRuntimeConfig: {}, virtualRouterBootstrapInput: {} })),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: Record<string, unknown>) => input ?? {}),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: Record<string, unknown>) => userConfig ?? {}),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  parseRouteCodexTomlRecord: jest.fn(async () => ({})),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  serializeRouteCodexTomlRecord: jest.fn(async () => ''),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTable: jest.fn(async () => ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn(() => ''),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn(() => undefined),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn(() => undefined),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn(() => ''),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (parsed: unknown) => parsed ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed ?? null),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: any) => ({ providerId: input?.dirId ?? 'provider', provider: input?.provider ?? {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/.rcc'),
+  resolveRccPathNativeSync: jest.fn((segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/')),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/.rcc/snapshots'),
+  planAuthFileResolutionNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  resolveAuthFileKeyNativeSync: jest.fn((input: any) => ({ kind: 'literal', value: input?.keyId ?? '', cacheKey: input?.keyId ?? '' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn((input: any) => ({ explicitPath: input?.explicitPath, providerRootDir: input?.routecodexProviderDir ?? input?.rccProviderDir })),
+  planProviderConfigRootNativeSync: jest.fn((rootDir?: string) => ({ rootDir })),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test-config.toml'),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: executeHubPipelineNativeMock,
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn((_handle: string, request: Record<string, unknown>, metadata: Record<string, unknown>) => {
+    if (!activeNativeRouteMock) {
+      throw new Error('native HubPipeline VR route mock is not installed');
+    }
+    return activeNativeRouteMock(request, metadata);
+  }),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(() => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(() => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
+  resolveBaseDir: jest.fn(() => process.cwd()),
+}));
+
 describe('router direct protocol boundary', () => {
   afterEach(() => {
     jest.useRealTimers();
+    activeNativeRouteMock = undefined;
+    executeHubPipelineNativeMock.mockClear();
   });
 
   function createRouterServer() {
@@ -29,9 +95,12 @@ describe('router direct protocol boundary', () => {
         }],
       },
     };
-    server.hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    server.hubPipeline = 'mock_hub_pipeline_handle';
     server.hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', server.hubPipeline],
+      ['gateway_priority_5555', 'mock_hub_pipeline_handle'],
+    ]);
+    server.pipelineRuntimeConfigByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', { routingProviderIds: [] }],
     ]);
   }
 
@@ -56,9 +125,23 @@ describe('router direct protocol boundary', () => {
         },
       },
     };
-    server.hubPipeline = { execute: jest.fn(), updateVirtualRouterConfig: jest.fn() };
+    server.hubPipeline = 'mock_hub_pipeline_handle';
     server.hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', server.hubPipeline],
+      ['gateway_priority_5555', 'mock_hub_pipeline_handle'],
+    ]);
+    server.pipelineRuntimeConfigByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', { routingProviderIds: [] }],
+    ]);
+  }
+
+  function installNativeHubPipelineRoute(server: any, route: NativeRouteMock): void {
+    activeNativeRouteMock = route;
+    server.hubPipeline = 'mock_hub_pipeline_handle';
+    server.hubPipelinesByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', 'mock_hub_pipeline_handle'],
+    ]);
+    server.pipelineRuntimeConfigByRoutingPolicyGroup = new Map([
+      ['gateway_priority_5555', { routingProviderIds: [] }],
     ]);
   }
 
@@ -253,14 +336,7 @@ describe('router direct protocol boundary', () => {
       };
     });
     attachRouterPort(server as any);
-    (server as any).hubPipeline = {
-      execute: jest.fn(),
-      updateVirtualRouterConfig: jest.fn(),
-      getVirtualRouter: () => ({ route: routeSpy }),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server as any, routeSpy);
     const executePipelineSpy = jest.spyOn(server as any, 'executePipeline').mockResolvedValue({
       status: 200,
       body: { id: 'relay_after_route_hint_preserved', object: 'response' },
@@ -349,6 +425,34 @@ describe('router direct protocol boundary', () => {
     expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'request.session_storm_backoff.recorded')).toHaveLength(0);
   });
 
+  it('fails fast instead of relaying when same-protocol direct reports tool or stopless relay reasons', async () => {
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+    const relayReasons = [
+      'client_tools_require_hub_relay',
+      'stopless_servertool_requires_hub_relay',
+    ];
+
+    for (const reason of relayReasons) {
+      const server = new RouteCodexHttpServer(createRouterServer());
+      attachRouterPort(server as any);
+      jest.spyOn(server as any, 'executeRouterDirectPipelineForPort').mockResolvedValue({
+        used: false,
+        reason,
+      } as any);
+      const executePipelineSpy = jest.spyOn(server as any, 'executePipeline');
+      const logStageSpy = jest.spyOn(server as any, 'logStage');
+
+      await expect((server as any).executePortAwarePipeline(
+        5555,
+        buildResponsesInput(`req_router_direct_${reason}`),
+      )).rejects.toThrow(`router-direct failed without relay: ${reason}`);
+
+      expect(executePipelineSpy).not.toHaveBeenCalled();
+      expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.failed_no_relay')).toHaveLength(1);
+      expect(logStageSpy.mock.calls.filter(([stage]) => stage === 'router-direct.relay')).toHaveLength(0);
+    }
+  });
+
   it('backs off repeated router-direct VR provider-unavailable failures without rewriting the error', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
@@ -405,25 +509,16 @@ describe('router direct protocol boundary', () => {
         processIncomingDirect: directSend,
       },
     }]]);
-    (server as any).hubPipeline = {
-      execute: jest.fn(),
-      updateVirtualRouterConfig: jest.fn(),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => ({
-          target: {
-            providerKey: runtimeKey,
-            providerType: 'anthropic',
-            runtimeKey,
-            modelId: 'claude-test',
-          },
-          decision: { routeName: 'search', pool: [runtimeKey] },
-          diagnostics: {},
-        })),
-      })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server as any, () => ({
+      target: {
+        providerKey: runtimeKey,
+        providerType: 'anthropic',
+        runtimeKey,
+        modelId: 'claude-test',
+      },
+      decision: { routeName: 'search', pool: [runtimeKey] },
+      diagnostics: {},
+    }));
 
     const result = await (server as any).executeRouterDirectPipelineForPort(
       {
@@ -453,18 +548,9 @@ describe('router direct protocol boundary', () => {
       new Error('All providers unavailable for model mini27.MiniMax-M2.7'),
       { code: 'PROVIDER_NOT_AVAILABLE' },
     );
-    (server as any).hubPipeline = {
-      execute: jest.fn(),
-      updateVirtualRouterConfig: jest.fn(),
-      getVirtualRouter: jest.fn(() => ({
-        route: jest.fn(() => {
-          throw routeError;
-        }),
-      })),
-    };
-    (server as any).hubPipelinesByRoutingPolicyGroup = new Map([
-      ['gateway_priority_5555', (server as any).hubPipeline],
-    ]);
+    installNativeHubPipelineRoute(server as any, () => {
+      throw routeError;
+    });
     const logStageSpy = jest.spyOn(server as any, 'logStage');
 
     const pending = (server as any).executeRouterDirectPipelineForPort(

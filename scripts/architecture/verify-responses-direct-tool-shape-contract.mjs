@@ -43,6 +43,16 @@ for (const forbidden of [
     failures.push(`router direct must not preflight Responses provider wire shape: ${forbidden}`);
   }
 }
+for (const forbidden of [
+  'client_tools_require_hub_relay',
+  'stopless_servertool_requires_hub_relay',
+  'responses_chat_process_requires_hub_relay',
+  'servertool_followup_requires_hub_relay',
+]) {
+  if (serverIndex.includes(forbidden)) {
+    failures.push(`router direct must not turn Responses tool/chat-process semantics into Hub relay: ${forbidden}`);
+  }
+}
 
 if (responsesProvider.includes('assertNativeResponsesDirectContractAvailable')) {
   failures.push('responses-provider must not runtime-call direct protocol validator projector');
