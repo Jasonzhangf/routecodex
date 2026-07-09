@@ -3,12 +3,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 import { evaluateResponsesHostPolicy } from './responses-host-policy.js';
 import {
-  convertMessagesToBridgeInput,
-  convertBridgeInputToChatMessages,
-  type BridgeInputItem
-} from '../bridge-message-utils.js';
-import type { BridgeInputBuildResult } from '../bridge-message-utils.js';
-import {
   createToolCallIdTransformer,
   enforceToolCallIdStyle,
   sanitizeResponsesFunctionName
@@ -22,7 +16,9 @@ import {
 } from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
+  buildBridgeHistoryWithNative,
   buildSlimResponsesBridgeContextWithNative,
+  convertBridgeInputToChatMessagesWithNative,
   extractResponsesMetadataExtraFieldsWithNative,
   filterBridgeInputForUpstreamWithNative,
   mergeRetainedResponsesRequestParametersWithNative,
@@ -52,6 +48,35 @@ export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;
 type ProviderErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
+
+type BridgeContentPart = {
+  type: string;
+  text?: string;
+  content?: unknown;
+};
+
+export type BridgeInputItem = {
+  type: string;
+  role?: string;
+  content?: Array<BridgeContentPart> | null;
+  name?: string;
+  arguments?: unknown;
+  call_id?: string;
+  output?: unknown;
+  function?: { name?: string; arguments?: unknown };
+  message?: { role?: string; content?: Array<BridgeContentPart> };
+  id?: string;
+  tool_call_id?: string;
+  tool_use_id?: string;
+  text?: string;
+};
+
+export interface BridgeInputBuildResult {
+  input: BridgeInputItem[];
+  combinedSystemInstruction?: string;
+  latestUserInstruction?: string;
+  originalSystemMessages: string[];
+}
 
 function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value);
@@ -180,6 +205,40 @@ function createProviderProtocolError(message: string, options: {
   error.category = (native.category as ProviderErrorCategory) || options.category || 'EXTERNAL_ERROR';
   error.details = (native.details as Record<string, unknown> | undefined) ?? options.details;
   return error;
+}
+
+function convertMessagesToBridgeInput(options: {
+  messages: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>> | undefined;
+  allowDanglingToolCalls?: boolean | undefined;
+}): BridgeInputBuildResult {
+  const { messages, tools, allowDanglingToolCalls } = options;
+  const native = buildBridgeHistoryWithNative({
+    messages,
+    tools,
+    allowPendingTerminalToolCall: allowDanglingToolCalls === true
+  });
+  return native as BridgeInputBuildResult;
+}
+
+function convertBridgeInputToChatMessages(options: {
+  input?: BridgeInputItem[];
+  tools?: Array<Record<string, unknown>>;
+  normalizeFunctionName?: ((raw: unknown) => string | undefined) | 'default' | 'responses';
+  toolResultFallbackText?: string;
+  allowDanglingToolCalls?: boolean;
+  allowOrphanToolResult?: boolean;
+}): Array<Record<string, unknown>> {
+  const { input, tools, normalizeFunctionName, toolResultFallbackText, allowDanglingToolCalls, allowOrphanToolResult } = options;
+  const output = convertBridgeInputToChatMessagesWithNative({
+    input: Array.isArray(input) ? input : [],
+    tools,
+    toolResultFallbackText,
+    normalizeFunctionName: typeof normalizeFunctionName === 'string' ? normalizeFunctionName : undefined,
+    allowPendingTerminalToolCall: allowDanglingToolCalls === true,
+    allowOrphanToolResult: allowOrphanToolResult === true
+  });
+  return output.messages;
 }
 
 export function collectResponsesRequestParameters(

@@ -5088,11 +5088,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
-  it('shared normalize and bridge wrappers must not run TS tool-history inspectors', () => {
+  it('shared normalize and responses bridge must not run TS tool-history inspectors', () => {
     const repoRoot = process.cwd();
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts',
-      'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     ];
     const findings: string[] = [];
@@ -5107,6 +5106,20 @@ describe('hub pipeline stage residue audit', () => {
     }
 
     expect(findings).toEqual([]);
+  });
+
+  it('bridge message utils facade must stay physically deleted and responses bridge must call native bridge helpers', () => {
+    const repoRoot = process.cwd();
+    const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts');
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+      'utf8',
+    );
+
+    expect(fs.existsSync(retiredPath)).toBe(false);
+    expect(source).toContain('buildBridgeHistoryWithNative');
+    expect(source).toContain('convertBridgeInputToChatMessagesWithNative');
+    expect(source).not.toContain('../bridge-message-utils.js');
   });
 
   it('OpenAI message normalize semantic helper shells must stay deleted', () => {

@@ -28232,3 +28232,11 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - `responses-openai-bridge.ts` now calls Rust native helpers from `native-hub-bridge-action-semantics.js` directly for request parameter picking, passthrough fields, slim bridge context/metadata, captured input sanitize, metadata extra fields, tool-control stripping, retained parameter merge, and data unwrap.
 - Residue audit now locks `responses-openai-bridge/utils.ts` physically absent and asserts the main bridge directly references the native helper calls.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=57`, `shellsWithProdImporters=56`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 205/205; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=57`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
+
+# 2026-07-09: bridge-message-utils TS facade deleted
+
+- Scope: continued single-import conversion facade deletion after `responses-openai-bridge/utils.ts`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts`; reference graph showed one production importer only: `responses-openai-bridge.ts`.
+- `responses-openai-bridge.ts` now owns only the local BridgeInput type aliases and calls Rust native `buildBridgeHistoryWithNative` / `convertBridgeInputToChatMessagesWithNative` directly for the old facade surface.
+- Residue audit now locks `bridge-message-utils.ts` physically absent and asserts the main bridge directly references the native helper calls.
+- Verification PASS in clean detached worktree with current patch: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=56`, `shellsWithProdImporters=55`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`); focused Jest 205/205 after symlinking existing node/native artifacts into the temp worktree; `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=56`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check`.
