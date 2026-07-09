@@ -6,19 +6,17 @@ import type {
   RoutingInstructionMode,
   VirtualRouterContextRoutingConfig
 } from '../native/router-hotpath/native-virtual-router-runtime.js';
-import type { RoutingInstructionState } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 
 // feature_id: vr.hit_log_projection
 
-type StopMessageRoutingStateView = Pick<
-  RoutingInstructionState,
-  | 'stopMessageText'
-  | 'stopMessageMaxRepeats'
-  | 'stopMessageUsed'
-  | 'stopMessageUpdatedAt'
-  | 'stopMessageLastUsedAt'
-  | 'stopMessageStageMode'
->;
+type StopMessageRoutingStateView = {
+  stopMessageText?: string;
+  stopMessageMaxRepeats?: number;
+  stopMessageUsed?: number;
+  stopMessageUpdatedAt?: number;
+  stopMessageLastUsedAt?: number;
+  stopMessageStageMode?: 'on' | 'off' | 'auto';
+};
 
 type LoggingDeps = {
   providers: Record<string, ProviderProfile>;

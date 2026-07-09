@@ -4,15 +4,10 @@ import type {
   StopMessageStateSnapshot,
   TargetMetadata
 } from '../native/router-hotpath/native-virtual-router-runtime.js';
-import { parseRoutingInstructionKindsWithNative } from '../native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
-import { parseResolvedStopMessageInstructionWithNative } from '../native/router-hotpath/native-virtual-router-stop-message-semantics.js';
-import {
-  resolveStopMessageScope,
-} from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
-import type { RoutingInstruction } from '../native/router-hotpath/native-virtual-router-routing-state.js';
 import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-loader.js';
 import {
+  parseJson,
   parseRecord,
   resolveRccUserDirWithNative as resolveRccUserDir,
   readNativeFunction,
@@ -20,6 +15,22 @@ import {
 } from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 type NativeRouterRequest = Record<string, unknown>;
+
+type RoutingInstruction =
+  | { type: 'stopMessageClear' }
+  | {
+      type: 'stopMessageMode';
+      stopMessageStageMode: 'on' | 'off' | 'auto';
+      stopMessageMaxRepeats?: number;
+    }
+  | {
+      type: 'stopMessageSet';
+      stopMessageText: string;
+      stopMessageMaxRepeats?: number;
+      stopMessageSource?: 'explicit_file' | 'explicit_text';
+    };
+
+type StopMessageResolvedNativeParseOutput = RoutingInstruction;
 
 export type VirtualRouterRouteHostEffects = {
   finalize: (
@@ -36,6 +47,95 @@ export type StopMessageMarkerParseLog = {
   scopedTypes: string[];
   stopScope?: string;
 };
+
+function stringifyForNative(capability: string, value: unknown): string {
+  return safeStringify(value) ?? failNativeRequired<string>(capability, 'json stringify failed');
+}
+
+function parseStringArrayPayload(raw: string): string[] | null {
+  const parsed = parseJson(raw);
+  if (!Array.isArray(parsed)) return null;
+  return parsed.every((entry) => typeof entry === 'string') ? parsed : null;
+}
+
+function parseStopMessageInstructionPayload(raw: string): StopMessageResolvedNativeParseOutput | null {
+  const parsed = parseRecord(raw);
+  if (!parsed) return null;
+  if (parsed.type === 'stopMessageClear') return { type: 'stopMessageClear' };
+  if (
+    parsed.type === 'stopMessageMode' &&
+    (parsed.stopMessageStageMode === 'on' ||
+      parsed.stopMessageStageMode === 'off' ||
+      parsed.stopMessageStageMode === 'auto')
+  ) {
+    return {
+      type: 'stopMessageMode',
+      stopMessageStageMode: parsed.stopMessageStageMode,
+      ...(typeof parsed.stopMessageMaxRepeats === 'number' ? { stopMessageMaxRepeats: parsed.stopMessageMaxRepeats } : {})
+    };
+  }
+  if (parsed.type !== 'stopMessageSet' || typeof parsed.stopMessageText !== 'string') return null;
+  return {
+    type: 'stopMessageSet',
+    stopMessageText: parsed.stopMessageText,
+    ...(typeof parsed.stopMessageMaxRepeats === 'number' ? { stopMessageMaxRepeats: parsed.stopMessageMaxRepeats } : {}),
+    ...(parsed.stopMessageSource === 'explicit_file' || parsed.stopMessageSource === 'explicit_text'
+      ? { stopMessageSource: parsed.stopMessageSource }
+      : {})
+  };
+}
+
+function parseRoutingInstructionKindsWithNative(request: Record<string, unknown>): string[] {
+  const capability = 'parseRoutingInstructionKindsJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<string[]>(capability);
+  const requestJson = stringifyForNative(capability, request);
+  const optionsJson = stringifyForNative(capability, { rccUserDir: resolveRccUserDir() });
+  try {
+    const raw = fn(requestJson, optionsJson);
+    if (typeof raw !== 'string' || !raw) return failNativeRequired<string[]>(capability, 'empty result');
+    return parseStringArrayPayload(raw) ?? failNativeRequired<string[]>(capability, 'invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string[]>(capability, reason);
+  }
+}
+
+function parseResolvedStopMessageInstructionWithNative(
+  instruction: string
+): StopMessageResolvedNativeParseOutput | null {
+  const capability = 'parseResolvedStopMessageInstructionJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<StopMessageResolvedNativeParseOutput | null>(capability);
+  const optionsJson = stringifyForNative(capability, { rccUserDir: resolveRccUserDir() });
+  try {
+    const raw = fn(String(instruction || ''), optionsJson);
+    if (typeof raw !== 'string') return failNativeRequired<StopMessageResolvedNativeParseOutput | null>(capability, 'non-string result');
+    if (!raw || raw === 'null') return null;
+    return parseStopMessageInstructionPayload(raw) ?? failNativeRequired<StopMessageResolvedNativeParseOutput | null>(capability, 'invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<StopMessageResolvedNativeParseOutput | null>(capability, reason);
+  }
+}
+
+function resolveStopMessageScope(metadata: RouterMetadataInput | Record<string, unknown>): string | undefined {
+  const capability = 'resolveVirtualRouterStopMessageScopeJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<string | undefined>(capability);
+  try {
+    const raw = fn(stringifyForNative(capability, metadata ?? null));
+    if (typeof raw !== 'string' || !raw) return failNativeRequired<string | undefined>(capability, 'empty result');
+    const parsed = parseJson(raw);
+    if (parsed === null) return undefined;
+    return typeof parsed === 'string' && parsed.trim()
+      ? parsed.trim()
+      : failNativeRequired<string | undefined>(capability, 'invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string | undefined>(capability, reason);
+  }
+}
 
 export function parseStopMessageInstruction(instruction: string): RoutingInstruction | null {
   const resolved = parseResolvedStopMessageInstructionWithNative(instruction);
