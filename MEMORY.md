@@ -1823,3 +1823,8 @@
 
 - `sharedmodule/llmswitch-core/src/conversion/bridge-instructions.ts` is physically deleted. Do not restore the facade; `responses-openai-bridge.ts` should call Rust native `ensureBridgeInstructionsWithNative` directly and keep only local IO mutation glue.
 - Current shell audit after this deletion is `prodTsShellCount=59`, `shellsWithProdImporters=58`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
+
+# 2026-07-09: Provider protocol error TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/provider-protocol-error.ts` is physically deleted. Do not restore the facade; `responses-openai-bridge.ts` should call Rust native `buildProviderProtocolErrorWithNative` directly and construct only the JS `Error` carrier locally.
+- Current shell audit after this deletion is `prodTsShellCount=58`, `shellsWithProdImporters=57`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.

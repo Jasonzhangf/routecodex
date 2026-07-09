@@ -15,7 +15,6 @@ import {
 } from '../shared/responses-tool-utils.js';
 import { mapChatToolsToBridge } from '../shared/tool-mapping.js';
 import type { BridgeToolDefinition, ChatToolDefinition } from '../shared/tool-mapping.js';
-import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { ensureRuntimeMetadata } from '../runtime-metadata.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
@@ -30,7 +29,10 @@ import {
   resolveResponsesBridgeToolsWithNative,
   runBridgeActionPipelineWithNative
 } from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
-import { ensureBridgeInstructionsWithNative } from '../../native/router-hotpath/native-shared-conversion-semantics.js';
+import {
+  buildProviderProtocolErrorWithNative,
+  ensureBridgeInstructionsWithNative
+} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,
@@ -53,6 +55,7 @@ import {
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;
+type ProviderErrorCategory = 'EXTERNAL_ERROR' | 'TOOL_ERROR' | 'INTERNAL_ERROR';
 
 function isJsonObject(value: unknown): value is JsonObject {
   return isRecord(value);
@@ -144,6 +147,43 @@ function ensureBridgeInstructions(payload: Record<string, unknown>): string | un
   }
   const instructions = payload.instructions;
   return typeof instructions === 'string' && instructions.length ? instructions : undefined;
+}
+
+function createProviderProtocolError(message: string, options: {
+  code: string;
+  protocol?: string;
+  providerType?: string;
+  category?: ProviderErrorCategory;
+  details?: Record<string, unknown>;
+}): Error & {
+  code?: string;
+  protocol?: string;
+  providerType?: string;
+  category?: ProviderErrorCategory;
+  details?: Record<string, unknown>;
+} {
+  const native = buildProviderProtocolErrorWithNative({
+    message,
+    code: options.code,
+    protocol: options.protocol,
+    providerType: options.providerType,
+    category: options.category,
+    details: options.details
+  });
+  const error = new Error(message) as Error & {
+    code?: string;
+    protocol?: string;
+    providerType?: string;
+    category?: ProviderErrorCategory;
+    details?: Record<string, unknown>;
+  };
+  error.name = 'ProviderProtocolError';
+  error.code = options.code;
+  error.protocol = typeof native.protocol === 'string' ? native.protocol : options.protocol;
+  error.providerType = typeof native.providerType === 'string' ? native.providerType : options.providerType;
+  error.category = (native.category as ProviderErrorCategory) || options.category || 'EXTERNAL_ERROR';
+  error.details = (native.details as Record<string, unknown> | undefined) ?? options.details;
+  return error;
 }
 
 function readPreviousResponseIdFromChatSemantics(chat: Record<string, unknown>): string {
@@ -361,7 +401,7 @@ export function buildChatRequestFromResponses(
   }
   messages = appendLocalImageBlockOnLatestUserInputWithNative({ messages }).messages;
   if (!messages.length) {
-    throw new ProviderProtocolError('Responses payload produced no chat messages', {
+    throw createProviderProtocolError('Responses payload produced no chat messages', {
       code: 'MALFORMED_REQUEST',
       protocol: 'openai-responses',
       providerType: 'responses',
