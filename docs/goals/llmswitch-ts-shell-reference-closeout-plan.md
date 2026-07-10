@@ -812,3 +812,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Two assertions were narrowed back to the transport layer they actually cover: client-close destroys upstream during Responses SSE transport, and required_action client close must not become a transport error. Continuation persistence remains owned by Chat Process / bridge/Rust gates, not this handler SSE spec.
 - Exact file scan for root bridge paths, legacy loader helpers, and retired local helper symbols in the touched spec returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 24/24 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
+
+### 2026-07-11 direct passthrough routing mock helper residue removed
+
+- `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` no longer exposes the retired `resolveBaseDir` helper from its `routing-integrations.js` mock.
+- Production direct passthrough code imports concrete `routing-integrations.js` native helpers and does not consume `resolveBaseDir`; removing the mock field reduces legacy loader-helper surface without adding TS behavior.
+- Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
+- Verification passed: strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
+- Verification gap: `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` baseline is currently red before this edit (22/33 pass, 11 fail/time out), so this slice does not claim focused direct-passthrough behavior closure.
