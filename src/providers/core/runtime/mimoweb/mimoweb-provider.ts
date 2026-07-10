@@ -17,7 +17,7 @@ import type { MimoCookieAuth } from "./mimoweb-types.js";
 import { resolveModelId, callMimoWeb } from "./mimoweb-client.js";
 import { normalizeAnthropicToolDef, type AnthropicToolDef } from "./mimoweb-tool-guidance.js";
 import { serializeMessages } from "./mimoweb-serialize.js";
-import { normalizeAssistantTextToToolCallsJson } from "../../../../modules/llmswitch/bridge.js";
+import { normalizeAssistantTextToToolCallsJson } from "../../../../modules/llmswitch/bridge/native-exports.js";
 import { extractProviderRuntimeMetadata } from "../provider-runtime-metadata.js";
 
 type ContentBlock = {

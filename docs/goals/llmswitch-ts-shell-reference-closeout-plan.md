@@ -578,3 +578,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `src/server/utils/finish-reason.ts` and checked-in `src/server/utils/finish-reason.js` now import `deriveFinishReasonNative` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
 - This removes a production root-bridge dependency from server response closeout logging while keeping finish-reason derivation owned by the existing Rust/native helper.
 - Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused finish-reason Jest and architecture gates pass.
+
+### 2026-07-11 provider logger and mimoweb native helper imports narrowed
+
+- `src/debug/logger/provider-error.ts` now imports the `ProviderErrorEvent` type from `src/types/llmswitch-local-types.js` instead of the root bridge barrel.
+- `src/providers/core/runtime/mimoweb/mimoweb-provider.ts` now imports `normalizeAssistantTextToToolCallsJson` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel, keeping text tool-call harvest on the Rust/native helper.
+- `tests/providers/core/runtime/mimoweb-provider.unit.test.ts` now mocks the same narrow native-export facade and has a complete current provider-error-reporter mock surface for `BaseProvider` link-time validation.
+- Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused mimoweb Jest passes 9/9, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass.

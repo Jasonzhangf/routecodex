@@ -64,17 +64,13 @@ jest.unstable_mockModule('../../../../src/providers/core/runtime/mimoweb/mimoweb
 
 jest.unstable_mockModule('../../../../src/providers/core/utils/provider-error-reporter.js', () => ({
   emitProviderError: jest.fn(),
+  emitProviderErrorAndWait: jest.fn(),
+  emitProviderSuccessAndWait: jest.fn(),
   buildRuntimeFromProviderContext: jest.fn(() => ({ requestId: 'test-request' })),
   buildRuntimeFromCompatContext: jest.fn(() => ({ requestId: 'test-request' }))
 }));
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  getStatsCenterSafe: jest.fn(() => ({
-    recordProviderUsage: jest.fn()
-  })),
-  getProviderErrorCenter: jest.fn(async () => ({
-    emit: jest.fn()
-  })),
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   normalizeAssistantTextToToolCallsJson: mockNormalizeAssistantTextToToolCallsJson
 }));
 
