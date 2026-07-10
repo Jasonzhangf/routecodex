@@ -16,147 +16,18 @@ async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
-const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return undefined;
-  }
-  const record = body as Record<string, unknown>;
-  if (Array.isArray(record.choices)) {
-    const first = record.choices[0] as Record<string, unknown> | undefined;
-    return typeof first?.finish_reason === 'string' ? first.finish_reason : undefined;
-  }
-  if (record.status === 'requires_action' || record.required_action) {
-    return 'tool_calls';
-  }
-  if (
-    record.status === 'completed'
-    || (typeof record.output_text === 'string' && record.output_text.trim())
-    || (Array.isArray(record.output) && record.output.length > 0)
-  ) {
-    return 'stop';
-  }
-  return undefined;
-};
 
-const mockCreateChatJsonToSseConverterForHttp = async () => ({
-  convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
-    const response = payload && typeof payload === 'object'
-      ? payload
-      : { id: 'chat_resp_from_test', object: 'chat.completion', choices: [] };
-    const requestId = typeof options.requestId === 'string' ? options.requestId : 'req_test_chat_sse';
-    return Readable.from([
-      `data: ${JSON.stringify({
-        id: response.id ?? requestId,
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: (response as any).model ?? 'test-model',
-        choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
-      })}\n\n`,
-      `data: ${JSON.stringify({
-        id: response.id ?? requestId,
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: (response as any).model ?? 'test-model',
-        choices: Array.isArray((response as any).choices) ? (response as any).choices : []
-      })}\n\n`,
-      'data: [DONE]\n\n'
-    ]);
-  }
-});
-
-const mockBridgeModule = () => ({
-  convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder,
-  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
-  createChatJsonToSseConverterForHttp: mockCreateChatJsonToSseConverterForHttp,
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-  createResponsesJsonToSseConverter: async () => ({
-    convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
-      const response = payload && typeof payload === 'object'
-        ? payload
-        : { id: 'resp_from_test_converter', object: 'response', status: 'completed', output: [], output_text: '' };
-      const requestId = typeof options.requestId === 'string' ? options.requestId : 'req_test';
-      const terminalType = response.status === 'requires_action' ? 'response.required_action' : 'response.completed';
-      const terminalPayload =
-        response.status === 'requires_action'
-          ? { type: 'response.required_action', response, required_action: response.required_action }
-          : { type: 'response.completed', response };
-      return Readable.from([
-        `event: response.created\ndata: ${JSON.stringify({ type: 'response.created', response: { id: response.id ?? requestId, object: 'response', status: 'in_progress' } })}\n\n`,
-        `event: ${terminalType}\ndata: ${JSON.stringify(terminalPayload)}\n\n`,
-        `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`,
-      ]);
-    }
-  }),
-  deriveFinishReasonNative: mockDeriveFinishReasonNative,
-  updateResponsesContractProbeFromSseChunkNative: () => ({}),
-  buildResponsesTerminalSseFramesFromProbeNative: () => [],
-  requireCoreDist: () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
-    buildResponsesPayloadFromChatWithNative: () => ({
-      id: 'resp_from_native_chat_builder',
-      object: 'response',
-      status: 'completed',
-      output: [],
-      output_text: ''
-    })
-  }),
-  importCoreDist: async () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
-    buildResponsesPayloadFromChatWithNative: () => ({
-      id: 'resp_from_native_chat_builder',
-      object: 'response',
-      status: 'completed',
-      output: [],
-      output_text: ''
-    })
-  })
-});
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.ts', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
-  requireCoreDist: () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
-    buildResponsesPayloadFromChatWithNative: () => ({
-      id: 'resp_from_native_chat_builder',
-      object: 'response',
-      status: 'completed',
-      output: [],
-      output_text: ''
-    })
-  }),
-  importCoreDist: async (subpath: string) => {
-    void subpath;
-    return {};
-  },
-  resolveImplForSubpath: () => 'ts',
-}));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.ts', () => ({
-  requireCoreDist: () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload,
-    buildResponsesPayloadFromChatWithNative: () => ({
-      id: 'resp_from_native_chat_builder',
-      object: 'response',
-      status: 'completed',
-      output: [],
-      output_text: ''
-    })
-  }),
-  importCoreDist: async (subpath: string) => {
-    void subpath;
-    return {};
-  },
-  resolveImplForSubpath: () => 'ts',
-}));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
   convertProviderResponse: mockConvertProviderResponse
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.ts', () => ({
   convertProviderResponse: mockConvertProviderResponse
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
+  createSnapshotRecorder: mockCreateSnapshotRecorder
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.ts', () => ({
+  createSnapshotRecorder: mockCreateSnapshotRecorder
 }));
 
 const TEST_METADATA_WRITER = {
