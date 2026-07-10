@@ -665,3 +665,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - This follows the existing provider snapshot test pattern and removes one more test-only root bridge consumer while preserving the SSE error/close propagation assertions.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+
+### 2026-07-11 dual-port stopless routing import narrowed
+
+- `tests/server/handlers/responses-handler.servertool-stopless.dual-port.e2e.spec.ts` now imports `bootstrapVirtualRouterConfig` from `src/modules/llmswitch/bridge/routing-integrations.js` instead of the root bridge barrel.
+- This keeps VR bootstrap on the existing Rust/NAPI routing facade and removes one leaf test root bridge consumer without changing stopless/servertool behavior.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 3/3, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+- Boundary: `responses-handler.routing-empty-pool.spec.ts` and `responses-handler.provider-outbound-reasoning.blackbox.spec.ts` remain future candidates because focused runs expose pre-existing fixture contract gaps around `NativeHubPipelineTestWrapper` pathing and current Rust `metadataCenterSnapshot` requirements; they were restored and are not included in this passing slice.
