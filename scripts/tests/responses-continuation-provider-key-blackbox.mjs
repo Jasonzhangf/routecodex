@@ -96,7 +96,7 @@ async function runScenario({ sameProtocolBehavior, expectedSecondProvider, label
       const advance = await post(harness.baseUrl, { model: 'gpt-5.4', input: [{ role: 'user', content: [{ type: 'input_text', text: 'advance round robin' }] }], metadata: { sessionId }, stream: false });
       assert.equal(advance.status, 200, `${advance.text} hits=${JSON.stringify(hits)}`);
       assert.equal(hits[0]?.label, 'p1', `${label}: advance request should hit p1`);
-      const { captureResponsesRequestContextForRequest, recordResponsesResponseForRequest } = await import('../../dist/modules/llmswitch/bridge.js');
+      const { captureResponsesRequestContextForRequest, recordResponsesResponseForRequest } = await import('../../dist/modules/llmswitch/bridge/runtime-integrations.js');
       const seedRequestId = `seed-${label}-${Date.now()}`;
       await captureResponsesRequestContextForRequest({
         requestId: seedRequestId,
