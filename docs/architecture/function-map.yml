@@ -1307,6 +1307,41 @@ owners:
     notes:
       - "Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy."
       - "Retired TS `runtime/virtual-router-hit-log.ts` facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports."
+      - "Runtime route host-effects planning/finalization is Rust-owned; `routing-integrations.ts` may only call `planVirtualRouterRouteHostEffectsJson` / `finalizeVirtualRouterRouteHostEffectsJson`, apply returned `cleanedRequest`, and emit returned log lines."
+
+  - feature_id: vr.route_host_effects
+    status: active
+    summary: "Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust owner for Virtual Router route host-effects planning and finalization"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs
+    canonical_types:
+      - VirtualRouterRouteHostEffectsPlan
+    canonical_builders:
+      - plan_virtual_router_route_host_effects_json
+      - finalize_virtual_router_route_host_effects_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - docs/architecture
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    forbidden_paths:
+      - src/modules/llmswitch/bridge/virtual-router-hit-log.ts
+      - src/modules/llmswitch/core
+      - src/server/runtime/http-server
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "TS routing integrations may call native host-effects exports and emit returned strings; request-id/session/status-label decisions must remain in Rust."
 
   - feature_id: hub.pipeline_contract_surface
     status: active

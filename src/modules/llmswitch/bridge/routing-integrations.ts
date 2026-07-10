@@ -28,6 +28,10 @@ type NativeHubPipelineOrchestrationSemantics = {
   hubPipelineVirtualRouterMarkConcurrencyScopeIdleJson?: (handle: string, scopeKey: string) => void;
 };
 
+type VirtualRouterRouteHostEffectsPlan = AnyRecord & {
+  cleanedRequest?: unknown;
+};
+
 let cachedNativeHubPipelineOrchestrationSemantics:
   | NativeHubPipelineOrchestrationSemantics
   | null = null;
@@ -1025,140 +1029,23 @@ export function routeHubPipelineVirtualRouterNative(handle: string, request: Any
   const hubPipelineVirtualRouterRouteJson = requireNativeHubPipelineFn<
     (handle: string, requestJson: string, metadataJson: string) => string
   >('hubPipelineVirtualRouterRouteJson');
-  const routeHostEffects = createVirtualRouterRouteHostEffectsLocal({ request, metadata });
+  const routeHostEffectsPlan = planVirtualRouterRouteHostEffectsNative(request, metadata);
   const nativeMetadata = injectVirtualRouterRuntimeMetadataLocal(metadata);
   const raw = hubPipelineVirtualRouterRouteJson(handle, JSON.stringify(request), JSON.stringify(nativeMetadata));
   try {
     const parsed = JSON.parse(raw) as AnyRecord;
-    routeHostEffects.finalize(parsed as { target: AnyRecord; decision: AnyRecord });
+    finalizeVirtualRouterRouteHostEffectsNative(parsed, routeHostEffectsPlan);
+    const cleanedRequest = routeHostEffectsPlan.cleanedRequest;
+    if (cleanedRequest && typeof cleanedRequest === 'object' && !Array.isArray(cleanedRequest)) {
+      for (const key of Object.keys(request)) {
+        delete request[key];
+      }
+      Object.assign(request, cleanedRequest as AnyRecord);
+    }
     return parsed;
   } catch (error) {
     throw new Error(`[llmswitch-bridge] routeHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
   }
-}
-
-function parseRoutingInstructionKindsLocal(request: AnyRecord): string[] {
-  const parsed = parseNativeJsonResult(callNativeBindingFn('parseRoutingInstructionKindsJson', [
-    stringifyNativePayload('parseRoutingInstructionKindsJson', request ?? null),
-    stringifyNativePayload('parseRoutingInstructionKindsJson', {
-      rccUserDir: resolveRccUserDirForNativeRouting()
-    })
-  ]));
-  if (!Array.isArray(parsed) || !parsed.every((entry) => typeof entry === 'string')) {
-    throw new Error('[llmswitch-bridge] parseRoutingInstructionKindsJson returned invalid payload');
-  }
-  return parsed as string[];
-}
-
-function resolveStopMessageScopeLocal(metadata: AnyRecord): string | undefined {
-  const parsed = parseNativeJsonResult(callNativeBindingFn('resolveVirtualRouterStopMessageScopeJson', [
-    stringifyNativePayload('resolveVirtualRouterStopMessageScopeJson', metadata ?? null)
-  ]));
-  if (parsed === null || typeof parsed === 'undefined') {
-    return undefined;
-  }
-  if (typeof parsed === 'string' && parsed.trim()) {
-    return parsed.trim();
-  }
-  throw new Error('[llmswitch-bridge] resolveVirtualRouterStopMessageScopeJson returned invalid payload');
-}
-
-function buildStopMessageMarkerParseLogLocal(request: AnyRecord, metadata: AnyRecord): AnyRecord | null {
-  const parsedKinds = parseRoutingInstructionKindsLocal(request);
-  const stopScope = resolveStopMessageScopeLocal(metadata);
-  const raw = callNativeBindingFn('buildStopMessageMarkerParseLogJson', [
-    stringifyNativePayload('buildStopMessageMarkerParseLogJson', request ?? null),
-    stringifyNativePayload('buildStopMessageMarkerParseLogJson', metadata ?? null),
-    stringifyNativePayload('buildStopMessageMarkerParseLogJson', parsedKinds),
-    stopScope
-  ]);
-  const parsed = parseNativeJsonResult(raw);
-  if (parsed === null) {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] buildStopMessageMarkerParseLogJson returned invalid payload');
-  }
-  return parsed as AnyRecord;
-}
-
-function emitStopMessageMarkerParseLogLocal(log: AnyRecord | null): void {
-  callNativeBindingFn('emitStopMessageMarkerParseLogJson', [
-    log ? stringifyNativePayload('emitStopMessageMarkerParseLogJson', log) : undefined
-  ]);
-}
-
-function cleanStopMessageMarkersInPlaceLocal(request: AnyRecord): void {
-  const cleaned = parseNativeRecord('cleanStopMessageMarkersInPlaceJson', callNativeBindingFn('cleanStopMessageMarkersInPlaceJson', [
-    stringifyNativePayload('cleanStopMessageMarkersInPlaceJson', request ?? null)
-  ]));
-  for (const key of Object.keys(request)) {
-    delete request[key];
-  }
-  Object.assign(request, cleaned);
-}
-
-function resolveSessionLogColorKeyLocal(metadata: AnyRecord): string | undefined {
-  const parsed = parseNativeJsonResult(callNativeBindingFn('resolveSessionLogColorKeyJson', [
-    stringifyNativePayload('resolveSessionLogColorKeyJson', metadata ?? null)
-  ]));
-  return typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined;
-}
-
-function formatStopMessageStatusLabelLocal(scope: string | undefined): string {
-  const raw = callNativeBindingFn('formatStopMessageStatusLabelJson', [
-    undefined,
-    scope,
-    true
-  ]);
-  return typeof raw === 'string' ? raw : String(raw ?? '');
-}
-
-function emitVirtualRouterHitLogLocal(result: { target: AnyRecord; decision: AnyRecord }, options: {
-  requestId?: string;
-  sessionId?: string;
-  stopScope?: string;
-  forceStopStatusLabel?: boolean;
-}): void {
-  const decision = result.decision || {};
-  const target = result.target || {};
-  const providerKey = typeof decision.providerKey === 'string' && decision.providerKey
-    ? decision.providerKey
-    : target.providerKey;
-  const record = parseNativeRecord('createVirtualRouterHitRecordJson', callNativeBindingFn('createVirtualRouterHitRecordJson', [
-    stringifyNativePayload('createVirtualRouterHitRecordJson', {
-      requestId: options.requestId,
-      sessionId: options.sessionId,
-      routeName: decision.routeName,
-      poolId: decision.poolId,
-      providerKey,
-      modelId: target.modelId,
-      hitReason: decision.reasoning
-    })
-  ]));
-  const lineRaw = callNativeBindingFn('formatVirtualRouterHitJson', [
-    stringifyNativePayload('formatVirtualRouterHitJson', record),
-    undefined
-  ]);
-  const line = typeof lineRaw === 'string' ? lineRaw : String(lineRaw ?? '');
-  const forcedStopStatusLabel = options.forceStopStatusLabel
-    ? formatStopMessageStatusLabelLocal(options.stopScope)
-    : '';
-  console.log(forcedStopStatusLabel ? `${line} ${forcedStopStatusLabel}` : line);
-}
-
-function resolveVirtualRouterLogRequestIdLocal(metadata: AnyRecord): string | undefined {
-  for (const value of [
-    metadata.requestId,
-    metadata.clientRequestId,
-    metadata.inputRequestId,
-    metadata.groupRequestId
-  ]) {
-    if (typeof value === 'string' && value.trim() && !value.includes('unknown')) {
-      return value.trim();
-    }
-  }
-  return undefined;
 }
 
 function injectVirtualRouterRuntimeMetadataLocal(metadata: AnyRecord): AnyRecord {
@@ -1179,44 +1066,28 @@ function injectVirtualRouterRuntimeMetadataLocal(metadata: AnyRecord): AnyRecord
   };
 }
 
-function createVirtualRouterRouteHostEffectsLocal(args: {
-  request: AnyRecord;
-  metadata: AnyRecord;
-}): {
-  finalize: (result: { target: AnyRecord; decision: AnyRecord }) => void;
-} {
-  const parseLog = buildStopMessageMarkerParseLogLocal(args.request, args.metadata);
-  return {
-    finalize: (result) => {
-      emitStopMessageMarkerParseLogLocal(parseLog);
-      cleanStopMessageMarkersInPlaceLocal(args.request);
-      const stopScope = typeof parseLog?.stopScope === 'string' && parseLog.stopScope
-        ? parseLog.stopScope
-        : resolveStopMessageScopeLocal(args.metadata);
-      const stopMessageTypes = Array.isArray(parseLog?.stopMessageTypes)
-        ? parseLog.stopMessageTypes
-        : [];
-      const scopedTypes = Array.isArray(parseLog?.scopedTypes)
-        ? parseLog.scopedTypes
-        : [];
-      const forceStopStatusLabel = Boolean(
-        stopMessageTypes.length ||
-        scopedTypes.some((type) =>
-          type === 'stopMessageSet' || type === 'stopMessageMode' || type === 'stopMessageClear'
-        )
-      );
-      const rt = args.metadata.__rt;
-      const rtRecord = rt && typeof rt === 'object' && !Array.isArray(rt) ? rt as AnyRecord : undefined;
-      if (!rtRecord || rtRecord.disableVirtualRouterHitLog !== true) {
-        emitVirtualRouterHitLogLocal(result, {
-          requestId: resolveVirtualRouterLogRequestIdLocal(args.metadata),
-          sessionId: resolveSessionLogColorKeyLocal(args.metadata),
-          stopScope,
-          forceStopStatusLabel
-        });
-      }
-    }
-  };
+function planVirtualRouterRouteHostEffectsNative(request: AnyRecord, metadata: AnyRecord): VirtualRouterRouteHostEffectsPlan {
+  return parseNativeRecord(
+    'planVirtualRouterRouteHostEffectsJson',
+    callNativeBindingFn('planVirtualRouterRouteHostEffectsJson', [
+      stringifyNativePayload('planVirtualRouterRouteHostEffectsJson', request ?? null),
+      stringifyNativePayload('planVirtualRouterRouteHostEffectsJson', metadata ?? null),
+      resolveRccUserDirForNativeRouting()
+    ])
+  ) as VirtualRouterRouteHostEffectsPlan;
+}
+
+function finalizeVirtualRouterRouteHostEffectsNative(result: AnyRecord, plan: VirtualRouterRouteHostEffectsPlan): void {
+  const parsed = parseNativeJsonResult(callNativeBindingFn('finalizeVirtualRouterRouteHostEffectsJson', [
+    stringifyNativePayload('finalizeVirtualRouterRouteHostEffectsJson', { result, plan })
+  ]));
+  if (parsed === null || typeof parsed === 'undefined') {
+    return;
+  }
+  if (typeof parsed !== 'string') {
+    throw new Error('[llmswitch-bridge] finalizeVirtualRouterRouteHostEffectsJson returned invalid payload');
+  }
+  console.log(parsed);
 }
 
 export function diagnoseHubPipelineVirtualRouterNative(handle: string, request: AnyRecord, metadata: AnyRecord): AnyRecord {

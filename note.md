@@ -1,3 +1,12 @@
+# 2026-07-10: routing-integrations VR host-effects moved behind Rust plan/finalize
+
+- Scope: shrink `src/modules/llmswitch/bridge/routing-integrations.ts` by removing local VR route host-effects decisions.
+- Change: Rust `virtual_router_host_effects.rs` now exports `planVirtualRouterRouteHostEffectsJson` and `finalizeVirtualRouterRouteHostEffectsJson`; TS bridge only calls plan/finalize, applies returned `cleanedRequest`, and emits returned hit-log line.
+- Removed TS-local requestId/sessionId resolution, stop-message parse sequencing, marker cleanup decision, forced stop label decision, and hit-log record/format orchestration from routing-integrations.
+- Map/wiki updated with `vr.route_host_effects` so runtime edge points to Rust finalizer instead of deleted TS `emitVirtualRouterHitLogLocal`.
+- Verification PASS: Rust host-effects tests 3/3; focused Jest 229/229; native required exports 13/13; `build:native-hotpath`; root `tsc --noEmit`; `verify:llmswitch-core-tsc`; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:llmswitch-rustification-audit`; `verify:llmswitch-ts-shell-reference-audit`; `build:base`; touched `git diff --check`.
+- Boundary: no managed live restart/replay claimed; source/gate closeout only. Unrelated responses store/provider policy/package/build-info dirty files preserved.
+
 # 2026-07-10: Virtual router hit-log facade deletion slice
 
 - Scope: external reference contraction for `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`.

@@ -2144,3 +2144,10 @@
 - Tests that need removed Phase 3 behavior must use direct Rust/NAPI binding evidence under test helpers, as `servertool-cli-native-bridge.spec.ts` now does for `planStoplessCliProjectionContextJson`.
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks both `native-exports.ts` and `native-exports.js` against restoring the Phase 3 wrapper marker and representative deleted wrapper names.
 - Verification evidence for this closeout: `build:base`, `verify:servertool-rust-only`, strict llmswitch shell audit with `prodTsShellCount=0`, rustification/minimal TS audits, focused servertool/residue Jest 246/246, function-map/mainline/deleted-path/thin-wrapper/fallback gates, and `git diff --check` pass.
+
+# 2026-07-10: routing-integrations VR route host-effects are Rust-planned
+
+- `src/modules/llmswitch/bridge/routing-integrations.ts` must not restore local VR route host-effects decision helpers such as `createVirtualRouterRouteHostEffectsLocal`, `emitVirtualRouterHitLogLocal`, `resolveVirtualRouterLogRequestIdLocal`, or local `forceStopStatusLabel` calculation.
+- Runtime VR route host-effects are Rust-owned by `virtual_router_engine/virtual_router_host_effects.rs` through NAPI exports `planVirtualRouterRouteHostEffectsJson` and `finalizeVirtualRouterRouteHostEffectsJson`.
+- The TS bridge may only call the Rust plan before route, call the Rust finalizer after route, apply returned `cleanedRequest` to the original request object, and `console.log` the optional returned hit-log line.
+- `vr.route_host_effects` and the VR hit-log mainline point to the Rust finalizer; function-map/wiki gates lock this owner so stop-message parse logs, request/session id selection, hit-log record creation, line formatting, and forced stop-status labels do not return to TS bridge logic.

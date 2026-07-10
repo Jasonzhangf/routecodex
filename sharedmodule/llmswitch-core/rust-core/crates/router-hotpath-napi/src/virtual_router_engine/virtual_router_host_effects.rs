@@ -6,6 +6,12 @@
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 
+use crate::virtual_router_engine::instructions::{
+    parse_routing_instructions_from_request, with_rcc_user_dir_override,
+};
+
+// feature_id: vr.route_host_effects
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -37,6 +43,31 @@ pub struct StopMessageMarkerParseInput {
     pub rcc_user_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualRouterRouteHostEffectsPlan {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_log: Option<StopMessageMarkerParseLog>,
+    pub cleaned_request: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_scope: Option<String>,
+    pub force_stop_status_label: bool,
+    pub hit_log_disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VirtualRouterRouteHostEffectsFinalizeInput {
+    pub result: serde_json::Value,
+    pub plan: VirtualRouterRouteHostEffectsPlan,
+    #[serde(default)]
+    pub hit_log: Option<serde_json::Value>,
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -50,6 +81,69 @@ const STOP_MESSAGE_SCOPED_TYPES: &[&str] = &[
     "preCommandSet",
     "preCommandClear",
 ];
+
+fn metadata_center_snapshot_or_self(metadata: &serde_json::Value) -> &serde_json::Value {
+    metadata.get("metadataCenterSnapshot").unwrap_or(metadata)
+}
+
+fn resolve_stop_message_scope_from_metadata(metadata: &serde_json::Value) -> Option<String> {
+    crate::virtual_router_engine::routing::resolve_stop_message_scope(
+        metadata_center_snapshot_or_self(metadata),
+    )
+}
+
+fn resolve_session_log_color_key_from_metadata(metadata: &serde_json::Value) -> Option<String> {
+    crate::virtual_router_hit_log::resolve_session_log_color_key_json(metadata.to_string())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Option<String>>(&raw).ok())
+        .flatten()
+        .and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+}
+
+fn resolve_virtual_router_log_request_id(metadata: &serde_json::Value) -> Option<String> {
+    let record = metadata.as_object()?;
+    for key in [
+        "requestId",
+        "clientRequestId",
+        "inputRequestId",
+        "groupRequestId",
+    ] {
+        if let Some(value) = record.get(key).and_then(|v| v.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() && !trimmed.contains("unknown") {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_virtual_router_hit_log_disabled(metadata: &serde_json::Value) -> bool {
+    metadata
+        .get("__rt")
+        .and_then(|v| v.as_object())
+        .and_then(|rt| rt.get("disableVirtualRouterHitLog"))
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
+fn force_stop_status_label_from_log(log: Option<&StopMessageMarkerParseLog>) -> bool {
+    let Some(log) = log else {
+        return false;
+    };
+    !log.stop_message_types.is_empty()
+        || log
+            .scoped_types
+            .iter()
+            .any(|kind| STOP_MESSAGE_INSTRUCTION_TYPES.contains(&kind.as_str()))
+}
 
 // ---------------------------------------------------------------------------
 // Stop message marker parse
@@ -454,10 +548,123 @@ pub fn clean_stop_message_markers_in_place_json(request_json: String) -> napi::R
         .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
 }
 
+#[napi]
+pub fn plan_virtual_router_route_host_effects_json(
+    request_json: String,
+    metadata_json: String,
+    rcc_user_dir: Option<String>,
+) -> napi::Result<String> {
+    let request: serde_json::Value = serde_json::from_str(&request_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid request: {}", e)))?;
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid metadata: {}", e)))?;
+    let parsed = with_rcc_user_dir_override(rcc_user_dir.as_deref(), || {
+        parse_routing_instructions_from_request(&request)
+    })
+    .map_err(napi::Error::from_reason)?;
+    let parsed_kinds: Vec<String> = parsed.into_iter().map(|entry| entry.kind).collect();
+    let stop_scope = resolve_stop_message_scope_from_metadata(&metadata);
+    let parse_log_raw = build_stop_message_marker_parse_log_json(
+        request_json,
+        metadata_json,
+        serde_json::to_string(&parsed_kinds)
+            .map_err(|e| napi::Error::from_reason(format!("serialize parsed kinds: {}", e)))?,
+        stop_scope.clone(),
+    )?;
+    let parse_log = if parse_log_raw == "null" {
+        None
+    } else {
+        Some(
+            serde_json::from_str::<StopMessageMarkerParseLog>(&parse_log_raw)
+                .map_err(|e| napi::Error::from_reason(format!("invalid parse log: {}", e)))?,
+        )
+    };
+    let mut cleaned_request = request;
+    clean_marker_syntax(&mut cleaned_request);
+    let plan = VirtualRouterRouteHostEffectsPlan {
+        stop_scope: parse_log
+            .as_ref()
+            .and_then(|log| log.stop_scope.clone())
+            .or(stop_scope),
+        force_stop_status_label: force_stop_status_label_from_log(parse_log.as_ref()),
+        hit_log_disabled: is_virtual_router_hit_log_disabled(&metadata),
+        request_id: resolve_virtual_router_log_request_id(&metadata),
+        session_id: resolve_session_log_color_key_from_metadata(&metadata),
+        parse_log,
+        cleaned_request,
+    };
+    serde_json::to_string(&plan)
+        .map_err(|e| napi::Error::from_reason(format!("serialize host effects plan: {}", e)))
+}
+
+#[napi]
+pub fn finalize_virtual_router_route_host_effects_json(input_json: String) -> napi::Result<String> {
+    let input: VirtualRouterRouteHostEffectsFinalizeInput = serde_json::from_str(&input_json)
+        .map_err(|e| {
+            napi::Error::from_reason(format!("invalid host effects finalize input: {}", e))
+        })?;
+    let parse_log_json = input
+        .plan
+        .parse_log
+        .as_ref()
+        .map(|log| serde_json::to_string(log))
+        .transpose()
+        .map_err(|e| napi::Error::from_reason(format!("serialize parse log: {}", e)))?;
+    emit_stop_message_marker_parse_log_json(parse_log_json)?;
+    if input.plan.hit_log_disabled {
+        return Ok("null".to_string());
+    }
+    let target = input
+        .result
+        .get("target")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| napi::Error::from_reason("host effects result missing target"))?;
+    let decision = input
+        .result
+        .get("decision")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| napi::Error::from_reason("host effects result missing decision"))?;
+    let provider_key = decision
+        .get("providerKey")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .or_else(|| target.get("providerKey").and_then(|v| v.as_str()));
+    let hit_record_input = serde_json::json!({
+        "requestId": input.plan.request_id,
+        "sessionId": input.plan.session_id,
+        "routeName": decision.get("routeName").cloned().unwrap_or(serde_json::Value::Null),
+        "poolId": decision.get("poolId").cloned().unwrap_or(serde_json::Value::Null),
+        "providerKey": provider_key,
+        "modelId": target.get("modelId").cloned().unwrap_or(serde_json::Value::Null),
+        "hitReason": decision.get("reasoning").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    let record = crate::virtual_router_hit_log::create_virtual_router_hit_record_json(
+        hit_record_input.to_string(),
+    )?;
+    let line = crate::virtual_router_hit_log::format_virtual_router_hit_json(
+        record,
+        input.hit_log.map(|value| value.to_string()),
+    )?;
+    let forced_stop_status_label = if input.plan.force_stop_status_label {
+        format_stop_message_status_label_json(None, input.plan.stop_scope, true)?
+    } else {
+        String::new()
+    };
+    let output = if forced_stop_status_label.is_empty() {
+        line
+    } else {
+        format!("{} {}", line, forced_stop_status_label)
+    };
+    serde_json::to_string(&Some(output))
+        .map_err(|e| napi::Error::from_reason(format!("serialize host effects output: {}", e)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_stop_message_marker_parse_log_json, clean_stop_message_markers_in_place_json,
+        finalize_virtual_router_route_host_effects_json,
+        plan_virtual_router_route_host_effects_json,
     };
     use serde_json::{json, Value};
 
@@ -518,5 +725,53 @@ mod tests {
             "hello"
         );
         assert!(!raw.contains("<**"));
+    }
+
+    #[test]
+    fn route_host_effects_plan_and_finalize_own_hit_log_inputs() {
+        let request = json!({
+            "messages": [
+                { "role": "user", "content": "<**stopMessage:on,3**> hello" }
+            ]
+        });
+        let metadata = json!({
+            "requestId": "req-host-effects-rust",
+            "sessionId": "session-host-effects-rust"
+        });
+
+        let plan_raw = plan_virtual_router_route_host_effects_json(
+            request.to_string(),
+            metadata.to_string(),
+            None,
+        )
+        .expect("host effects plan");
+        let plan: Value = serde_json::from_str(&plan_raw).expect("parse host effects plan");
+
+        assert_eq!(plan["requestId"], "req-host-effects-rust");
+        assert_eq!(plan["sessionId"], "session-host-effects-rust");
+        assert_eq!(plan["forceStopStatusLabel"], true);
+        assert!(!plan["cleanedRequest"].to_string().contains("<**"));
+
+        let result = json!({
+            "target": { "providerKey": "cc.key1.gpt-5.5", "modelId": "gpt-5.5" },
+            "decision": {
+                "providerKey": "cc.key1.gpt-5.5",
+                "routeName": "thinking",
+                "poolId": "gateway-priority-5520-priority-thinking",
+                "reasoning": "thinking:user-input"
+            }
+        });
+        let output_raw = finalize_virtual_router_route_host_effects_json(
+            json!({ "result": result, "plan": plan }).to_string(),
+        )
+        .expect("finalize host effects");
+        let output: Option<String> = serde_json::from_str(&output_raw).expect("parse output");
+        let line = output.expect("hit log line");
+        assert!(line.contains("[virtual-router-hit]"));
+        assert!(line.contains("req=req-host-effects-rust"));
+        assert!(line.contains("sid=session-host-effects-rust"));
+        assert!(line.contains(
+            "[stopMessage:scope=session:session-host-effects-rust active=no state=cleared]"
+        ));
     }
 }

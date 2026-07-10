@@ -17,6 +17,7 @@ Feature scope: `vr.* / virtual_router.*`
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
 | `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability` |
 | `vr.hit_log_projection` | Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs` | `npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime` |
+| `vr.route_host_effects` | Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit` |
 | `virtual_router.primary_exhausted_to_default_pool` | primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run build:base` |
 | `vr.route_availability_floor` | route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-ci`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:vr-route-availability-default-floor` |
 | `vr.provider_forwarder_runtime` | ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-forwarder-runtime`<br/>`npm run verify:function-map-compile-gate` |
@@ -205,6 +206,48 @@ Required gates:
 Notes:
 - Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy.
 - Retired TS `runtime/virtual-router-hit-log.ts` facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports.
+- Runtime route host-effects planning/finalization is Rust-owned; `routing-integrations.ts` may only call `planVirtualRouterRouteHostEffectsJson` / `finalizeVirtualRouterRouteHostEffectsJson`, apply returned `cleanedRequest`, and emit returned log lines.
+
+## vr.route_host_effects
+
+Summary: Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs`
+Owner scope: file-scoped Rust owner for Virtual Router route host-effects planning and finalization
+
+Canonical types:
+- `VirtualRouterRouteHostEffectsPlan`
+
+Canonical builders:
+- `plan_virtual_router_route_host_effects_json`
+- `finalize_virtual_router_route_host_effects_json`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
+- `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
+- `src/modules/llmswitch/bridge/routing-integrations.ts`
+- `docs/architecture`
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+- `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+
+Forbidden paths:
+- `src/modules/llmswitch/bridge/virtual-router-hit-log.ts`
+- `src/modules/llmswitch/core`
+- `src/server/runtime/http-server`
+
+Required tests:
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+- `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+
+Required gates:
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:llmswitch-rustification-audit`
+
+Notes:
+- TS routing integrations may call native host-effects exports and emit returned strings; request-id/session/status-label decisions must remain in Rust.
 
 ## virtual_router.primary_exhausted_to_default_pool
 

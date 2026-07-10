@@ -3301,6 +3301,8 @@ describe('hub pipeline stage residue audit', () => {
       'resolveSessionColorStr',
       'resolveSessionLogColorKeyJson',
       'buildHitReasonJson',
+      'planVirtualRouterRouteHostEffectsJson',
+      'finalizeVirtualRouterRouteHostEffectsJson',
     ];
     const nativeSource = [
       fs.readFileSync(
@@ -3331,6 +3333,10 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local hit reason builder', pattern: /reasoning\.split\(['"]\|['"]\)|routeUsed === 'tools'|context:\$\{contextDetail\}/u },
       { label: 'local formatted line timestamp', pattern: /padStart\(2,\s*'0'\)|toLocaleTimeString/u },
       { label: 'local stopMessage label formatter', pattern: /stopMessage:\$\{parts\.join/u },
+      { label: 'local route host-effects planner', pattern: /function createVirtualRouterRouteHostEffectsLocal/u },
+      { label: 'local route hit-log emitter', pattern: /function emitVirtualRouterHitLogLocal/u },
+      { label: 'local route hit-log request id resolver', pattern: /function resolveVirtualRouterLogRequestIdLocal/u },
+      { label: 'local route stop label force decision', pattern: /forceStopStatusLabel\s*=\s*Boolean/u },
     ];
     const scannedFiles = [
       'src/utils/session-log-color.ts',

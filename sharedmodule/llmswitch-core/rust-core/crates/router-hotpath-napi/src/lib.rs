@@ -3379,6 +3379,26 @@ pub fn clean_stop_message_markers_in_place_json_bridge(
     crate::virtual_router_engine::virtual_router_host_effects::clean_stop_message_markers_in_place_json(request_json)
 }
 
+#[napi(js_name = "planVirtualRouterRouteHostEffectsJson")]
+pub fn plan_virtual_router_route_host_effects_json_bridge(
+    request_json: String,
+    metadata_json: String,
+    rcc_user_dir: Option<String>,
+) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::plan_virtual_router_route_host_effects_json(
+        request_json,
+        metadata_json,
+        rcc_user_dir,
+    )
+}
+
+#[napi(js_name = "finalizeVirtualRouterRouteHostEffectsJson")]
+pub fn finalize_virtual_router_route_host_effects_json_bridge(
+    input_json: String,
+) -> napi::Result<String> {
+    crate::virtual_router_engine::virtual_router_host_effects::finalize_virtual_router_route_host_effects_json(input_json)
+}
+
 #[napi(js_name = "createVirtualRouterHitRecordJson")]
 pub fn create_virtual_router_hit_record_json_bridge(input_json: String) -> napi::Result<String> {
     crate::virtual_router_hit_log::create_virtual_router_hit_record_json(input_json)
