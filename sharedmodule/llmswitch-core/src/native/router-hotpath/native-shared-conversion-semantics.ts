@@ -461,7 +461,7 @@ export function cloneRuntimeMetadataWithNative(
 // re-implementation, no behavior change; thin re-export only.
 export {
   captureReqInboundResponsesContextSnapshotWithNative
-} from './native-hub-pipeline-req-inbound-semantics-tools.js';
+} from './native-hub-pipeline-req-inbound-semantics.js';
 // Reference only: the canonical builders `normalize_responses_input_items`,
 // `sanitize_format_envelope`, and `normalize_provider_protocol_token` are
 // owned by the Rust `hub_req_inbound_responses_context_capture` module.
@@ -4086,4 +4086,3 @@ export function mapChatToolsToAnthropicToolsWithNative(
     return fail(reason);
   }
 }
-

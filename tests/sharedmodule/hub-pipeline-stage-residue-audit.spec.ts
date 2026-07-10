@@ -3099,16 +3099,17 @@ describe('hub pipeline stage residue audit', () => {
       repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts'
     );
+    const toolsWrapperPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts'
+    );
     const source = fs.readFileSync(
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts'),
       'utf8'
     );
-    const toolsSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts'),
-      'utf8'
-    );
     const forbiddenPatterns = [
       { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-req-inbound-semantics-parsers/u },
+      { label: 'imports deleted tools facade', pattern: /native-hub-pipeline-req-inbound-semantics-tools/u },
       { label: 'snapshot object validation', pattern: /const snapshot = parsed\.snapshot/u },
       { label: 'payload object validation', pattern: /const payload = parsed\.payload/u },
       { label: 'snapshot array rejection', pattern: /Array\.isArray\(snapshot\)/u },
@@ -3116,10 +3117,11 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local snapshot payload rebuild', pattern: /return\s*\{\s*snapshot:[\s\S]{0,140}payload:/u },
     ];
     const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source) || pattern.test(toolsSource))
+      .filter(({ pattern }) => pattern.test(source))
       .map(({ label }) => label);
 
     expect(fs.existsSync(parserPath)).toBe(false);
+    expect(fs.existsSync(toolsWrapperPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 
@@ -3494,10 +3496,11 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFiles = [
       'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-req-inbound-semantic-lift.mjs',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-types.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
@@ -3710,7 +3713,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
     ];
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',

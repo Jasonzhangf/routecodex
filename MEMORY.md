@@ -2021,3 +2021,10 @@
 - Non-terminal CLI `summary` is also neutral `继续`; do not reintroduce state-judging summaries.
 - `stopreason=2` next-turn provider-facing user prompt must be the model-provided `next_step` itself. The system should not synthesize "suggested next step" text.
 - Verified on installed `0.90.3707`: `routecodex hook run reasoningStop` for no-schema, invalid-schema, and budget-exhausted all emit neutral `summary`/`continuationPrompt`; runtime `dist` grep has no terminal-state judgment wording.
+
+# 2026-07-10: Req inbound split native wrappers are retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.ts` and `native-hub-pipeline-req-inbound-semantics-tools.ts` are physically deleted. Do not restore them as production split wrapper shells.
+- Aggregate owner `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts` may carry only native binding/stringify/parse/fail-fast glue for req inbound helpers such as collected tool outputs, bridge tool mapping, context capture, tool-output snapshot, diagnostics, and shell-like tool-call normalization. Semantics remain Rust/NAPI truth.
+- Active production and test callers should import req inbound native helper exports from the aggregate owner; residue gates should assert the split paths remain absent.
+- Current shell audit after this deletion is `prodTsShellCount=18`, `shellsWithProdImporters=14`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.

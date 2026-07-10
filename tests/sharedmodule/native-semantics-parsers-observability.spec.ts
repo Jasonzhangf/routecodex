@@ -32,6 +32,10 @@ async function importWithNativeParseFailureMock<TModule>(
   return import(modulePath) as Promise<TModule>;
 }
 
+function warnCallsContain(warnSpy: jest.SpiedFunction<typeof console.warn>, expected: string): boolean {
+  return warnSpy.mock.calls.some((call) => String(call[0] ?? '').includes(expected));
+}
+
 describe('native semantics parser observability', () => {
   it('logs router hotpath analysis parser JSON failures and still returns null', () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -87,18 +91,18 @@ describe('native semantics parser observability', () => {
     expect(() => fs.statSync(retiredWrapperPath)).toThrow();
   });
 
-  it('logs inbound/outbound parser JSON failures before fail-fasting native capability', async () => {
+  it('logs req inbound collected tool output parser JSON failures before fail-fasting native capability', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mod = await importWithNativeParseFailureMock<{
       collectToolOutputsWithNative: (payload: unknown) => Array<{ tool_call_id: string; call_id: string }>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-inbound-outbound-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
       'collectToolOutputsJson'
     );
 
     expect(() => mod.collectToolOutputsWithNative({})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseCollectedToolOutputs failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseCollectedToolOutputs parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -123,7 +127,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.normalizeHubEndpointWithNative('/v1/chat/completions')).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseString failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseString failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -148,23 +152,23 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.normalizeProviderProtocolTokenWithNative('openai-chat')).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseOptionalString parse failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseOptionalString parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
 
-  it('logs req inbound tools parser JSON failures before fail-fasting native capability', async () => {
+  it('logs req inbound tool parser JSON failures before fail-fasting native capability', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const mod = await importWithNativeParseFailureMock<{
       mapReqInboundBridgeToolsToChatWithNative: (rawTools: unknown) => Array<Record<string, unknown>>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-tools.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
       'mapBridgeToolsToChatJson'
     );
 
     expect(() => mod.mapReqInboundBridgeToolsToChatWithNative([])).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseArray parse failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseArray parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -180,7 +184,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.normalizeAliasMapWithNative({})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseAliasMap parse failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseAliasMap parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -196,7 +200,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.evaluateResponsesHostPolicyWithNative({})).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseResponsesHostPolicyResult parse failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseResponsesHostPolicyResult parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -212,7 +216,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.resolveBridgePolicyWithNative({ protocol: 'openai-chat' })).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('resolveBridgePolicyWithNative parse failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'resolveBridgePolicyWithNative parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
@@ -228,7 +232,7 @@ describe('native semantics parser observability', () => {
     );
 
     expect(() => mod.sanitizeFormatEnvelopeWithNative({ envelope: {} })).toThrow('native-fail:invalid payload');
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parseRecord failed (non-blocking)');
+    expect(warnCallsContain(warnSpy, 'parseRecord failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });
