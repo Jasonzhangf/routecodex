@@ -39,18 +39,6 @@ describe("llmswitch bridge runtime-integrations responses store authority", () =
       startPruneTimer: () => {},
     };
 
-    jest.unstable_mockModule(
-      "../../../../src/modules/llmswitch/bridge/module-loader.js",
-      () => ({
-        requireCoreDist: jest.fn((subpath: string) => {
-          throw new Error(`unexpected requireCoreDist: ${subpath}`);
-        }),
-        importCoreDist: jest.fn(async (subpath: string) => {
-          throw new Error(`unexpected importCoreDist: ${subpath}`);
-        }),
-      }),
-    );
-
     const mod =
       await import("../../../../src/modules/llmswitch/bridge/runtime-integrations.js");
 

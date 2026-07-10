@@ -220,6 +220,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks the old wrapper path as physically absent.
 - Function map and verification map now record that the stop-message auto wrapper must stay deleted and that direct NAPI tests are evidence, not runtime TS ownership.
 
+### 2026-07-10 runtime-integrations test loader mock removed
+
+- Removed the stale `src/modules/llmswitch/bridge/module-loader.js` mock from `tests/modules/llmswitch/bridge/runtime-integrations.responses-store.spec.ts`.
+- The spec now proves `runtime-integrations.ts` reaches the authoritative process-global Responses conversation store without preserving `requireCoreDist` / `importCoreDist` as a test consumer.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `module-loader` / `resolveImplForSubpath` / `resolveBaseDir` in that spec now returns zero matches.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.
