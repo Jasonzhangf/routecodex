@@ -2028,3 +2028,9 @@
 - Aggregate owner `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts` may carry only native binding/stringify/parse/fail-fast glue for req inbound helpers such as collected tool outputs, bridge tool mapping, context capture, tool-output snapshot, diagnostics, and shell-like tool-call normalization. Semantics remain Rust/NAPI truth.
 - Active production and test callers should import req inbound native helper exports from the aggregate owner; residue gates should assert the split paths remain absent.
 - Current shell audit after this deletion is `prodTsShellCount=18`, `shellsWithProdImporters=14`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.
+
+# 2026-07-10: Edge-stage native wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts` is physically deleted. Do not restore it as a production split wrapper for format envelope or SSE stream mode glue.
+- `native-hub-pipeline-req-inbound-semantics.ts` is the aggregate owner for the remaining native-call/stringify/parse/fail-fast glue: `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, and `processSseStreamWithNative`. Runtime semantics remain Rust/NAPI truth.
+- Current shell audit after this deletion is `prodTsShellCount=17`, `shellsWithProdImporters=13`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.

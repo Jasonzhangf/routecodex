@@ -227,12 +227,12 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       sanitizeFormatEnvelopeWithNative: <T>(candidate: T) => T;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.js',
+      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
       'sanitizeFormatEnvelopeJson'
     );
 
     expect(() => mod.sanitizeFormatEnvelopeWithNative({ envelope: {} })).toThrow('native-fail:invalid payload');
-    expect(warnCallsContain(warnSpy, 'parseRecord failed (non-blocking)')).toBe(true);
+    expect(warnCallsContain(warnSpy, 'parseRecord parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });

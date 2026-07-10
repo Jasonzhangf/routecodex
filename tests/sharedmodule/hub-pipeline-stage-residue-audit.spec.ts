@@ -2859,6 +2859,10 @@ describe('hub pipeline stage residue audit', () => {
 
   it('retired edge-stage public wrappers must stay deleted from TS and Rust exports', () => {
     const repoRoot = process.cwd();
+    const retiredWrapperPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts'
+    );
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
@@ -2910,6 +2914,7 @@ describe('hub pipeline stage residue audit', () => {
       }
     }
 
+    expect(fs.existsSync(retiredWrapperPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

@@ -3,7 +3,6 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-loader.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import { sanitizeFormatEnvelopeWithNative } from './native-hub-pipeline-edge-stage-semantics.js';
 import { formatUnknownError } from './native-shared-conversion-semantics-core.js';
 
 
@@ -218,6 +217,118 @@ export function sanitizeReqInboundFormatEnvelopeWithNative<T>(
   candidate: unknown
 ): T {
   return sanitizeFormatEnvelopeWithNative(candidate) as T;
+}
+
+export function sanitizeFormatEnvelopeWithNative<T>(candidate: T): T {
+  const capability = 'sanitizeFormatEnvelopeJson';
+  const fail = (reason?: string) => failNativeRequired<T>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction('sanitizeFormatEnvelopeJson');
+  if (!fn) {
+    return fail();
+  }
+  const candidateJson = safeStringify(candidate);
+  if (!candidateJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(candidateJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    return (parsed as unknown as T) ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function parseSseStreamModeBoolean(raw: string): boolean | null {
+  const parsed = parseJson('parseSseStreamModeBoolean', raw);
+  if (parsed === JSON_PARSE_FAILED) {
+    return null;
+  }
+  return typeof parsed === 'boolean' ? parsed : null;
+}
+
+export function resolveSseStreamModeWithNative(
+  wantsStream: boolean,
+  clientProtocol: string
+): boolean {
+  const capability = 'resolveSseStreamModeJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<boolean>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction('resolveSseStreamModeJson');
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(Boolean(wantsStream), String(clientProtocol || ''));
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseSseStreamModeBoolean(raw);
+    return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function processSseStreamWithNative(input: {
+  clientPayload: Record<string, unknown>;
+  clientProtocol: string;
+  requestId: string;
+  wantsStream: boolean;
+}): { shouldStream: boolean; payload: Record<string, unknown> } {
+  const capability = 'processSseStreamJson';
+  const fail = (reason?: string) =>
+    failNativeRequired<{ shouldStream: boolean; payload: Record<string, unknown> }>(
+      capability,
+      reason
+    );
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(input);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return fail('invalid payload');
+    }
+    const shouldStream = parsed.shouldStream;
+    const clientPayloadOut = parsed.payload;
+    if (typeof shouldStream !== 'boolean') {
+      return fail('invalid shouldStream');
+    }
+    if (!clientPayloadOut || typeof clientPayloadOut !== 'object' || Array.isArray(clientPayloadOut)) {
+      return fail('invalid payload object');
+    }
+    return {
+      shouldStream,
+      payload: clientPayloadOut as Record<string, unknown>
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
 }
 
 export function normalizeProviderProtocolTokenWithNative(
