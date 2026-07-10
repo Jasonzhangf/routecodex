@@ -506,3 +506,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/handler-response-sse-upstream-incomplete.regression.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or declares legacy `importCoreDist` / `requireCoreDist` projection helpers.
 - The regression now exercises the real current response/SSE facade/native path for incomplete and split-terminal SSE closeout while keeping only snapshot writer disabled for IO isolation.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.
+
+### 2026-07-11 write-after-end broad bridge mock removed
+
+- `tests/server/handlers/handler-response-sse-write-after-end.regression.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or declares legacy `importCoreDist` / `requireCoreDist` projection helpers.
+- The regression now exercises the real current response/SSE facade/native path for closed-client and late-upstream SSE writes while keeping only snapshot writer disabled for IO isolation.
+- Removed the stale `requires_action` output assertion that was only true under the deleted mock; this file now locks transport no-uncaught behavior and does not claim SSE/handler ownership of required_action semantics.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.

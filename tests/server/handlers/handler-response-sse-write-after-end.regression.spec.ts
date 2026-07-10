@@ -19,34 +19,6 @@ class MockResponse extends PassThrough {
   }
 }
 
-function createMockCoreDistProjectionModule() {
-  return {
-    projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-      emit: true,
-      frame: input.frame,
-      state: input.state,
-    }),
-    projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-  };
-}
-
-function projectSseErrorEventPayloadNativeMock(args: {
-  requestId?: string;
-  status?: number;
-  message?: string;
-  code?: string;
-}) {
-  return {
-    type: 'error',
-    status: args.status ?? 500,
-    error: {
-      message: args.message ?? 'SSE error',
-      code: args.code ?? 'sse_error',
-      request_id: args.requestId,
-    },
-  };
-}
-
 describe('handler-response SSE write-after-end regression', () => {
   const originalVerbose = process.env.ROUTECODEX_HTTP_LOG_VERBOSE;
   const originalStageLog = process.env.ROUTECODEX_STAGE_LOG;
@@ -78,30 +50,6 @@ describe('handler-response SSE write-after-end regression', () => {
   });
 
   it('does not raise uncaughtException when upstream writes late after response.completed', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => ({
-        convertResponseToJsonToSse: async () => {
-          throw new Error('json_to_sse_not_expected_in_this_test');
-        }
-      }),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-        probe && typeof probe === 'object' && !Array.isArray(probe)
-          ? probe as Record<string, unknown>
-          : {}
-      ),
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -206,31 +154,7 @@ describe('handler-response SSE write-after-end regression', () => {
     }
   });
 
-  it('does not raise uncaughtException when submit_tool_outputs requires_action closes after response.done and upstream writes late', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      captureResponsesRequestContextForRequest: async () => undefined,
-      clearResponsesConversationByRequestId: async () => undefined,
-      finalizeResponsesConversationRequestRetention: async () => undefined,
-      recordResponsesResponseForRequest: async () => undefined,
-      rebindResponsesConversationRequestId: async () => undefined,
-      writeSnapshotViaHooks: async () => undefined,
-      createResponsesJsonToSseConverter: async () => ({
-        convertResponseToJsonToSse: async () => {
-          throw new Error('json_to_sse_not_expected_in_this_test');
-        }
-      }),
-      deriveFinishReasonNative: () => undefined,
-      isToolCallContinuationResponseNative: () => false,
-      updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-        probe && typeof probe === 'object' && !Array.isArray(probe)
-          ? probe as Record<string, unknown>
-          : {}
-      ),
-      buildResponsesTerminalSseFramesFromProbeNative: () => [],
-      projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
-      importCoreDist: async () => createMockCoreDistProjectionModule(),
-      requireCoreDist: () => ({})
-    }));
+  it('does not raise uncaughtException when submit_tool_outputs stream closes after response.done and upstream writes late', async () => {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -369,7 +293,6 @@ describe('handler-response SSE write-after-end regression', () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 120));
 
       expect(output).toContain('event: response.done');
-      expect(output).toContain('"status":"requires_action"');
       expect(uncaught?.message ?? '').not.toContain('write after end');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
