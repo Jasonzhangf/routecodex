@@ -525,3 +525,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/responses-handler.request-timeout.blackbox.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or old handler-facing bridge helpers.
 - The blackbox now exercises the real current request/response/SSE facade/native path for Responses request timeout and fast-stream completion while keeping only snapshot writer disabled for IO isolation.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.
+
+### 2026-07-11 request-start-log broad bridge mock removed
+
+- `tests/server/handlers/responses-handler.request-start-log.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or declares the local `readSessionToken` helper solely for that mock.
+- The request-start logging spec still uses its local `responses-request-bridge.js` mock for handler log/session-color coverage, but now lets response dispatch use the real current response/SSE facade/native path.
+- The local request bridge mock now includes current `requestContext.context.toolsRaw` shape so the spec does not rely on response projection failure side effects.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.

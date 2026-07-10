@@ -1,31 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-function readSessionToken(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record?.[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
-  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-  convertProviderResponse: jest.fn(async (value) => value),
-  createSnapshotRecorder: jest.fn(async () => ({ record: jest.fn() })),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => ({
-    ...(readSessionToken(meta, ['sessionId', 'session_id']) ? { sessionId: readSessionToken(meta, ['sessionId', 'session_id']) } : {}),
-    ...(readSessionToken(meta, ['conversationId', 'conversation_id']) ? { conversationId: readSessionToken(meta, ['conversationId', 'conversation_id']) } : {})
-  }),
-  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
-  recordResponsesResponseForRequest: jest.fn(async () => undefined),
-  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-}));
-
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', () => ({
   buildResponsesConversationPortScopeForHttp: jest.fn(() => ({})),
   buildResponsesPipelineMetadataForHttp: jest.fn(() => ({})),
@@ -79,7 +53,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-reques
     return {
       kind: 'ok',
       payload: args.payload,
-      requestContext: { payload: args.payload, context: { input: [] } },
+      requestContext: { payload: args.payload, context: { input: [], toolsRaw: [] } },
       pipelineEntryEndpoint: args.entryEndpoint,
       isSubmitToolOutputs: false,
       plannedEntryMode: 'none',
