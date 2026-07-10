@@ -572,3 +572,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/debug/snapshot-default-raw-port-contract.spec.ts` now mocks `writeSnapshotViaHooks` through `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
 - Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; snapshot default raw/port focused Jest passes 5/5, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass.
 - Attempted direct passthrough handler focused Jest was stopped after no output from its specific session; it is not used as passing evidence for this slice and `responses-provider.ts` remains a dedicated future production-root-import closeout candidate.
+
+### 2026-07-11 finish-reason native export import narrowed
+
+- `src/server/utils/finish-reason.ts` and checked-in `src/server/utils/finish-reason.js` now import `deriveFinishReasonNative` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
+- This removes a production root-bridge dependency from server response closeout logging while keeping finish-reason derivation owned by the existing Rust/native helper.
+- Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused finish-reason Jest and architecture gates pass.
