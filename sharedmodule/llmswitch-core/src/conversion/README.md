@@ -4,10 +4,7 @@
 
 Hub Pipeline runtime semantics are Rust-owned. TypeScript under `src/conversion/` is limited to direct-owner bridge modules, generated/dist entry points, and narrow host glue around native Rust owners.
 
-The public conversion barrel file has been removed. Repository-live consumers must use direct owner paths or the root package exports:
-
-- `convertProviderResponse`
-- `runStandardChatRequestFilters`
+The public conversion barrel file has been removed. Repository-live consumers must use direct Rust/native owner paths or the root package exports.
 
 Other conversion modules must be imported from their direct owner path when they remain live. Do not restore a legacy umbrella export or `./conversion` package subpath for protocol pipelines, codec registries, schema validators, Hub types, response bridge helpers, or shared tool/text helpers.
 

@@ -383,12 +383,6 @@
       "topDir": "conversion"
     },
     {
-      "path": "sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts",
-      "loc": 79,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts",
       "loc": 220,
       "nativeLinked": false,
@@ -487,12 +481,6 @@
     {
       "path": "sharedmodule/llmswitch-core/src/conversion/shared/tooling.ts",
       "loc": 29,
-      "nativeLinked": true,
-      "topDir": "conversion"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts",
-      "loc": 467,
       "nativeLinked": true,
       "topDir": "conversion"
     },

@@ -1253,7 +1253,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(rootIndexSource).not.toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
     expect(rootIndexSource).not.toContain("export * from './telemetry/stats-center.js';");
     expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/virtual-router-contracts.js';");
-    expect(rootIndexSource).toContain("export { runStandardChatRequestFilters } from './conversion/shared/chat-request-filters.js';");
+    expect(rootIndexSource).not.toContain('runStandardChatRequestFilters');
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts'))).toBe(false);
     expect(rootIndexSource).toContain("export type * from './native/router-hotpath/virtual-router-contracts.js';");
     expect(findings).toEqual([]);
   });
@@ -1346,20 +1348,17 @@ describe('hub pipeline stage residue audit', () => {
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder.ts'),
       'utf8',
     );
-    const coverageScript = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-snapshot-hooks-utils-recorder.mjs'),
-      'utf8',
+    const retiredCoverageScript = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-snapshot-hooks-utils-recorder.mjs',
     );
     const findings = collectMatches(source, [
       { label: 'exports internal recorder options', pattern: /export\s+interface\s+SnapshotStageRecorderOptions\b/ },
       { label: 'exports internal recorder class', pattern: /export\s+class\s+SnapshotStageRecorder\b/ },
     ]);
 
-    if (/\bnew\s+SnapshotStageRecorder\b|snapshotRecorder\.SnapshotStageRecorder\b/.test(coverageScript)) {
-      findings.push('coverage script consumes internal SnapshotStageRecorder');
-    }
-
     expect(findings).toEqual([]);
+    expect(fs.existsSync(retiredCoverageScript)).toBe(false);
     expect(source).toContain('export async function createSnapshotRecorder');
   });
 
@@ -4168,29 +4167,16 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
-  it('shared openai message normalize must not inject MCP tools or swallow native failures in TS', () => {
+  it('shared openai message normalize and chat request filter facades must stay deleted', () => {
     const repoRoot = process.cwd();
     const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts');
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts'),
-      'utf8',
-    );
-    const findings = collectMatches(source, [
-      { label: 'imports MCP injection helper in TS normalize path', pattern: /injectMcpToolsForChat|mcp-injection/ },
-      { label: 'reads MCP env flags in TS normalize path', pattern: /ROUTECODEX_MCP_ENABLE|RCC_MCP_SERVERS|__rcc_disable_mcp_tools/ },
-      { label: 'discovers MCP servers from tool result text in TS', pattern: /list_mcp_resources|resourceTemplates|extractFromOutput/ },
-      { label: 'keeps non-blocking normalize logger', pattern: /logNormalizeNonBlocking|formatUnknownError/ },
-      { label: 'swallows native normalize failure', pattern: /catch\s*\(error\)\s*\{[\s\S]*?chat_messages\.normalize_native/ },
-      { label: 'maps messages in TS normalize path', pattern: /\.messages\s*=\s*[^;]*\.map\s*\(/ },
-      { label: 'maps tools in TS normalize path', pattern: /\.tools\s*=\s*[^;]*\.map\s*\(/ },
-      { label: 'calls per-message native wrapper from TS normalize path', pattern: /normalizeOpenaiMessageWithNative/ },
-      { label: 'calls per-tool native wrapper from TS normalize path', pattern: /normalizeOpenaiToolWithNative/ },
-      { label: 'calls message-array native wrapper from TS normalize path', pattern: /normalizeOpenaiChatMessagesWithNative/ },
-    ]);
-
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('normalizeOpenaiChatRequestWithNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts'),
+    )).toBe(false);
+    expect(fs.existsSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/snapshot-utils.ts'),
+    )).toBe(false);
   });
 
   it('HubPipeline runtime ingress hooks must not swallow native lifecycle failures', () => {
@@ -5138,10 +5124,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(existing).toEqual([]);
   });
 
-  it('shared normalize and responses bridge must not run TS tool-history inspectors', () => {
+  it('responses bridge must not run TS tool-history inspectors', () => {
     const repoRoot = process.cwd();
     const files = [
-      'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts',
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     ];
     const findings: string[] = [];
