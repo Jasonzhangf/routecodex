@@ -4,15 +4,6 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const mockConvertProviderResponse = jest.fn();
 
-const mockBridgeModule = () => ({
-  convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: async () => ({
-    record: async () => undefined,
-    flush: async () => undefined,
-  }),
-  deriveFinishReasonNative: () => undefined,
-});
-
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
 }));
@@ -22,8 +13,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-r
     flush: async () => undefined,
   }),
 }));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 async function loadConverter() {
   const mod = await import('../../../../../src/server/runtime/http-server/executor/provider-response-converter.js');
