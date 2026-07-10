@@ -1983,6 +1983,24 @@
 - Do not restore their dependency on the production `responses-openai-bridge` dist file; these scripts only need Rust native response mapping, not request bridge glue.
 - After this move, `responses-openai-bridge.ts` remains `prodImportRefs=0`; script text refs are down to 2 and both remaining refs need request-side bridge handling before deletion.
 
+# 2026-07-10: replay-responses-sse uses native Responses payload mapper
+
+- `scripts/replay-responses-sse.mjs` must use `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative` for Chat response -> Responses payload projection.
+- Do not restore its sharedmodule `dist/conversion/responses/responses-openai-bridge.js` import.
+- The remaining script dist bridge dependencies, `scripts/outbound-regression-codex-samples.mjs` and `scripts/responses-sse-capture.mjs`, require Chat->Responses request bridge semantics. Existing `runResponsesOpenaiRequestCodecJson` is the opposite direction (Responses->Chat) and is not an equivalent replacement.
+
+# 2026-07-10: metadata boundary test uses host native Responses mapper
+
+- `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts` must import `buildResponsesPayloadFromChatNative` from `src/modules/llmswitch/bridge/native-exports.js`, not from `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js`.
+- This test validates client metadata isolation through Rust native projection and does not need the production Responses bridge TS shell.
+
+# 2026-07-10: Production Responses OpenAI bridge is retired
+
+- `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts` is physically deleted from production source. Do not restore it as a public bridge, production helper, dist import target, or compatibility layer.
+- Chat -> Responses request building is Rust/NAPI-owned through `buildResponsesRequestFromChatJson` and host `buildResponsesRequestFromChatNative`; Responses -> Chat request adaptation remains Rust `responses_openai_codec.rs` / `convert_bridge_input_to_chat_messages`.
+- Tests that still need old deep bridge assertions must use test-only `tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts`; production source/scripts must use Rust/host native exports.
+- The direction lock remains: `runResponsesOpenaiRequestCodecJson` is Responses -> Chat and must not be used as a Chat -> Responses replacement.
+
 # 2026-07-09: Local shutdown requires caller provenance
 
 - `/shutdown` is lifecycle control-plane. Localhost alone is not enough authorization because a single accepted shutdown stops every listener in the managed multi-port process (`5520`, `10000`, `5555`, `4444`).

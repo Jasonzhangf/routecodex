@@ -2,7 +2,7 @@ import {
   buildChatRequestFromResponses,
   buildResponsesRequestFromChat,
   captureResponsesContext,
-} from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+} from '../sharedmodule/helpers/responses-openai-bridge-direct-native.js';
 
 type Obj = Record<string, any>;
 

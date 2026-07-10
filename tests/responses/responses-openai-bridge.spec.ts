@@ -15,7 +15,7 @@ jest.unstable_mockModule(
 );
 
 const { buildResponsesRequestFromChat, buildChatRequestFromResponses, captureResponsesContext } = await import(
-  '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js'
+  '../sharedmodule/helpers/responses-openai-bridge-direct-native.js'
 );
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {

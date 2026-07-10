@@ -194,3 +194,109 @@ Source/test/script import audit on 2026-07-07:
 - Gates pass with source/doc-only evidence.
 - Runtime-impacting changes are globally installed and live-verified.
 - Commit is scoped and does not include unrelated dirty worktree changes.
+
+## 2026-07-10 Addendum: Delete `responses-openai-bridge.ts`
+
+### Goal And Acceptance
+
+Physically delete `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts` by moving all remaining Responses bridge request/response semantics to Rust-owned NAPI exports and host native exports.
+
+Acceptance criteria:
+
+- `responses-openai-bridge.ts` is deleted from production source.
+- No active source/test/script imports `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js` or `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js`.
+- `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` shows no `responses-openai-bridge.ts` shell entry.
+- Rust/native gates and focused Responses bridge parity tests pass.
+
+### Current State
+
+As of 2026-07-10 audit:
+
+- `responses-openai-bridge.ts` has `prodImportRefs=0`.
+- Remaining references are tests/scripts/docs only.
+- Already migrated to native exports:
+  - `scripts/tests/exec-command-loop.mjs`
+  - `scripts/batch-toolcall-report.mjs`
+  - `scripts/responses-sse-replay-golden.mjs`
+  - `scripts/replay-responses-sse.mjs`
+  - `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts`
+- Remaining hard blockers need request-bridge semantics:
+  - `buildResponsesRequestFromChat`
+  - `captureResponsesContext`
+  - selected `buildChatRequestFromResponses` callers where context capture/continuation semantics are tested.
+
+Important direction lock:
+
+- Existing Rust `runResponsesOpenaiRequestCodecJson` / host `convertResponsesRequestToChatNative` is Responses request -> Chat request.
+- It is not a replacement for `buildResponsesRequestFromChat`, which is Chat request -> Responses request.
+- Do not reverse this direction to make tests pass.
+
+### Scope
+
+In scope:
+
+- Add Rust-owned Chat request -> Responses request builder export.
+- Add Rust-owned Responses context capture export if remaining tests/scripts need it.
+- Add host native exports in `src/modules/llmswitch/bridge/native-exports.ts`.
+- Migrate remaining scripts/tests to Rust/host native exports or test-only direct native helpers.
+- Delete the TS bridge and update residue gates/maps.
+
+Out of scope:
+
+- Provider runtime behavior changes.
+- Direct/relay routing policy changes.
+- Responses continuation store redesign unless needed only to remove this bridge.
+- Live server restart unless a runtime behavior path changes.
+
+### Technical Plan
+
+1. Rust export gap closure:
+   - Implement or expose `buildResponsesRequestFromChatJson` in the Rust owner that already owns Responses/OpenAI codec semantics.
+   - Implement or expose `captureResponsesContextJson` only if the remaining callers cannot be rewritten to an existing Rust context snapshot/export.
+   - Add required NAPI export names to `native-router-hotpath-required-exports.ts` gates.
+
+2. Host native export:
+   - Add `buildResponsesRequestFromChatNative` and, if needed, `captureResponsesContextNative` to `src/modules/llmswitch/bridge/native-exports.ts`.
+   - Keep host wrappers as JSON invocation/parse only; no TS semantic reconstruction.
+
+3. External reference migration:
+   - Low-risk first: `tests/sharedmodule/responses-bridge-closed-loop.ts` for payload/response projection.
+   - Then migrate request-side users:
+     - `scripts/outbound-regression-codex-samples.mjs`
+     - `scripts/responses-sse-capture.mjs`
+     - `scripts/tools/responses-provider-replay.mjs`
+   - Then migrate parity/red tests:
+     - `tests/red-tests/request_field_cross_protocol_equivalence_matrix.test.ts`
+     - `tests/responses/responses-openai-bridge.spec.ts`
+     - `tests/sharedmodule/responses-continuation-store.spec.ts`
+     - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts`
+
+4. Delete and gate:
+   - Delete `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`.
+   - Update `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` and red tests to require the file absent.
+   - Update `docs/architecture/function-map.yml`, `docs/architecture/verification-map.yml`, and `docs/architecture/mainline-call-map.yml` so request/response bridge owners point to Rust/host native exports, not the deleted TS bridge.
+
+### Verification Plan
+
+Minimum gates:
+
+- `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json`
+- `npm run verify:llmswitch-rustification-audit`
+- `npm run verify:llmswitch-minimal-ts-surface`
+- `npm run verify:llmswitch-core-tsc`
+- `npm run verify:function-map-compile-gate`
+- Focused Jest for migrated bridge tests/scripts.
+- Rust tests for the new NAPI request builder/context capture exports.
+
+Additional gates if touched paths require them:
+
+- `npm run verify:servertool-rust-only`
+- `npm run verify:architecture-fallback-denylist`
+- `npm run build:base`
+
+### Risks And Guardrails
+
+- The bridge contains both request and response direction helpers; migrate by direction and do not mix `Responses -> Chat` with `Chat -> Responses`.
+- Do not preserve the TS bridge as a hidden test helper under production source.
+- Test-only direct native helpers must live under `tests/`, not `sharedmodule/llmswitch-core/src`.
+- Do not stage unrelated dirty worktree files.

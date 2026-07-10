@@ -1014,10 +1014,10 @@ chains:
       - step_id: stl-06
         from_node: StoplessReq07ContinuationRestored
         to_node: StoplessReq08GuidanceRewritten
-        caller_symbol: buildChatRequestFromResponses
-        caller_file: sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts
-        callee_symbol: convertBridgeInputToChatMessages
-        callee_file: sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts
+        caller_symbol: run_responses_openai_request_codec_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+        callee_symbol: convert_bridge_input_to_chat_messages
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
         semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn, with legacy shell-projected `reasoningStop` / `reasoning_stop` history physically removed instead of replayed"

@@ -6,7 +6,7 @@ import {
   buildResponsesPayloadFromChat,
   buildResponsesRequestFromChat,
   captureResponsesContext
-} from '../../src/conversion/responses/responses-openai-bridge.js';
+} from '../../../../tests/sharedmodule/helpers/responses-openai-bridge-direct-native.js';
 import { normalizeChatRequest } from '../../src/conversion/shared/openai-message-normalize.js';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {

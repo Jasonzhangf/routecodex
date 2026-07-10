@@ -219,6 +219,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "extractExecuteBlocksFromTextJson",
   "extractExploredListDirectoryCallsFromTextJson",
   "evaluateResponsesHostPolicyJson",
+  "buildResponsesRequestFromChatJson",
   "enforceChatBudgetJson",
   "resolveBudgetForModelJson",
   "governResponseJson",

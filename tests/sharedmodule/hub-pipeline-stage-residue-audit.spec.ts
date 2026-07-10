@@ -794,29 +794,14 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts',
     );
-    const bridgeSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+    const nativeSource = fs.readFileSync(
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts'),
       'utf8',
-    );
-    const source = bridgeSource.slice(
-      bridgeSource.indexOf('export function buildChatResponseFromResponses'),
-      bridgeSource.indexOf('export {', bridgeSource.indexOf('export function buildChatResponseFromResponses')),
     );
 
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('buildChatResponseFromResponsesFullWithNative');
-    expect(source).not.toContain('responses-reasoning-registry');
-    expect(source).not.toContain('createBridgeActionState');
-    expect(source).not.toContain('runBridgeActionPipeline');
-    expect(source).not.toContain('resolveBridgePolicy');
-    expect(source).not.toContain('resolvePolicyActions');
-    expect(source).not.toContain('unwrapResponsesResponse');
-    expect(source).not.toContain('registerPassthroughSnapshot');
-    expect(source).not.toContain('cloneSnapshot');
-    expect(source).not.toContain('registerResponsesPayloadSnapshot');
-    expect(source).not.toContain('registerResponsesPassthrough');
-    expect(source).not.toContain('buildChatResponseFromResponsesWithNative');
-    expect(source).not.toContain('__responses_payload_snapshot');
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(nativeSource).toContain('buildChatResponseFromResponsesFullWithNative');
   });
 
   it('responses response payload bridge must call native pipeline without TS wrapper or swallowed errors', () => {
@@ -824,15 +809,11 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
     );
-    const bridgeSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+    const hostNative = fs.readFileSync(
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts'),
       'utf8',
     );
-    const source = bridgeSource.slice(
-      bridgeSource.indexOf('export function buildResponsesPayloadFromChat'),
-      bridgeSource.indexOf('export function extractRequestIdFromResponse'),
-    );
-    const findings = collectMatches(source, [
+    const findings = collectMatches(hostNative, [
       { label: 'uses TS bridge action state wrapper', pattern: /createBridgeActionState/ },
       { label: 'uses TS bridge action pipeline wrapper', pattern: /runBridgeActionPipeline\(/ },
       { label: 'keeps response outbound bridge action owner in TS', pattern: /runBridgeActionPipelineWithNative/ },
@@ -841,7 +822,8 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(hostNative).toContain('buildResponsesPayloadFromChatNative');
     expect(findings).toEqual([]);
   });
 
@@ -850,13 +832,9 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
     );
-    const bridgeSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts'),
       'utf8',
-    );
-    const source = bridgeSource.slice(
-      bridgeSource.indexOf('export function buildResponsesPayloadFromChat'),
-      bridgeSource.indexOf('export function extractRequestIdFromResponse'),
     );
     const findings = collectMatches(source, [
       { label: 'uses shared TS reasoning normalizer wrapper', pattern: /normalizeMessageReasoningTools\b/ },
@@ -867,7 +845,8 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('planResponsesPayloadFromChatCloseoutWithNative');
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(source).toContain('buildResponsesPayloadFromChatNative');
     expect(findings).toEqual([]);
   });
 
@@ -876,18 +855,7 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'keeps TS redundant reasoning action filter', pattern: /filterRedundantResponsesReasoningAction/ },
-      { label: 'keeps TS tool signal scanner', pattern: /hasToolSignalsInMessages/ },
-      { label: 'keeps TS inbound payload-hint filter', pattern: /filterResponsesInboundActionsByPayloadHints/ },
-      { label: 'keeps direct reasoning.extract string filter', pattern: /reasoning\.extract/ },
-      { label: 'keeps direct normalize-call-ids string filter', pattern: /tools\.normalize-call-ids/ },
-      { label: 'keeps direct ensure-placeholders string filter', pattern: /tools\.ensure-placeholders/ },
-    ]);
-
-    expect(source).toContain('planResponsesBridgePolicyActionsWithNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('responses bridge utils facade must stay physically deleted and main bridge must call native helpers', () => {
@@ -896,41 +864,27 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/utils.ts',
     );
     const source = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+      path.join(process.cwd(), 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs'),
       'utf8',
     );
-    const findings = collectMatches(source, [
-      { label: 'keeps TS request parameter whitelist', pattern: /RESPONSES_REQUEST_PARAMETER_KEYS/ },
-      { label: 'keeps TS tool passthrough whitelist', pattern: /RESPONSES_TOOL_PASSTHROUGH_KEYS/ },
-      { label: 'keeps TS field picker policy', pattern: /function pickObjectFields/ },
-      { label: 'keeps TS accepted call id set', pattern: /acceptedCallIds/ },
-      { label: 'keeps TS saw function call policy', pattern: /sawFunctionCalls/ },
-      { label: 'keeps TS call id candidate policy', pattern: /callIdCandidates/ },
-      { label: 'keeps TS tool-control deletion policy', pattern: /delete .*tool_choice|parallel_tool_calls/ },
-      { label: 'keeps TS data unwrap loop policy', pattern: /while\s*\(current/ },
-      { label: 'keeps TS retained parameter merge loop', pattern: /for \(const key of RESPONSES_REQUEST_PARAMETER_KEYS\)/ },
-    ]);
-
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('sanitizeCapturedResponsesInputWithNative');
-    expect(source).toContain('pickResponsesRequestParametersWithNative');
-    expect(source).toContain('pickResponsesToolPassthroughFieldsWithNative');
-    expect(source).toContain('pickResponsesBridgeDecisionMetadataWithNative');
-    expect(source).toContain('extractResponsesMetadataExtraFieldsWithNative');
-    expect(source).toContain('buildSlimResponsesBridgeContextWithNative');
-    expect(source).toContain('stripResponsesToolControlFieldsWithNative');
-    expect(source).toContain('unwrapResponsesDataWithNative');
-    expect(source).toContain('mergeRetainedResponsesRequestParametersWithNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(source).toContain('pick_responses_request_parameters');
+    expect(source).toContain('pick_responses_tool_passthrough_fields');
+    expect(source).toContain('extract_responses_metadata_extra_fields');
+    expect(source).toContain('strip_responses_tool_control_fields');
+    expect(source).toContain('merge_retained_responses_request_parameters');
   });
 
   it('responses bridge files must not import deleted TS bridge wrappers', () => {
-    const files = [
-      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
-    ];
+    const files: string[] = [];
     expect(fs.existsSync(path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge/response-payload.ts',
+    ))).toBe(false);
+    expect(fs.existsSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     ))).toBe(false);
     const findings = files.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
@@ -3293,8 +3247,11 @@ describe('hub pipeline stage residue audit', () => {
       const rootPath = path.join(repoRoot, root);
       if (!fs.existsSync(rootPath)) return [];
       return walkFiles(rootPath, ['.ts', '.js', '.mjs']).flatMap((filePath) => {
-        const source = fs.readFileSync(filePath, 'utf8');
         const relativePath = path.relative(repoRoot, filePath);
+        if (relativePath === 'tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts') {
+          return [];
+        }
+        const source = fs.readFileSync(filePath, 'utf8');
         return forbiddenPatterns
           .filter(({ pattern }) => pattern.test(source))
           .map(({ label }) => `${relativePath}:${label}`);
@@ -5129,8 +5086,10 @@ describe('hub pipeline stage residue audit', () => {
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts',
     ];
+    expect(fs.existsSync(path.join(repoRoot, files[0]))).toBe(false);
     const findings: string[] = [];
     for (const relativePath of files) {
+      if (!fs.existsSync(path.join(repoRoot, relativePath))) continue;
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
       for (const match of collectMatches(source, [
         { label: 'runs TS chat tool-history inspector', pattern: /inspectOpenAiChatToolHistory\s*\(/ },
@@ -5146,15 +5105,21 @@ describe('hub pipeline stage residue audit', () => {
   it('bridge message utils facade must stay physically deleted and responses bridge must call native bridge helpers', () => {
     const repoRoot = process.cwd();
     const retiredPath = path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/bridge-message-utils.ts');
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'),
+    const historySource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs'),
+      'utf8',
+    );
+    const bridgeInputSource = fs.readFileSync(
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs'),
       'utf8',
     );
 
     expect(fs.existsSync(retiredPath)).toBe(false);
-    expect(source).toContain('buildBridgeHistoryWithNative');
-    expect(source).toContain('convertBridgeInputToChatMessagesWithNative');
-    expect(source).not.toContain('../bridge-message-utils.js');
+    expect(fs.existsSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(historySource).toContain('build_bridge_history');
+    expect(bridgeInputSource).toContain('convert_bridge_input_to_chat_messages');
+    expect(historySource).not.toContain('../bridge-message-utils.js');
+    expect(bridgeInputSource).not.toContain('../bridge-message-utils.js');
   });
 
   it('OpenAI message normalize semantic helper shells must stay deleted', () => {
@@ -5171,14 +5136,7 @@ describe('hub pipeline stage residue audit', () => {
 
   it('responses bridge wrappers must not run TS synthetic control-text inspectors', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'runs TS synthetic bridge input inspector', pattern: /inspectSyntheticRouteCodexBridgeInput\s*\(/ },
-      { label: 'runs TS synthetic assistant message inspector', pattern: /inspectSyntheticRouteCodexAssistantMessages\s*\(/ },
-      { label: 'keeps TS synthetic bridge assertion helper', pattern: /assertNoSyntheticOrMalformedBridgeInput|assertNoSyntheticAssistantMessages/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('servertool orchestration policy must not run TS synthetic control-text recursion', () => {

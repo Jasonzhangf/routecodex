@@ -2043,7 +2043,7 @@ describe("sendPipelineResponse responses store integration", () => {
       });
 
       const bridge =
-        await import("../../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js");
+        await import("../../sharedmodule/helpers/responses-openai-bridge-direct-native.js");
       const ctx = bridge.captureResponsesContext(
         resumed.payload as Record<string, unknown>,
         {
@@ -2081,7 +2081,7 @@ describe("sendPipelineResponse responses store integration", () => {
 
   it("uses resume fullInput semantics to preserve assistant tool_calls before tool outputs", async () => {
     const bridge =
-      await import("../../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js");
+      await import("../../sharedmodule/helpers/responses-openai-bridge-direct-native.js");
 
     const payload = {
       model: "gpt-5.4",

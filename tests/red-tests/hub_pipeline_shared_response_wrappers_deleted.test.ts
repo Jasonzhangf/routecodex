@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const repoRoot = process.cwd();
@@ -46,14 +46,13 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   });
 
   it('keeps zero-consumer responses tool utility wrappers deleted', () => {
-    const bridge = read('sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts')).toThrow();
     expect(() => read('sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs')).toThrow();
-    expect(bridge).toContain('createToolCallIdTransformerWithNative');
-    expect(bridge).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
-    expect(bridge).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
-    expect(bridge).not.toContain('normalizeResponsesToolCallIdsWithNative');
-    expect(bridge).not.toContain('resolveToolCallIdStyleWithNative');
+    expect(existsSync(join(repoRoot, 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
+    expect(requiredExports).toContain('createToolCallIdTransformerJson');
+    expect(requiredExports).not.toContain('normalizeResponsesToolCallIdsWithNative');
+    expect(requiredExports).not.toContain('resolveToolCallIdStyleWithNative');
   });
 });

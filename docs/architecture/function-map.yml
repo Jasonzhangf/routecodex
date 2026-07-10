@@ -1978,7 +1978,7 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "The retired `responses-response-utils.ts` facade must stay deleted; `responses-openai-bridge.ts` may keep only the public bridge export and native invocation/JSON parse glue for `buildChatResponseFromResponses`."
+      - "The retired `responses-response-utils.ts` facade and production `responses-openai-bridge.ts` bridge must stay deleted; Responses/OpenAI request/response bridge semantics are Rust/NAPI owned, with host wrappers limited to native JSON invocation/parse glue."
       - "Zero-consumer TS wrappers for `collectToolCallsFromResponses` and `resolveFinishReason` must remain physically deleted from the shared response utility surface."
       - "Zero-consumer shared response wrappers for output segment extraction, single content-part normalization, chat response reasoning normalization, single-tool mapping, and Responses tool id style must remain physically deleted from TS/native bridge/Rust NAPI public surfaces."
       - "Server response converter must not run provider-specific bridge bypasses or post-bridge TS shape predicates to rebuild Responses payloads."

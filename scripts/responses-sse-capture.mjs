@@ -106,8 +106,17 @@ async function main() {
   const cfg = { type: provEntry.type, config: provEntry.config };
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const bridgePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const { buildResponsesRequestFromChat, buildChatResponseFromResponses } = await import(bridgePath);
+  const nativeExportsPath = pathToFileURL(path.join(BASEDIR, 'dist/modules/llmswitch/bridge/native-exports.js')).href;
+  const nativeResponsePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js')).href;
+  const { buildResponsesRequestFromChatNative } = await import(nativeExportsPath);
+  const { buildChatResponseFromResponsesFullWithNative } = await import(nativeResponsePath);
+  const buildChatResponseFromResponses = (payload) => {
+    const output = buildChatResponseFromResponsesFullWithNative({
+      payload: JSON.stringify(payload)
+    });
+    const parsed = JSON.parse(output);
+    return JSON.parse(parsed.result);
+  };
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };
@@ -117,7 +126,7 @@ async function main() {
   // payload: chat → responses
   const responsesSample = loadResponsesSample();
   const chatBody = responsesSample ? null : pickChatSample();
-  const rawReq = responsesSample ? responsesSample.payload : (buildResponsesRequestFromChat(chatBody)?.request || {});
+  const rawReq = responsesSample ? responsesSample.payload : (buildResponsesRequestFromChatNative(chatBody)?.request || {});
   let respReq = JSON.parse(JSON.stringify(rawReq));
   if (!responsesSample) {
     // override model with provider config's modelId/defaultModel

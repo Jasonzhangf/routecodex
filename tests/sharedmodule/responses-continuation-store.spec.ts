@@ -16,7 +16,7 @@ import {
   resumeLatestResponsesContinuationByScope,
   responsesConversationStore
 } from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
-import { buildChatRequestFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
 import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {

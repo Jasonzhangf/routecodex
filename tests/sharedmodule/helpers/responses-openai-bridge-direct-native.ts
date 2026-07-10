@@ -12,11 +12,11 @@ import {
   normalizeFunctionCallOutputIdWithNative,
   normalizeResponsesCallIdWithNative,
   stripInternalToolingMetadataWithNative
-} from '../../native/router-hotpath/native-shared-conversion-semantics.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
-} from '../../native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 import {
   appendLocalImageBlockOnLatestUserInputWithNative,
   buildBridgeHistoryWithNative,
@@ -36,19 +36,19 @@ import {
   sanitizeCapturedResponsesInputWithNative,
   stripResponsesToolControlFieldsWithNative,
   unwrapResponsesDataWithNative
-} from '../../native/router-hotpath/native-hub-bridge-action-semantics.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js';
 import {
   buildResponsesPayloadFromChatWithNative,
   consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
   evaluateResponsesHostPolicyWithNative,
   planResponsesPayloadFromChatCloseoutWithNative,
-} from '../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
-} from '../../native/router-hotpath/native-hub-bridge-policy-semantics.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;

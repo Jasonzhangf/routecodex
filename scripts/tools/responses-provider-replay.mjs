@@ -131,23 +131,16 @@ function resolveEntryEndpoint(doc, fallback = '/v1/messages') {
 }
 
 async function loadCoreModules() {
-  const respPath = path.join(CORE_DIST, 'conversion', 'responses', 'responses-openai-bridge.js');
-  const resp = await import(pathToFileURL(respPath).href);
-  const required = [
-    'buildResponsesRequestFromChat',
-    'buildChatRequestFromResponses',
-    'captureResponsesContext'
-  ];
-  if (typeof resp.buildResponsesRequestFromChat !== 'function' ||
-      typeof resp.buildChatRequestFromResponses !== 'function' ||
-      typeof resp.captureResponsesContext !== 'function') {
+  const nativeExportsPath = path.join(ROOT, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
+  const nativeExports = await import(pathToFileURL(nativeExportsPath).href);
+  if (typeof nativeExports.buildResponsesRequestFromChatNative !== 'function' ||
+      typeof nativeExports.convertResponsesRequestToChatNative !== 'function') {
     throw new Error('Responses bridge helpers missing');
   }
   return {
     buildOpenAIChatFromAnthropic,
-    buildResponsesRequestFromChat: resp.buildResponsesRequestFromChat,
-    buildChatRequestFromResponses: resp.buildChatRequestFromResponses,
-    captureResponsesContext: resp.captureResponsesContext
+    buildResponsesRequestFromChat: nativeExports.buildResponsesRequestFromChatNative,
+    convertResponsesRequestToChatNative: nativeExports.convertResponsesRequestToChatNative
   };
 }
 
@@ -188,8 +181,9 @@ async function convertSampleToChat(samplePath, modules) {
     return { chat, entryEndpoint, payloadKind: 'anthropic' };
   }
   if (info.kind === 'responses') {
-    const ctx = modules.captureResponsesContext(info.payload, { route: { requestId: `replay-${Date.now()}` } });
-    const { request } = modules.buildChatRequestFromResponses(info.payload, ctx);
+    const request = modules.convertResponsesRequestToChatNative(info.payload, {
+      requestId: `replay-${Date.now()}`
+    }).request;
     return { chat: request, entryEndpoint, payloadKind: 'responses' };
   }
   return { chat: deepClone(info.payload), entryEndpoint, payloadKind: 'chat' };

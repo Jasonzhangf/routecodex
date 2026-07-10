@@ -466,6 +466,30 @@ pub fn build_format_request(input: FormatBuildInput) -> Result<FormatBuildOutput
     Ok(FormatBuildOutput { payload })
 }
 
+pub fn build_responses_request_from_chat_json(input_json: String) -> napi::Result<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let payload = input
+        .as_object()
+        .and_then(|row| row.get("payload"))
+        .cloned()
+        .ok_or_else(|| napi::Error::from_reason("Missing payload".to_string()))?;
+    let output = build_format_request(FormatBuildInput {
+        format_envelope: serde_json::json!({
+            "format": "openai-chat",
+            "version": "v1",
+            "payload": payload
+        }),
+        protocol: "openai-responses".to_string(),
+    })
+    .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&serde_json::json!({
+        "request": output.payload,
+        "originalSystemMessages": []
+    }))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +629,39 @@ mod tests {
         assert_eq!(input_items[1]["type"], "function_call_output");
         assert_eq!(input_items[1]["call_id"], "call_1");
         assert_eq!(input_items[1]["output"], "ok");
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_wraps_rust_owned_request_builder() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-4",
+                    "messages": [
+                        { "role": "user", "content": "hello" }
+                    ],
+                    "metadata": { "providerKey": "must-not-leak" }
+                },
+                "context": { "ignored": true },
+                "extras": { "ignored": true }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["request"]["model"], "gpt-4");
+        assert_eq!(parsed["request"]["input"][0]["type"], "message");
+        assert_eq!(parsed["request"]["input"][0]["role"], "user");
+        assert_eq!(
+            parsed["request"]["input"][0]["content"][0]["type"],
+            "input_text"
+        );
+        assert_eq!(parsed["request"]["input"][0]["content"][0]["text"], "hello");
+        assert!(parsed["request"].get("metadata").is_none());
+        assert!(parsed["originalSystemMessages"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

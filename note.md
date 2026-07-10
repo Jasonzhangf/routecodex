@@ -28439,6 +28439,26 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Changed `scripts/batch-toolcall-report.mjs` and `scripts/responses-sse-replay-golden.mjs` from `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js::buildChatResponseFromResponses` to `dist/native/router-hotpath/native-shared-conversion-semantics.js::buildChatResponseFromResponsesWithNative`.
 - This keeps response->chat projection verification on Rust native truth and reduces `responses-openai-bridge.ts` script text refs from 4 to 2; the remaining script refs are request-bridge users that still need `buildResponsesRequestFromChat`.
 - Verification PASS: `node --check scripts/batch-toolcall-report.mjs`; `node --check scripts/responses-sse-replay-golden.mjs`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` (`responses-openai-bridge.ts prodImportRefs=0`, script refs 2); `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; targeted `git diff --check`.
+
+# 2026-07-10: replay-responses-sse uses native Responses payload mapper
+
+- Scope: continued Responses bridge script contraction after response projection script cleanup.
+- Changed `scripts/replay-responses-sse.mjs` from loading sharedmodule `dist/conversion/responses/responses-openai-bridge.js` for `buildResponsesPayloadFromChat` to host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative`.
+- Verification PASS: `node --check scripts/replay-responses-sse.mjs`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; targeted `git diff --check`.
+- Boundary: remaining script files with true `responses-openai-bridge` dist dependency are `scripts/outbound-regression-codex-samples.mjs` and `scripts/responses-sse-capture.mjs`; both need Chat->Responses request bridge (`buildResponsesRequestFromChat`). Existing Rust `runResponsesOpenaiRequestCodecJson` is Responses->Chat and must not be used as replacement.
+
+# 2026-07-10: metadata boundary test no longer imports Responses bridge TS shell
+
+- Scope: external Hub/Responses TS reference contraction after Jason clarified the goal is external TS references into Hub Pipeline.
+- Changed `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts` from direct `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js::buildResponsesPayloadFromChat` import to host `src/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative`.
+- Verification PASS: focused Jest `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` shows `responses-openai-bridge.ts importRefs=7`, `root-tests=8`, `prodImportRefs=0`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; targeted `git diff --check`.
+
+# 2026-07-10: production Responses OpenAI bridge is deleted
+
+- Scope: completed bridge closeout for `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`.
+- Moved the old bridge file to test-only `tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts`, added Rust/NAPI `buildResponsesRequestFromChatJson`, host `buildResponsesRequestFromChatNative`, and migrated active scripts/tests to Rust/host native exports or the test-only helper.
+- Updated function-map/mainline/wiki/guidance/residue gates so production bridge restoration is forbidden and `stl-06` points to Rust `run_responses_openai_request_codec_json -> convert_bridge_input_to_chat_messages`.
+- Verification PASS: production file absent; old src/dist import scan returns no active hits; shell audit no longer lists `responses-openai-bridge.ts`; rustification/minimal TS gates show `nonNativeFileCount=0`; focused bridge/residue Jest passes 52 + 211 tests; Rust request builder focused test passes; `cargo fmt --check`; `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; `npm run verify:architecture-fallback-denylist`; `npm run build:base`.
 ## 2026-07-09 21:50 runtime lifecycle silent-stop audit
 
 - Latest live health: `127.0.0.1:5520/health` and `127.0.0.1:5555/health` both return `ready=true`, `pipelineReady=true`, version `0.90.3699`.

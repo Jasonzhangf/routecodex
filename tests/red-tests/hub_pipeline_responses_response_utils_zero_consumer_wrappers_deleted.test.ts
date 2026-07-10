@@ -33,14 +33,13 @@ const bridgePath = join(
 
 describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   it('does not keep zero-consumer tool-call and finish-reason TS wrappers', () => {
-    const source = readFileSync(bridgePath, 'utf8');
+    const source = readFileSync(nativeBarrelPath, 'utf8');
 
     expect(existsSync(sourcePath)).toBe(false);
+    expect(existsSync(bridgePath)).toBe(false);
     expect(source).toContain('buildChatResponseFromResponsesFullWithNative');
     expect(source).not.toContain('collectToolCallsFromResponsesWithNative');
     expect(source).not.toContain('resolveFinishReasonWithNative');
-    expect(source).not.toMatch(/export\s+function\s+collectToolCallsFromResponses\b/);
-    expect(source).not.toMatch(/export\s+function\s+resolveFinishReason\b/);
   });
 
   it('does not keep public native wrapper exports for deleted response helpers', () => {
@@ -58,14 +57,13 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   });
 
   it('does not keep coverage-only responses tool utils wrapper exports', () => {
-    const bridgeSource = readFileSync(bridgePath, 'utf8');
+    const requiredExports = readFileSync(requiredExportsPath, 'utf8');
 
     expect(existsSync(responsesToolUtilsPath)).toBe(false);
     expect(existsSync(responsesToolUtilsCoverageScriptPath)).toBe(false);
-    expect(bridgeSource).not.toMatch(/export\s+function\s+normalizeResponsesToolCallIds\b/);
-    expect(bridgeSource).not.toMatch(/export\s+function\s+resolveToolCallIdStyle\b/);
-    expect(bridgeSource).not.toContain('normalizeResponsesToolCallIdsWithNative');
-    expect(bridgeSource).not.toContain('resolveToolCallIdStyleWithNative');
+    expect(existsSync(bridgePath)).toBe(false);
+    expect(requiredExports).not.toContain('normalizeResponsesToolCallIdsWithNative');
+    expect(requiredExports).not.toContain('resolveToolCallIdStyleWithNative');
   });
 
   it('does not keep public native wrapper exports for deleted responses tool id helpers', () => {

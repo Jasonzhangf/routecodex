@@ -14,7 +14,7 @@
  *  - node --experimental-vm-modules ./node_modules/.bin/jest tests/responses/responses-openai-bridge.spec.ts
  */
 
-import { buildResponsesPayloadFromChat, buildChatResponseFromResponses } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { buildResponsesPayloadFromChat, buildChatResponseFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
 import fs from 'fs';
 import path from 'path';
 

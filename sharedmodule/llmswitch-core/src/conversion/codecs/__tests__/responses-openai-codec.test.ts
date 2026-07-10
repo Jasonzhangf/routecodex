@@ -3,7 +3,7 @@ import {
   runResponsesOpenAIRequestCodecDirectNative,
   runResponsesOpenAIResponseCodecDirectNative,
 } from '../../../../../../tests/sharedmodule/helpers/responses-codec-direct-native.js';
-import { buildResponsesPayloadFromChat } from '../../responses/responses-openai-bridge.js';
+import { buildResponsesPayloadFromChatNative as buildResponsesPayloadFromChat } from '../../../../../../src/modules/llmswitch/bridge/native-exports.js';
 
 describe('responses-openai codec direct native owner', () => {
   test('request maps responses input into openai chat request', async () => {

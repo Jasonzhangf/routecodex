@@ -8,7 +8,7 @@
   - 响应侧：`conversion/shared/tool-governor.ts::processChatResponseTools`
 - 三端共用：
   - Chat OpenAI 形状 → 直接治理
-  - Responses → 先桥接到 Chat 再治理（`responses/responses-openai-bridge.ts` 内部调用）
+  - Responses → 通过 Rust/NAPI Responses/OpenAI codec 与 Hub native 边界桥接到 Chat 再治理
   - Messages（Anthropic）→ 编码器统一到 OpenAI Chat 后治理
 - 严格边界：
   - Server 端点与 Provider/兼容层不得重复实现工具收割、指引注入、结果回灌等逻辑。
@@ -94,8 +94,8 @@
 - 指引模块：Rust/NAPI `buildSystemToolGuidanceJson`、`augmentOpenAIToolsJson`、`augmentAnthropicToolsJson`
 - 工具治理入口：`v2/conversion/shared/tool-governor.ts`
 - 工具 canonicalize（native）：`rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs`
-- Responses 桥接：`v2/conversion/responses/responses-openai-bridge.ts`
-  - Responses→Chat 请求适配入口直接使用 bridge owner；请求语义继续下沉到 Rust req_inbound / req_chatprocess native 边界，禁止恢复 shared adapter 中转层。
+- Responses 桥接：Rust/NAPI `responses_openai_codec.rs`、`hub_req_inbound_context_capture.rs`、`hub_req_outbound_format_build.rs`
+  - Responses→Chat 请求适配与 Chat→Responses 出站构建使用 Rust/native owner；禁止恢复 `responses-openai-bridge.ts` 或 shared adapter 中转层。
 - OpenAI 编解码：Rust/NAPI `runOpenaiOpenaiRequestCodecJson`、`runOpenaiOpenaiResponseCodecJson`
 - Anthropic 编解码：Rust/NAPI `buildOpenaiChatFromAnthropicJson`、`buildAnthropicFromOpenaiChatJson`
 

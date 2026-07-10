@@ -98,17 +98,26 @@ function loadCodexSample() {
 
 async function loadConverters() {
   const distRoot = path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
-  const responsesBridgePath = path.join(distRoot, 'conversion', 'responses', 'responses-openai-bridge.js');
   const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
-  if (!fs.existsSync(responsesBridgePath) || !fs.existsSync(nativeRespPath)) {
+  const nativeSharedPath = path.join(distRoot, 'native', 'router-hotpath', 'native-shared-conversion-semantics.js');
+  const hostNativeExportsPath = path.resolve(process.cwd(), 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
+  if (!fs.existsSync(nativeRespPath) || !fs.existsSync(nativeSharedPath) || !fs.existsSync(hostNativeExportsPath)) {
     throw new Error('llmswitch-core dist missing. 请先在 sharedmodule/llmswitch-core 运行 npm run build');
   }
-  const responsesBridge = await import(pathToFileURL(responsesBridgePath).href);
   const nativeResp = await import(pathToFileURL(nativeRespPath).href);
-  const { buildChatResponseFromResponses, buildResponsesPayloadFromChat } = responsesBridge;
+  const nativeShared = await import(pathToFileURL(nativeSharedPath).href);
+  const hostNativeExports = await import(pathToFileURL(hostNativeExportsPath).href);
+  const buildChatResponseFromResponses = (payload) => {
+    const output = nativeShared.buildChatResponseFromResponsesFullWithNative({
+      payload: JSON.stringify(payload)
+    });
+    const parsed = JSON.parse(output);
+    return JSON.parse(parsed.result);
+  };
+  const buildResponsesPayloadFromChat = hostNativeExports.buildResponsesPayloadFromChatNative;
   if (
-    typeof buildChatResponseFromResponses !== 'function' ||
     typeof buildResponsesPayloadFromChat !== 'function' ||
+    typeof nativeShared.buildChatResponseFromResponsesFullWithNative !== 'function' ||
     typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
     typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
   ) {

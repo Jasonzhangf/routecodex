@@ -689,6 +689,11 @@ pub fn convert_bridge_input_to_chat_messages_json(input_json: String) -> NapiRes
     hub_bridge_actions::convert_bridge_input_to_chat_messages_json(input_json)
 }
 
+#[napi(js_name = "buildResponsesRequestFromChatJson")]
+pub fn build_responses_request_from_chat_json(input_json: String) -> NapiResult<String> {
+    hub_req_outbound_format_build::build_responses_request_from_chat_json(input_json)
+}
+
 #[napi]
 pub fn extract_reasoning_segments_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::extract_reasoning_segments_json(input_json)
