@@ -424,6 +424,8 @@ Additional gates if touched paths require them:
 ### 2026-07-10 Progress: zero-ref bridge d.ts leaf mirrors deleted
 
 - Exact source-tracked scan found these bridge declaration mirrors had no active runtime/test importers outside residue coverage:
+  - `bridge.d.ts`
+  - `bridge/index.d.ts`
   - `module-loader.d.ts`
   - `native-exports.d.ts`
   - `provider-response-converter-host.d.ts`

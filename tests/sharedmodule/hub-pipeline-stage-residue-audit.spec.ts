@@ -4219,10 +4219,8 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge.ts',
       'src/modules/llmswitch/bridge.js',
-      'src/modules/llmswitch/bridge.d.ts',
       'src/modules/llmswitch/bridge/index.ts',
       'src/modules/llmswitch/bridge/index.js',
-      'src/modules/llmswitch/bridge/index.d.ts',
     ];
     const findings = bridgeFiles.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -4242,7 +4240,6 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge.ts',
       'src/modules/llmswitch/bridge.js',
-      'src/modules/llmswitch/bridge.d.ts',
     ];
     const retiredNames = [
       'parseRouteCodexTomlRecord',
@@ -4262,6 +4259,8 @@ describe('hub pipeline stage residue audit', () => {
 
   it('unused llmswitch bridge dts mirrors must stay deleted', () => {
     const deletedBridgeDeclarations = [
+      'src/modules/llmswitch/bridge.d.ts',
+      'src/modules/llmswitch/bridge/index.d.ts',
       'src/modules/llmswitch/bridge/module-loader.d.ts',
       'src/modules/llmswitch/bridge/native-exports.d.ts',
       'src/modules/llmswitch/bridge/provider-response-converter-host.d.ts',
