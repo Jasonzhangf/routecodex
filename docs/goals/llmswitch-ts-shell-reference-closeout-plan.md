@@ -681,3 +681,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
 - Boundary: `responses-provider-direct-stream-incomplete.spec.ts` was checked and restored; after moving it to narrow facades it exposes a direct SSE passthrough behavioral assertion mismatch, so it needs a separate contract/test slice rather than being included in this reference-only cleanup.
+
+### 2026-07-11 responses debug diag request bridge mock narrowed
+
+- `tests/server/handlers/responses-handler.debug-diag.spec.ts` now mocks `src/modules/llmswitch/bridge/responses-request-bridge.js` instead of the root bridge barrel.
+- The local mock surface was reduced to the current handler request-bridge imports and updated to return the current `prepareResponsesHandlerRuntimeForHttp` / stream-plan shape needed by the handler.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+- Boundary: `protocol-http-providers.unit.test.ts` was checked and restored; splitting its root mock exposes provider snapshot entry-port fixture gaps, so it needs a separate provider snapshot contract slice rather than being included in this reference-only cleanup.

@@ -7,26 +7,30 @@ jest.unstable_mockModule('../../../src/debug/diag/index.js', () => ({
 }));
 
 jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge.js',
+  '../../../src/modules/llmswitch/bridge/responses-request-bridge.js',
   () => ({
     buildResponsesConversationPortScopeForHttp: jest.fn(),
-    buildResponsesPipelineMetadataForHttp: jest.fn(),
-    captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+    buildResponsesPipelineMetadataForHttp: jest.fn(() => ({})),
     captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
-    clearResponsesConversationByRequestId: jest.fn(async () => undefined),
     clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
-    convertProviderResponse: jest.fn(async (value) => value),
-    createSnapshotRecorder: jest.fn(async () => ({ record: jest.fn() })),
-    deriveFinishReasonNative: jest.fn(() => undefined),
-    extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
     finalizeResponsesPipelineResultForHttp: jest.fn((result) => result),
-    finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-    isToolCallContinuationResponseNative: jest.fn(() => false),
     planResponsesHandlerStreamForHttp: jest.fn(() => ({ outboundStream: false })),
     prepareResponsesRequestBodyForHttp: jest.fn((payload) => ({ payload, responseIdFromPayload: undefined })),
-    prepareResponsesHandlerRuntimeForHttp: jest.fn(() => ({ requestContext: undefined, portScope: undefined, matchedPort: undefined })),
-    rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-    recordResponsesResponseForRequest: jest.fn(async () => undefined),
+    prepareResponsesHandlerRuntimeForHttp: jest.fn((args) => ({
+      kind: 'ok',
+      payload: args.payload,
+      requestContext: {},
+      pipelineEntryEndpoint: args.entryEndpoint,
+      isSubmitToolOutputs: false,
+      plannedEntryMode: 'none',
+      streamPlan: {
+        originalStream: false,
+        outboundStream: false,
+        inboundStream: false,
+        acceptsSse: false,
+        requestStartMeta: {},
+      },
+    })),
   }),
 );
 
