@@ -2159,3 +2159,8 @@
 - The host shell may pass `ROUTECODEX_RESPONSES_CONVERSATION_STORE` as operation-level IO context because Jest/runtime host env is not always visible as OS env to Rust; Rust applies the path and resets store state only when that explicit path changes.
 - Checked-in `responses-conversation-store-host.js` / `.d.ts` mirrors must not receive debug API backfill. Debug accessors may exist only on canonical TS source/tests until the source mirror imports are fully retired.
 - Residue gate must keep old per-plan native helper names out of `responses-conversation-store-host.ts/js/d.ts`; the allowed production surface is the single operation API plus thin host wrappers.
+
+# 2026-07-10: Responses continuation direct NAPI wrappers are retired
+
+- `resumeResponsesConversationPayloadJson`, `restoreResponsesContinuationPayloadJson`, and `materializeResponsesContinuationPayloadJson` must not return to `native-hotpath-required-exports.json`; the host-facing store surface is `executeResponsesConversationStoreOperationJson`.
+- Direct resume error-envelope coverage now uses store operation `resume_entry_payload`; do not reintroduce standalone NAPI wrappers or test-only JS helper wrappers for those three names.

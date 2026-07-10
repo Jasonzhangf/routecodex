@@ -520,7 +520,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.scopeIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
@@ -678,7 +678,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
@@ -800,7 +800,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
     const resumed = store.resumeResponsesConversation(responseId, {
       tool_outputs: [
@@ -956,7 +956,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
@@ -1052,7 +1052,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestMapSize).toBe(1);
   });
@@ -1188,7 +1188,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.requestMapSize).toBe(1);
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
@@ -1297,7 +1297,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestMapSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
@@ -1430,7 +1430,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
@@ -1615,7 +1615,7 @@ describe("sendPipelineResponse responses store integration", () => {
     );
     await waitForEnd(res);
 
-    const stats = store.responsesConversationStore.getDebugStats();
+    const stats = store.getResponsesConversationStoreDebugStats();
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
 
@@ -1682,7 +1682,7 @@ describe("sendPipelineResponse responses store integration", () => {
         },
       );
 
-      const stats = store.responsesConversationStore.getDebugStats();
+      const stats = store.getResponsesConversationStoreDebugStats();
       expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
       const resumed = store.resumeResponsesConversation(responseId, {
         response_id: responseId,
@@ -1745,7 +1745,7 @@ describe("sendPipelineResponse responses store integration", () => {
         { entryEndpoint: "/v1/responses" },
       );
 
-      const stats = store.responsesConversationStore.getDebugStats();
+      const stats = store.getResponsesConversationStoreDebugStats();
       expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
       expect(stats.retainedInputItems).toBe(0);
       expect(() =>
@@ -1821,7 +1821,7 @@ describe("sendPipelineResponse responses store integration", () => {
         },
       );
 
-      const stats = store.responsesConversationStore.getDebugStats();
+      const stats = store.getResponsesConversationStoreDebugStats();
       expect(stats.responseIndexSize).toBeGreaterThanOrEqual(1);
 
       const resumed = store.resumeResponsesConversation(responseId, {
@@ -1856,10 +1856,6 @@ describe("sendPipelineResponse responses store integration", () => {
     const requestId = "openai-responses-router-index-repair";
     const responseId = "resp_index_repair_1";
     const callId = "call_index_repair_1";
-    const storeObject = store.responsesConversationStore as unknown as {
-      responseIndex?: Map<string, unknown>;
-    };
-
     try {
       store.captureResponsesRequestContext({
         requestId,
@@ -1930,7 +1926,7 @@ describe("sendPipelineResponse responses store integration", () => {
       store.finalizeResponsesConversationRequestRetention(requestId, {
         keepForSubmitToolOutputs: true,
       });
-      storeObject.responseIndex?.delete(responseId);
+      store.deleteResponsesConversationResponseIndexForDebug(responseId);
 
       const resumed = store.resumeResponsesConversation(
         responseId,
@@ -1951,7 +1947,7 @@ describe("sendPipelineResponse responses store integration", () => {
           }),
         ]),
       );
-      expect(store.responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
+      expect(store.getResponsesConversationStoreDebugStats().responseIndexSize).toBe(0);
     } finally {
       store.clearResponsesConversationByRequestId(requestId);
       store.clearResponsesConversationByRequestId(responseId);
@@ -2234,7 +2230,7 @@ describe("sendPipelineResponse responses store integration", () => {
       routeHint: "tools/gateway-priority-5520-tools",
     });
 
-    const before = store.responsesConversationStore.getDebugStats();
+    const before = store.getResponsesConversationStoreDebugStats();
     expect(before.requestEntriesWithoutLastResponseId).toBeGreaterThanOrEqual(1);
     expect(before.retainedInputItems).toBeGreaterThan(0);
 
@@ -2287,7 +2283,7 @@ describe("sendPipelineResponse responses store integration", () => {
       },
     );
 
-    const after = store.responsesConversationStore.getDebugStats();
+    const after = store.getResponsesConversationStoreDebugStats();
     expect(after.responseIndexSize).toBeGreaterThanOrEqual(1);
     expect(after.scopeIndexSize).toBeGreaterThanOrEqual(1);
     expect(after.requestEntriesWithoutLastResponseId).toBeLessThanOrEqual(1);
@@ -2396,7 +2392,7 @@ describe("sendPipelineResponse responses store integration", () => {
       );
       await waitForEnd(toolRes);
 
-      const afterToolCall = store.responsesConversationStore.getDebugStats();
+      const afterToolCall = store.getResponsesConversationStoreDebugStats();
       expect(afterToolCall.requestEntriesWithoutLastResponseId).toBeLessThanOrEqual(1);
       expect(afterToolCall.responseIndexSize).toBeGreaterThanOrEqual(1);
       expect(afterToolCall.scopeIndexSize).toBeGreaterThanOrEqual(1);
@@ -2455,7 +2451,7 @@ describe("sendPipelineResponse responses store integration", () => {
       );
       await waitForEnd(stopRes);
 
-      const afterStop = store.responsesConversationStore.getDebugStats();
+      const afterStop = store.getResponsesConversationStoreDebugStats();
       expect(afterStop.requestEntriesWithoutLastResponseId).toBe(0);
       expect(afterStop.responseIndexSize).toBeGreaterThanOrEqual(1);
       expect(afterStop.scopeIndexSize).toBeGreaterThanOrEqual(1);
@@ -2508,7 +2504,7 @@ describe("sendPipelineResponse responses store integration", () => {
         routeHint: "thinking/gateway-priority-5555-thinking",
       });
 
-      const before = store.responsesConversationStore.getDebugStats();
+      const before = store.getResponsesConversationStoreDebugStats();
       expect(before.requestMapSize).toBeGreaterThanOrEqual(1);
       expect(before.retainedInputItems).toBeGreaterThan(0);
 
@@ -2564,7 +2560,7 @@ describe("sendPipelineResponse responses store integration", () => {
         },
       );
 
-      const after = store.responsesConversationStore.getDebugStats();
+      const after = store.getResponsesConversationStoreDebugStats();
       expect(after.requestMapSize).toBeLessThanOrEqual(1);
       expect(after.retainedInputItems).toBeLessThanOrEqual(1);
       expect(after.requestEntriesWithoutLastResponseId).toBeLessThanOrEqual(1);

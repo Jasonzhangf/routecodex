@@ -125,9 +125,6 @@ function isPromptTooLongLike(args: {
   if (args.errorCode === 'CONTEXT_LENGTH_EXCEEDED' || args.upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
     return true;
   }
-  if (typeof args.statusCode === 'number' && args.statusCode !== 400) {
-    return false;
-  }
   const rawMessage =
     typeof args.reason === 'string' && args.reason.trim()
       ? args.reason
@@ -147,6 +144,16 @@ function isPromptTooLongLike(args: {
     detailReason,
     detailUpstreamCode
   ].join(' ').toLowerCase();
+  const isPayloadSizeLimit =
+    message.includes('request entity too large')
+    || message.includes('payload too large')
+    || message.includes('body too large');
+  if (isPayloadSizeLimit) {
+    return true;
+  }
+  if (typeof args.statusCode === 'number' && args.statusCode !== 400) {
+    return false;
+  }
   return (
     message.includes('prompt is too long')
     || message.includes('maximum context')

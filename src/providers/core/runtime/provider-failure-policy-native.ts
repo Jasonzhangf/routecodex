@@ -60,6 +60,13 @@ function buildNativeFailurePolicyBridge(mod: unknown): NativeFailurePolicyBridge
   };
 }
 
+function resolveCoreNativeBindingPath(): string {
+  return path.resolve(
+    resolveModuleDir(),
+    '../../../../sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node'
+  );
+}
+
 export function loadNativeFailurePolicyBridge(): NativeFailurePolicyBridge | null {
   if (process.env.JEST_WORKER_ID !== undefined) {
     return null;
@@ -69,15 +76,7 @@ export function loadNativeFailurePolicyBridge(): NativeFailurePolicyBridge | nul
   }
   try {
     const nativeRequire = resolveNativeRequire();
-    const packageMod = buildNativeFailurePolicyBridge(nativeRequire('rcc-llmswitch-core'));
-    if (packageMod) {
-      cachedNativeFailurePolicy = packageMod;
-      return cachedNativeFailurePolicy;
-    }
-    const nativePath = path.resolve(
-      resolveModuleDir(),
-      '../../../../sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node'
-    );
+    const nativePath = resolveCoreNativeBindingPath();
     cachedNativeFailurePolicy = buildNativeFailurePolicyBridge(nativeRequire(nativePath));
     return cachedNativeFailurePolicy;
   } catch {

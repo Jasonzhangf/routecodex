@@ -70,12 +70,6 @@ export function isNetworkTransportError(error: unknown): boolean {
 
 export function isPromptTooLongError(error: unknown): boolean {
   const status = extractErrorStatusCode(error);
-  // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
-  // Some error shims only expose the message (or nest status inside response.data.error.status),
-  // so allow missing status when the message is a strong match.
-  if (status !== undefined && status !== 400) {
-    return false;
-  }
   const explicitCode = (error as { code?: unknown }).code;
   if (typeof explicitCode === 'string' && explicitCode.trim().toLowerCase() === 'context_length_exceeded') {
     return true;
@@ -111,6 +105,19 @@ export function isPromptTooLongError(error: unknown): boolean {
   }
   const combined = messages.join(' | ').toLowerCase();
   if (!combined) {
+    return false;
+  }
+  const isPayloadSizeLimit =
+    combined.includes('request entity too large') ||
+    combined.includes('payload too large') ||
+    combined.includes('body too large');
+  if (isPayloadSizeLimit) {
+    return true;
+  }
+  // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
+  // Some error shims only expose the message (or nest status inside response.data.error.status),
+  // so allow missing status when the message is a strong match.
+  if (status !== undefined && status !== 400) {
     return false;
   }
   return (

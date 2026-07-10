@@ -409,6 +409,13 @@ Additional gates if touched paths require them:
 - Verification passed so far: focused Jest `provider-runtime-ingress.spec.ts`, `routing-state-store-observability.spec.ts`, `error-pipeline-contract.spec.ts`, and `hub-pipeline-stage-residue-audit.spec.ts` 219/219; exact source scan shows only docs/history/residue references; strict shell reference audit reports `prodTsShellCount=10`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; scoped `git diff --check`.
 - Remaining work: continue the strict audit graph. `native-virtual-router-bootstrap-config.ts` has no production importer but still has root tests/docs and owner roles, so it requires the same exact test/owner migration before deletion.
 
+### 2026-07-10 Progress: Responses store direct continuation NAPI wrappers retired
+
+- Removed required native export surface for `resumeResponsesConversationPayloadJson`, `restoreResponsesContinuationPayloadJson`, and `materializeResponsesContinuationPayloadJson`; production and tests now use `executeResponsesConversationStoreOperationJson` for the host-facing store operation API.
+- Added Rust store operation `resume_entry_payload` to keep the old direct resume error-envelope regression covered without exposing a standalone NAPI wrapper.
+- Removed the matching test-only helper wrappers from `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`.
+- Verification passed: exact source scan shows the retired wrapper names only in historical notes and negative assertions; focused Jest `native-required-exports-sse-stream`, `hub-pipeline-stage-residue-audit`, and `responses-continuation-store` passed 263/263; `npm run build:native-hotpath`, `npm run verify:responses-history-protocol-contract`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-mainline-call-map`, strict shell reference audit, minimal TS surface audit, rustification audit, deleted-path/thin-wrapper/fallback-denylist gates, `npm run build:base`, and `git diff --check` passed.
+
 ### 2026-07-10 In Progress: virtual router bootstrap TS wrapper deletion
 
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts` has been removed in the working tree after exact source scan showed the runtime mainline already uses host `src/modules/llmswitch/bridge/routing-integrations.ts::bootstrapVirtualRouterConfig`.

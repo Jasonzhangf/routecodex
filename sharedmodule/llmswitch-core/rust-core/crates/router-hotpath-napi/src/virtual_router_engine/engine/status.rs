@@ -477,7 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets() {
+    fn diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets()
+    {
         let mut core = VirtualRouterEngineCore::new();
         core.initialize(&build_forwarder_status_test_config())
             .expect("initialize");

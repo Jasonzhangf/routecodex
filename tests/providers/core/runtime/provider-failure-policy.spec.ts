@@ -205,6 +205,46 @@ describe('provider failure policy ssot', () => {
     }));
   });
 
+  it('classifies upstream request entity too large as health-neutral payload overflow', () => {
+    const reason = 'request entity too large';
+    const error = Object.assign(new Error(reason), {
+      code: 'HTTP_500',
+      statusCode: 500
+    });
+    const classification = resolveProviderFailureClassification({
+      error,
+      stage: 'provider.send',
+      statusCode: 500,
+      errorCode: 'HTTP_500',
+      reason
+    });
+
+    expect(classification).toBe('recoverable');
+    expect(isProviderFailureHealthNeutral({
+      stage: 'provider.send',
+      error,
+      errorCode: 'HTTP_500',
+      statusCode: 500,
+      classification,
+      reason
+    })).toBe(true);
+    expect(resolveProviderFailureActionPlan({
+      error,
+      stage: 'provider.send',
+      statusCode: 500,
+      errorCode: 'HTTP_500',
+      reason,
+      attempt: 1,
+      maxAttempts: 6
+    })).toEqual(expect.objectContaining({
+      classification: 'recoverable',
+      affectsHealth: false,
+      shouldRetry: true,
+      action: 'reroute_explicit_alternative',
+      decisionLabel: 'exclude_and_reroute'
+    }));
+  });
+
   it('classifies responses runtime payload contract failures as health-neutral unrecoverable local errors', () => {
     const reason = 'provider-runtime-error: responses payload missing "input" or "instructions"';
     const error = new Error(reason);

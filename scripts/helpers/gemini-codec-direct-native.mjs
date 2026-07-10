@@ -5,24 +5,9 @@ const nodeRequire = createRequire(import.meta.url);
 let nativeBinding = null;
 
 function candidateNativePaths() {
-  const candidates = [
+  return [
     path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node'),
   ];
-  for (const specifier of ['rcc-llmswitch-core', '@jsonstudio/llms']) {
-    try {
-      const mainPath = nodeRequire.resolve(specifier);
-      const packageRoot = mainPath.endsWith(`${path.sep}dist${path.sep}index.js`)
-        ? path.dirname(path.dirname(mainPath))
-        : path.dirname(mainPath);
-      candidates.push(
-        path.join(packageRoot, 'dist', 'native', 'router_hotpath_napi.node'),
-        path.join(packageRoot, 'router_hotpath_napi.node'),
-      );
-    } catch {
-      // Source checkout scripts do not require an installed package.
-    }
-  }
-  return [...new Set(candidates)];
 }
 
 function getNativeBinding() {

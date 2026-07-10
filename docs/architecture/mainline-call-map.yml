@@ -1263,7 +1263,7 @@ chains:
         to_node: ResponsesContinuationStore
         caller_symbol: prepare_responses_conversation_entry_json
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
-        callee_symbol: restore_responses_continuation_payload_json
+        callee_symbol: restore_responses_continuation_payload
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
         owner_feature_id: conversion.responses.store
         semantic_input: "Responses request/response continuation truth and scope data"

@@ -7,6 +7,19 @@ import { captureReqInboundResponsesContextSnapshotWithNative } from './helpers/r
 
 const nodeRequire = createRequire(import.meta.url);
 
+function executeResponsesStoreOperationForTest(operation: string, payload: unknown): unknown {
+  const binding = nodeRequire(
+    path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+  ) as Record<string, unknown>;
+  const execute = binding.executeResponsesConversationStoreOperationJson as ((inputJson: string) => string) | undefined;
+  expect(typeof execute).toBe('function');
+  const raw = execute?.(JSON.stringify({ operation, payload }));
+  expect(typeof raw).toBe('string');
+  const envelope = JSON.parse(String(raw)) as { ok?: boolean; result?: unknown; error?: unknown };
+  expect(envelope.ok).toBe(true);
+  return envelope.result;
+}
+
 describe('native required exports for sse stream helpers', () => {
   test('includes sse stream resolver/process exports and keeps export list deduplicated', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('processSseStreamJson');
@@ -214,22 +227,24 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('isCanonicalChatCompletionPayloadJson');
   });
 
-  test('native resume helper returns protocol error envelope instead of napi generic failure', () => {
-    const binding = nodeRequire(
-      path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
-    ) as Record<string, unknown>;
-    const fn = binding.resumeResponsesConversationPayloadJson as (...args: string[]) => string;
-    const raw = fn(
-      JSON.stringify({
+  test('does not require retired responses store direct continuation payload exports', () => {
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resumeResponsesConversationPayloadJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('restoreResponsesContinuationPayloadJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('materializeResponsesContinuationPayloadJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('executeResponsesConversationStoreOperationJson');
+  });
+
+  test('native store operation returns protocol error envelope instead of napi generic failure', () => {
+    const parsed = executeResponsesStoreOperationForTest('resume_entry_payload', {
+      entry: {
         requestId: 'req_native_resume_bad_id_1',
         basePayload: { model: 'gpt-5.5' },
         input: [{ type: 'function_call', id: 'fc_expected', call_id: 'call_expected', name: 'exec_command', arguments: '{"cmd":"pwd"}' }]
-      }),
-      'resp_native_resume_bad_id_1',
-      JSON.stringify({ tool_outputs: [{ call_id: 'call_function_snr978zyv21w_1', output: '/tmp' }] }),
-      'req_native_resume_bad_id_2'
-    );
-    const parsed = JSON.parse(raw) as { error?: { type?: string; message?: string; status?: number; origin?: string } };
+      },
+      responseId: 'resp_native_resume_bad_id_1',
+      submitPayload: { tool_outputs: [{ call_id: 'call_function_snr978zyv21w_1', output: '/tmp' }] },
+      requestId: 'req_native_resume_bad_id_2'
+    }) as { error?: { type?: string; message?: string; status?: number; origin?: string } };
     expect(parsed.error?.type).toBe('orphan_tool_result');
     expect(parsed.error?.origin).toBe('client');
     expect(parsed.error?.status).toBe(400);
@@ -245,7 +260,6 @@ describe('native required exports for sse stream helpers', () => {
       entryEndpoint?: string,
       responseIdFromPath?: string
     ) => string;
-    const resume = binding.resumeResponsesConversationPayloadJson as (...args: string[]) => string;
 
     const planned = JSON.parse(
       plan(
@@ -266,9 +280,8 @@ describe('native required exports for sse stream helpers', () => {
       { tool_call_id: 'call_empty_output_1', output: '' },
     ]);
 
-    const resumed = JSON.parse(
-      resume(
-        JSON.stringify({
+    const resumed = executeResponsesStoreOperationForTest('resume_entry_payload', {
+      entry: {
           requestId: 'req_empty_output_1',
           basePayload: { model: 'gpt-5.5' },
           input: [
@@ -280,14 +293,13 @@ describe('native required exports for sse stream helpers', () => {
               arguments: '{"cmd":"pwd"}',
             },
           ],
-        }),
-        'resp_empty_output_1',
-        JSON.stringify({
-          tool_outputs: [{ call_id: 'call_empty_output_1' }],
-        }),
-        'req_empty_output_2'
-      )
-    ) as {
+      },
+      responseId: 'resp_empty_output_1',
+      submitPayload: {
+        tool_outputs: [{ call_id: 'call_empty_output_1' }],
+      },
+      requestId: 'req_empty_output_2'
+    }) as {
       payload: { input?: Array<{ output?: string; type?: string; call_id?: string }> };
       meta?: { toolOutputsDetailed?: Array<{ outputText?: string; callId?: string }> };
     };

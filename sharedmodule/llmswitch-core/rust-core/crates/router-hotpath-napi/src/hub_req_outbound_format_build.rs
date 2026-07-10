@@ -180,18 +180,16 @@ fn read_tool_call_id_style(payload: &Value, context: Option<&Value>) -> Option<S
         .and_then(|metadata| metadata.get("toolCallIdStyle"))
         .and_then(Value::as_str);
     let root_style = payload.get("toolCallIdStyle").and_then(Value::as_str);
-    let context_style = context
-        .and_then(Value::as_object)
-        .and_then(|row| {
-            row.get("toolCallIdStyle")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    row.get("metadata")
-                        .and_then(Value::as_object)
-                        .and_then(|metadata| metadata.get("toolCallIdStyle"))
-                        .and_then(Value::as_str)
-                })
-        });
+    let context_style = context.and_then(Value::as_object).and_then(|row| {
+        row.get("toolCallIdStyle")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                row.get("metadata")
+                    .and_then(Value::as_object)
+                    .and_then(|metadata| metadata.get("toolCallIdStyle"))
+                    .and_then(Value::as_str)
+            })
+    });
     root_style
         .or(metadata_style)
         .or(context_style)
@@ -299,12 +297,23 @@ fn compact_oversized_response_input_ids(value: &mut Value) {
         else {
             continue;
         };
-        let prefix = if id.starts_with("msg_") { "msg_" } else { "item_" };
-        row.insert("id".to_string(), Value::String(compact_tool_id(prefix, &id)));
+        let prefix = if id.starts_with("msg_") {
+            "msg_"
+        } else {
+            "item_"
+        };
+        row.insert(
+            "id".to_string(),
+            Value::String(compact_tool_id(prefix, &id)),
+        );
     }
 }
 
-fn merge_response_request_parameters(request: &mut Value, payload: &Value, context: Option<&Value>) {
+fn merge_response_request_parameters(
+    request: &mut Value,
+    payload: &Value,
+    context: Option<&Value>,
+) {
     const ALLOWED_KEYS: &[&str] = &[
         "temperature",
         "top_p",
@@ -328,7 +337,9 @@ fn merge_response_request_parameters(request: &mut Value, payload: &Value, conte
     };
     let mut source = Map::new();
     for candidate in [
-        context.and_then(Value::as_object).and_then(|row| row.get("parameters")),
+        context
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("parameters")),
         payload.get("parameters"),
     ] {
         if let Some(parameters) = candidate.and_then(Value::as_object) {
@@ -367,11 +378,11 @@ fn merge_context_system_instruction(request: &mut Value, payload: &Value, contex
         .filter(|value| !value.is_empty())
         .or_else(|| {
             context
-        .and_then(Value::as_object)
-        .and_then(|row| row.get("systemInstruction"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("systemInstruction"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
         })
     else {
         return;
@@ -710,7 +721,10 @@ pub fn build_responses_request_from_chat_json(input_json: String) -> napi::Resul
         .and_then(|row| row.get("payload"))
         .cloned()
         .ok_or_else(|| napi::Error::from_reason("Missing payload".to_string()))?;
-    let context = input.as_object().and_then(|row| row.get("context")).cloned();
+    let context = input
+        .as_object()
+        .and_then(|row| row.get("context"))
+        .cloned();
     let extras = input.as_object().and_then(|row| row.get("extras")).cloned();
     let output = build_format_request(FormatBuildInput {
         format_envelope: serde_json::json!({

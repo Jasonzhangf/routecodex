@@ -3564,12 +3564,11 @@ pub use responses_reasoning_registry::{
     register_responses_passthrough_json, register_responses_payload_snapshot_json,
 };
 pub use shared_responses_conversation_utils::{
-    materialize_provider_owned_submit_context_json,
-    materialize_responses_continuation_payload_json, plan_responses_captured_entry_json,
+    materialize_provider_owned_submit_context_json, plan_responses_captured_entry_json,
     plan_responses_continuation_request_action_json, plan_responses_conversation_preflight_json,
     plan_responses_handler_entry_json, plan_responses_record_continuation_flag_json,
     plan_responses_request_context_json, prepare_responses_conversation_entry_json,
-    publish_responses_record_plan_json, resume_responses_conversation_payload_json,
+    publish_responses_record_plan_json,
 };
 
 // ---------------------------------------------------------------------------

@@ -4692,6 +4692,33 @@ fn execute_responses_conversation_store_operation(input: &Value) -> Value {
         "rebind_request_id" => store.rebind_request_id(&payload),
         "resume_latest_by_scope" => store.scope_restore(&payload, "resume"),
         "materialize_latest_by_scope" => store.scope_restore(&payload, "materialize"),
+        "resume_entry_payload" => {
+            let obj = payload.as_object().cloned().unwrap_or_default();
+            let entry = obj.get("entry").cloned().unwrap_or(Value::Null);
+            let response_id = read_trimmed_string(obj.get("responseId")).unwrap_or_default();
+            let submit_payload = obj.get("submitPayload").cloned().unwrap_or(Value::Null);
+            let request_id = obj
+                .get("requestId")
+                .and_then(|value| read_trimmed_string(Some(value)));
+            let output = resume_responses_conversation_payload(
+                &entry,
+                &response_id,
+                &submit_payload,
+                request_id.as_deref(),
+            )
+            .unwrap_or_else(|reason| {
+                serde_json::json!({
+                    "error": {
+                        "type": "orphan_tool_result",
+                        "message": reason,
+                        "status": 400,
+                        "code": "hub_pipeline_context_capture_failed",
+                        "origin": "client"
+                    }
+                })
+            });
+            responses_store_ok(output)
+        }
         "prune_expired" => {
             let cleared = store.prune_expired();
             responses_store_ok(serde_json::json!({ "cleared": cleared }))
@@ -5833,77 +5860,6 @@ pub fn execute_responses_conversation_store_operation_json(
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = execute_responses_conversation_store_operation(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
-pub fn resume_responses_conversation_payload_json(
-    entry_json: String,
-    response_id: String,
-    submit_payload_json: String,
-    request_id: Option<String>,
-) -> NapiResult<String> {
-    let entry: Value =
-        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let submit_payload: Value = serde_json::from_str(&submit_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = resume_responses_conversation_payload(
-        &entry,
-        &response_id,
-        &submit_payload,
-        request_id.as_deref(),
-    )
-    .unwrap_or_else(|reason| {
-        serde_json::json!({
-            "error": {
-                "type": "orphan_tool_result",
-                "message": reason,
-                "status": 400,
-                "code": "hub_pipeline_context_capture_failed",
-                "origin": "client"
-            }
-        })
-    });
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
-pub fn restore_responses_continuation_payload_json(
-    entry_json: String,
-    incoming_payload_json: String,
-    request_id: Option<String>,
-    scope_key: Option<String>,
-) -> NapiResult<String> {
-    let entry: Value =
-        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let incoming_payload: Value = serde_json::from_str(&incoming_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = restore_responses_continuation_payload(
-        &entry,
-        &incoming_payload,
-        request_id.as_deref(),
-        scope_key.as_deref(),
-    );
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi_derive::napi]
-pub fn materialize_responses_continuation_payload_json(
-    entry_json: String,
-    incoming_payload_json: String,
-    request_id: Option<String>,
-    scope_key: Option<String>,
-) -> NapiResult<String> {
-    let entry: Value =
-        serde_json::from_str(&entry_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let incoming_payload: Value = serde_json::from_str(&incoming_payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = materialize_responses_continuation_payload(
-        &entry,
-        &incoming_payload,
-        request_id.as_deref(),
-        scope_key.as_deref(),
-    );
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

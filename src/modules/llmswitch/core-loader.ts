@@ -8,6 +8,7 @@ const PACKAGE_CANDIDATES = [
   BUILTIN_SHARED_MODULE_REL,
   path.join('node_modules', 'rcc-llmswitch-core'),
 ];
+const CORE_DIST_PROBE_REL = path.join('native', 'servertool-wrapper.js');
 
 let corePackageDir: string | null = null;
 
@@ -89,7 +90,7 @@ export function resolveCorePackageDir(): string {
   ];
   for (const builtinDir of builtinCandidates) {
     const distDir = path.join(builtinDir, 'dist');
-    if (fs.existsSync(distDir) && fs.existsSync(path.join(distDir, 'index.js'))) {
+    if (fs.existsSync(distDir) && fs.existsSync(path.join(distDir, CORE_DIST_PROBE_REL))) {
       corePackageDir = builtinDir;
       return builtinDir;
     }
