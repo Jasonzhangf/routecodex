@@ -55,9 +55,6 @@ const mockBridgeModule = () => ({
   deriveFinishReasonNative: jest.fn(() => undefined),
 });
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
-
 const mockRoutingIntegrationsModule = () => ({
   bootstrapVirtualRouterConfig: jest.fn(async (input: unknown) => ({ config: input, runtime: {}, targetRuntime: {} })),
   compileRouteCodexRuntimeManifest: jest.fn(async () => ({

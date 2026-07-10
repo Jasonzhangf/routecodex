@@ -741,3 +741,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/http-server/hub-policy-injection.spec.ts` no longer exposes retired `resolveBaseDir`, `importCoreDist`, or `requireCoreDist` helper fields from its bridge/routing mocks.
 - The spec still mocks only the current routing/runtime surfaces required to observe hub policy injection; no TS semantic owner or legacy loader path was added.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveBaseDir` in the spec returns zero matches.
+
+### 2026-07-11 request executor reroute root bridge mock removed
+
+- `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts` and `tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts` no longer mock the root `src/modules/llmswitch/bridge.js` / `.ts` barrels.
+- Both specs keep only the current `routing-integrations` and `runtime-integrations` submodule mocks needed by `request-executor.ts`; no root bridge consumer or TS semantic owner was restored.
+- Exact file scan for root bridge imports/mocks and legacy loader helpers in both specs returns zero matches.
