@@ -797,3 +797,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and the test-local `deriveFinishReasonNative` copy.
 - Exact file scan for root bridge paths and legacy loader helpers in the touched spec returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 5/5 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
+
+### 2026-07-11 provider response unified semantics mock narrowed
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels, `bridge/index`, or `bridge/module-loader`.
+- The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and test-local TS copies of finish-reason, direct-chat SSE reprojection, and Responses tool-argument normalization logic.
+- Exact file scan for root bridge paths, legacy loader helpers, and retired mock symbols in the touched spec returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 19/19 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.

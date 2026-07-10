@@ -7,258 +7,6 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
-const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
-const mockLoadRoutingInstructionStateSync = jest.fn(() => null);
-const mockDeriveFinishReasonNative = (body: unknown): string | undefined => {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return undefined;
-  }
-  const record = body as Record<string, unknown>;
-  if (Array.isArray(record.choices)) {
-    const first = record.choices[0] as Record<string, unknown> | undefined;
-    return typeof first?.finish_reason === 'string' ? first.finish_reason : undefined;
-  }
-  if (record.status === 'requires_action' || record.required_action) {
-    return 'tool_calls';
-  }
-  if (
-    record.status === 'completed'
-    || (typeof record.output_text === 'string' && record.output_text.trim())
-    || (Array.isArray(record.output) && record.output.length > 0)
-  ) {
-    return 'stop';
-  }
-  return undefined;
-};
-const mockCreateChatJsonToSseConverterForHttp = jest.fn(async () => ({
-  convertResponseToJsonToSse: async (payload: any, options: Record<string, unknown>) => {
-    const response = payload && typeof payload === 'object'
-      ? payload
-      : { id: 'chat_resp_from_test', object: 'chat.completion', choices: [] };
-    const requestId = typeof options.requestId === 'string' ? options.requestId : 'req_test_chat_sse';
-    return Readable.from([
-      `data: ${JSON.stringify({
-        id: response.id ?? requestId,
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: (response as any).model ?? 'test-model',
-        choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
-      })}\n\n`,
-      `data: ${JSON.stringify({
-        id: response.id ?? requestId,
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: (response as any).model ?? 'test-model',
-        choices: (() => {
-          const choices = Array.isArray((response as any).choices) ? (response as any).choices : [];
-          const first = choices[0] && typeof choices[0] === 'object' ? choices[0] : {};
-          const message = first && typeof (first as any).message === 'object' ? (first as any).message : {};
-          const toolCalls = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
-          return [{
-            index: 0,
-            delta: {
-              tool_calls: toolCalls.map((toolCall: any, index: number) => ({
-                index,
-                id: toolCall.id,
-                type: toolCall.type,
-                function: toolCall.function
-              }))
-            },
-            finish_reason: 'tool_calls'
-          }];
-        })()
-      })}\n\n`,
-      'data: [DONE]\n\n'
-    ]);
-  }
-}));
-const mockReprojectDirectChatToolCallStreamForHttp = jest.fn(async (args: {
-  body: Record<string, unknown>;
-  requestId?: string;
-}) => {
-  const requestId = typeof args.requestId === 'string' ? args.requestId : 'req_test_chat_sse';
-  const response = args.body;
-  const choices = Array.isArray((response as any).choices) ? (response as any).choices : [];
-  const first = choices[0] && typeof choices[0] === 'object' ? choices[0] : {};
-  const message = first && typeof (first as any).message === 'object' ? (first as any).message : {};
-  const toolCalls = Array.isArray((message as any).tool_calls) ? (message as any).tool_calls : [];
-  const content = typeof (message as any).content === 'string' ? (message as any).content : '';
-  const contentFrame = content
-    ? [
-      `data: ${JSON.stringify({
-        id: (response as any).id ?? requestId,
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: (response as any).model ?? 'test-model',
-        choices: [{
-          index: 0,
-          delta: { content },
-          finish_reason: null
-        }]
-      })}\n\n`
-    ]
-    : [];
-  return Readable.from([
-    `data: ${JSON.stringify({
-      id: response.id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: (response as any).model ?? 'test-model',
-      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
-    })}\n\n`,
-    ...contentFrame,
-    `data: ${JSON.stringify({
-      id: response.id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: (response as any).model ?? 'test-model',
-      choices: (() => {
-        return [{
-          index: 0,
-          delta: {
-            tool_calls: toolCalls.map((toolCall: any, index: number) => ({
-              index,
-              id: toolCall.id,
-              type: toolCall.type,
-              function: {
-                name: toolCall.function?.name,
-                arguments: ''
-              }
-            }))
-          },
-          finish_reason: null
-        }];
-      })()
-    })}\n\n`,
-    `data: ${JSON.stringify({
-      id: (response as any).id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: (response as any).model ?? 'test-model',
-      choices: (() => {
-        return toolCalls.map((toolCall: any, index: number) => ({
-          index: 0,
-          delta: {
-            tool_calls: [{
-              index,
-              function: {
-                arguments: typeof toolCall.function?.arguments === 'string' ? toolCall.function.arguments : ''
-              }
-            }]
-          },
-          finish_reason: null
-        }));
-      })()
-    })}\n\n`,
-    `data: ${JSON.stringify({
-      id: (response as any).id ?? requestId,
-      object: 'chat.completion.chunk',
-      created: 1,
-      model: (response as any).model ?? 'test-model',
-      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
-    })}\n\n`,
-    'data: [DONE]\n\n'
-  ]);
-});
-const mockBridgeModule = () => ({
-  convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder,
-  createChatJsonToSseConverterForHttp: mockCreateChatJsonToSseConverterForHttp,
-  reprojectDirectChatToolCallStreamForHttp: mockReprojectDirectChatToolCallStreamForHttp,
-  requireCoreDist: jest.fn(() => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown, toolsRaw: unknown[]) => {
-      const toolName =
-        Array.isArray(toolsRaw) && toolsRaw[0] && typeof toolsRaw[0] === 'object'
-          ? String((((toolsRaw[0] as any).function || (toolsRaw[0] as any)).name) || '')
-          : '';
-      if (!payload || typeof payload !== 'object' || toolName !== 'exec_command') {
-        return payload as Record<string, unknown>;
-      }
-      const cloned = JSON.parse(JSON.stringify(payload));
-      const normalizeArgs = (holder: any) => {
-        if (!holder || typeof holder !== 'object') {
-          return;
-        }
-        try {
-          const parsed = typeof holder.arguments === 'string' ? JSON.parse(holder.arguments) : holder.arguments;
-          if (parsed && typeof parsed === 'object' && typeof parsed.command === 'string' && !parsed.cmd) {
-            holder.arguments = JSON.stringify({ cmd: parsed.command });
-          }
-        } catch {
-          // keep original shape on parse failure
-        }
-        if (holder.function && typeof holder.function === 'object') {
-          holder.function.arguments = holder.arguments;
-        }
-      };
-      const output = Array.isArray((cloned as any).output) ? (cloned as any).output : [];
-      for (const item of output) {
-        if (item && typeof item === 'object' && item.type === 'function_call') {
-          normalizeArgs(item);
-        }
-      }
-      const toolCalls = Array.isArray((cloned as any)?.required_action?.submit_tool_outputs?.tool_calls)
-        ? (cloned as any).required_action.submit_tool_outputs.tool_calls
-        : [];
-      for (const toolCall of toolCalls) {
-        normalizeArgs(toolCall);
-      }
-      return cloned;
-    },
-  })),
-  importCoreDist: jest.fn(async () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown, toolsRaw: unknown[]) => {
-      const toolName =
-        Array.isArray(toolsRaw) && toolsRaw[0] && typeof toolsRaw[0] === 'object'
-          ? String((((toolsRaw[0] as any).function || (toolsRaw[0] as any)).name) || '')
-          : '';
-      if (!payload || typeof payload !== 'object' || toolName !== 'exec_command') {
-        return payload as Record<string, unknown>;
-      }
-      const cloned = JSON.parse(JSON.stringify(payload));
-      const normalizeArgs = (holder: any) => {
-        if (!holder || typeof holder !== 'object') {
-          return;
-        }
-        try {
-          const parsed = typeof holder.arguments === 'string' ? JSON.parse(holder.arguments) : holder.arguments;
-          if (parsed && typeof parsed === 'object' && typeof parsed.command === 'string' && !parsed.cmd) {
-            holder.arguments = JSON.stringify({ cmd: parsed.command });
-          }
-        } catch {
-          // keep original shape on parse failure
-        }
-        if (holder.function && typeof holder.function === 'object') {
-          holder.function.arguments = holder.arguments;
-        }
-      };
-      const output = Array.isArray((cloned as any).output) ? (cloned as any).output : [];
-      for (const item of output) {
-        if (item && typeof item === 'object' && item.type === 'function_call') {
-          normalizeArgs(item);
-        }
-      }
-      const toolCalls = Array.isArray((cloned as any)?.required_action?.submit_tool_outputs?.tool_calls)
-        ? (cloned as any).required_action.submit_tool_outputs.tool_calls
-        : [];
-      for (const toolCall of toolCalls) {
-        normalizeArgs(toolCall);
-      }
-      return cloned;
-    },
-    convertProviderResponse: mockConvertProviderResponse,
-  })),
-  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
-  loadRoutingInstructionStateSync: mockLoadRoutingInstructionStateSync,
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-  deriveFinishReasonNative: mockDeriveFinishReasonNative,
-  updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async (args: { sseStream?: unknown }) => args.sseStream)
-});
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 
 const TEST_METADATA_WRITER = {
   module: 'tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts',
@@ -276,41 +24,17 @@ function buildPipelineMetadata(providerProtocol: string, extra: Record<string, u
   );
   return metadata;
 }
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/index.ts', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.js', () => ({
-  requireCoreDist: () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
-  }),
-  importCoreDist: async (subpath: string) => {
-    if (!subpath) {
-      return {
-        normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
-      };
-    }
-    return {};
-  },
-  resolveImplForSubpath: () => 'ts',
-}));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loader.ts', () => ({
-  requireCoreDist: () => ({
-    normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
-  }),
-  importCoreDist: async (subpath: string) => {
-    if (!subpath) {
-      return {
-        normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
-      };
-    }
-    return {};
-  },
-  resolveImplForSubpath: () => 'ts',
-}));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
   convertProviderResponse: mockConvertProviderResponse
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.ts', () => ({
   convertProviderResponse: mockConvertProviderResponse
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
+  createSnapshotRecorder: mockCreateSnapshotRecorder
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.ts', () => ({
+  createSnapshotRecorder: mockCreateSnapshotRecorder
 }));
 
 describe('provider-response-converter unified semantics handoff', () => {
@@ -446,7 +170,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockResolvedValueOnce({
       body: {
@@ -527,7 +250,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockResolvedValueOnce({
       body: {
@@ -604,7 +326,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockImplementation(async ({ requestSemantics, context }) => ({
       body: {
@@ -714,7 +435,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
       body: {
@@ -825,7 +545,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
       body: {
@@ -946,7 +665,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockImplementationOnce(async ({ providerResponse }) => ({
       body: {
@@ -1036,9 +754,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
-    mockLoadRoutingInstructionStateSync.mockReset();
-    mockLoadRoutingInstructionStateSync.mockReturnValue(null);
 
     mockConvertProviderResponse.mockResolvedValueOnce({
       body: {
@@ -1161,7 +876,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     const sampleDir = path.join(
       '/Volumes/extension/.rcc/codex-samples/openai-responses/mimo.key1.mimo-v2.5-pro',
@@ -1252,7 +966,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     const samplePath = path.join(
       process.env.HOME || '',
@@ -1350,7 +1063,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
 
     mockConvertProviderResponse.mockResolvedValueOnce({
       body: {
@@ -1614,7 +1326,6 @@ describe('provider-response-converter unified semantics handoff', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockReprojectDirectChatToolCallStreamForHttp.mockClear();
 
     const providerSse = Readable.from([
       'data: {"id":"chatcmpl_direct_reproject_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"visible text"},"finish_reason":null}]}\n\n',
@@ -1678,7 +1389,6 @@ describe('provider-response-converter unified semantics handoff', () => {
       },
     );
 
-    expect(mockReprojectDirectChatToolCallStreamForHttp).not.toHaveBeenCalled();
     expect(converted.sseStream).toBe(providerSse);
     expect((converted.body as any)?.choices?.[0]?.message?.content).toBeNull();
   });
