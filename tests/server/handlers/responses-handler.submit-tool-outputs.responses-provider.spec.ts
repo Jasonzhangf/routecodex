@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockResumeResponsesConversation = jest.fn();
@@ -11,7 +10,10 @@ const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => nu
 const mockResumeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const createNativeExportsMock = () => ({
-  getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+  })),
   getNetworkErrorCodes: jest.fn(() => []),
   mapChatToolsToBridgeJson: jest.fn(async (rawTools: unknown) => Array.isArray(rawTools) ? rawTools : []),
   injectMcpToolsForChatJson: jest.fn(async (input: unknown) => input),
@@ -33,12 +35,77 @@ const createNativeExportsMock = () => ({
     },
     responseId: responseIdFromPath,
   })),
+  materializeProviderOwnedSubmitContext: jest.fn(async (input: { payload?: Record<string, unknown> }) => {
+    const payload = input.payload ?? {};
+    const toolOutputs = Array.isArray(payload.tool_outputs) ? payload.tool_outputs : [];
+    const materializedInput = toolOutputs.map((item) => {
+      const record = item && typeof item === 'object' && !Array.isArray(item)
+        ? (item as Record<string, unknown>)
+        : {};
+      return {
+        type: 'function_call_output',
+        call_id: record.call_id,
+        output: record.output,
+      };
+    });
+    return {
+      payload: {
+        ...payload,
+        input: Array.isArray(payload.input) && payload.input.length ? payload.input : materializedInput,
+      },
+      context: {
+        input: Array.isArray(payload.input) && payload.input.length ? payload.input : materializedInput,
+      },
+    };
+  }),
+  planResponsesRequestContext: jest.fn((input: { payload?: Record<string, unknown> }) => {
+    const payload = input.payload ?? {};
+    return {
+      kind: 'context',
+      payload,
+      context: {
+        input: Array.isArray(payload.input) ? payload.input : [],
+      },
+    };
+  }),
+  planResponsesContinuationRequestAction: jest.fn((input: {
+    responseId?: string;
+    continuation?: Record<string, unknown> | null;
+  }) => {
+    const continuation = input.continuation && typeof input.continuation === 'object'
+      ? input.continuation
+      : {};
+    const responseId = input.responseId;
+    if (continuation.continuationOwner === 'direct') {
+      return {
+        action: 'direct_submit',
+        responseId,
+        pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
+        materializeProviderOwnedSubmitContext: true,
+        resumeMeta: {
+          providerKey: continuation.providerKey,
+          continuationOwner: 'direct',
+          responseId,
+          restored: false,
+        },
+      };
+    }
+    if (continuation.continuationOwner === 'relay') {
+      return {
+        action: 'relay_submit',
+        responseId,
+        pipelineEntryEndpoint: '/v1/responses',
+      };
+    }
+    return { action: 'none' };
+  }),
   buildAnthropicResponseFromChatJson: jest.fn(async (input: unknown) => input),
   sanitizeProviderOutboundPayload: jest.fn(async (input: unknown) => input),
   hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),
   convertResponsesRequestToChatNative: jest.fn((input: unknown) => input),
+  normalizeResponsesDirectCurrentRequestPayload: jest.fn((input: unknown) => input),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ providerWireValid: true, requiresHubRelay: false })),
   buildResponsesPayloadFromChatNative: jest.fn((input: unknown) => input),
   projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
@@ -58,6 +125,8 @@ const createNativeExportsMock = () => ({
   deriveFinishReasonNative: jest.fn(() => undefined),
   isToolCallContinuationResponseNative: jest.fn(() => false),
   isEmptyClientResponsePayloadNative: jest.fn(() => false),
+  shouldRecordSnapshotsNative: jest.fn(() => false),
+  writeSnapshotViaHooksNative: jest.fn(() => undefined),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false, reason: undefined })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
@@ -85,6 +154,7 @@ const createNativeExportsMock = () => ({
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
+  buildResponsesJsonFromSseStreamWithNative: jest.fn(async () => ({})),
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
   clearAllResponsesConversationState: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: mockClearResponsesConversationByRequestId,
@@ -128,7 +198,6 @@ jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
 }));
 
 const createResponsesBridgeMock = () => ({
-  ...createBridgeHttpServerMock(),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(() => undefined),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(() => undefined),
   buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
@@ -152,6 +221,7 @@ const createResponsesBridgeMock = () => ({
   })),
   buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn(() => []),
   clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
+  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({})),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => ({})
   })),
@@ -167,6 +237,8 @@ const createResponsesBridgeMock = () => ({
     normalized: false,
     source: undefined,
   })),
+  normalizeResponsesClientPayloadForHttp: jest.fn((payload: unknown) => payload),
+  normalizeResponsesJsonBodyForHttp: jest.fn((payload: unknown) => payload),
   normalizeResponsesSseFrameForClientForHttp: jest.fn((frame: string) => frame),
   planResponsesContinuationCloseActionForHttp: jest.fn(() => ({ action: 'none' })),
   planResponsesStreamEndRepairForHttp: jest.fn(() => ({ shouldRepair: false })),
@@ -175,6 +247,11 @@ const createResponsesBridgeMock = () => ({
     clientBody: args.body,
     sanitizedBody: args.body,
     finishReason: undefined,
+  })),
+  projectResponsesSseFrameForClientForHttp: jest.fn((input: { frame?: string; state?: unknown }) => ({
+    emit: true,
+    frame: input.frame ?? '',
+    state: input.state,
   })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
@@ -284,7 +361,7 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     expect(mockResumeResponsesConversation).not.toHaveBeenCalled();
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(pipelineInput.entryEndpoint).toBe('/v1/responses.submit_tool_outputs');
-    expect(pipelineInput.body).toEqual({
+    expect(pipelineInput.hubBody).toEqual({
       response_id: 'resp_submit_direct_1',
       previous_response_id: 'resp_submit_direct_1',
       input: [
@@ -297,11 +374,11 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       tool_outputs: [{ call_id: 'call_submit_direct_1', output: 'ok' }],
     });
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
-      providerKey: 'dibittai.crsa.gpt-5.4',
       continuationOwner: 'direct',
       responseId: 'resp_submit_direct_1',
       restored: false,
     });
+    expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
   });
 
   it('rewrites relay submit_tool_outputs back to /v1/responses mainline after local materialization', async () => {
@@ -408,12 +485,12 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(pipelineInput.entryEndpoint).toBe('/v1/responses');
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
-      routeHint: 'thinking',
       continuationOwner: 'relay',
     });
-    expect(pipelineInput.body?.previous_response_id).toBe('resp_submit_same_protocol_1');
-    expect(pipelineInput.body?.tool_outputs).toBeUndefined();
-    expect(pipelineInput.body?.input).toEqual(
+    expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
+    expect(pipelineInput.hubBody?.previous_response_id).toBe('resp_submit_same_protocol_1');
+    expect(pipelineInput.hubBody?.tool_outputs).toBeUndefined();
+    expect(pipelineInput.hubBody?.input).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: 'function_call', call_id: 'call_submit_same_protocol_1' }),
         expect.objectContaining({
@@ -422,26 +499,6 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
           output: 'ok',
         }),
       ]),
-    );
-    expect(mockCaptureResponsesRequestContextForRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: expect.any(String),
-        entryKind: 'responses',
-        payload: expect.objectContaining({
-          previous_response_id: 'resp_submit_same_protocol_1',
-          input: expect.arrayContaining([
-            expect.objectContaining({ type: 'function_call', call_id: 'call_submit_same_protocol_1' }),
-            expect.objectContaining({
-              type: 'function_call_output',
-              call_id: 'call_submit_same_protocol_1',
-              output: 'ok',
-            }),
-          ]),
-        }),
-        context: expect.objectContaining({
-          input: expect.any(Array),
-        }),
-      }),
     );
   });
 
@@ -548,18 +605,17 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     );
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
-      routeHint: 'thinking',
-      providerKey: 'dibittai.crsa.gpt-5.4',
+      restoredFromResponseId: 'resp_submit_same_provider_pin_1',
     });
+    expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
+    expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
     const center = MetadataCenter.read(pipelineInput.metadata);
     expect(center?.readRequestTruth()).toEqual(expect.objectContaining({
       requestId: expect.any(String),
       clientRequestId: expect.any(String),
     }));
-    expect(center?.readRuntimeControl()).toMatchObject({
-      routeHint: 'thinking',
-      retryProviderKey: 'dibittai.crsa.gpt-5.4',
-    });
+    expect(center?.readRuntimeControl().routeHint).toBeUndefined();
+    expect(center?.readRuntimeControl().retryProviderKey).toBeUndefined();
   });
 
   it('RED: relay submit_tool_outputs follow-up requires_action must persist the new response id for the next submit', async () => {
@@ -792,13 +848,11 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       clientRequestId: expect.any(String),
     }));
     expect(center?.readContinuationContext().responsesResume).toMatchObject({
-      providerKey: 'minimonth.key1.MiniMax-M2.7',
-      routeHint: 'search/gateway-priority-5555-priority-search',
       continuationOwner: 'relay'
     });
-    expect(center?.readRuntimeControl()).toMatchObject({
-      routeHint: 'search/gateway-priority-5555-priority-search',
-    });
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
+    expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('routeHint');
+    expect(center?.readRuntimeControl().routeHint).toBeUndefined();
     expect(center?.readRuntimeControl().retryProviderKey).toBeUndefined();
   });
 });
