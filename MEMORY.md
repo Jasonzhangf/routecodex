@@ -2120,3 +2120,12 @@
 - Production VR diagnostics and hit-log mainline now bind to Rust/NAPI plus host `src/modules/llmswitch/bridge/routing-integrations.ts`; tests/scripts that need direct runtime access use `tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts` or `sharedmodule/llmswitch-core/scripts/helpers/virtual-router-engine-direct-native.mjs`.
 - Current strict shell audit after deletion is `prodTsShellCount=2`, `shellsWithProdImporters=0`, `coreModuleSubpathRefs=3`; rustification baseline is `prodTsFileCount=2`, `prodTsLocTotal=1159`, `nonNativeFileCount=0`.
 - Remaining production TS files are `sharedmodule/llmswitch-core/src/index.ts` (type-only + VERSION) and `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` (native export manifest/binding loader). Do not claim zero production TS until the loader manifest/binding role and root package entry are replaced.
+
+# 2026-07-10: llmswitch-core production TS shell count is zero
+
+- `sharedmodule/llmswitch-core/src/index.ts` is physically deleted; do not restore the root TypeScript barrel for metadata, `VERSION`, or type-only re-export purposes.
+- `sharedmodule/llmswitch-core/package.json` no longer exposes root `"."`, `main`, `module`, `types`, or deleted `"./conversion/switch-orchestrator"`; the package remains consumable through explicit live subpaths such as `./native/servertool-wrapper`.
+- `scripts/ci/llmswitch-rustification-audit.mjs` and `scripts/ci/verify-llmswitch-minimal-ts-surface.mjs` no longer allow a metadata-only root entry exception.
+- `scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` is the canonical shell gate and now reports `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`.
+- `npm run verify:llmswitch-rustification-audit -- --json` now compares against baseline `prodTsFileCount=0`, `prodTsLocTotal=0`, `nonNativeFileCount=0`.
+- Commit: `16395ae09 refactor(hub): retire llmswitch-core root TS barrel`; note commit: `b51b8a691 docs(note): record llmswitch-core zero TS shell closeout`.
