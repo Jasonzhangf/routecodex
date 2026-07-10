@@ -2168,3 +2168,8 @@
 # 2026-07-10: Responses store host d.ts mirror is retired
 
 - `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active consumer and is physically deleted. Keep it absent; residue coverage should assert absence while `responses-conversation-store-host.ts` remains the canonical source and `.js` remains only while runtime importers still require it.
+
+# 2026-07-10: zero-ref bridge d.ts mirrors should be deleted, not preserved
+
+- `src/modules/llmswitch/bridge/{provider-response-converter-host,response-converter,responses-request-bridge,runtime-integrations,snapshot-recorder-runtime,snapshot-recorder-tool-failures,snapshot-recorder-types,snapshot-recorder,state-integrations}.d.ts` had no active consumer and are physically deleted.
+- For bridge closeout, zero-ref `.d.ts` sidecar mirrors are stale artifacts, not compatibility surfaces. Keep them absent and lock with residue coverage instead of preserving them beside live `.ts`/`.js` files.

@@ -4260,6 +4260,27 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('unused llmswitch bridge dts mirrors must stay deleted', () => {
+    const deletedBridgeDeclarations = [
+      'src/modules/llmswitch/bridge/provider-response-converter-host.d.ts',
+      'src/modules/llmswitch/bridge/response-converter.d.ts',
+      'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts',
+      'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
+      'src/modules/llmswitch/bridge/runtime-integrations.d.ts',
+      'src/modules/llmswitch/bridge/snapshot-recorder-runtime.d.ts',
+      'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.d.ts',
+      'src/modules/llmswitch/bridge/snapshot-recorder-types.d.ts',
+      'src/modules/llmswitch/bridge/snapshot-recorder.d.ts',
+      'src/modules/llmswitch/bridge/state-integrations.d.ts',
+    ];
+
+    const existing = deletedBridgeDeclarations.filter((relativePath) =>
+      fs.existsSync(path.join(process.cwd(), relativePath)),
+    );
+
+    expect(existing).toEqual([]);
+  });
+
   it('HubPipeline deleted type shell must not be re-exported or restored', () => {
     const deletedHubPipelinePath = path.join(
       process.cwd(),

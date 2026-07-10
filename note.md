@@ -28681,3 +28681,17 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 
 - Exact source-tracked scan found `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active runtime/test importers; only residue audit referenced the path.
 - Deleted the stale `.d.ts` mirror and changed residue audit to assert absence. `responses-conversation-store-host.js` remains active because runtime bridge imports still use it.
+
+# 2026-07-10: zero-ref bridge d.ts leaf mirrors deleted
+
+- Exact source-tracked scan found no active runtime/test importers for:
+  - `provider-response-converter-host.d.ts`
+  - `response-converter.d.ts`
+  - `responses-request-bridge.d.ts`
+  - `runtime-integrations.d.ts`
+  - `snapshot-recorder-runtime.d.ts`
+  - `snapshot-recorder-tool-failures.d.ts`
+  - `snapshot-recorder-types.d.ts`
+  - `snapshot-recorder.d.ts`
+  - `state-integrations.d.ts`
+- Deleted them and added one residue audit that asserts the whole absent set stays deleted.

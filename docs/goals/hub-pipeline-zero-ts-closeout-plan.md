@@ -421,6 +421,20 @@ Additional gates if touched paths require them:
 - Exact source-tracked scan found `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active runtime/test importers; the only remaining reference is the residue gate negative path.
 - Physically deleted the stale `.d.ts` mirror and changed `hub-pipeline-stage-residue-audit` to assert it stays absent; canonical source remains `responses-conversation-store-host.ts`, and the still-active runtime `.js` mirror remains until its runtime importers are migrated.
 
+### 2026-07-10 Progress: zero-ref bridge d.ts leaf mirrors deleted
+
+- Exact source-tracked scan found these bridge declaration mirrors had no active runtime/test importers outside residue coverage:
+  - `provider-response-converter-host.d.ts`
+  - `response-converter.d.ts`
+  - `responses-request-bridge.d.ts`
+  - `runtime-integrations.d.ts`
+  - `snapshot-recorder-runtime.d.ts`
+  - `snapshot-recorder-tool-failures.d.ts`
+  - `snapshot-recorder-types.d.ts`
+  - `snapshot-recorder.d.ts`
+  - `state-integrations.d.ts`
+- Physically deleted the mirrors and added one residue gate asserting they all stay absent. Canonical `.ts` sources and still-active `.js` runtime mirrors remain in place until their external importers are migrated.
+
 ### 2026-07-10 In Progress: virtual router bootstrap TS wrapper deletion
 
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts` has been removed in the working tree after exact source scan showed the runtime mainline already uses host `src/modules/llmswitch/bridge/routing-integrations.ts::bootstrapVirtualRouterConfig`.
