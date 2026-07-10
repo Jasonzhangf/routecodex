@@ -244,6 +244,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The request-start logging spec now uses a local minimal bridge mock for handler log/session-color coverage, reducing `createBridgeHttpServerMock(...)` source consumers from 17 to 16.
 - Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
 
+### 2026-07-10 SSE timeout spec shared mock consumer removed
+
+- `tests/server/handlers/sse-timeout.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The SSE timeout test now uses a local minimal bridge mock for finish-reason/error-frame projection and passes the stream through the current `PipelineExecutionResult.sseStream` contract instead of the stale `body.sseStream` shape.
+- `createBridgeHttpServerMock(...)` source consumers are reduced from 16 to 15, and exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.

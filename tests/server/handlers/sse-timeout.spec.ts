@@ -3,7 +3,6 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
-import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 describe('HTTP SSE stream timeout', () => {
   jest.setTimeout(10_000);
@@ -20,16 +19,17 @@ describe('HTTP SSE stream timeout', () => {
   });
 
   it('ends stalled SSE streams with an error event', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
-        writeSnapshotViaHooks: async () => undefined,
-        createResponsesJsonToSseConverter: async () => ({
-          convertResponseToJsonToSse: async () => {
-            throw new Error('json_to_sse_not_expected_in_timeout_test');
-          }
-        })
-      })
-    );
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      deriveFinishReasonNative: () => undefined,
+      projectSseErrorEventPayloadNative: (args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
+        type: 'error',
+        request_id: args.requestId,
+        status: args.status ?? 500,
+        message: args.message ?? 'sse error',
+        code: args.code ?? 'ERR_SSE_ERROR',
+      }),
+      writeSnapshotViaHooks: async () => undefined,
+    }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -49,9 +49,7 @@ describe('HTTP SSE stream timeout', () => {
         {
           status: 200,
           headers: {},
-          body: {
-            sseStream: stalled
-          }
+          sseStream: stalled,
         } as any,
         'req_test',
         { forceSSE: true, sseTotalTimeoutMs: 50 }
