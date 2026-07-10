@@ -96,7 +96,6 @@ function buildRoutingBridgeMock(captured: { policy?: unknown }) {
     markHubPipelineVirtualRouterConcurrencyScopeBusyNative: () => {},
     markHubPipelineVirtualRouterConcurrencyScopeIdleNative: () => {},
     disposeHubPipelineNative: () => {},
-    resolveBaseDir: () => process.cwd(),
   };
 }
 
@@ -137,8 +136,6 @@ function buildRuntimeBridgeMock() {
 
 function buildRootBridgeMock(captured: { policy?: unknown }) {
   return {
-    importCoreDist: async () => ({}),
-    requireCoreDist: () => ({}),
     getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
     extractSessionIdentifiersFromMetadata: () => ({}),
     extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),

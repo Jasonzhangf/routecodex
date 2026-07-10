@@ -735,3 +735,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts` and `tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts` no longer expose retired `resolveBaseDir` or `importCoreDist` helper fields from their bridge/routing mocks.
 - The specs still keep only the explicit request-executor runtime mocks needed for reroute/rebind behavior; no TS semantic owner or legacy loader path was added.
 - Exact file scan for `importCoreDist` / `resolveBaseDir` in both specs returns zero matches.
+
+### 2026-07-11 hub policy injection loader helper residue removed
+
+- `tests/server/http-server/hub-policy-injection.spec.ts` no longer exposes retired `resolveBaseDir`, `importCoreDist`, or `requireCoreDist` helper fields from its bridge/routing mocks.
+- The spec still mocks only the current routing/runtime surfaces required to observe hub policy injection; no TS semantic owner or legacy loader path was added.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveBaseDir` in the spec returns zero matches.
