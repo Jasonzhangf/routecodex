@@ -16,7 +16,12 @@ const mockBridgeWithStoplessStateStubs = async () => {
     convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
     writeSnapshotViaHooks: jest.fn(async () => {}),
     preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
-    resumeResponsesConversation: jest.fn(async () => ({ payload: {}, meta: {} })),
+    lookupResponsesContinuationByResponseId: jest.fn(async (...args: unknown[]) =>
+      mockLookupResponsesContinuationByResponseId(...args)
+    ),
+    resumeResponsesConversation: jest.fn(async (...args: unknown[]) =>
+      mockResumeResponsesConversation(...args)
+    ),
     resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
     createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
     resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
@@ -55,6 +60,21 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeW
 
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js', () => ({
+  lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
+  resumeResponsesConversation: mockResumeResponsesConversation,
+  captureResponsesRequestContext: jest.fn(),
+  recordResponsesResponse: jest.fn(),
+  clearResponsesConversationByRequestId: jest.fn(),
+  finalizeResponsesConversationRequestRetention: jest.fn(),
+  materializeLatestResponsesContinuationByScope: jest.fn(() => null),
+  resumeLatestResponsesContinuationByScope: jest.fn(() => null),
+  rebindResponsesConversationRequestId: jest.fn(),
+  clearAllResponsesConversationState: jest.fn(),
+  resetResponsesConversationStateForRestartSimulation: jest.fn(),
+  clearUnresolvedResponsesConversationRequests: jest.fn(() => 0),
+}));
 
 const express = (await import('express')).default;
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
@@ -108,19 +128,6 @@ describe('responses provider-owned continuation reroute blackbox', () => {
   beforeEach(() => {
     mockLookupResponsesContinuationByResponseId.mockReset();
     mockResumeResponsesConversation.mockReset();
-    (globalThis as Record<string, unknown>).__rccResponsesConversationStore = {
-      lookupContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
-      resumeConversation: mockResumeResponsesConversation,
-      captureRequestContext: () => undefined,
-      clearRequest: () => undefined,
-      finalizeResponsesConversationRequestRetention: () => undefined,
-      materializeLatestContinuationByScope: () => null,
-      recordResponse: () => undefined,
-    };
-  });
-
-  afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__rccResponsesConversationStore;
   });
 
   it('does not replay tool-result continuations on an alternative provider after provider.send throws', async () => {

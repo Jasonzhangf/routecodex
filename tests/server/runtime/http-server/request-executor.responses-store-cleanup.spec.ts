@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../../src/server/runtime/handlers/types.js';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import {
   captureResponsesRequestContext,
-  clearResponsesConversationByRequestId,
+  clearAllResponsesConversationState,
   getResponsesConversationStoreDebugStats,
   recordResponsesResponse,
   resumeLatestResponsesContinuationByScope,
-} from '../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts';
+} from '../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 
 const mockExecuteHubPipelineNative = jest.fn();
 
@@ -183,14 +186,30 @@ function createExecutor(converted: PipelineExecutionResult) {
 
 describe('HubRequestExecutor responses conversation retention cleanup', () => {
   const requestId = 'req_responses_store_cleanup_400';
+  let previousStoreFile: string | undefined;
+  let storeTempDir: string | undefined;
 
   beforeEach(() => {
+    previousStoreFile = process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE;
+    storeTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-responses-store-cleanup-'));
+    process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE = path.join(storeTempDir, 'store.json');
+    clearAllResponsesConversationState();
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     mockExecuteHubPipelineNative.mockReset();
   });
 
   afterEach(() => {
-    clearResponsesConversationByRequestId(requestId);
+    clearAllResponsesConversationState();
+    if (previousStoreFile === undefined) {
+      delete process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE;
+    } else {
+      process.env.ROUTECODEX_RESPONSES_CONVERSATION_STORE = previousStoreFile;
+    }
+    if (storeTempDir) {
+      fs.rmSync(storeTempDir, { recursive: true, force: true });
+    }
+    previousStoreFile = undefined;
+    storeTempDir = undefined;
   });
 
   it('clears captured responses request when malformed responses continuation shape converts into client-side 400 contract', async () => {

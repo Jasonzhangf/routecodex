@@ -464,55 +464,6 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(readStopMessageUsed(sessionId)).toBe(0);
   });
 
-  it('does not finalize responses conversation retention inside executor after successful tool_calls response', async () => {
-    const finalizeSpy = jest.fn();
-    const globalStoreKey = '__rccResponsesConversationStore';
-    const previousStore = (globalThis as Record<string, unknown>)[globalStoreKey];
-    (globalThis as Record<string, unknown>)[globalStoreKey] = {
-      finalizeResponsesConversationRequestRetention: finalizeSpy
-    };
-    const handle = createRuntimeHandle(async () => ({ ok: true }));
-    const { executor, request } = createExecutor(pipelineResult, handle);
-    stubConvertProviderResponse({
-      status: 200,
-      body: {
-        id: 'resp_retention_tool_calls',
-        object: 'response',
-        status: 'requires_action',
-        output: [
-          {
-            type: 'function_call',
-            name: 'exec_command',
-            arguments: '{"cmd":"pwd"}',
-            call_id: 'call_retention_tool'
-          }
-        ],
-        required_action: {
-          type: 'submit_tool_outputs',
-          submit_tool_outputs: { tool_calls: [] }
-        },
-        finish_reason: 'tool_calls'
-      }
-    });
-
-    try {
-      await executor.execute({
-        ...request,
-        requestId: 'req_executor_responses_retention_tool_calls',
-        entryEndpoint: '/v1/responses',
-        body: { model: 'gpt-5.4', input: 'call a tool' }
-      });
-
-      expect(finalizeSpy).not.toHaveBeenCalled();
-    } finally {
-      if (previousStore === undefined) {
-        delete (globalThis as Record<string, unknown>)[globalStoreKey];
-      } else {
-        (globalThis as Record<string, unknown>)[globalStoreKey] = previousStore;
-      }
-    }
-  });
-
   it('writes payload-contract-error errorsample for empty provider request payload by default', async () => {
     const errorsDir = fs.mkdtempSync(
       path.join(process.cwd(), 'tmp', 'jest-request-executor-errorsamples-empty-request-')

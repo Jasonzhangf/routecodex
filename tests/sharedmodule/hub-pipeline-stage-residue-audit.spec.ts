@@ -4931,6 +4931,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(storeSource).toContain('executeResponsesConversationStoreOperationJson');
     expect(storeSource).toContain('executeStoreOperation');
     expect(fs.existsSync(storeDtsPath)).toBe(false);
+    expect(storeSource).not.toMatch(/class\s+ResponsesConversationStore\b/u);
+    expect(storeSource).not.toContain('__rccResponsesConversationStore');
+    expect(storeSource).not.toMatch(/globalThis[\s\S]{0,160}ResponsesConversationStore/u);
 
     for (const retiredNativePlan of [
       'buildConversationScopePlan',
@@ -5011,6 +5014,21 @@ describe('hub pipeline stage residue audit', () => {
     expect(storeSource).not.toMatch(/\brequestMap\b|\bresponseIndex\b|\bscopeIndex\b/u);
     expect(storeSource).not.toContain('export { store as responsesConversationStore }');
     expect(fs.existsSync(storeJsPath)).toBe(false);
+
+    const globalStoreRefs: string[] = [];
+    for (const root of ['src', 'scripts', 'tests']) {
+      for (const filePath of walkFiles(path.join(repoRoot, root), ['.ts', '.js', '.mjs'])) {
+        const relativePath = path.relative(repoRoot, filePath);
+        if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
+          continue;
+        }
+        const source = fs.readFileSync(filePath, 'utf8');
+        if (source.includes('__rccResponsesConversationStore')) {
+          globalStoreRefs.push(relativePath);
+        }
+      }
+    }
+    expect(globalStoreRefs).toEqual([]);
   });
 
   it('responses conversation continuation input source selection must be native-owned', () => {

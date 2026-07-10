@@ -193,157 +193,54 @@ function logResponsesStoreNonBlockingError(
   }
 }
 
-class ResponsesConversationStore {
-  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+let pruneTimer: ReturnType<typeof setInterval> | null = null;
 
-  getDebugStats(): StoreMetrics {
-    return executeStoreOperation<StoreMetrics>('debug_stats');
-  }
-
-  deleteResponseIndexForDebug(responseId?: string): void {
-    executeStoreOperation<null>('debug_delete_response_index', { responseId });
-  }
-
-  hasRequestForDebug(requestId?: string): boolean {
-    return executeStoreOperation<boolean>('debug_has_request', { requestId });
-  }
-
-  hasResponseForDebug(responseId?: string): boolean {
-    return executeStoreOperation<boolean>('debug_has_response', { responseId });
-  }
-
-  hasScopeForDebug(scopeKey?: string): boolean {
-    return executeStoreOperation<boolean>('debug_has_scope', { scopeKey });
-  }
-
-  rebindRequestId(oldId: string | undefined, newId: string | undefined): void {
-    executeStoreOperation<null>('rebind_request_id', { oldId, newId });
-  }
-
-  captureRequestContext(args: CaptureContextArgs): void {
-    executeStoreOperation<unknown>('capture_request_context', args);
-  }
-
-  recordResponse(args: RecordResponseArgs): void {
+function startResponsesConversationStorePruneTimer(): void {
+  if (pruneTimer) return;
+  const PRUNE_INTERVAL_MS = 60_000;
+  pruneTimer = setInterval(() => {
     try {
-      executeStoreOperation<unknown>('record_response', args);
+      executeStoreOperation<unknown>('prune_expired');
     } catch (error) {
-      if (error instanceof ProviderProtocolError && error.code === 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT') {
-        logResponsesStoreNonBlockingError('record.missing_request_context', error, {
-          code: error.code,
-          reason: 'missing_request_context'
-        });
-      }
-      throw error;
+      logResponsesStoreNonBlockingError('prune.timer', error);
     }
-  }
+  }, PRUNE_INTERVAL_MS);
+  pruneTimer.unref?.();
+}
 
-  resumeConversation(responseId: string, submitPayload: AnyRecord, options?: ResumeOptions): ResumeResult {
-    return executeStoreOperation<ResumeResult>('resume_conversation', { responseId, submitPayload, options });
-  }
+function stopResponsesConversationStorePruneTimer(): void {
+  if (!pruneTimer) return;
+  clearInterval(pruneTimer);
+  pruneTimer = null;
+}
 
-  lookupContinuationByResponseId(
-    responseId: string,
-    options?: ContinuationLookupOptions,
-  ): ResponsesStoreLookupResult | null {
-    return executeStoreOperation<ResponsesStoreLookupResult | null>('lookup_by_response_id', { responseId, options });
-  }
-
-  clearRequest(requestId?: string): void {
-    executeStoreOperation<null>('clear_request', { requestId });
-  }
-
-  clearUnresolvedRequests(): number {
-    const result = executeStoreOperation<{ cleared?: number }>('clear_unresolved');
-    return typeof result?.cleared === 'number' ? result.cleared : 0;
-  }
-
-  releaseRequestPayload(requestId?: string): void {
-    executeStoreOperation<null>('release_request_payload', { requestId });
-  }
-
-  finalizeResponsesConversationRequestRetention(
-    requestId?: string,
-    options?: { keepForSubmitToolOutputs?: boolean }
-  ): void {
-    executeStoreOperation<null>('finalize_retention', { requestId, options });
-  }
-
-  resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
-    return executeStoreOperation<ResumeResult | null>('resume_latest_by_scope', args);
-  }
-
-  materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
-    return executeStoreOperation<ResumeResult | null>('materialize_latest_by_scope', args);
-  }
-
-  startPruneTimer(): void {
-    if (this.pruneTimer) return;
-    const PRUNE_INTERVAL_MS = 60_000;
-    this.pruneTimer = setInterval(() => {
-      try {
-        executeStoreOperation<unknown>('prune_expired');
-      } catch (error) {
-        logResponsesStoreNonBlockingError('prune.timer', error);
-      }
-    }, PRUNE_INTERVAL_MS);
-    this.pruneTimer.unref?.();
-  }
-
-  private stopPruneTimer(): void {
-    if (!this.pruneTimer) return;
-    clearInterval(this.pruneTimer);
-    this.pruneTimer = null;
-  }
-
-  clearAll(): void {
-    executeStoreOperation<null>('clear_all');
-    this.stopPruneTimer();
-  }
-
-  clearAllAndPersist(): void {
-    executeStoreOperation<null>('clear_all_and_persist');
-    this.stopPruneTimer();
-  }
-
-  getLastPruneAt(): number {
-    return executeStoreOperation<number>('get_last_prune_at');
+function recordResponsesResponseNative(args: RecordResponseArgs): void {
+  try {
+    executeStoreOperation<unknown>('record_response', args);
+  } catch (error) {
+    if (error instanceof ProviderProtocolError && error.code === 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT') {
+      logResponsesStoreNonBlockingError('record.missing_request_context', error, {
+        code: error.code,
+        reason: 'missing_request_context'
+      });
+    }
+    throw error;
   }
 }
 
-const RESPONSES_CONVERSATION_STORE_GLOBAL_KEY = "__rccResponsesConversationStore";
-
-function isResponsesConversationStoreLike(value: unknown): value is ResponsesConversationStore {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && typeof (value as { captureRequestContext?: unknown }).captureRequestContext === 'function'
-    && typeof (value as { recordResponse?: unknown }).recordResponse === 'function'
-    && typeof (value as { getDebugStats?: unknown }).getDebugStats === 'function'
-  );
+function clearResponsesConversationState(operation: 'clear_all' | 'clear_all_and_persist'): void {
+  executeStoreOperation<null>(operation);
+  stopResponsesConversationStorePruneTimer();
 }
 
-function resolveProcessResponsesConversationStore(): ResponsesConversationStore {
-  const globals = globalThis as Record<string, unknown>;
-  const existing = globals[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY];
-  if (isResponsesConversationStoreLike(existing)) {
-    return existing;
-  }
-  const created = new ResponsesConversationStore();
-  globals[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = created;
-  return created;
-}
-
-const store = resolveProcessResponsesConversationStore();
-store.startPruneTimer();
+startResponsesConversationStorePruneTimer();
 
 export function captureResponsesRequestContext(args: CaptureContextArgs): void {
   try {
     if (RESPONSES_DEBUG) {
       console.log('[responses-store] capture', args.requestId);
     }
-    store.captureRequestContext(args);
+    executeStoreOperation<unknown>('capture_request_context', args);
   } catch (error) {
     if (error instanceof ProviderProtocolError) {
       throw error;
@@ -361,7 +258,7 @@ export function recordResponsesResponse(args: RecordResponseArgs): void {
   if (RESPONSES_DEBUG) {
     console.log('[responses-store] record', args.requestId, (args.response as AnyRecord)?.id);
   }
-  store.recordResponse(args);
+  recordResponsesResponseNative(args);
 }
 
 export function resumeResponsesConversation(
@@ -372,85 +269,84 @@ export function resumeResponsesConversation(
   if (RESPONSES_DEBUG) {
     console.log('[responses-store] resume', responseId);
   }
-  return store.resumeConversation(responseId, submitPayload, options);
+  return executeStoreOperation<ResumeResult>('resume_conversation', { responseId, submitPayload, options });
 }
 
 export function lookupResponsesContinuationByResponseId(
   responseId: string,
   options?: ContinuationLookupOptions,
 ): ResponsesStoreLookupResult | null {
-  return store.lookupContinuationByResponseId(responseId, options);
+  return executeStoreOperation<ResponsesStoreLookupResult | null>('lookup_by_response_id', { responseId, options });
 }
 
 export function clearResponsesConversationByRequestId(requestId?: string): void {
   if (RESPONSES_DEBUG && requestId) {
     console.log('[responses-store] clear', requestId);
   }
-  store.clearRequest(requestId);
+  executeStoreOperation<null>('clear_request', { requestId });
 }
 
 export function finalizeResponsesConversationRequestRetention(
   requestId?: string,
   options?: { keepForSubmitToolOutputs?: boolean }
 ): void {
-  store.finalizeResponsesConversationRequestRetention(requestId, options);
+  executeStoreOperation<null>('finalize_retention', { requestId, options });
 }
 
 export function rebindResponsesConversationRequestId(oldId?: string, newId?: string): void {
   if (RESPONSES_DEBUG && oldId && newId) {
     console.log('[responses-store] rebind', oldId, '->', newId);
   }
-  store.rebindRequestId(oldId, newId);
+  executeStoreOperation<null>('rebind_request_id', { oldId, newId });
 }
 
 export function resumeLatestResponsesContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
   if (RESPONSES_DEBUG) {
     console.log('[responses-store] resume-by-scope', args.sessionId, args.conversationId);
   }
-  return store.resumeLatestContinuationByScope(args);
+  return executeStoreOperation<ResumeResult | null>('resume_latest_by_scope', args);
 }
 
 export function materializeLatestResponsesContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null {
   if (RESPONSES_DEBUG) {
     console.log('[responses-store] materialize-by-scope', args.sessionId, args.conversationId);
   }
-  return store.materializeLatestContinuationByScope(args);
+  return executeStoreOperation<ResumeResult | null>('materialize_latest_by_scope', args);
 }
 
 export function clearAllResponsesConversationState(): void {
-  store.clearAllAndPersist();
+  clearResponsesConversationState('clear_all_and_persist');
 }
 
 export function resetResponsesConversationStateForRestartSimulation(): void {
-  store.clearAll();
+  clearResponsesConversationState('clear_all');
 }
 
 export function clearUnresolvedResponsesConversationRequests(): number {
-  return store.clearUnresolvedRequests();
+  const result = executeStoreOperation<{ cleared?: number }>('clear_unresolved');
+  return typeof result?.cleared === 'number' ? result.cleared : 0;
 }
 
-export function getResponsesConversationStoreDebugStats(): ReturnType<ResponsesConversationStore['getDebugStats']> {
-  return store.getDebugStats();
+export function getResponsesConversationStoreDebugStats(): StoreMetrics {
+  return executeStoreOperation<StoreMetrics>('debug_stats');
 }
 
 export function releaseResponsesConversationRequestPayload(requestId?: string): void {
-  store.releaseRequestPayload(requestId);
+  executeStoreOperation<null>('release_request_payload', { requestId });
 }
 
 export function deleteResponsesConversationResponseIndexForDebug(responseId?: string): void {
-  store.deleteResponseIndexForDebug(responseId);
+  executeStoreOperation<null>('debug_delete_response_index', { responseId });
 }
 
 export function hasResponsesConversationRequestForDebug(requestId?: string): boolean {
-  return store.hasRequestForDebug(requestId);
+  return executeStoreOperation<boolean>('debug_has_request', { requestId });
 }
 
 export function hasResponsesConversationResponseForDebug(responseId?: string): boolean {
-  return store.hasResponseForDebug(responseId);
+  return executeStoreOperation<boolean>('debug_has_response', { responseId });
 }
 
 export function hasResponsesConversationScopeForDebug(scopeKey?: string): boolean {
-  return store.hasScopeForDebug(scopeKey);
+  return executeStoreOperation<boolean>('debug_has_scope', { scopeKey });
 }
-
-(globalThis as Record<string, unknown>)[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = store;

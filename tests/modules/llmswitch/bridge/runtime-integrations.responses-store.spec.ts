@@ -1,98 +1,90 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 
+const captureResponsesRequestContext = jest.fn();
+const recordResponsesResponse = jest.fn();
+const resumeResponsesConversation = jest.fn();
+const resumeLatestResponsesContinuationByScope = jest.fn();
+
+jest.unstable_mockModule(
+  "../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js",
+  () => ({
+    captureResponsesRequestContext,
+    recordResponsesResponse,
+    resumeResponsesConversation,
+    lookupResponsesContinuationByResponseId: jest.fn(),
+    resumeLatestResponsesContinuationByScope,
+    materializeLatestResponsesContinuationByScope: jest.fn(),
+    rebindResponsesConversationRequestId: jest.fn(),
+    clearResponsesConversationByRequestId: jest.fn(),
+    finalizeResponsesConversationRequestRetention: jest.fn(),
+    clearAllResponsesConversationState: jest.fn(),
+    resetResponsesConversationStateForRestartSimulation: jest.fn(),
+    clearUnresolvedResponsesConversationRequests: jest.fn(() => 0),
+  }),
+);
+
 describe("llmswitch bridge runtime-integrations responses store authority", () => {
   beforeEach(() => {
-    jest.resetModules();
-    delete (globalThis as Record<string, unknown>)
-      .__rccResponsesConversationStore;
+    captureResponsesRequestContext.mockReset();
+    recordResponsesResponse.mockReset();
+    resumeResponsesConversation.mockReset();
+    resumeLatestResponsesContinuationByScope.mockReset();
+    resumeResponsesConversation.mockReturnValue({
+      payload: { source: "host" },
+      meta: { source: "host" },
+    });
+    resumeLatestResponsesContinuationByScope.mockReturnValue({
+      payload: { source: "host-scope" },
+      meta: { source: "host-scope" },
+    });
   });
 
-  test("RED: capture/record/resume helpers must prefer global authoritative responses store over imported module", async () => {
-    const importCapture = jest.fn();
-    const importRecord = jest.fn();
-    const importResume = jest.fn(() => ({
-      payload: { source: "import" },
-      meta: { source: "import" },
-    }));
-    const importResumeByScope = jest.fn(() => ({
-      payload: { source: "import-scope" },
-      meta: { source: "import-scope" },
-    }));
-
-    const globalCapture = jest.fn();
-    const globalRecord = jest.fn();
-    const globalResume = jest.fn(() => ({
-      payload: { source: "global" },
-      meta: { source: "global" },
-    }));
-    const globalResumeByScope = jest.fn(() => ({
-      payload: { source: "global-scope" },
-      meta: { source: "global-scope" },
-    }));
-
-    (globalThis as Record<string, unknown>).__rccResponsesConversationStore = {
-      captureRequestContext: globalCapture,
-      recordResponse: globalRecord,
-      resumeConversation: globalResume,
-      resumeLatestContinuationByScope: globalResumeByScope,
-      getDebugStats: () => ({}),
-      startPruneTimer: () => {},
-    };
-
-    const mod =
-      await import("../../../../src/modules/llmswitch/bridge/runtime-integrations.js");
+  test("responses helpers delegate to the native store host without global store state", async () => {
+    const mod = await import("../../../../src/modules/llmswitch/bridge/runtime-integrations.js");
 
     await mod.captureResponsesRequestContextForRequest({
-      requestId: "req_global_truth_1",
+      requestId: "req_host_truth_1",
       payload: { model: "gpt-5.4" },
       context: { input: [] },
     });
     await mod.recordResponsesResponseForRequest({
-      requestId: "req_global_truth_1",
+      requestId: "req_host_truth_1",
       response: {
-        id: "resp_global_truth_1",
+        id: "resp_host_truth_1",
         output: [{ type: "function_call", call_id: "call_1" }],
       },
     });
-    const resumed = await mod.resumeResponsesConversation(
-      "resp_global_truth_1",
-      {
-        tool_outputs: [{ call_id: "call_1", output: "ok" }],
-      },
-    );
+    const resumed = await mod.resumeResponsesConversation("resp_host_truth_1", {
+      tool_outputs: [{ call_id: "call_1", output: "ok" }],
+    });
     const resumedByScope = await mod.resumeLatestResponsesContinuationByScope({
       payload: { input: [] },
-      sessionId: "sess_global_truth_1",
+      sessionId: "sess_host_truth_1",
     });
 
-    expect(globalCapture).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: "req_global_truth_1" }),
+    expect(captureResponsesRequestContext).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req_host_truth_1" }),
     );
-    expect(globalRecord).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: "req_global_truth_1" }),
+    expect(recordResponsesResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req_host_truth_1" }),
     );
-    expect(globalResume).toHaveBeenCalledWith(
-      "resp_global_truth_1",
+    expect(resumeResponsesConversation).toHaveBeenCalledWith(
+      "resp_host_truth_1",
       expect.objectContaining({
         tool_outputs: [{ call_id: "call_1", output: "ok" }],
       }),
       undefined,
     );
-    expect(globalResumeByScope).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "sess_global_truth_1" }),
+    expect(resumeLatestResponsesContinuationByScope).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess_host_truth_1" }),
     );
-
-    expect(importCapture).not.toHaveBeenCalled();
-    expect(importRecord).not.toHaveBeenCalled();
-    expect(importResume).not.toHaveBeenCalled();
-    expect(importResumeByScope).not.toHaveBeenCalled();
     expect(resumed).toEqual({
-      payload: { source: "global" },
-      meta: { source: "global" },
+      payload: { source: "host" },
+      meta: { source: "host" },
     });
     expect(resumedByScope).toEqual({
-      payload: { source: "global-scope" },
-      meta: { source: "global-scope" },
+      payload: { source: "host-scope" },
+      meta: { source: "host-scope" },
     });
   });
 });

@@ -2160,6 +2160,12 @@
 - Checked-in `responses-conversation-store-host.js` / `.d.ts` mirrors must not receive debug API backfill. Debug accessors may exist only on canonical TS source/tests until the source mirror imports are fully retired.
 - Residue gate must keep old per-plan native helper names out of `responses-conversation-store-host.ts/js/d.ts`; the allowed production surface is the single operation API plus thin host wrappers.
 
+# 2026-07-11: Responses store host global singleton is retired
+
+- `ResponsesConversationStore` class and `globalThis.__rccResponsesConversationStore` are physically removed from `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`; do not restore either as runtime truth or a test hook.
+- Runtime observers/tests must use explicit host exports such as `getResponsesConversationStoreDebugStats()` and the Rust operation API, not raw global `Map` access.
+- Tests that assert request-map cleanup must set `ROUTECODEX_RESPONSES_CONVERSATION_STORE` to a temp file and clear that isolated store before/after. Otherwise `clear_request` can load the user's default persisted store and leave unrelated old entries, creating false failures.
+
 # 2026-07-10: Responses continuation direct NAPI wrappers are retired
 
 - `resumeResponsesConversationPayloadJson`, `restoreResponsesContinuationPayloadJson`, and `materializeResponsesContinuationPayloadJson` must not return to `native-hotpath-required-exports.json`; the host-facing store surface is `executeResponsesConversationStoreOperationJson`.

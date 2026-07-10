@@ -1,8 +1,10 @@
 /**
  * Memory observer — periodic heap diagnostics for leak detection.
  * Logs RSS / heapUsed / external every INTERVAL_MS seconds.
- * Exposes internal store sizes via globalThis for external consumers.
+ * Exposes internal store sizes via native debug metrics for external consumers.
  */
+
+import { getResponsesConversationStoreDebugStats } from '../modules/llmswitch/bridge/responses-conversation-store-host.js';
 
 const INTERVAL_MS = 30_000; // 30s
 const LOG_PREFIX = '[mem-observer]';
@@ -24,24 +26,11 @@ function getMemoryStats(): NodeJS.MemoryUsage {
 }
 
 function getStoreMetrics(): StoreMetrics | null {
-  const store = (globalThis as Record<string, unknown>)['__rccResponsesConversationStore'];
-  if (!store || typeof store !== 'object') {
+  try {
+    return getResponsesConversationStoreDebugStats();
+  } catch {
     return null;
   }
-  const s = store as {
-    requestMap?: Map<unknown, unknown>;
-    responseIndex?: Map<unknown, unknown>;
-    scopeIndex?: Map<unknown, unknown>;
-    getDebugStats?: () => StoreMetrics;
-  };
-  if (typeof s.getDebugStats === 'function') {
-    return s.getDebugStats();
-  }
-  return {
-    requestMapSize: s.requestMap?.size ?? 0,
-    responseIndexSize: s.responseIndex?.size ?? 0,
-    scopeIndexSize: s.scopeIndex?.size ?? 0,
-  };
 }
 
 function formatBytes(mb: number): string {

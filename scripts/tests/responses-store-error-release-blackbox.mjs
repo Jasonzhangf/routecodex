@@ -101,12 +101,12 @@ async function createHarness(userConfig) {
   return { routeCodex, httpHarness };
 }
 
-function getStoreStats() {
-  const store = globalThis.__rccResponsesConversationStore;
-  if (!store || typeof store.getDebugStats !== 'function') {
+async function getStoreStats() {
+  const store = await import('../../dist/modules/llmswitch/bridge/responses-conversation-store-host.js');
+  if (typeof store.getResponsesConversationStoreDebugStats !== 'function') {
     throw new Error('responses conversation store debug stats unavailable');
   }
-  return store.getDebugStats();
+  return store.getResponsesConversationStoreDebugStats();
 }
 
 async function main() {
@@ -134,7 +134,7 @@ async function main() {
     await fs.mkdir(sessionDir, { recursive: true });
     upstream = await createFailingUpstream(hits);
     harness = await createHarness(buildConfig(upstream.baseUrl));
-    const before = getStoreStats();
+    const before = await getStoreStats();
     const input = Array.from({ length: 8 }, (_, i) => ({ role: 'user', content: [{ type: 'input_text', text: `store-error-${i}` }] }));
     const res = await fetch(`${harness.httpHarness.baseUrl}/v1/responses`, {
       method: 'POST',
@@ -144,7 +144,7 @@ async function main() {
     const text = await res.text();
     assert.notEqual(res.status, 200, text);
     assert.ok(hits.length >= 1, 'failing provider should receive at least one request');
-    const after = getStoreStats();
+    const after = await getStoreStats();
     assert.equal(after.requestEntriesWithoutLastResponseId, before.requestEntriesWithoutLastResponseId, 'failed request must not leave pendingNoResponseId entries');
     assert.equal(after.retainedInputItems, before.retainedInputItems, 'failed request must not retain input items');
     console.log(JSON.stringify({ ok: true, before, after, hits: hits.length }, null, 2));
