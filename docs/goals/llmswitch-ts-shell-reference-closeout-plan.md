@@ -835,3 +835,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Removed the stale `resolveBaseDir` and `importCoreDist` helper fields from this metadata-center contract fixture without adding TS behavior.
 - Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
 - Verification gap: the focused spec remains OOM before and after this edit, so this slice does not claim metadata-center behavior closure.
+
+### 2026-07-11 protocol providers root bridge mock removed
+
+- `tests/providers/core/runtime/protocol-http-providers.unit.test.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel.
+- The spec now mocks only the active provider runtime leaf surfaces: `native-exports.js` for provider wire sanitization / direct payload normalization / request conversion and `runtime-integrations.js` for provider runtime reporting and SSE materialization.
+- Exact file scan for legacy loader helpers and root bridge references in the touched spec returns zero matches.
+- Focused Jest loads successfully after the leaf mock migration and remains at the pre-existing provider snapshot/header baseline (13/16 pass, 3 fail), so this slice does not claim provider runtime behavior closure.

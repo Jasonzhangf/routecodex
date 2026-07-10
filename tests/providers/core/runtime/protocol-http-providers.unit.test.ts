@@ -11,20 +11,13 @@ import { allowSnapshotLocalDiskWrite, __resetSnapshotLocalDiskGateForTests } fro
 import { runtimeFlags, setRuntimeFlag } from '../../../../src/runtime/runtime-flags.js';
 import { sanitizeProviderOutboundPayloadWithNative } from '../../../sharedmodule/helpers/native-hub-bridge-policy-direct-native.js';
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
-  reportProviderErrorToRouterPolicy: async () => {},
-  reportProviderSuccessToRouterPolicy: async () => {},
-  writeSnapshotViaHooks: async () => {},
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   sanitizeProviderOutboundPayload: async (input: {
     protocol?: string;
     compatibilityProfile?: string;
     payload: Record<string, unknown>;
   }) => sanitizeProviderOutboundPayloadWithNative(input),
-  buildResponsesJsonFromSseStreamWithNative: async () => ({
-    status: 'completed',
-    output: []
-  }),
+  normalizeResponsesDirectCurrentRequestPayload: (input: { payload?: Record<string, unknown> }) => input.payload ?? {},
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
     request: {
       model: payload.model,
@@ -48,13 +41,15 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       tools: payload.tools
     }
   }),
-  createResponsesSseToJsonConverter: async () => ({
-    convertSseToJson: async () => ({ status: 'completed', output: [] })
-  })
 }), { virtual: true });
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} })
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
+  reportProviderErrorToRouterPolicy: async () => {},
+  reportProviderSuccessToRouterPolicy: async () => {},
+  buildResponsesJsonFromSseStreamWithNative: async () => ({
+    status: 'completed',
+    output: []
+  })
 }), { virtual: true });
 
 const { HttpTransportProvider } = await import('../../../../src/providers/core/runtime/http-transport-provider.js');
