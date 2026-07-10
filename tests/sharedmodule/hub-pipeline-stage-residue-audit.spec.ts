@@ -4257,6 +4257,7 @@ describe('hub pipeline stage residue audit', () => {
 
   it('unused llmswitch bridge dts mirrors must stay deleted', () => {
     const deletedBridgeDeclarations = [
+      'src/modules/llmswitch/core-loader.d.ts',
       'src/modules/llmswitch/bridge.d.ts',
       'src/modules/llmswitch/bridge/index.d.ts',
       'src/modules/llmswitch/bridge/module-loader.d.ts',

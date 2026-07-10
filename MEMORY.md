@@ -2171,5 +2171,5 @@
 
 # 2026-07-10: zero-ref bridge d.ts mirrors should be deleted, not preserved
 
-- `src/modules/llmswitch/{bridge,bridge/index}.d.ts` and `src/modules/llmswitch/bridge/{module-loader,native-exports,provider-response-converter-host,response-converter,responses-request-bridge,responses-response-bridge,responses-sse-bridge,routing-integrations,runtime-integrations,snapshot-recorder-runtime,snapshot-recorder-tool-failures,snapshot-recorder-types,snapshot-recorder,state-integrations}.d.ts` had no active consumer and are physically deleted.
+- `src/modules/llmswitch/{core-loader,bridge,bridge/index}.d.ts` and `src/modules/llmswitch/bridge/{module-loader,native-exports,provider-response-converter-host,response-converter,responses-request-bridge,responses-response-bridge,responses-sse-bridge,routing-integrations,runtime-integrations,snapshot-recorder-runtime,snapshot-recorder-tool-failures,snapshot-recorder-types,snapshot-recorder,state-integrations}.d.ts` had no active consumer and are physically deleted.
 - For bridge closeout, zero-ref `.d.ts` sidecar mirrors are stale artifacts, not compatibility surfaces. Keep them absent and lock with residue coverage instead of preserving them beside live `.ts`/`.js` files.
