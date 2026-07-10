@@ -11,14 +11,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-r
   createSnapshotRecorder: mockCreateSnapshotRecorder,
 }));
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
-  deriveFinishReasonNative: jest.fn(() => 'stop'),
-  sanitizeFollowupText: jest.fn(async (text: string) => text),
-  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async ({ sseStream }: { sseStream: unknown }) => sseStream),
-  reprojectDirectChatToolCallStreamForHttp: jest.fn(async ({ sseStream }: { sseStream: unknown }) => sseStream),
-  importCoreDist: jest.fn(async () => ({})),
-}));
-
 const { MetadataCenter } = await import(
   '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js'
 );

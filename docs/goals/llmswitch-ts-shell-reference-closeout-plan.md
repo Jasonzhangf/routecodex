@@ -710,3 +710,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The test already imports the current Responses conversation store host and routing facade directly, so the old module-loader field was dead mock surface.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 5/5 tests. The run still emits the existing non-blocking provider snapshot `entryPort required` warning, which is unrelated to this reference-only cleanup.
+
+### 2026-07-11 provider response metadata protocol mock narrowed
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.metadata-center-provider-protocol.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel or declares legacy `importCoreDist`.
+- The production converter already imports its active collaborators through `response-converter.js` and `snapshot-recorder.js`; the removed root barrel mock was dead test surface.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 1/1 test.
