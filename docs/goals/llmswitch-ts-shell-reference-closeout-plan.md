@@ -623,3 +623,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `src/manager/modules/health/index.ts`, `src/tools/stats-request-events.ts`, and `src/tools/stats-usage.ts` now import `ProviderErrorEvent` / `ProviderUsageEvent` from `src/types/llmswitch-local-types.js` instead of the root bridge barrel.
 - Exact scans for root bridge imports and legacy loader helper names in the touched files return zero matches.
 - Verification passed: `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), and `verify:function-map-compile-gate`.
+
+### 2026-07-11 responses-to-chat production import narrowed
+
+- `src/utils/responses-to-chat.ts` now imports `convertResponsesRequestToChatNative` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
+- This closes the production `src/utils` root-bridge importer missed by the earlier `src/providers src/debug src/client src/server src/modules` production scan, without moving Responses-to-Chat request semantics out of the existing Rust/native codec owner.
+- Exact production scan across tracked `src/**` now reports only `src/modules/README.md` as a root bridge text reference and no production code importers.
+- Verification passed: `tests/utils/responses-to-chat-native.spec.ts` 6/6, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
