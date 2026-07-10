@@ -747,3 +747,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts` and `tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts` no longer mock the root `src/modules/llmswitch/bridge.js` / `.ts` barrels.
 - Both specs keep only the current `routing-integrations` and `runtime-integrations` submodule mocks needed by `request-executor.ts`; no root bridge consumer or TS semantic owner was restored.
 - Exact file scan for root bridge imports/mocks and legacy loader helpers in both specs returns zero matches.
+
+### 2026-07-11 hub policy root bridge path mock removed
+
+- `tests/server/http-server/hub-policy-injection.spec.ts` no longer registers root `src/modules/llmswitch/bridge.ts` or `bridge/index.ts` mocks.
+- The spec keeps only the directly used `routing-integrations`, `runtime-integrations`, and `hub-pipeline-handle` mocks, deleting the unused broad root bridge mock surface.
+- Exact file scan for root bridge paths and legacy loader helpers in the spec returns zero matches.

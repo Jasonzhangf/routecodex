@@ -3,8 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-const BRIDGE_TS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge.ts');
-const BRIDGE_INDEX_TS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/index.ts');
 const ROUTING_INTEGRATIONS_TS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/routing-integrations.ts');
 const RUNTIME_INTEGRATIONS_TS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/runtime-integrations.ts');
 const HUB_PIPELINE_HANDLE_TS_PATH = path.resolve(process.cwd(), 'src/server/runtime/http-server/hub-pipeline-handle.ts');
@@ -134,53 +132,7 @@ function buildRuntimeBridgeMock() {
   };
 }
 
-function buildRootBridgeMock(captured: { policy?: unknown }) {
-  return {
-    getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
-    extractSessionIdentifiersFromMetadata: () => ({}),
-    extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
-    extractAntigravityGeminiSessionId: () => undefined,
-    cacheAntigravitySessionSignature: () => {},
-    lookupAntigravitySessionSignatureEntry: () => undefined,
-    getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
-    resetAntigravitySessionSignatureCachesForTests: () => {},
-    warmupAntigravitySessionSignatureModule: async () => {},
-    loadRoutingInstructionStateSync: () => null,
-    saveRoutingInstructionStateAsync: () => {},
-    saveRoutingInstructionStateSync: () => {},
-    syncReasoningStopModeFromRequest: () => {},
-    sanitizeFollowupText: (value: string) => value,
-    createSnapshotRecorder: () => ({}) as any,
-    convertProviderResponse: async (value: any) => value,
-    createCoreQuotaManager: async () => null,
-    deriveFinishReasonNative: () => undefined,
-    mapChatToolsToBridgeJson: async () => [],
-    planResponsesHandlerEntry: async () => ({ mode: 'passthrough' }),
-    normalizeAssistantTextToToolCallsJson: async () => ({ toolCalls: [] }),
-    buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
-    injectMcpToolsForChatJson: async (payload: unknown) => payload,
-    injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
-    sanitizeProviderOutboundPayload: async (payload: unknown) => payload,
-    convertResponsesRequestToChatNative: (payload: unknown) => ({ payload }),
-    evaluateResponsesDirectRouteDecisionNative: async () => ({ mode: 'passthrough' }),
-    hasDeclaredApplyPatchToolNative: () => false,
-    projectSseErrorEventPayloadNative: () => ({}),
-    isToolCallContinuationResponseNative: () => false,
-    classifyProviderFailure: () => ({ code: 'UNKNOWN', retryable: false }),
-    getNetworkErrorCodes: () => [],
-    updateResponsesContractProbeFromSseChunkNative: () => ({}),
-    buildResponsesTerminalSseFramesFromProbeNative: () => [],
-    buildResponsesRequestFromChat: async () => ({}),
-    ensureResponsesInstructions: async () => {},
-    createResponsesSseToJsonConverter: async () => ({ convertSseToJson: async () => ({}) }),
-    createResponsesJsonToSseConverter: async () => ({ convertResponseToJsonToSse: async () => ({}) }),
-    ...buildRuntimeBridgeMock(),
-    ...buildRoutingBridgeMock(captured),
-  };
-}
-
 async function installBridgeMocks(captured: { policy?: unknown }): Promise<void> {
-  const root = () => buildRootBridgeMock(captured);
   const routing = () => buildRoutingBridgeMock(captured);
   const runtime = () => buildRuntimeBridgeMock();
   const hubPipelineHandle = () => ({
@@ -191,8 +143,6 @@ async function installBridgeMocks(captured: { policy?: unknown }): Promise<void>
       return null;
     },
   });
-  jest.unstable_mockModule(BRIDGE_TS_MODULE_PATH, root);
-  jest.unstable_mockModule(BRIDGE_INDEX_TS_MODULE_PATH, root);
   jest.unstable_mockModule(ROUTING_INTEGRATIONS_TS_PATH, routing);
   jest.unstable_mockModule(RUNTIME_INTEGRATIONS_TS_PATH, runtime);
   jest.unstable_mockModule(HUB_PIPELINE_HANDLE_TS_PATH, hubPipelineHandle);
