@@ -1,8 +1,8 @@
-import { buildResponsesPayloadFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { buildResponsesPayloadFromChatNative } from '../../src/modules/llmswitch/bridge/native-exports.js';
 
 describe('responses-openai bridge metadata boundary', () => {
   it('does not project source retention metadata into client Responses payload', () => {
-    const result = buildResponsesPayloadFromChat(
+    const result = buildResponsesPayloadFromChatNative(
       {
         id: 'chatcmpl_metadata_boundary',
         object: 'chat.completion',
