@@ -12,8 +12,8 @@ describe('RouteCodexApp.stop responses continuation retention', () => {
   });
 
   it('RED: stop must not clear responses continuation store (preserve for client continuation after restart)', async () => {
-    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.js', async () => {
-      const actual = await import('../../src/modules/llmswitch/bridge.js');
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.js', async () => {
+      const actual = await import('../../src/modules/llmswitch/bridge/runtime-integrations.js');
       return {
         ...actual,
         clearAllResponsesConversationState: clearAllMock

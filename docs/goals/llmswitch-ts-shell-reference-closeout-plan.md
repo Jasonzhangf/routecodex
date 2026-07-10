@@ -637,3 +637,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The script-level exact scan for root bridge, legacy loader helpers, and `dist/modules/llmswitch/bridge.js` references now returns zero matches.
 - Verification passed: `RCC_CONTINUATION_SCENARIO=relay node scripts/tests/responses-continuation-provider-key-blackbox.mjs`, `npm run build:base`, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
 - Boundary: full `node scripts/tests/responses-continuation-provider-key-blackbox.mjs` still fails before the relay branch because the direct child currently routes the continuation to `p2` instead of the expected pinned `p1`; that pre-existing behavioral failure is not used as passing evidence for this import-narrowing slice.
+
+### 2026-07-11 app stop retention test bridge mock narrowed
+
+- `tests/cli/routecodex-app-stop.responses-store-retention.spec.ts` now mocks `clearAllResponsesConversationState` through `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- This keeps the test focused on the app stop retention contract while removing one test-only root bridge consumer; `RouteCodexApp.stop()` behavior and Responses store semantics are unchanged.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
