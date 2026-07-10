@@ -469,3 +469,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now declares its response/SSE/request bridge mocks explicitly, including the current Rust/native request bridge contracts for `planResponsesContinuationRequestAction`, `materializeProviderOwnedSubmitContext`, and `planResponsesRequestContext`.
 - The submit assertions were aligned with the current handler contract: raw HTTP body remains on `pipelineInput.body`, prepared Hub payload is asserted on `pipelineInput.hubBody`, and relay `routeHint` / `providerKey` are not expected in pre-execute MetadataCenter continuation/runtime control.
 - This removes the submit-tool regression from the legacy helper consumer set without reintroducing `importCoreDist`, `requireCoreDist`, `resolveImplForSubpath`, or `resolveBaseDir`.
+
+### 2026-07-11 SSE projection timeout shared bridge mock deleted
+
+- `tests/server/handlers/sse-projection-timeout.blackbox.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The spec now mocks the current handler-facing facades directly: `responses-response-bridge.js` and `responses-sse-bridge.js`, with SSE projection/terminal state kept as explicit file-local test doubles.
+- Stale SSE-side repair expectations were removed: the blackbox now locks the current transport-only contract that SSE passes projected frames, does not synthesize function-call repair frames, and does not turn a normally ended non-terminal upstream stream into a handler-owned semantic error.
+- Source-tracked active consumer scan showed `createBridgeHttpServerMock(...)` was referenced only by the helper itself, so `tests/helpers/bridge-http-server-mock.ts` was physically deleted.

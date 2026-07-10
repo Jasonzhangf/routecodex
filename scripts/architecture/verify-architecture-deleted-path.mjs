@@ -113,6 +113,7 @@ const deletedPathDenylist = [
   'src/server/runtime/http-server/metadata-center/metadata-center-types.d.ts',
   'src/server/runtime/http-server/metadata-center/request-truth-readers.js',
   'src/server/runtime/http-server/metadata-center/request-truth-readers.d.ts',
+  'tests/helpers/bridge-http-server-mock.ts',
 ];
 const deletedContentDenylist = [
   {
@@ -152,6 +153,11 @@ const repoWideDeletedContentDenylist = [
     token: '__routecodex_reasoning_stop_finalized',
     roots: ['src', 'sharedmodule/llmswitch-core/src', 'tests', 'scripts'],
     reason: 'non-standard reasoning-stop finalized payload marker was removed; internal control must not return through payload fields.',
+  },
+  {
+    token: 'createBridgeHttpServerMock',
+    roots: ['src', 'tests', 'scripts'],
+    reason: 'shared bridge-http-server mock was removed; tests must declare explicit local mocks for the current facade they exercise.',
   },
 ];
 

@@ -4,7 +4,81 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PassThrough } from 'node:stream';
 import { once } from 'node:events';
-import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
+
+type BridgeOverrides = Record<string, unknown>;
+
+function createProjectionState() {
+  return {
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
+  };
+}
+
+function updateTerminalStateFromFrame(input: {
+  chunk: unknown;
+  state: Record<string, unknown> | undefined;
+}): { state: Record<string, unknown>; observedTerminal: boolean } {
+  const chunk = typeof input.chunk === 'string' ? input.chunk : '';
+  const observedTerminal =
+    chunk.includes('event: response.completed')
+    || chunk.includes('event: response.done')
+    || chunk.includes('data: [DONE]');
+  return {
+    state: {
+      ...(input.state ?? {}),
+      observedTerminal: Boolean((input.state ?? {}).observedTerminal) || observedTerminal,
+    },
+    observedTerminal,
+  };
+}
+
+function createLocalResponseBridgeMock(overrides: BridgeOverrides = {}): BridgeOverrides {
+  return {
+    buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
+    prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(() => ({ mode: 'json' })),
+    normalizeResponsesClientPayloadForHttp: jest.fn((payload: unknown) => payload),
+    normalizeResponsesJsonBodyForHttp: jest.fn((payload: unknown) => payload),
+    ...overrides,
+  };
+}
+
+function createLocalSseBridgeMock(overrides: BridgeOverrides = {}): BridgeOverrides {
+  return {
+    buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
+    createResponsesSseClientProjectionStateForHttp: jest.fn(createProjectionState),
+    projectResponsesSseFrameForClientForHttp: jest.fn((input: { frame?: string; state?: unknown }) => ({
+      emit: true,
+      frame: input.frame ?? '',
+      state: input.state,
+    })),
+    updateResponsesSseTransportTerminalStateForHttp: jest.fn(updateTerminalStateFromFrame),
+    ...overrides,
+  };
+}
+
+function mockBridgeModules(overrides: BridgeOverrides = {}): void {
+  const responseBridge = createLocalResponseBridgeMock(overrides);
+  const sseBridge = createLocalSseBridgeMock(overrides);
+  const barrelBridge = {
+    deriveFinishReasonNative: jest.fn(() => undefined),
+    isToolCallContinuationResponseNative: jest.fn(() => false),
+    updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe: unknown) => (
+      probe && typeof probe === 'object' && !Array.isArray(probe)
+        ? probe
+        : {}
+    )),
+    buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
+    captureResponsesConversationToolCallRequestContext: jest.fn(async () => undefined),
+    recordResponsesConversationToolCallResponse: jest.fn(async () => undefined),
+    writeSnapshotViaHooks: jest.fn(async () => undefined),
+    ...overrides,
+  };
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => responseBridge);
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => sseBridge);
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => barrelBridge);
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', () => barrelBridge);
+}
 
 function parseSseEvents(text: string): Array<{ event?: string; data?: unknown }> {
   return text
@@ -246,19 +320,15 @@ describe('HTTP Responses SSE projection timeout', () => {
     else process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = originalTotalTimeout;
   });
 
-  it('ends the client SSE response when frame projection stalls', async () => {
-    const bridgeMock = () =>
-      createBridgeHttpServerMock({
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return new Promise(() => {});
-          }
-          return {};
-        },
-        writeSnapshotViaHooks: async () => undefined,
-      });
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', bridgeMock);
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', bridgeMock);
+  it('ends the client SSE response when projected frames never emit a terminal response', async () => {
+    process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '120';
+    mockBridgeModules({
+      projectResponsesSseFrameForClientForHttp: jest.fn((input: { state?: unknown }) => ({
+        emit: false,
+        frame: '',
+        state: input.state,
+      })),
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -281,7 +351,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         {
           forceSSE: true,
           entryEndpoint: '/v1/responses',
-          sseTotalTimeoutMs: 5000,
+          sseTotalTimeoutMs: 120,
         }
       );
       upstream.write('event: response.output_text.delta\n');
@@ -301,9 +371,9 @@ describe('HTTP Responses SSE projection timeout', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(Date.now() - startedAt).toBeLessThan(5_500);
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
       expect(text).toContain('event: error');
-      expect(text).toMatch(/(SSE_CLIENT_PROJECTION_(TIMEOUT|FAILED)|HTTP_SSE_TIMEOUT)/);
+      expect(text).toContain('HTTP_SSE_TIMEOUT');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -322,8 +392,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       }
     };
 
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: (body: unknown) => Boolean(
           body
           && typeof body === 'object'
@@ -380,22 +449,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         },
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_tool_close_guard'),
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -442,7 +497,9 @@ describe('HTTP Responses SSE projection timeout', () => {
       });
       const text = await response.text();
       expect(Date.now() - startedAt).toBeLessThan(2_000);
-      expectResponsesToolCallContinuationSequence(text);
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('"type":"function_call"');
+      expect(text).toContain('"name":"exec_command"');
       expect(text).not.toContain('HTTP_SSE_TIMEOUT');
       expect(text).not.toContain('event: error');
     } finally {
@@ -451,9 +508,8 @@ describe('HTTP Responses SSE projection timeout', () => {
     }
   });
 
-  it('repairs a function-call-only responses stream even when the initial continuation probe is absent', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+  it('passes through a function-call-only responses stream without SSE-side repair', async () => {
+    mockBridgeModules({
         isToolCallContinuationResponseNative: (body: unknown) => Boolean(
           body
           && typeof body === 'object'
@@ -516,22 +572,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         },
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_probe_from_frame'),
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -578,7 +620,9 @@ describe('HTTP Responses SSE projection timeout', () => {
       });
       const text = await response.text();
       expect(Date.now() - startedAt).toBeLessThan(2_000);
-      expectResponsesToolCallContinuationSequence(text);
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('"type":"function_call"');
+      expect(text).toContain('"name":"exec_command"');
       expect(text).not.toContain('HTTP_SSE_TIMEOUT');
       expect(text).not.toContain('event: error');
     } finally {
@@ -588,8 +632,7 @@ describe('HTTP Responses SSE projection timeout', () => {
   });
 
   it('does not close a non-terminal text stream before the upstream stream ends', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
         updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
           probe && typeof probe === 'object' && !Array.isArray(probe)
@@ -597,22 +640,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -676,9 +705,8 @@ describe('HTTP Responses SSE projection timeout', () => {
     }
   });
 
-  it('emits explicit SSE error when a non-terminal responses stream ends without terminal event', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+  it('does not synthesize a terminal error when a non-terminal responses stream ends', async () => {
+    mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
         updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
           probe && typeof probe === 'object' && !Array.isArray(probe)
@@ -686,22 +714,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -747,7 +761,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       });
       const text = await response.text();
       expect(text).toContain('"delta":"partial"');
-      expect(text).toContain('event: error');
+      expect(text).not.toContain('event: error');
       expect(text).not.toContain('event: response.done');
     } finally {
       upstream.destroy();
@@ -759,8 +773,7 @@ describe('HTTP Responses SSE projection timeout', () => {
     const captureSpy = jest.fn(async () => undefined);
     const recordSpy = jest.fn(async () => undefined);
 
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: (body: unknown) => Boolean(
           body
           && typeof body === 'object'
@@ -775,22 +788,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -851,8 +850,7 @@ describe('HTTP Responses SSE projection timeout', () => {
     const captureSpy = jest.fn(async () => undefined);
     const recordSpy = jest.fn(async () => undefined);
 
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: (body: unknown) => Boolean(
           body
           && typeof body === 'object'
@@ -867,22 +865,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -947,8 +931,7 @@ describe('HTTP Responses SSE projection timeout', () => {
   });
 
   it('does not treat timeout-hint disconnect state as pre-start socket close', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
         updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
           probe && typeof probe === 'object' && !Array.isArray(probe)
@@ -956,22 +939,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -1052,8 +1021,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       }
     };
 
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: (body: unknown) => Boolean(
           body
           && typeof body === 'object'
@@ -1067,22 +1035,8 @@ describe('HTTP Responses SSE projection timeout', () => {
         ),
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_direct_passthrough_probe'),
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -1197,8 +1151,7 @@ describe('HTTP Responses SSE projection timeout', () => {
   });
 
   it('closes after a real terminal event without turning an empty probe repair into an error', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-      createBridgeHttpServerMock({
+    mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
         updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
           probe && typeof probe === 'object' && !Array.isArray(probe)
@@ -1206,22 +1159,8 @@ describe('HTTP Responses SSE projection timeout', () => {
             : {}
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
-        importCoreDist: async (subpath?: string) => {
-          if (!subpath) {
-            return {
-              projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-                emit: true,
-                frame: input.frame,
-                state: input.state,
-              }),
-              projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-            };
-          }
-          return {};
-        },
         writeSnapshotViaHooks: async () => undefined,
-      })
-    );
+    });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -1253,6 +1192,7 @@ describe('HTTP Responses SSE projection timeout', () => {
       );
       upstream.write('event: response.done\n');
       upstream.write('data: {"type":"response.done"}\n\n');
+      upstream.end();
     });
 
     const server = http.createServer(app);
