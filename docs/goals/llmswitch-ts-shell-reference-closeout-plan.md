@@ -494,3 +494,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` / `.ts` or declares legacy `importCoreDist` / `requireCoreDist` helpers.
 - The blackbox now exercises the real current handler-facing facade/native path while keeping only snapshot writer disabled; no replacement TS projection/continuation mock was added.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` / `.ts` mock references returns zero matches.
+
+### 2026-07-11 required_action split-frame broad bridge mock removed
+
+- `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` / `.ts`, response/SSE bridge source `.ts`, or declares legacy `importCoreDist` / `requireCoreDist` helpers.
+- The regression now exercises the real current handler-facing facade/native path while keeping only snapshot writer disabled; no replacement TS projection/continuation/terminal-repair mock was added.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.
