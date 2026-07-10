@@ -2078,3 +2078,9 @@
 - Provider error/success ingress truth is Rust-owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs::report_provider_error_to_router_policy_json_bridge` and `virtual_router_engine/provider_runtime_ingress.rs::report_provider_error` / `report_provider_success`.
 - Tests that need direct ingress calls should use host/native binding (`src/modules/llmswitch/bridge/native-exports.js::getRouterHotpathJsonBindingSync`) or local host boundary types, not the retired llmswitch-core TS wrapper.
 - Current strict shell audit after deletion is `prodTsShellCount=10`, `shellsWithProdImporters=7`, `coreModuleSubpathRefs=3`; focused provider ingress/error-pipeline/residue tests pass.
+
+# 2026-07-10: Req inbound aggregate native wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts` is physically deleted from production source. Do not restore it as a production aggregate wrapper, required dist output, or Jest mock subpath.
+- Tests that need req_inbound direct native evidence must use `tests/sharedmodule/helpers/req-inbound-direct-native.ts`; runtime context capture remains host bridge `src/modules/llmswitch/bridge/native-exports.ts` calling Rust/NAPI truth in `hub_req_inbound_context_capture.rs`.
+- Function map and mainline call map no longer point runtime edges at the retired aggregate wrapper. Active import scan for the retired aggregate path should have no source/test/script imports outside residue absent-file locks.
