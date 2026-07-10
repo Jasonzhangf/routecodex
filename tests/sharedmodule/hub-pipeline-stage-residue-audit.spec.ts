@@ -1009,7 +1009,7 @@ describe('hub pipeline stage residue audit', () => {
     );
     const requiredExportsPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
     );
     const wrapperSource = fs.readFileSync(helperPath, 'utf8');
     const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
@@ -2082,7 +2082,7 @@ describe('hub pipeline stage residue audit', () => {
       'utf8',
     );
     const requiredExports = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
       'utf8',
     );
     const respToolGovernanceBindings = fs.readFileSync(
@@ -2507,7 +2507,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics-builders.ts';
     const scannedFiles = [
       'tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
     ];
@@ -2619,7 +2619,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredSessionIdentifierWrapperPath =
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-session-identifiers-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_session_identifiers.rs',
     ];
     const retiredSymbols = [
@@ -2663,7 +2663,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredAggregateWrapperPath =
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs',
     ];
@@ -2696,7 +2696,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
     ];
     const retiredSymbols = [
@@ -2734,7 +2734,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(existingRetiredFiles).toEqual([]);
 
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_submit_tool_outputs.rs',
     ];
@@ -2783,7 +2783,7 @@ describe('hub pipeline stage residue audit', () => {
     const retiredReqProcessWrapperPath =
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts';
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage2_route_select.rs',
@@ -2827,7 +2827,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-stop-message-semantics.ts',
     ))).toBe(false);
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_instruction.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_stop_message_actions.rs',
@@ -2874,7 +2874,7 @@ describe('hub pipeline stage residue audit', () => {
     );
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs',
@@ -2931,7 +2931,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_decode_semantics.rs',
     ];
     const retiredSymbols = [
@@ -2965,7 +2965,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-node-result-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_node_result_semantics.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
       'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-node-result.mjs',
@@ -3015,7 +3015,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_anthropic_tool_alias.rs',
       'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-process-anthropic-alias.mjs',
@@ -3145,7 +3145,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(validatorPath)).toBe(false);
 
     const requiredExportsSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
       'utf8'
     );
     expect(requiredExportsSource).toContain('"normalizeExecCommandArgsJson"');
@@ -3229,7 +3229,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(shellPath)).toBe(false);
 
     const requiredExportsSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
       'utf8'
     );
     expect(requiredExportsSource).toContain('"normalizeExecCommandArgsJson"');
@@ -3325,7 +3325,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_continue_execution_directive_injection.rs',
       'sharedmodule/llmswitch-core/scripts/tests/coverage-native-chat-process-governance-semantics.mjs',
@@ -3381,7 +3381,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_web_search_tool_schema.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton/mod.rs',
@@ -3440,7 +3440,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs',
@@ -3518,7 +3518,7 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics-parsers.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs',
@@ -3591,7 +3591,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-routing-instructions-semantics.ts',
     ))).toBe(false);
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
     ];
     const retiredSymbols = [
@@ -3625,7 +3625,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_protocol_spec_semantics.rs',
     ];
@@ -3660,7 +3660,7 @@ describe('hub pipeline stage residue audit', () => {
   it('retired responses tool-call remap public wrapper must stay deleted', () => {
     const repoRoot = process.cwd();
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/mod.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bindings.rs',
@@ -3729,7 +3729,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts',
     ];
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs',
@@ -4331,7 +4331,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const files = [
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
     ];
     const findings: string[] = [];
@@ -4382,7 +4382,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-shell-utils.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_args_mapping.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs',
@@ -4520,7 +4520,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(argsJsonPath)).toBe(false);
 
     const requiredExportsSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'),
+      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
       'utf8'
     );
     expect(requiredExportsSource).toContain('"parseToolArgsJsonWithArtifactRepairJson"');
@@ -5246,7 +5246,7 @@ describe('hub pipeline stage residue audit', () => {
     const nativeWrapperSource = fs.readFileSync(nativeWrapperPath, 'utf8');
     const requiredExportsPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts',
     );
     const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
 
@@ -5356,7 +5356,7 @@ describe('hub pipeline stage residue audit', () => {
   it('virtual router stop-message status label must stay Rust-owned', () => {
     const hostEffectsPath = path.join(
       process.cwd(),
-      'sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
     );
     const source = fs.readFileSync(hostEffectsPath, 'utf8');
     const statusLabelSource = source.slice(
@@ -5371,6 +5371,13 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(findings).toEqual([]);
+  });
+
+  it('retired virtual router host-effects TS shell must stay absent', () => {
+    expect(fs.existsSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts',
+    ))).toBe(false);
   });
 
   it('compat profile registry TS parallel implementation must stay deleted', () => {

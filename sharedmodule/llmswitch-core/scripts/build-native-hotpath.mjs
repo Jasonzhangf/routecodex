@@ -18,7 +18,7 @@ const requiredNativeExportsSource = path.join(
   'src',
   'native',
   'router-hotpath',
-  'native-router-hotpath-required-exports.ts'
+  'native-router-hotpath-loader.ts'
 );
 const servertoolBinaryName = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
 const releaseServertoolBinary = path.join(targetRelease, servertoolBinaryName);
@@ -192,7 +192,13 @@ function readRequiredNativeExports() {
     process.exit(1);
   }
   const source = fs.readFileSync(requiredNativeExportsSource, 'utf8');
-  const exports = [...new Set([...source.matchAll(/"([^"]+)"/g)].map((match) => match[1]))].filter(Boolean);
+  const arrayMatch = source.match(/export const REQUIRED_NATIVE_HOTPATH_EXPORTS\s*=\s*\[([\s\S]*?)^]\s*(?:as const)?;/m);
+  if (!arrayMatch) {
+    console.error('[native-build] required export contract array not found');
+    process.exit(1);
+  }
+  const arraySource = arrayMatch[1];
+  const exports = [...new Set([...arraySource.matchAll(/"([^"]+)"/g)].map((match) => match[1]))].filter(Boolean);
   if (!exports.includes('compileRouteCodexRuntimeManifestJson')) {
     console.error('[native-build] required export contract missing compileRouteCodexRuntimeManifestJson');
     process.exit(1);

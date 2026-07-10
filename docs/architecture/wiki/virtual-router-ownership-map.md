@@ -174,8 +174,8 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`
-- `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts`
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
 - `tests/sharedmodule/virtual-router-hit-log.spec.ts`
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
 - `docs`

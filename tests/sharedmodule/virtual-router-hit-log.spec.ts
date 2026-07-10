@@ -9,7 +9,7 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
 import {
   createVirtualRouterRouteHostEffects
-} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('virtual-router hit log', () => {
   it('includes request token estimate when available', () => {

@@ -1,22 +1,22 @@
 {
-  "generatedAt": "2026-07-10T05:48:43.614Z",
+  "generatedAt": "2026-07-10T05:57:31.304Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 7,
-    "prodTsLocTotal": 2340,
+    "prodTsFileCount": 5,
+    "prodTsLocTotal": 2330,
     "nonNativeFileCount": 0,
     "nonNativeLocTotal": 0
   },
   "byTopDir": {
     "native": {
-      "prodTsFiles": 4,
-      "prodTsLoc": 1709,
+      "prodTsFiles": 3,
+      "prodTsLoc": 2098,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     },
     "runtime": {
-      "prodTsFiles": 2,
-      "prodTsLoc": 621,
+      "prodTsFiles": 1,
+      "prodTsLoc": 222,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     },
@@ -36,13 +36,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts",
-      "loc": 533,
-      "nativeLinked": true,
-      "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts",
-      "loc": 556,
+      "loc": 1088,
       "nativeLinked": true,
       "topDir": "native"
     },
@@ -54,19 +48,13 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts",
-      "loc": 355,
+      "loc": 745,
       "nativeLinked": true,
       "topDir": "native"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts",
       "loc": 222,
-      "nativeLinked": true,
-      "topDir": "runtime"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts",
-      "loc": 399,
       "nativeLinked": true,
       "topDir": "runtime"
     }

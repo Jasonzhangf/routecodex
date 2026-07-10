@@ -3,7 +3,7 @@ import {
   cleanStopMessageMarkersInPlace,
   formatStopMessageStatusLabel,
   parseStopMessageInstruction
-} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 describe('stopmessage marker module', () => {
   test('parseStopMessageInstruction remains available from unified module', () => {

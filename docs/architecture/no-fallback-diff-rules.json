@@ -1369,11 +1369,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/config.ts",
       "textContains": ""
     },

@@ -596,7 +596,7 @@ verification:
   - feature_id: vr.route_selection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
     contract:
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
@@ -721,13 +721,13 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
     contract:
       - tests/sharedmodule/virtual-router-hit-log.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
-      - sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
     smoke:
       - npm run verify:llmswitch-rustification-audit
       - npm run verify:function-map-compile-gate
@@ -1733,7 +1733,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1749,7 +1749,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
@@ -1765,7 +1765,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     integration:
