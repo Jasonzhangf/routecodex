@@ -4234,6 +4234,32 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('routing integrations bridge must not re-export unused async config wrappers', () => {
+    const repoRoot = process.cwd();
+    const bridgeFiles = [
+      'src/modules/llmswitch/bridge/routing-integrations.ts',
+      'src/modules/llmswitch/bridge/routing-integrations.js',
+      'src/modules/llmswitch/bridge/routing-integrations.d.ts',
+      'src/modules/llmswitch/bridge.ts',
+      'src/modules/llmswitch/bridge.js',
+      'src/modules/llmswitch/bridge.d.ts',
+    ];
+    const retiredNames = [
+      'parseRouteCodexTomlRecord',
+      'serializeRouteCodexTomlRecord',
+      'updateRouteCodexTomlStringScalarInTable',
+      'coerceRouteCodexProviderConfigV2',
+    ];
+    const findings = bridgeFiles.flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      return retiredNames.flatMap((name) => collectMatches(source, [
+        { label: `${relativePath}: legacy async ${name} export`, pattern: new RegExp(`\\b${name}\\b(?!Sync)`) },
+      ]));
+    });
+
+    expect(findings).toEqual([]);
+  });
+
   it('HubPipeline deleted type shell must not be re-exported or restored', () => {
     const deletedHubPipelinePath = path.join(
       process.cwd(),

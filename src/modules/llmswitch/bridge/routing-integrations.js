@@ -248,9 +248,6 @@ export function buildRouteCodexForwarderProfilesSync(userConfig, knownProviderId
     }
     return forwarderProfiles;
 }
-export async function parseRouteCodexTomlRecord(raw) {
-    return parseRouteCodexTomlRecordSync(raw);
-}
 export function parseRouteCodexTomlRecordSync(raw) {
     const binding = loadNativeBindingForConfigCodec();
     const fn = binding.parseRouteCodexTomlRecordJson;
@@ -259,9 +256,6 @@ export function parseRouteCodexTomlRecordSync(raw) {
     }
     return parseNativeTomlRecord(String(fn(String(raw ?? ''))));
 }
-export async function serializeRouteCodexTomlRecord(record) {
-    return serializeRouteCodexTomlRecordSync(record);
-}
 export function serializeRouteCodexTomlRecordSync(record) {
     const binding = loadNativeBindingForConfigCodec();
     const fn = binding.serializeRouteCodexTomlRecordJson;
@@ -269,9 +263,6 @@ export function serializeRouteCodexTomlRecordSync(record) {
         throw new Error('[llmswitch-bridge] serializeRouteCodexTomlRecordJson not available');
     }
     return String(fn(JSON.stringify(record ?? {})));
-}
-export async function updateRouteCodexTomlStringScalarInTable(input) {
-    return updateRouteCodexTomlStringScalarInTableSync(input);
 }
 export function updateRouteCodexTomlStringScalarInTableSync(input) {
     const binding = loadNativeBindingForConfigCodec();
@@ -413,9 +404,6 @@ export function loadRouteCodexConfigNativeSync(input = {}) {
         throw new Error('[llmswitch-bridge] RouteCodex config loader returned invalid shape');
     }
     return loaded;
-}
-export async function coerceRouteCodexProviderConfigV2(parsed, fallbackProviderId) {
-    return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }
 export function coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId) {
     const binding = loadNativeBindingForConfigCodec();

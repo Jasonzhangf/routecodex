@@ -14,16 +14,8 @@ export declare function extractRouteCodexMaterializedProviderConfigsSync(userCon
 export declare function materializeRouteCodexUserConfigFromManifestSync(userConfig: AnyRecord, manifest: AnyRecord): AnyRecord;
 export declare function buildRouteCodexProviderProfilesSync(userConfig: AnyRecord): AnyRecord;
 export declare function buildRouteCodexForwarderProfilesSync(userConfig: AnyRecord, knownProviderIds: Set<string> | string[]): AnyRecord;
-export declare function parseRouteCodexTomlRecord(raw: string): Promise<AnyRecord>;
 export declare function parseRouteCodexTomlRecordSync(raw: string): AnyRecord;
-export declare function serializeRouteCodexTomlRecord(record: AnyRecord): Promise<string>;
 export declare function serializeRouteCodexTomlRecordSync(record: AnyRecord): string;
-export declare function updateRouteCodexTomlStringScalarInTable(input: {
-    raw: string;
-    tablePath: string[];
-    key: string;
-    value: string;
-}): Promise<string>;
 export declare function updateRouteCodexTomlStringScalarInTableSync(input: {
     raw: string;
     tablePath: string[];
@@ -86,7 +78,6 @@ export declare function loadRouteCodexConfigNativeSync(input?: {
     userConfig: AnyRecord;
     providerProfiles: AnyRecord;
 };
-export declare function coerceRouteCodexProviderConfigV2(parsed: AnyRecord, fallbackProviderId?: string): Promise<AnyRecord | null>;
 export declare function coerceRouteCodexProviderConfigV2Sync(parsed: AnyRecord, fallbackProviderId?: string): AnyRecord | null;
 export declare function planRouteCodexProviderConfigV2FilesSync(fileNames: string[]): Array<{
     fileName: string;

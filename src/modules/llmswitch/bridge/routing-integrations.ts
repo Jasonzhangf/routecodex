@@ -295,10 +295,6 @@ export function buildRouteCodexForwarderProfilesSync(userConfig: AnyRecord, know
   return forwarderProfiles as AnyRecord;
 }
 
-export async function parseRouteCodexTomlRecord(raw: string): Promise<AnyRecord> {
-  return parseRouteCodexTomlRecordSync(raw);
-}
-
 export function parseRouteCodexTomlRecordSync(raw: string): AnyRecord {
   const binding = loadNativeBindingForConfigCodec();
   const fn = binding.parseRouteCodexTomlRecordJson;
@@ -308,10 +304,6 @@ export function parseRouteCodexTomlRecordSync(raw: string): AnyRecord {
   return parseNativeTomlRecord(String(fn(String(raw ?? ''))));
 }
 
-export async function serializeRouteCodexTomlRecord(record: AnyRecord): Promise<string> {
-  return serializeRouteCodexTomlRecordSync(record);
-}
-
 export function serializeRouteCodexTomlRecordSync(record: AnyRecord): string {
   const binding = loadNativeBindingForConfigCodec();
   const fn = binding.serializeRouteCodexTomlRecordJson;
@@ -319,15 +311,6 @@ export function serializeRouteCodexTomlRecordSync(record: AnyRecord): string {
     throw new Error('[llmswitch-bridge] serializeRouteCodexTomlRecordJson not available');
   }
   return String(fn(JSON.stringify(record ?? {})));
-}
-
-export async function updateRouteCodexTomlStringScalarInTable(input: {
-  raw: string;
-  tablePath: string[];
-  key: string;
-  value: string;
-}): Promise<string> {
-  return updateRouteCodexTomlStringScalarInTableSync(input);
 }
 
 export function updateRouteCodexTomlStringScalarInTableSync(input: {
@@ -550,13 +533,6 @@ export function loadRouteCodexConfigNativeSync(input: {
     userConfig: AnyRecord;
     providerProfiles: AnyRecord;
   };
-}
-
-export async function coerceRouteCodexProviderConfigV2(
-  parsed: AnyRecord,
-  fallbackProviderId?: string
-): Promise<AnyRecord | null> {
-  return coerceRouteCodexProviderConfigV2Sync(parsed, fallbackProviderId);
 }
 
 export function coerceRouteCodexProviderConfigV2Sync(
