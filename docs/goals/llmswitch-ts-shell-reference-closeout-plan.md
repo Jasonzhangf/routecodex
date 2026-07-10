@@ -488,3 +488,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or declares legacy `importCoreDist` / `requireCoreDist` helpers.
 - The keepalive transport spec now mocks only the current handler-facing `responses-response-bridge.js` and `responses-sse-bridge.js` facades, preserving the SSE transport-only contract without adding TS semantic owner logic.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` mock references returns zero matches.
+
+### 2026-07-11 responses SSE client contract broad bridge mock removed
+
+- `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` / `.ts` or declares legacy `importCoreDist` / `requireCoreDist` helpers.
+- The blackbox now exercises the real current handler-facing facade/native path while keeping only snapshot writer disabled; no replacement TS projection/continuation mock was added.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` / `.ts` mock references returns zero matches.
