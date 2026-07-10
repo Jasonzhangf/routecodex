@@ -60,24 +60,8 @@ function createLocalSseBridgeMock(overrides: BridgeOverrides = {}): BridgeOverri
 function mockBridgeModules(overrides: BridgeOverrides = {}): void {
   const responseBridge = createLocalResponseBridgeMock(overrides);
   const sseBridge = createLocalSseBridgeMock(overrides);
-  const barrelBridge = {
-    deriveFinishReasonNative: jest.fn(() => undefined),
-    isToolCallContinuationResponseNative: jest.fn(() => false),
-    updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe: unknown) => (
-      probe && typeof probe === 'object' && !Array.isArray(probe)
-        ? probe
-        : {}
-    )),
-    buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-    captureResponsesConversationToolCallRequestContext: jest.fn(async () => undefined),
-    recordResponsesConversationToolCallResponse: jest.fn(async () => undefined),
-    writeSnapshotViaHooks: jest.fn(async () => undefined),
-    ...overrides,
-  };
   jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => responseBridge);
   jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => sseBridge);
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => barrelBridge);
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', () => barrelBridge);
 }
 
 function parseSseEvents(text: string): Array<{ event?: string; data?: unknown }> {
