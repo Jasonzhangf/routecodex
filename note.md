@@ -28608,3 +28608,16 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Supersedes the earlier same-day non-closed VR direct-native warning: after Rust web_search route-prefix resolution, excluded forwarder/default-floor handling, provider.model alias-filter normalization, and fixture priority/auth corrections, the broad affected Jest set now passes.
 - Current verification PASS: Rust `web_search_tool_intent_selects_web_search_before_tools_backup`, `round_robin_forwarder_retry_exclusion_exhausts_after_every_real_provider`, and `diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets`; `npm run build:native-hotpath`; focused Jest 4 suites / 24 tests; broader affected Jest 25 suites / 329 tests; strict shell audit `prodTsShellCount=2`, `shellsWithProdImporters=0`; rustification audit `prodTsFileCount=2`, `nonNativeFileCount=0`; `verify:llmswitch-core-tsc`; function-map, mainline, manifest, mermaid, deleted-path, thin-wrapper, and vr-no-ts-runtime gates; `build:base`; `git diff --check`.
 - Remaining caveat: this is source/gate closeout only. No global install, managed restart, `/health.version`, or live sample replay was run in this turn, so do not claim installed runtime closeout from this note alone.
+
+# 2026-07-10: llmswitch-core root TS barrel retired — zero TS shell achieved
+
+- Scope: final llmswitch-core public TypeScript shell closeout.
+- Deleted `sharedmodule/llmswitch-core/src/index.ts` (9L metadata-only barrel).
+- Pruned dead package.json fields: `main`, `module`, `types`, root `"."` export, and `"./conversion/switch-orchestrator"` subpath.
+- Removed `isMetadataTypeOnlyRootEntry` whitelist from `llmswitch-rustification-audit.mjs` and `verify-llmswitch-minimal-ts-surface.mjs`.
+- Added package export gate rules to `llmswitch-ts-shell-reference-audit.mjs`: root barrel (`.`) and deleted switch-orchestrator (`. /conversion/switch-orchestrator`) are now forbidden exports.
+- Updated residue audit test to assert `fs.existsSync(rootIndexPath)` is `false` instead of scanning content for forbidden exports.
+- Updated `rustification-audit-baseline.json`: `prodTsFileCount=0`, `prodTsLocTotal=0`, removed `index.ts` and `native-router-hotpath-loader.ts` entries (loader retired by another worker).
+- Gate evidence: `npm run verify:llmswitch-core-tsc` PASS; focused residue Jest 206/206 PASS; strict shell reference audit `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`; rustification audit baseline compare PASS; minimal TS surface audit PASS; function-map gate PASS; mainline-call-map PASS; fallback denylist PASS; deleted-path PASS; thin-wrapper PASS; Node.js runtime confirm root import blocked with `ERR_PACKAGE_PATH_NOT_EXPORTED`, native subpath `./native/servertool-wrapper` still resolves 255 exports.
+- Commit: `16395ae09 refactor(hub): retire llmswitch-core root TS barrel`.
+- Note: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` was already deleted by another worker in the same session; the rename detection caused staging conflicts when adding `src/index.ts` via `git add`. Resolved by carefully resetting the loader file and re-adding only the zero-shell closeout files.
