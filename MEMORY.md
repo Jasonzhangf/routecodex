@@ -2164,3 +2164,7 @@
 
 - `resumeResponsesConversationPayloadJson`, `restoreResponsesContinuationPayloadJson`, and `materializeResponsesContinuationPayloadJson` must not return to `native-hotpath-required-exports.json`; the host-facing store surface is `executeResponsesConversationStoreOperationJson`.
 - Direct resume error-envelope coverage now uses store operation `resume_entry_payload`; do not reintroduce standalone NAPI wrappers or test-only JS helper wrappers for those three names.
+
+# 2026-07-10: Responses store host d.ts mirror is retired
+
+- `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active consumer and is physically deleted. Keep it absent; residue coverage should assert absence while `responses-conversation-store-host.ts` remains the canonical source and `.js` remains only while runtime importers still require it.

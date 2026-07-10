@@ -416,6 +416,11 @@ Additional gates if touched paths require them:
 - Removed the matching test-only helper wrappers from `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`.
 - Verification passed: exact source scan shows the retired wrapper names only in historical notes and negative assertions; focused Jest `native-required-exports-sse-stream`, `hub-pipeline-stage-residue-audit`, and `responses-continuation-store` passed 263/263; `npm run build:native-hotpath`, `npm run verify:responses-history-protocol-contract`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-mainline-call-map`, strict shell reference audit, minimal TS surface audit, rustification audit, deleted-path/thin-wrapper/fallback-denylist gates, `npm run build:base`, and `git diff --check` passed.
 
+### 2026-07-10 Progress: Responses store host d.ts mirror deleted
+
+- Exact source-tracked scan found `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active runtime/test importers; the only remaining reference is the residue gate negative path.
+- Physically deleted the stale `.d.ts` mirror and changed `hub-pipeline-stage-residue-audit` to assert it stays absent; canonical source remains `responses-conversation-store-host.ts`, and the still-active runtime `.js` mirror remains until its runtime importers are migrated.
+
 ### 2026-07-10 In Progress: virtual router bootstrap TS wrapper deletion
 
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts` has been removed in the working tree after exact source scan showed the runtime mainline already uses host `src/modules/llmswitch/bridge/routing-integrations.ts::bootstrapVirtualRouterConfig`.

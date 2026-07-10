@@ -28676,3 +28676,8 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Added operation `resume_entry_payload` to preserve the protocol-error envelope regression without exposing the retired direct wrapper.
 - Removed the matching test-only helper wrappers from `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`.
 - Verification PASS: exact source-tracked scan shows retired names only in historical notes and negative assertions; `npm run build:native-hotpath`; focused Jest `native-required-exports-sse-stream`, `hub-pipeline-stage-residue-audit`, `responses-continuation-store` 263/263; `npm run verify:responses-history-protocol-contract`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; strict shell reference audit; minimal TS surface audit; rustification audit; deleted-path/thin-wrapper/fallback-denylist gates; `npm run build:base`; `git diff --check`.
+
+# 2026-07-10: Responses store host d.ts mirror deleted
+
+- Exact source-tracked scan found `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active runtime/test importers; only residue audit referenced the path.
+- Deleted the stale `.d.ts` mirror and changed residue audit to assert absence. `responses-conversation-store-host.js` remains active because runtime bridge imports still use it.

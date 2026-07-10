@@ -4907,13 +4907,11 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.js'),
       'utf8'
     );
-    const storeDts = fs.readFileSync(
-      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts'),
-      'utf8'
-    );
+    const storeDtsPath = path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts');
 
     expect(storeSource).toContain('executeResponsesConversationStoreOperationJson');
     expect(storeSource).toContain('executeStoreOperation');
+    expect(fs.existsSync(storeDtsPath)).toBe(false);
 
     for (const retiredNativePlan of [
       'buildConversationScopePlan',
@@ -4994,9 +4992,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(storeSource).not.toMatch(/\brequestMap\b|\bresponseIndex\b|\bscopeIndex\b/u);
     expect(storeSource).not.toContain('export { store as responsesConversationStore }');
     expect(storeJs).not.toContain('export { store as responsesConversationStore }');
-    expect(storeDts).not.toContain('export { store as responsesConversationStore }');
     expect(storeJs).not.toContain('getResponsesConversationStoreDebugStats');
-    expect(storeDts).not.toContain('getResponsesConversationStoreDebugStats');
   });
 
   it('responses conversation continuation input source selection must be native-owned', () => {
