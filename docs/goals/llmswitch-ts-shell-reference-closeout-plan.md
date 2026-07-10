@@ -717,3 +717,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The production converter already imports its active collaborators through `response-converter.js` and `snapshot-recorder.js`; the removed root barrel mock was dead test surface.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 1/1 test.
+
+### 2026-07-11 provider response error logging mock narrowed
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.error-logging.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel or declares legacy `requireCoreDist` / `importCoreDist`.
+- The production converter imports only `response-converter.js` and `snapshot-recorder.js` for this path; the removed root barrel mock was dead test surface.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.

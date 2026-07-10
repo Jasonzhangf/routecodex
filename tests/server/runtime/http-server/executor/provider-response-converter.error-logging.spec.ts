@@ -3,7 +3,6 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
-const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
 const logStageSpy = jest.fn();
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
@@ -12,21 +11,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-c
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder,
-}));
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
-  syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
-  createChatJsonToSseConverterForHttp: async () => ({
-    convertResponseToJsonToSse: async () => ({ pipe: () => undefined })
-  }),
-  reprojectDirectChatToolCallStreamForHttp: async () => ({ pipe: () => undefined }),
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-  deriveFinishReasonNative: () => undefined,
-  updateResponsesContractProbeFromSseChunkNative: () => ({}),
-  buildResponsesTerminalSseFramesFromProbeNative: () => [],
-  resolveRelayResponsesClientSseStreamForHttp: () => undefined,
-  requireCoreDist: () => ({}),
-  importCoreDist: async () => ({})
 }));
 
 jest.unstable_mockModule('../../../../../src/server/utils/stage-logger.js', () => ({
@@ -55,7 +39,6 @@ describe('provider-response-converter error logging', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
     logStageSpy.mockReset();
 
     const { convertProviderResponseIfNeeded } = await import(
@@ -103,7 +86,6 @@ describe('provider-response-converter error logging', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
     logStageSpy.mockReset();
 
     const { convertProviderResponseIfNeeded } = await import(
@@ -199,7 +181,6 @@ describe('provider-response-converter error logging', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
     logStageSpy.mockReset();
 
     const { convertProviderResponseIfNeeded } = await import(
@@ -263,7 +244,6 @@ describe('provider-response-converter error logging', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
     logStageSpy.mockReset();
 
     mockConvertProviderResponse.mockRejectedValueOnce(Object.assign(new Error(
@@ -315,7 +295,6 @@ describe('provider-response-converter error logging', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockSyncReasoningStopModeFromRequest.mockClear();
     logStageSpy.mockReset();
 
     mockConvertProviderResponse.mockRejectedValueOnce(new Error(
