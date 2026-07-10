@@ -617,3 +617,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact production scan across `src/providers src/debug src/client src/server src/modules` now returns zero root `src/modules/llmswitch/bridge.js` or `.ts` importers.
 - Verification passed: focused Jest 2 suites / 22 tests (`responses-provider.direct-passthrough`, `hub-policy-injection`), `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).
 - Boundary: `responses-provider-direct-stream-incomplete` and broad `protocol-http-providers` still expose older provider test assumptions when migrated to narrow facades; they were restored and are not used as passing evidence for this production root-import closeout slice.
+
+### 2026-07-11 type-only bridge imports moved to local type contract
+
+- `src/manager/modules/health/index.ts`, `src/tools/stats-request-events.ts`, and `src/tools/stats-usage.ts` now import `ProviderErrorEvent` / `ProviderUsageEvent` from `src/types/llmswitch-local-types.js` instead of the root bridge barrel.
+- Exact scans for root bridge imports and legacy loader helper names in the touched files return zero matches.
+- Verification passed: `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), and `verify:function-map-compile-gate`.

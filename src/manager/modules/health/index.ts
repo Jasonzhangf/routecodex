@@ -3,7 +3,7 @@ import fs from 'node:fs';
 // canonical_builders: getHealthStore, getCurrentSnapshot, resolveStateDir
 import path from 'node:path';
 import type { ManagerContext, ManagerModule } from '../../types.js';
-import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
+import type { ProviderErrorEvent } from '../../../types/llmswitch-local-types.js';
 import { JsonlFileStore } from '../../storage/file-store.js';
 import { resolveRccPath } from '../../../config/user-data-paths.js';
 
