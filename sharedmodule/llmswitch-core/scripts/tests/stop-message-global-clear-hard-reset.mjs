@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../helpers/virtual-router-engine-direct-native.mjs';
 import { readNativeFunction } from '../../dist/native/router-hotpath/native-router-hotpath-loader.js';
 
 const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||

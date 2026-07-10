@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig } from '../../../../tests/sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterEngine } from '../../src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../../../../tests/sharedmodule/helpers/virtual-router-engine-direct-native.js';
 
 test('thinking route with declared tools still keeps responses primary provider selectable', () => {
   const bootstrapped = bootstrapVirtualRouterConfig({

@@ -14,7 +14,7 @@ let reportProviderErrorToRouterPolicyRef;
 let VirtualRouterErrorRef;
 
 async function main() {
-  const { VirtualRouterEngine } = await importModule('native/router-hotpath/native-virtual-router-runtime.js');
+  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'scripts/helpers/virtual-router-engine-direct-native.mjs'));
   const {
     reportProviderErrorToRouterPolicy,
   } = await importModule('native/router-hotpath/native-provider-runtime-ingress.js');

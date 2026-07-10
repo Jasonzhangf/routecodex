@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../helpers/virtual-router-engine-direct-native.mjs';
 import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
 import { VirtualRouterError } from '../../dist/native/router-hotpath/native-router-hotpath-loader.js';
 

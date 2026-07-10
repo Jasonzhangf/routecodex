@@ -60,7 +60,7 @@ async function main() {
     scenarioMap.set(absoluteSample, scenario);
   }
 
-  const engineModule = await import(path.resolve(repoRoot, 'dist', 'native', 'router-hotpath', 'native-virtual-router-runtime.js'));
+  const engineModule = await import(path.resolve(repoRoot, 'scripts', 'helpers', 'virtual-router-engine-direct-native.mjs'));
   const { VirtualRouterEngine } = engineModule;
   const engine = new VirtualRouterEngine();
   engine.initialize(config);

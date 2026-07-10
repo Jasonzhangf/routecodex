@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import { applyMaxTokensPolicyForRequest } from '../../src/conversion/hub/pipeline/hub-pipeline-max-tokens-policy.js';
 import { bootstrapVirtualRouterConfig } from '../../../../tests/sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterEngine } from '../../src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../../../../tests/sharedmodule/helpers/virtual-router-engine-direct-native.js';
 
 function buildBootstrapInput(processMode?: 'chat' | 'passthrough') {
   return {

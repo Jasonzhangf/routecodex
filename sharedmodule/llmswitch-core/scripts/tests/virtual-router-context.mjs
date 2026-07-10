@@ -11,7 +11,7 @@ const SMALL_KEY = 'ctx.small.main.tiny';
 const FALLBACK_KEY = 'ctx.long.main.colossal';
 
 async function main() {
-  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'dist/native/router-hotpath/native-virtual-router-runtime.js'));
+  const { VirtualRouterEngine } = await import(path.resolve(repoRoot, 'scripts/helpers/virtual-router-engine-direct-native.mjs'));
   const engine = new VirtualRouterEngine();
   engine.initialize(buildConfig());
 

@@ -780,8 +780,8 @@ chains:
       - step_id: vrd-03
         from_node: VrDiag03DryRunDecision
         to_node: ServerRespOutbound05ClientFrame
-        caller_symbol: diagnoseRoute
-        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+        caller_symbol: registerHttpRoutes
+        caller_file: src/server/runtime/http-server/routes.ts
         callee_symbol: registerHttpRoutes
         callee_file: src/server/runtime/http-server/routes.ts
         owner_feature_id: vr.online_diagnostics
@@ -798,8 +798,8 @@ chains:
       - step_id: vrh-01
         from_node: VrHitLog01RouteDecision
         to_node: VrHitLog02NativeProjection
-        caller_symbol: emitVirtualRouterHitLog
-        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+        caller_symbol: emitVirtualRouterHitLogLocal
+        caller_file: src/modules/llmswitch/bridge/routing-integrations.ts
         callee_symbol: create_virtual_router_hit_record_json_bridge
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
         owner_feature_id: vr.hit_log_projection

@@ -721,14 +721,14 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/utils/session-log-color.ts
     contract:
       - tests/sharedmodule/virtual-router-hit-log.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
     smoke:
       - npm run verify:llmswitch-rustification-audit
       - npm run verify:function-map-compile-gate
@@ -857,7 +857,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts
+      - src/server/runtime/http-server/routes.ts
     contract:
       - tests/sharedmodule/virtual-router-online-diagnostics.spec.ts
       - tests/server/runtime/http-server/virtual-router-diagnostics.spec.ts

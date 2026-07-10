@@ -125,12 +125,20 @@ describe('Error Pipeline contract', () => {
     }
   });
 
-  it('handleProviderFailure is not implemented as independent policy in the TS proxy', () => {
+  it('handleProviderFailure is not implemented as independent policy in a TS proxy', () => {
     const filePath = path.join(ROOT, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    expect(source).toContain('handleProviderFailure(event: ProviderFailureEvent): void');
-    expect(source).toContain('this.nativeProxy.handleProviderFailure(JSON.stringify(event));');
-    expect(source).not.toMatch(/handleProviderFailure\([^)]*\)\s*:\s*void\s*{[\s\S]*?health_manager\./);
+    expect(fs.existsSync(filePath)).toBe(false);
+    const proxySource = fs.readFileSync(path.join(
+      ROOT,
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs'
+    ), 'utf8');
+    const eventSource = fs.readFileSync(path.join(
+      ROOT,
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs'
+    ), 'utf8');
+    expect(proxySource).toContain('pub fn handle_provider_failure');
+    expect(proxySource).toContain('core.handle_provider_failure(&event_value)');
+    expect(eventSource).toContain('pub(crate) fn handle_provider_failure');
   });
 
   it('manual reportProviderErrorToRouterPolicy event construction stays in bridge/capture modules only', () => {

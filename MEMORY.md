@@ -2113,3 +2113,10 @@
 - The remaining production native binding helpers (`callNativeJson`, `loadNativeRouterHotpathBindingForInternalUse`, `failNative`) are owned by `native-router-hotpath-loader.ts`; this is loader plumbing only, not a second semantics owner.
 - Direct tests that need the old helper-shaped analyzer functions use `tests/sharedmodule/helpers/native-router-hotpath-direct-native.ts`; scripts should call `dist/native/router-hotpath/native-router-hotpath-loader.js` and the NAPI binding directly.
 - Current strict shell audit after deletion is `prodTsShellCount=3`, `shellsWithProdImporters=1`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=3`, `prodTsLocTotal=1980`, `nonNativeFileCount=0`.
+
+# 2026-07-10: Native virtual router runtime production shell is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts` is physically deleted. Do not restore it as production `VirtualRouterEngine`, hit-log host-effects, token estimator, stop-message marker, or diagnostics runtime shell.
+- Production VR diagnostics and hit-log mainline now bind to Rust/NAPI plus host `src/modules/llmswitch/bridge/routing-integrations.ts`; tests/scripts that need direct runtime access use `tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts` or `sharedmodule/llmswitch-core/scripts/helpers/virtual-router-engine-direct-native.mjs`.
+- Current strict shell audit after deletion is `prodTsShellCount=2`, `shellsWithProdImporters=0`, `coreModuleSubpathRefs=3`; rustification baseline is `prodTsFileCount=2`, `prodTsLocTotal=1159`, `nonNativeFileCount=0`.
+- Remaining production TS files are `sharedmodule/llmswitch-core/src/index.ts` (type-only + VERSION) and `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` (native export manifest/binding loader). Do not claim zero production TS until the loader manifest/binding role and root package entry are replaced.

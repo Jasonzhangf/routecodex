@@ -3316,7 +3316,6 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local stopMessage label formatter', pattern: /stopMessage:\$\{parts\.join/u },
     ];
     const scannedFiles = [
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
       'src/utils/session-log-color.ts',
       'src/modules/llmswitch/bridge/routing-integrations.ts',
       'src/types/rcc-llmswitch-core.d.ts',
@@ -5344,8 +5343,17 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
     );
-    const source = fs.readFileSync(runtimePath, 'utf8');
-    const findings = collectMatches(source, [
+    expect(fs.existsSync(runtimePath)).toBe(false);
+    const helperPath = path.join(
+      process.cwd(),
+      'tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts',
+    );
+    const source = fs.readFileSync(helperPath, 'utf8');
+    const diagnoseSource = source.slice(
+      source.indexOf('  diagnoseRoute('),
+      source.indexOf('  resetProviderQuota('),
+    );
+    const findings = collectMatches(diagnoseSource, [
       { label: 'TS dry-run metadata builder revived', pattern: /buildVirtualRouterDryRunMetadata/ },
       { label: 'TS metadataCenterSnapshot reconstruction revived', pattern: /metadataCenterSnapshot:\s*snapshot/ },
       { label: 'TS diagnostic excludedProviderKeys merge revived', pattern: /excludedProviderKeys['"]/ },
@@ -5360,10 +5368,17 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
     );
-    const source = fs.readFileSync(runtimePath, 'utf8');
+    expect(fs.existsSync(runtimePath)).toBe(false);
+    const source = fs.readFileSync(path.join(
+      process.cwd(),
+      'tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts',
+    ), 'utf8');
     const estimatorSource = source.slice(
-      source.indexOf('function invokeTokenEstimator'),
       source.indexOf('export function countRequestTokens'),
+      source.indexOf('export function countRequestTokens'),
+    ) + source.slice(
+      source.indexOf('export function countRequestTokens'),
+      source.indexOf('export function computeRequestTokens'),
     );
     const findings = collectMatches(estimatorSource, [
       { label: 'TS token estimate rounding revived', pattern: /Math\.round/ },
@@ -5379,7 +5394,11 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
     );
-    const source = fs.readFileSync(hostEffectsPath, 'utf8');
+    expect(fs.existsSync(hostEffectsPath)).toBe(false);
+    const source = fs.readFileSync(path.join(
+      process.cwd(),
+      'tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts',
+    ), 'utf8');
     const statusLabelSource = source.slice(
       source.indexOf('export function formatStopMessageStatusLabel'),
       source.indexOf('export function createVirtualRouterRouteHostEffects'),
@@ -5392,6 +5411,13 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(findings).toEqual([]);
+  });
+
+  it('retired native virtual router runtime TS shell must stay absent', () => {
+    expect(fs.existsSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
+    ))).toBe(false);
   });
 
   it('retired virtual router host-effects TS shell must stay absent', () => {

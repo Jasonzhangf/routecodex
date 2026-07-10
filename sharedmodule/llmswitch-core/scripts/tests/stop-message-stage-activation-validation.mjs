@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../helpers/virtual-router-engine-direct-native.mjs';
 
 function createEngine() {
   const engine = new VirtualRouterEngine();
