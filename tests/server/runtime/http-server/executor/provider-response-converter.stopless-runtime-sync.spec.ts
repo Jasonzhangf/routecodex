@@ -1,21 +1,16 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { createBridgeHttpServerMock } from '../../../../helpers/bridge-http-server-mock.js';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
-const mockRequireCoreDist = jest.fn(() => ({
-  normalizeResponsesToolCallArgumentsForClientWithNative: () => ({}),
-}));
-const mockImportCoreDist = jest.fn(async () => ({
-  normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) =>
-    (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>,
-}));
 
-const mockBridgeModule = () => createBridgeHttpServerMock({
+const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
-  requireCoreDist: mockRequireCoreDist,
-  importCoreDist: mockImportCoreDist,
+  createSnapshotRecorder: async () => ({
+    record: async () => undefined,
+    flush: async () => undefined,
+  }),
+  deriveFinishReasonNative: () => undefined,
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);

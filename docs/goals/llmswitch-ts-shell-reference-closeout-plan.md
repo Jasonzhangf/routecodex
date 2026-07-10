@@ -256,6 +256,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The submit-tool-outputs SSE error regression now uses local minimal mocks for the handler-facing request bridge, response/SSE bridge, bridge barrel session extraction, and native export projection symbols required by the tested path.
 - Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` / legacy core loader helpers in that spec now returns zero matches, and `createBridgeHttpServerMock(...)` source consumers are reduced from 15 to 14.
 
+### 2026-07-10 provider response converter stopless sync shared mock consumer removed
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The provider response converter metadata-center binding spec now uses a local minimal bridge mock for `convertProviderResponse`, `createSnapshotRecorder`, and `deriveFinishReasonNative`; it no longer declares `importCoreDist` / `requireCoreDist` loader helpers.
+- Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` / legacy core loader helpers in that spec now returns zero matches, and `createBridgeHttpServerMock(...)` source consumers are reduced from 14 to 13.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.
