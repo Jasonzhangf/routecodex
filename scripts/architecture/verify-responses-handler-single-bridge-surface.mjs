@@ -140,12 +140,6 @@ const checks = [
     forbiddenTokens: [],
   },
   {
-    file: 'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
-    allowedImport: './responses-sse-transport.js',
-    forbiddenLocalTokens: [],
-    forbiddenTokens: [],
-  },
-  {
     file: 'src/server/handlers/handler-response-utils.ts',
     allowedImport: '../../modules/llmswitch/bridge/responses-response-bridge.js',
     requiredImports: [

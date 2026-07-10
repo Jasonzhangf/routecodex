@@ -28693,6 +28693,7 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - `response-converter.d.ts`
   - `responses-request-bridge.d.ts`
   - `responses-response-bridge.d.ts`
+  - `responses-sse-bridge.d.ts`
   - `runtime-integrations.d.ts`
   - `snapshot-recorder-runtime.d.ts`
   - `snapshot-recorder-tool-failures.d.ts`

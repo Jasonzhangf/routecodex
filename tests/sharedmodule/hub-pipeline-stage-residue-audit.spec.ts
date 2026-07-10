@@ -4268,6 +4268,7 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts',
       'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-response-bridge.d.ts',
+      'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
       'src/modules/llmswitch/bridge/runtime-integrations.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-runtime.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.d.ts',
