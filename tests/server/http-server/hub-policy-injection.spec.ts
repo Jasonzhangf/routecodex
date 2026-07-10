@@ -3,13 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 
-const BRIDGE_JS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge.js');
 const BRIDGE_TS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge.ts');
-const BRIDGE_INDEX_JS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/index.js');
 const BRIDGE_INDEX_TS_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/index.ts');
-const ROUTING_INTEGRATIONS_JS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/routing-integrations.js');
 const ROUTING_INTEGRATIONS_TS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/routing-integrations.ts');
-const RUNTIME_INTEGRATIONS_JS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/runtime-integrations.js');
 const RUNTIME_INTEGRATIONS_TS_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge/runtime-integrations.ts');
 const HUB_PIPELINE_HANDLE_TS_PATH = path.resolve(process.cwd(), 'src/server/runtime/http-server/hub-pipeline-handle.ts');
 
@@ -198,13 +194,9 @@ async function installBridgeMocks(captured: { policy?: unknown }): Promise<void>
       return null;
     },
   });
-  jest.unstable_mockModule(BRIDGE_JS_MODULE_PATH, root);
   jest.unstable_mockModule(BRIDGE_TS_MODULE_PATH, root);
-  jest.unstable_mockModule(BRIDGE_INDEX_JS_MODULE_PATH, root);
   jest.unstable_mockModule(BRIDGE_INDEX_TS_MODULE_PATH, root);
-  jest.unstable_mockModule(ROUTING_INTEGRATIONS_JS_PATH, routing);
   jest.unstable_mockModule(ROUTING_INTEGRATIONS_TS_PATH, routing);
-  jest.unstable_mockModule(RUNTIME_INTEGRATIONS_JS_PATH, runtime);
   jest.unstable_mockModule(RUNTIME_INTEGRATIONS_TS_PATH, runtime);
   jest.unstable_mockModule(HUB_PIPELINE_HANDLE_TS_PATH, hubPipelineHandle);
 }

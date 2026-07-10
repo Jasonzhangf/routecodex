@@ -810,10 +810,10 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('native exports must not restore the Phase 3 servertool wrapper fan-out', () => {
-    const files = [
+    const source = fs.readFileSync(
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts'),
-      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.js'),
-    ];
+      'utf8',
+    );
     const forbidden = [
       'SERVERTOOL ORCHESTRATION WRAPPERS',
       'planStoplessCliProjectionContextWithNative',
@@ -824,11 +824,8 @@ describe('hub pipeline stage residue audit', () => {
       'visionBuildAnalysisPayloadWithNative',
     ];
 
-    for (const file of files) {
-      const source = fs.readFileSync(file, 'utf8');
-      for (const token of forbidden) {
-        expect(source).not.toContain(token);
-      }
+    for (const token of forbidden) {
+      expect(source).not.toContain(token);
     }
   });
 
@@ -4215,11 +4212,8 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const bridgeFiles = [
       'src/modules/llmswitch/bridge/routing-integrations.ts',
-      'src/modules/llmswitch/bridge/routing-integrations.js',
       'src/modules/llmswitch/bridge.ts',
-      'src/modules/llmswitch/bridge.js',
       'src/modules/llmswitch/bridge/index.ts',
-      'src/modules/llmswitch/bridge/index.js',
     ];
     const findings = bridgeFiles.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
@@ -4235,9 +4229,7 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const bridgeFiles = [
       'src/modules/llmswitch/bridge/routing-integrations.ts',
-      'src/modules/llmswitch/bridge/routing-integrations.js',
       'src/modules/llmswitch/bridge.ts',
-      'src/modules/llmswitch/bridge.js',
     ];
     const retiredNames = [
       'parseRouteCodexTomlRecord',
@@ -4927,10 +4919,7 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.ts'),
       'utf8'
     );
-    const storeJs = fs.readFileSync(
-      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.js'),
-      'utf8'
-    );
+    const storeJsPath = path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.js');
     const storeDtsPath = path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts');
 
     expect(storeSource).toContain('executeResponsesConversationStoreOperationJson');
@@ -5015,8 +5004,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(forbidden).toEqual([]);
     expect(storeSource).not.toMatch(/\brequestMap\b|\bresponseIndex\b|\bscopeIndex\b/u);
     expect(storeSource).not.toContain('export { store as responsesConversationStore }');
-    expect(storeJs).not.toContain('export { store as responsesConversationStore }');
-    expect(storeJs).not.toContain('getResponsesConversationStoreDebugStats');
+    expect(fs.existsSync(storeJsPath)).toBe(false);
   });
 
   it('responses conversation continuation input source selection must be native-owned', () => {
@@ -5096,6 +5084,18 @@ describe('hub pipeline stage residue audit', () => {
       .filter((relativePath) => relativePath && fs.existsSync(path.join(process.cwd(), relativePath)));
 
     expect(trackedSourceMaps).toEqual([]);
+  });
+
+  it('llmswitch host bridge source must not keep side-by-side JS emit artifacts', () => {
+    const trackedArtifacts = execFileSync(
+      'git',
+      ['ls-files', 'src/modules/llmswitch/**/*.js', 'src/modules/llmswitch*.js'],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    )
+      .split('\n')
+      .filter((relativePath) => relativePath && fs.existsSync(path.join(process.cwd(), relativePath)));
+
+    expect(trackedArtifacts).toEqual([]);
   });
 
   it('llmswitch-core src must not keep side-by-side TS emit artifacts', () => {

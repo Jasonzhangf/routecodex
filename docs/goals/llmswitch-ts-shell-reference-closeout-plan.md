@@ -405,3 +405,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Residue audit now locks both paths physically absent and scans helper surfaces for old local parser/normalizer logic.
 - Strict audit now reports `prodTsShellCount=62`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=4`.
 - Verification passed: focused exec_command/residue Jest 205/205, script syntax checks, strict shell audit, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule/root `tsc`, exact source/package ref scan, and `git diff --check`.
+
+### 2026-07-10 host bridge source-side JS mirrors deleted
+
+- Physically deleted all tracked `src/modules/llmswitch/**/*.js` and `src/modules/llmswitch*.js` source-side emit mirrors after confirming every deleted file had a canonical same-name `.ts` source.
+- Kept canonical TypeScript bridge sources as the only host authoring surface. Runtime build output is produced under `dist`; Jest relative `.js` specifiers resolve to TS via `moduleNameMapper`, so checked-in source mirrors are not active runtime truth.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now fails if any tracked-and-existing host bridge `.js` source artifact returns under `src/modules/llmswitch`.
+- Gate updates stopped reading deleted mirrors in `verify-responses-handler-single-bridge-surface`, `llmswitch-ts-shell-reference-audit`, `hub-policy-injection`, and residue tests; checks now target `.ts` canonical sources or absent mirrors.
+- Verification passed: focused residue Jest 211/211, focused hub-policy/snapshot Jest 4/4, `verify:responses-handler-single-bridge-surface`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=3`), `verify:responses-sse-business-module`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, root `tsc`, and `build:base`.

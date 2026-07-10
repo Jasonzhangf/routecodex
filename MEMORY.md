@@ -2173,3 +2173,9 @@
 
 - `src/modules/llmswitch/{core-loader,bridge,bridge/index}.d.ts` and `src/modules/llmswitch/bridge/{module-loader,native-exports,provider-response-converter-host,response-converter,responses-request-bridge,responses-response-bridge,responses-sse-bridge,routing-integrations,runtime-integrations,snapshot-recorder-runtime,snapshot-recorder-tool-failures,snapshot-recorder-types,snapshot-recorder,state-integrations}.d.ts` had no active consumer and are physically deleted.
 - For bridge closeout, zero-ref `.d.ts` sidecar mirrors are stale artifacts, not compatibility surfaces. Keep them absent and lock with residue coverage instead of preserving them beside live `.ts`/`.js` files.
+
+# 2026-07-10: host llmswitch bridge JS mirrors are retired
+
+- All tracked `src/modules/llmswitch/**/*.js` and `src/modules/llmswitch*.js` source-side emit mirrors are physically deleted. Do not restore them as compatibility surfaces, Jest helpers, or runtime truth.
+- Canonical host bridge authoring remains in `src/modules/llmswitch/**/*.ts`; runtime JS belongs in `dist` after build. Jest relative `.js` specifiers resolve to TS through `moduleNameMapper`, so source imports may keep ESM `.js` specifiers without requiring checked-in mirror files.
+- Residue coverage now fails if a tracked-and-existing host bridge `.js` source artifact returns under `src/modules/llmswitch`.
