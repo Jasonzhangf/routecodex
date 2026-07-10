@@ -2,30 +2,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 
-const mockBridgeModule = {
-  loadRoutingInstructionStateSync: jest.fn(() => null),
-  saveRoutingInstructionStateAsync: jest.fn(async () => undefined),
-  saveRoutingInstructionStateSync: jest.fn(() => undefined),
+const mockStateIntegrationsModule = {
   extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
   extractContinuationContextSessionIdentifiersFromMetadata: jest.fn(() => ({})),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
+};
+
+const mockRuntimeIntegrationsModule = {
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-  syncReasoningStopModeFromRequest: jest.fn(() => 'off'),
-  sanitizeFollowupText: jest.fn(async (raw: unknown) => (typeof raw === 'string' ? raw : '')),
-  createSnapshotRecorder: jest.fn(async () => ({ record: () => undefined })),
-  convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
   writeSnapshotViaHooks: jest.fn(async () => undefined),
   preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
   resumeResponsesConversation: jest.fn(async () => ({ payload: {}, meta: {} })),
   resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
-  createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
-  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
-  reprojectDirectChatToolCallStreamForHttp: jest.fn(async () => undefined),
-  reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
-  reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
-  bootstrapVirtualRouterConfig: jest.fn(),
+};
+
+const mockRoutingIntegrationsModule = {
   createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
   executeHubPipelineNative: jest.fn(async () => ({ metadata: {} })),
   updateHubPipelineVirtualRouterConfigNative: jest.fn(),
@@ -35,17 +27,11 @@ const mockBridgeModule = {
   getHubPipelineVirtualRouterStatusNative: jest.fn(async () => ({})),
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   disposeHubPipelineNative: jest.fn(),
-  resolveBaseDir: jest.fn(),
-  mapChatToolsToBridgeJson: jest.fn(async () => []),
-  buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
-  injectMcpToolsForChatJson: jest.fn(async () => []),
-  injectMcpToolsForResponsesJson: jest.fn(async () => []),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  importCoreDist: jest.fn(async () => ({}))
 };
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => mockBridgeModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.ts', () => mockBridgeModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => mockStateIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => mockRoutingIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
   const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
   return {

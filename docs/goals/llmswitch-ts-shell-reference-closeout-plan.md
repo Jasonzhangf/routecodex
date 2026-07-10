@@ -827,3 +827,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec already mocks concrete config/runtime native helper entrypoints; the removed field was legacy loader-helper surface and was not consumed by the tested runtime setup contract.
 - Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
 - Verification gap: the focused spec remains red on the pre-existing `server.hubPipeline?.getVirtualRouter` expectation (4/6 pass, 2 fail), so this slice does not claim runtime setup behavior closure.
+
+### 2026-07-11 request executor metadata-center root bridge mock removed
+
+- `tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels.
+- The spec now mocks only the active production leaf collaborators used by `request-executor.ts` and `executor-metadata.ts`: `runtime-integrations.js`, `routing-integrations.js`, `state-integrations.js`, and `native-exports.js`.
+- Removed the stale `resolveBaseDir` and `importCoreDist` helper fields from this metadata-center contract fixture without adding TS behavior.
+- Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
+- Verification gap: the focused spec remains OOM before and after this edit, so this slice does not claim metadata-center behavior closure.
