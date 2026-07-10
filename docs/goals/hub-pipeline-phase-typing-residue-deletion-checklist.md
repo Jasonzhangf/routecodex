@@ -198,7 +198,7 @@ Phase 8F-10 additional Hub zero-consumer source deletion proof: import graph and
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/ops/operations.ts`.
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/tool-session-compat.ts`.
 - Deleted `sharedmodule/llmswitch-core/src/conversion/hub/types/chat-schema.ts`.
-- Kept `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts` because it is dynamically loaded by `src/modules/llmswitch/bridge/snapshot-recorder.ts` via `importCoreDist('conversion/hub/snapshot-recorder')`.
+- Deleted `sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts`; host `src/modules/llmswitch/bridge/snapshot-recorder.ts` owns IO/observation and calls Rust/native snapshot hook planning directly.
 - Kept `sharedmodule/llmswitch-core/src/native/router-hotpath/native-failure-policy.ts` because it is dynamically loaded by bridge/runtime failure-policy owners.
 - Updated `docs/goals/metadata-request-isolation-plan.md` so it points to live `chat-envelope.ts` and records that `chat-schema.ts` must not be restored.
 - Red test now fails if any deleted source file reappears.
