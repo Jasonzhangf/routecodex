@@ -1,20 +1,42 @@
-# llmswitch Module
-## Overview
-llmswitch module provides the bridge between RouteCodex Host and the shared llmswitch- core Hub Pipeline. This is the single entry point for all Hub Pipeline interactions.
-## Directory Structure
-```src/modules/llmswitch/
-├── bridge. ts                  # Main Hub Pipeline bridge and entry point
-├── core- loader. ts            # llmswitch-core loading (symlink or npm version)
-└── pipeline- registry. ts      # Pipeline registry and configuration```## Key Components### BridgeThe main bridge implementation:- Creates Hub Pipeline instances- Handles request routing to pipeline
-- Manages response streaming and SSE conversion### CoreLoaderLoads llmswitch-core from:- Local symlink (`node_modules/rcc-llmswitch-core` → `sharedmodule/llmswitch-core`)
-- NPM package (`rcc-llmswitch-core`) for release builds### PipelineRegistryMaintains registry of:- Active pipeline instances
-- Pipeline configurations- Runtime metadata mappings## Usage```typescriptimport { createHubPipeline } from './bridge. js';const pipeline = await createHubPipeline({ virtualRouter, targetRuntime });```## Do / Don't
-**Do**
-- Use as the single entry point for Hub Pipeline calls
-- Pass `virtualRouter` and `targetRuntime` from `bootstrapVirtualRouterConfig`
-- Handle SSE conversion through the bridge**Don't**
-- Call Hub Pipeline directly from other modules
-- Implement custom routing logic here
-- Store pipeline state across requests## Related Documentation
-- `AGENTS. md` - Architecture principles and responsibilities
-- `sharedmodule/llmswitch-core/README.md` - Hub Pipeline details
+# llmswitch Host Bridge
+
+`src/modules/llmswitch` is the RouteCodex host boundary for llmswitch-core.
+The host bridge is not the Hub Pipeline semantic owner: Hub Pipeline,
+Virtual Router, servertool, continuation, tool governance, and error-policy
+semantics belong to Rust/native owners under
+`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`.
+
+## Source Surface
+
+- `bridge.ts`: root host export surface for server/runtime callers.
+- `bridge/*.ts`: thin host IO, native binding, routing, snapshot, SSE, and
+  continuation store shells.
+- `core-loader.ts`: package/dist path resolution for explicit llmswitch-core
+  dist modules when a remaining approved loader path needs it.
+
+Do not add checked-in side-by-side `.js` or `.d.ts` mirrors under this tree.
+Runtime JavaScript belongs in `dist` after build; tests may keep ESM `.js`
+specifiers because Jest maps them to the canonical TypeScript source.
+
+## Boundary Rules
+
+- Do call Rust/NAPI through `native-exports.ts` or the existing approved host
+  bridge shell for the feature.
+- Do keep host code limited to IO, native binding calls, HTTP/server adapters,
+  and explicit diagnostic writing.
+- Do not restore `importCoreDist`, `requireCoreDist`, engine selection,
+  source-prefer loading, or broad compatibility fallback paths.
+- Do not implement Hub Pipeline, Chat Process, servertool, continuation,
+  tool-governance, Virtual Router, or error-policy semantics in TypeScript.
+- Do not add provider-specific behavior to the host bridge; provider-specific
+  compatibility belongs in provider runtime.
+
+## Verification
+
+Relevant gates include:
+
+- `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json`
+- `npm run verify:architecture-deleted-path`
+- `npm run verify:architecture-thin-wrapper-only`
+- `npm run verify:function-map-compile-gate`
+- `npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
