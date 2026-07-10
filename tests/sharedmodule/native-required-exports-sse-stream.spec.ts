@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.js';
+import { captureReqInboundResponsesContextSnapshotWithNative } from './helpers/req-inbound-direct-native.js';
 
 const nodeRequire = createRequire(import.meta.url);
 
@@ -42,20 +43,8 @@ describe('native required exports for sse stream helpers', () => {
     expect(typeof binding.captureReqInboundResponsesContextSnapshotJson).toBe('function');
   });
 
-  test('native req_inbound capture collapses latest output when an identical tool-call batch repeats', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
-      )
-    )) as {
-      captureReqInboundResponsesContextSnapshotWithNative: (input: {
-        rawRequest: Record<string, unknown>;
-        requestId?: string;
-      }) => Record<string, unknown>;
-    };
-
-    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+  test('native req_inbound capture collapses latest output when an identical tool-call batch repeats', () => {
+    const captured = captureReqInboundResponsesContextSnapshotWithNative({
       requestId: 'req_native_dup_batch_1',
       rawRequest: {
         model: 'gpt-5.4',
@@ -99,20 +88,8 @@ describe('native required exports for sse stream helpers', () => {
     });
   });
 
-  test('native req_inbound capture rewrites auto-injected stop hook pair into text input for next turn', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
-      )
-    )) as {
-      captureReqInboundResponsesContextSnapshotWithNative: (input: {
-        rawRequest: Record<string, unknown>;
-        requestId?: string;
-      }) => Record<string, unknown>;
-    };
-
-    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+  test('native req_inbound capture rewrites auto-injected stop hook pair into text input for next turn', () => {
+    const captured = captureReqInboundResponsesContextSnapshotWithNative({
       requestId: 'req_native_stopless_rewrite_1',
       rawRequest: {
         model: 'gpt-5.4',
@@ -158,20 +135,8 @@ describe('native required exports for sse stream helpers', () => {
     expect(JSON.stringify(input)).not.toContain('exec_command');
   });
 
-  test('native req_inbound capture preserves user-initiated stop hook tool history', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
-      )
-    )) as {
-      captureReqInboundResponsesContextSnapshotWithNative: (input: {
-        rawRequest: Record<string, unknown>;
-        requestId?: string;
-      }) => Record<string, unknown>;
-    };
-
-    const captured = mod.captureReqInboundResponsesContextSnapshotWithNative({
+  test('native req_inbound capture preserves user-initiated stop hook tool history', () => {
+    const captured = captureReqInboundResponsesContextSnapshotWithNative({
       requestId: 'req_native_stopless_preserve_1',
       rawRequest: {
         model: 'gpt-5.4',

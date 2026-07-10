@@ -1082,7 +1082,7 @@ verification:
     change_risk: low
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+      - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts

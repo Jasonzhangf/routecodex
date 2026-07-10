@@ -466,7 +466,7 @@ export function cloneRuntimeMetadataWithNative(
 
 export {
   captureReqInboundResponsesContextSnapshotWithNative
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+} from './req-inbound-direct-native.js';
 
 function parseResponsesConversationResumeResult(
   raw: string

@@ -126,7 +126,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       collectToolOutputsWithNative: (payload: unknown) => Array<{ tool_call_id: string; call_id: string }>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
+      './helpers/req-inbound-direct-native.js',
       'collectToolOutputsJson'
     );
 
@@ -176,7 +176,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       normalizeProviderProtocolTokenWithNative: (value: string | undefined) => string | undefined;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
+      './helpers/req-inbound-direct-native.js',
       'normalizeProviderProtocolTokenJson'
     );
 
@@ -192,7 +192,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       mapReqInboundBridgeToolsToChatWithNative: (rawTools: unknown) => Array<Record<string, unknown>>;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
+      './helpers/req-inbound-direct-native.js',
       'mapBridgeToolsToChatJson'
     );
 
@@ -256,7 +256,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       sanitizeFormatEnvelopeWithNative: <T>(candidate: T) => T;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js',
+      './helpers/req-inbound-direct-native.js',
       'sanitizeFormatEnvelopeJson'
     );
 

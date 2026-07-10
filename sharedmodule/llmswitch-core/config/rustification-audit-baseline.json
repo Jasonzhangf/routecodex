@@ -1,16 +1,16 @@
 {
-  "generatedAt": "2026-07-10T04:39:36.948Z",
+  "generatedAt": "2026-07-10T05:26:31.081Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 12,
-    "prodTsLocTotal": 3833,
+    "prodTsFileCount": 9,
+    "prodTsLocTotal": 2398,
     "nonNativeFileCount": 0,
     "nonNativeLocTotal": 0
   },
   "byTopDir": {
     "native": {
-      "prodTsFiles": 9,
-      "prodTsLoc": 3199,
+      "prodTsFiles": 6,
+      "prodTsLoc": 1767,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     },
@@ -22,7 +22,7 @@
     },
     "index.ts": {
       "prodTsFiles": 1,
-      "prodTsLoc": 13,
+      "prodTsLoc": 10,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     }
@@ -30,27 +30,9 @@
   "prodTsFiles": [
     {
       "path": "sharedmodule/llmswitch-core/src/index.ts",
-      "loc": 13,
+      "loc": 10,
       "nativeLinked": true,
       "topDir": "index.ts"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts",
-      "loc": 679,
-      "nativeLinked": true,
-      "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts",
-      "loc": 86,
-      "nativeLinked": true,
-      "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts",
-      "loc": 790,
-      "nativeLinked": true,
-      "topDir": "native"
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts",
@@ -66,7 +48,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts",
-      "loc": 141,
+      "loc": 265,
       "nativeLinked": true,
       "topDir": "native"
     },
@@ -78,7 +60,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts",
-      "loc": 47,
+      "loc": 46,
       "nativeLinked": true,
       "topDir": "native"
     },

@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 
 describe('bootstrapVirtualRouterConfig loadBalancing-only route targets', () => {
   function buildInput(routingEntry: Record<string, unknown>): any {

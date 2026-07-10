@@ -1871,9 +1871,9 @@ owners:
       - chat_envelope_to_standardized_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
       - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
       - tests/sharedmodule
+      - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -1894,7 +1894,7 @@ owners:
     migration_target: rust
     notes:
       - "ChatEnvelope, StandardizedRequest, and JsonObject TS declaration shells are physically deleted; tests and TS IO shells may use local minimal Record shapes but must not restore a shared Hub TS type owner."
-      - "Native conversion evidence remains `chatEnvelopeToStandardizedWithNative` and Rust `hub_standardized_bridge`; TS wrapper is native-call/JSON IO only."
+      - "Native conversion evidence remains Rust `hub_standardized_bridge`; test-only direct native helpers may call `chatEnvelopeToStandardizedJson`, but production TS wrapper ownership is retired."
       - "Zero-consumer nested semantic aliases, ChatEnvelope message/tool-call aliases, tool-output detail aliases, StandardizedRequest tool-call aliases, and StandardizedRequest field-detail aliases must stay module-internal and absent from the public type surface."
       - "The former `standardized-bridge.ts` runtime wrapper shell is deleted; tests that need conversion evidence call native req inbound/outbound semantics directly."
 
@@ -2145,9 +2145,9 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_output_snapshot.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - docs/architecture
+      - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
     forbidden_paths:

@@ -1,4 +1,4 @@
-import { chatEnvelopeToStandardizedWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { chatEnvelopeToStandardizedWithNative } from './req-inbound-direct-native.js';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 

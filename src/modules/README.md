@@ -37,12 +37,11 @@ src/modules/
 
 ## Hub Pipeline 接入示例
 ```ts
-import { bootstrapVirtualRouterConfig } from 'rcc-llmswitch-core/native/router-hotpath/native-virtual-router-bootstrap-config';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader';
-import { createHubPipeline } from '../modules/llmswitch/bridge';
+import { bootstrapVirtualRouterConfig, createHubPipeline } from '../modules/llmswitch/bridge';
 
 const config = await loadRouteCodexConfig();
-const { virtualRouter, targetRuntime } = bootstrapVirtualRouterConfig(config.virtualrouter);
+const { virtualRouter, targetRuntime } = await bootstrapVirtualRouterConfig(config.virtualrouter);
 
 const hubPipeline = await createHubPipeline({ virtualRouter, targetRuntime });
 const response = await hubPipeline.handleChat(request);

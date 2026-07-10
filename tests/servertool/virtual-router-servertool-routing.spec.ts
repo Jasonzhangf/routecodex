@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig, type RouterMetadataInput, type VirtualRouterBootstrapInput } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig, type RouterMetadataInput, type VirtualRouterBootstrapInput } from '../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 type StandardizedMessage = Record<string, unknown> & {

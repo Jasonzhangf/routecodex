@@ -8,7 +8,7 @@ async function compileVirtualRouterInput(userConfig: Record<string, unknown>, pr
   return (await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, options)).virtualRouterBootstrapInput;
 }
 import { serializeTomlRecord } from '../../src/config/toml-basic.js';
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 
 async function createTempDir(prefix: string): Promise<string> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeReqInboundShellLikeToolCallsWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+import { normalizeReqInboundShellLikeToolCallsWithNative } from './helpers/req-inbound-direct-native.js';
 import {
   applyReqProcessToolGovernanceDirectNative,
   type NativeReqProcessToolGovernanceInput,

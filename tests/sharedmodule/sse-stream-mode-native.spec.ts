@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
   processSseStreamWithNative,
   resolveSseStreamModeWithNative
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
+} from './helpers/req-inbound-direct-native.js';
 
 describe('sse stream mode native bridge', () => {
   test('enables stream for openai-responses protocol when wantsStream=true', () => {

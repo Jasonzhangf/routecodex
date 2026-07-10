@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 function buildBaseInput(): any {

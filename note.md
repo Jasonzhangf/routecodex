@@ -28551,3 +28551,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` after strict audit showed no production importer and tests were migrated to host native binding.
 - `error.mainline` `err-03` and function registry now bind to Rust `report_provider_error_to_router_policy_json_bridge -> report_provider_error`; no-fallback allowlist entry for the retired TS shell is removed.
 - Verification PASS so far: exact source scan only docs/history/residue refs; strict shell reference audit `prodTsShellCount=10`; focused provider ingress/routing-state/error-pipeline/residue Jest 219/219; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; scoped `git diff --check`.
+
+# 2026-07-10: Virtual router bootstrap TS wrapper deletion in progress
+
+- Working tree currently deletes `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts`; runtime mainline is already host bridge `src/modules/llmswitch/bridge/routing-integrations.ts::bootstrapVirtualRouterConfig`.
+- Added test-only direct native helper `tests/sharedmodule/helpers/virtual-router-bootstrap-direct-native.ts` and moved 20 direct test imports off the production wrapper.
+- Verification PASS so far: exact old wrapper scan has no active import; strict shell reference audit `prodTsShellCount=9`; `verify:llmswitch-core-tsc`.
+- Not closed / not committed: broad migrated VR/bootstrap Jest still fails on metadataCenterSnapshot/sessionId requirements, missing `config/providers/ali-coding-plan.json`, and old bootstrap projection expectations. Next step is to migrate those tests to host bridge contract or split verified focused gates without restoring the production wrapper.

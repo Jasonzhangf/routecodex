@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const nodeRequire = createRequire(import.meta.url);
+const nativeBinding = nodeRequire(path.join(repoRoot, 'dist', 'native', 'router_hotpath_napi.node'));
 
 const standardizedBridgeUrl = pathToFileURL(
   path.join(repoRoot, 'dist', 'conversion', 'hub', 'standardized-bridge.js')
-).href;
-const nativeReqInboundUrl = pathToFileURL(
-  path.join(
-    repoRoot,
-    'dist',
-    'native',
-    'router-hotpath',
-    'native-hub-pipeline-req-inbound-semantics.js'
-  )
 ).href;
 
 function stableJson(value) {
@@ -26,11 +20,24 @@ async function importFresh(url, tag) {
   return import(`${url}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 }
 
+function chatEnvelopeToStandardizedWithNative(input) {
+  const fn = nativeBinding.chatEnvelopeToStandardizedJson;
+  assert.equal(typeof fn, 'function');
+  const raw = fn(
+    JSON.stringify(input.chatEnvelope),
+    JSON.stringify(input.adapterContext),
+    String(input.endpoint || ''),
+    input.requestId
+  );
+  assert.equal(typeof raw, 'string');
+  const parsed = JSON.parse(raw);
+  assert.equal(Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed)), true);
+  return parsed;
+}
+
 async function main() {
   const stdMod = await importFresh(standardizedBridgeUrl, 'std-bridge');
-  const nativeMod = await importFresh(nativeReqInboundUrl, 'native-req-inbound');
   const chatEnvelopeToStandardized = stdMod.chatEnvelopeToStandardized;
-  const chatEnvelopeToStandardizedWithNative = nativeMod.chatEnvelopeToStandardizedWithNative;
 
   assert.equal(typeof chatEnvelopeToStandardized, 'function');
   assert.equal(typeof chatEnvelopeToStandardizedWithNative, 'function');

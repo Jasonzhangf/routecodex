@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from '../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
 
 describe('virtual-router priority provider granularity', () => {
   test('priority route should keep provider-level target and avoid key-level expansion', () => {

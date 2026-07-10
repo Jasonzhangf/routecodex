@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 
 describe('bootstrapVirtualRouterConfig removed compat defaults', () => {
   it('keeps anthropic providers on passthrough without injected compat headers', () => {

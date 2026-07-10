@@ -326,8 +326,8 @@ chains:
         to_node: HubReqChatProcess03Governed
         caller_symbol: captureReqInboundResponsesContextSnapshot
         caller_file: src/modules/llmswitch/bridge/native-exports.ts
-        callee_symbol: captureReqInboundResponsesContextSnapshotWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+        callee_symbol: capture_req_inbound_responses_context_snapshot_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
         owner_feature_id: hub.req_inbound_responses_context_capture
         semantic_input: "normalized raw request envelope"
         semantic_output: "Hub req-inbound context capture truth for later governed request build"
@@ -501,8 +501,8 @@ chains:
         to_node: ChatProcReqContinuation05Governed
         caller_symbol: captureReqInboundResponsesContextSnapshot
         caller_file: src/modules/llmswitch/bridge/native-exports.ts
-        callee_symbol: captureReqInboundResponsesContextSnapshotWithNative
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
+        callee_symbol: capture_req_inbound_responses_context_snapshot_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "restored current-turn request semantic"
         semantic_output: "normal governed Hub request path resumes"

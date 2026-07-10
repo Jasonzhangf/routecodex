@@ -1,4 +1,4 @@
-import { bootstrapVirtualRouterConfig, type VirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig, type VirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
 import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
