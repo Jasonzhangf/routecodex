@@ -13,7 +13,7 @@ import {
 } from './vision-debug-utils.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { Readable } from 'node:stream';
-import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge.js';
+import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { readRuntimeRequestTruthPortNumber } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 
 const formatUnknownError = (error: unknown): string => {

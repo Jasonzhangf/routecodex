@@ -565,3 +565,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Provider policy event types now come from the local llmswitch type contract, so this production error-chain caller no longer depends on the root bridge barrel for either runtime functions or types.
 - `tests/providers/core/utils/provider-error-reporter.spec.ts` mocks the same narrow runtime integration facade, and `tests/providers/core/runtime/base-provider-success-report.spec.ts` no longer carries an obsolete root bridge mock.
 - Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused Jest passes 2/2 suites and 5/5 tests.
+
+### 2026-07-11 provider outbound sanitizer and snapshot raw-port mocks narrowed
+
+- `src/providers/core/runtime/http-request-executor.ts` now imports `sanitizeProviderOutboundPayload` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
+- `tests/debug/snapshot-default-raw-port-contract.spec.ts` now mocks `writeSnapshotViaHooks` through `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; snapshot default raw/port focused Jest passes 5/5, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass.
+- Attempted direct passthrough handler focused Jest was stopped after no output from its specific session; it is not used as passing evidence for this slice and `responses-provider.ts` remains a dedicated future production-root-import closeout candidate.
