@@ -1096,7 +1096,6 @@ export function resetResponsesConversationStateForRestartSimulation() {
 export function clearUnresolvedResponsesConversationRequests() {
     return store.clearUnresolvedRequests();
 }
-export { store as responsesConversationStore };
 // Expose raw store for memory-observer diagnostics
 globalThis[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = store;
 //# sourceMappingURL=responses-conversation-store-host.js.map

@@ -7,6 +7,9 @@ import {
   clearAllResponsesConversationState,
   clearResponsesConversationByRequestId,
   clearUnresolvedResponsesConversationRequests,
+  hasResponsesConversationRequestForDebug,
+  hasResponsesConversationResponseForDebug,
+  hasResponsesConversationScopeForDebug,
   lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
@@ -14,8 +17,9 @@ import {
   resetResponsesConversationStateForRestartSimulation,
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
-  responsesConversationStore
-} from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
+  getResponsesConversationStoreDebugStats,
+  releaseResponsesConversationRequestPayload
+} from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts';
 import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
 import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
 
@@ -352,7 +356,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-materialize-tools-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-materialize-tools-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-materialize-tools-2'),
@@ -461,7 +465,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-cross-operation-store-1');
+    releaseResponsesConversationRequestPayload('req-cross-operation-store-1');
 
     const resumed = resumeResponsesConversation(
       'resp-cross-operation-1',
@@ -595,7 +599,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
 
     const providerAttempt1 = track('req-provider-switch-attempt-1');
     const providerAttempt2 = track('req-provider-switch-attempt-2');
@@ -1190,7 +1194,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-direct-scope-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-direct-scope-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-direct-scope-2'),
@@ -1308,9 +1312,9 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-1');
 
-    const statsAfterRelease = responsesConversationStore.getDebugStats();
+    const statsAfterRelease = getResponsesConversationStoreDebugStats();
     expect(statsAfterRelease.retainedInputItems).toBe(0);
     expect(statsAfterRelease.requestMapSize).toBe(1);
     expect(statsAfterRelease.responseIndexSize).toBe(1);
@@ -1382,7 +1386,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-image-release-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-image-release-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-image-release-2'),
@@ -1681,7 +1685,7 @@ describe('responses conversation store plain continuation restore', () => {
         ]
       }
     });
-    responsesConversationStore.releaseRequestPayload('req-resp-store-owner-direct-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-owner-direct-1');
 
     const ambiguous = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-owner-next-1'),
@@ -1779,7 +1783,7 @@ describe('responses conversation store plain continuation restore', () => {
         ]
       }
     });
-    responsesConversationStore.releaseRequestPayload('req-resp-store-restart-relay-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-restart-relay-1');
 
     captureResponsesRequestContext({
       requestId: track('req-resp-store-restart-direct-1'),
@@ -1815,7 +1819,7 @@ describe('responses conversation store plain continuation restore', () => {
         ]
       }
     });
-    responsesConversationStore.releaseRequestPayload('req-resp-store-restart-direct-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-restart-direct-1');
 
     expect(fs.existsSync(persistFile)).toBe(true);
 
@@ -1896,7 +1900,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-release-materialize-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-release-materialize-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-release-materialize-2',
@@ -2002,7 +2006,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-no-dup-pending-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-no-dup-pending-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-no-dup-pending-2'),
@@ -2141,7 +2145,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-tail-batch-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-tail-batch-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-tail-batch-2'),
@@ -2369,7 +2373,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-dup-call-batch-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-dup-call-batch-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-dup-call-batch-2'),
@@ -2608,7 +2612,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-reasoning-keep-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-reasoning-keep-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-reasoning-keep-2'),
@@ -2720,7 +2724,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-pending-delta-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-pending-delta-1');
 
     const materialized = materializeLatestResponsesContinuationByScope({
       requestId: track('req-resp-store-pending-delta-2'),
@@ -2793,7 +2797,7 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    responsesConversationStore.releaseRequestPayload('req-resp-store-1');
+    releaseResponsesConversationRequestPayload('req-resp-store-1');
 
     captureResponsesRequestContext({
       requestId: 'req-resp-store-2',
@@ -2828,18 +2832,12 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    const rawStore = responsesConversationStore as unknown as {
-      requestMap?: Map<string, unknown>;
-      responseIndex?: Map<string, unknown>;
-      scopeIndex?: Map<string, unknown>;
-    };
-
-    expect(rawStore.requestMap?.has('req-resp-store-1')).toBe(false);
-    expect(rawStore.requestMap?.has('req-resp-store-2')).toBe(true);
-    expect(rawStore.responseIndex?.has('resp-store-supersede-1')).toBe(false);
-    expect(rawStore.responseIndex?.has('resp-store-supersede-2')).toBe(true);
-    expect(rawStore.scopeIndex?.has('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
-    expect(rawStore.scopeIndex?.has('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
+    expect(hasResponsesConversationRequestForDebug('req-resp-store-1')).toBe(false);
+    expect(hasResponsesConversationRequestForDebug('req-resp-store-2')).toBe(true);
+    expect(hasResponsesConversationResponseForDebug('resp-store-supersede-1')).toBe(false);
+    expect(hasResponsesConversationResponseForDebug('resp-store-supersede-2')).toBe(true);
+    expect(hasResponsesConversationScopeForDebug('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
+    expect(hasResponsesConversationScopeForDebug('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-3',
@@ -2912,13 +2910,10 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    const rawStore = responsesConversationStore as unknown as {
-      requestMap?: Map<string, unknown>;
-    };
-    expect(rawStore.requestMap?.has('req-pending-old-1')).toBe(false);
-    expect(rawStore.requestMap?.has('req-pending-old-2')).toBe(true);
+    expect(hasResponsesConversationRequestForDebug('req-pending-old-1')).toBe(false);
+    expect(hasResponsesConversationRequestForDebug('req-pending-old-2')).toBe(true);
 
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBeGreaterThanOrEqual(1);
   });
 
@@ -2955,11 +2950,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    const rawStore = responsesConversationStore as unknown as {
-      requestMap?: Map<string, unknown>;
-    };
-    expect(rawStore.requestMap?.has('req-pending-scope-a-1')).toBe(true);
-    expect(rawStore.requestMap?.has('req-pending-scope-b-1')).toBe(true);
+    expect(hasResponsesConversationRequestForDebug('req-pending-scope-a-1')).toBe(true);
+    expect(hasResponsesConversationRequestForDebug('req-pending-scope-b-1')).toBe(true);
   });
 
   it('keeps recording when response capture sees synthetic RouteCodex assistant control text', () => {
@@ -3794,12 +3786,12 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    const before = responsesConversationStore.getDebugStats();
+    const before = getResponsesConversationStoreDebugStats();
     expect(before.requestMapSize).toBeGreaterThan(0);
 
     clearAllResponsesConversationState();
 
-    const after = responsesConversationStore.getDebugStats();
+    const after = getResponsesConversationStoreDebugStats();
     expect(after.requestMapSize).toBe(0);
     expect(after.responseIndexSize).toBe(0);
     expect(after.scopeIndexSize).toBe(0);
@@ -3833,7 +3825,7 @@ describe('responses conversation store plain continuation restore', () => {
     });
 
     const cleared = clearUnresolvedResponsesConversationRequests();
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
 
     expect(cleared).toBe(1);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);

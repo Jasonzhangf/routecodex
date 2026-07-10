@@ -1,24 +1,115 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../../src/server/runtime/handlers/types.js';
-import type { HubPipeline, ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
+import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
-import {
-  HubRequestExecutor,
-  __requestExecutorTestables,
-} from '../../../../src/server/runtime/http-server/request-executor.js';
 import {
   captureResponsesRequestContext,
   clearResponsesConversationByRequestId,
-  responsesConversationStore,
+  getResponsesConversationStoreDebugStats,
+  recordResponsesResponse,
   resumeLatestResponsesContinuationByScope,
-} from '../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
+} from '../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts';
+
+const mockExecuteHubPipelineNative = jest.fn();
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  bootstrapVirtualRouterConfig: jest.fn(async (input: unknown) => ({ config: input, runtime: {}, targetRuntime: {} })),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {},
+  })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {},
+  })),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: unknown) => input ?? {}),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => 'default'),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: unknown) => userConfig ?? {}),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  parseRouteCodexTomlRecord: jest.fn(async () => ({})),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  serializeRouteCodexTomlRecord: jest.fn(async () => ''),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTable: jest.fn(async (input: any) => input?.raw ?? ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn((input: any) => input?.raw ?? ''),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', parsed: {} })),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', parsed: {} })),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: input?.parsed ?? {},
+  })),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: input?.parsed ?? {},
+  })),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn((input: any) => ({
+    path: input?.configPath ?? '',
+    format: 'toml',
+    raw: '',
+    parsed: {},
+  })),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (parsed: unknown) => parsed ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed ?? null),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => ({ files: [] })),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: unknown) => input ?? {}),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  planAuthFileResolutionNativeSync: jest.fn((input: unknown) => input ?? {}),
+  resolveAuthFileKeyNativeSync: jest.fn((input: any) => input?.key ?? ''),
+  planProviderConfigRootNativeSync: jest.fn(() => ({ providerRoot: '' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({ configPath: '' })),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => ''),
+  resolveRccPathNativeSync: jest.fn((...parts: string[]) => parts.join('/')),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => ''),
+  resolveRccUserDirNativeSync: jest.fn(() => ''),
+  resolveBaseDir: jest.fn(() => process.cwd()),
+  createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
+  executeHubPipelineNative: mockExecuteHubPipelineNative,
+  updateHubPipelineVirtualRouterConfigNative: jest.fn(),
+  updateHubPipelineEngineDepsNative: jest.fn(),
+  routeHubPipelineVirtualRouterNative: jest.fn(() => ({ diagnostics: {} })),
+  diagnoseHubPipelineVirtualRouterNative: jest.fn(() => ({ diagnostics: {} })),
+  getHubPipelineVirtualRouterStatusNative: jest.fn(() => ({})),
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  disposeHubPipelineNative: jest.fn(),
+}));
+
+const {
+  HubRequestExecutor,
+  __requestExecutorTestables,
+} = await import('../../../../src/server/runtime/http-server/request-executor.js');
 
 function createRuntimeHandle(processImpl: () => Promise<unknown>): ProviderHandle {
   return {
     providerType: 'openai',
     providerFamily: 'openai',
+    providerProtocol: 'openai-responses',
     providerId: 'dbittai-gpt',
+    runtime: {
+      runtimeKey: 'runtime:key',
+      providerId: 'dbittai-gpt',
+      providerKey: 'dbittai-gpt.key1.gpt-5.3-codex',
+      providerType: 'openai',
+      providerFamily: 'openai',
+      providerProtocol: 'openai-responses',
+      endpoint: 'https://example.invalid/v1',
+      auth: { type: 'static', value: 'test-key' },
+      outboundProfile: 'openai-responses',
+      defaultModel: 'gpt-5.3-codex',
+    },
     instance: {
       processIncoming: jest.fn().mockImplementation(processImpl),
       cleanup: jest.fn(),
@@ -50,12 +141,16 @@ function createExecutor(converted: PipelineExecutionResult) {
       processMode: 'standard',
     },
     processMode: 'standard',
+    routingDecision: {
+      routeName: 'thinking',
+      providerProtocol: 'openai-responses',
+      pool: ['dbittai-gpt.key1.gpt-5.3-codex'],
+    },
     metadata: {},
   };
 
-  const fakePipeline: HubPipeline = {
-    execute: jest.fn().mockResolvedValue(pipelineResult),
-  };
+  mockExecuteHubPipelineNative.mockReturnValue(pipelineResult);
+  const fakePipeline = 'mock_hub_pipeline_handle';
 
   const deps = {
     runtimeManager: {
@@ -91,6 +186,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
 
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
+    mockExecuteHubPipelineNative.mockReset();
   });
 
   afterEach(() => {
@@ -116,7 +212,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBeGreaterThan(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBeGreaterThan(0);
 
     const { executor } = createExecutor({
       status: 400,
@@ -140,8 +236,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     } as PipelineExecutionInput);
 
     expect(result).toBeTruthy();
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('does not allow same-session continuation restore after malformed responses continuation shape was converted into error contract', async () => {
@@ -210,8 +306,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     });
 
     expect(resumed).toBeNull();
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('clears captured responses request on provider 502 error responses to avoid orphan pending entries', async () => {
@@ -237,7 +333,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBeGreaterThan(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBeGreaterThan(0);
 
     const { executor } = createExecutor({
       status: 502,
@@ -250,7 +346,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
     });
 
     try {
-      await expect(executor.execute({
+      const result = await executor.execute({
         requestId,
         entryEndpoint: '/v1/responses',
         headers: {},
@@ -259,9 +355,10 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
           input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
         },
         metadata: { stream: false, inboundStream: false },
-      } as PipelineExecutionInput)).rejects.toBeTruthy();
-      expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-      expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+      } as PipelineExecutionInput);
+      expect(result.status).toBeGreaterThanOrEqual(400);
+      expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+      expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -299,7 +396,7 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       },
     });
 
-    responsesConversationStore.recordResponse({
+    recordResponsesResponse({
       requestId,
       sessionId: 'sess-plain-create-no-auto-resume',
       response: {
@@ -348,8 +445,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBeGreaterThan(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBeGreaterThan(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
 
     const handle = createRuntimeHandle(async () => {
       throw Object.assign(new Error('provider raw stream ended with no content'), {
@@ -374,12 +471,16 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
         processMode: 'standard',
       },
       processMode: 'standard',
+      routingDecision: {
+        routeName: 'thinking',
+        providerProtocol: 'openai-responses',
+        pool: ['dbittai-gpt.key1.gpt-5.3-codex'],
+      },
       metadata: {},
     };
 
-    const fakePipeline: HubPipeline = {
-      execute: jest.fn().mockResolvedValue(pipelineResult),
-    };
+    mockExecuteHubPipelineNative.mockReturnValue(pipelineResult);
+    const fakePipeline = 'mock_hub_pipeline_handle';
 
     const deps = {
       runtimeManager: {
@@ -421,8 +522,8 @@ describe('HubRequestExecutor responses conversation retention cleanup', () => {
       statusCode: 400,
     });
 
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
 });

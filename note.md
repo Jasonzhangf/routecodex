@@ -28639,3 +28639,13 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Test-only `planStoplessCliProjectionContextWithNative` usage in `tests/servertool/servertool-cli-native-bridge.spec.ts` is now a local direct native helper calling `planStoplessCliProjectionContextJson`.
 - Stale servertool wrapper Jest mock in `tests/servertool/servertool-skeleton-reasoning-stop-flows.spec.ts` is removed; residue audit now locks the Phase 3 block and key wrapper names absent from `native-exports.ts/js`.
 - Active source scan after edits finds removed wrapper names only in residue tests and historical/docs goal text, not in production source/scripts/sharedmodule generated declarations.
+
+# 2026-07-10: responses store raw export contraction and stale handler gate de-scope
+
+- Scope: current llmswitch / Hub Pipeline external-reference contraction for `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`.
+- Change: removed public raw `responsesConversationStore` export and moved direct tests to narrow TS canonical debug/accessor functions instead of importing the store singleton.
+- Mirror discipline: checked-in `responses-conversation-store-host.js` and `.d.ts` only lose the raw store export; they do not receive debug API backfill. Direct Jest imports in touched tests now target explicit `.ts` canonical source to avoid depending on source JS mirror.
+- Gate: `hub-pipeline-stage-residue-audit.spec.ts` forbids raw store export in TS/JS/d.ts and forbids debug API backfill in JS/d.ts.
+- Map sync: removed stale `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` from `hub.chat_process_responses_continuation` required gates because it expects handler/SSE `sendPipelineResponse` to save continuation state. That violates the immutable interval; valid assertions must migrate to bridge/Rust owner tests instead of adding handler-side save logic.
+- Verification PASS: focused Jest 5 suites / 274 tests; `verify:responses-history-protocol-contract`; strict shell reference audit; minimal TS surface; rustification audit; function-map compile gate; architecture mainline-call-map; deleted-path; thin-wrapper-only; fallback-denylist; `build:base`; `git diff --check`.
+- Remaining gap: full objective is not closed. `responses-conversation-store-host.ts` still owns TS Map/index/IO shell state, `routing-integrations.ts` is not yet split, and unrelated dirty files remain outside this slice.

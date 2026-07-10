@@ -663,6 +663,29 @@ class ResponsesConversationStore {
     };
   }
 
+  deleteResponseIndexForDebug(responseId?: string): void {
+    if (typeof responseId !== 'string' || !responseId.trim()) return;
+    this.responseIndex.delete(responseId.trim());
+  }
+
+  hasRequestForDebug(requestId?: string): boolean {
+    return typeof requestId === 'string' && requestId.trim().length > 0
+      ? this.requestMap.has(requestId.trim())
+      : false;
+  }
+
+  hasResponseForDebug(responseId?: string): boolean {
+    return typeof responseId === 'string' && responseId.trim().length > 0
+      ? this.responseIndex.has(responseId.trim())
+      : false;
+  }
+
+  hasScopeForDebug(scopeKey?: string): boolean {
+    return typeof scopeKey === 'string' && scopeKey.trim().length > 0
+      ? this.scopeIndex.has(scopeKey.trim())
+      : false;
+  }
+
   rebindRequestId(oldId: string | undefined, newId: string | undefined): void {
     const plan = planRebindRequestId({
       oldId,
@@ -1474,7 +1497,29 @@ export function clearUnresolvedResponsesConversationRequests(): number {
   return store.clearUnresolvedRequests();
 }
 
-export { store as responsesConversationStore };
+export function getResponsesConversationStoreDebugStats(): ReturnType<ResponsesConversationStore['getDebugStats']> {
+  return store.getDebugStats();
+}
+
+export function releaseResponsesConversationRequestPayload(requestId?: string): void {
+  store.releaseRequestPayload(requestId);
+}
+
+export function deleteResponsesConversationResponseIndexForDebug(responseId?: string): void {
+  store.deleteResponseIndexForDebug(responseId);
+}
+
+export function hasResponsesConversationRequestForDebug(requestId?: string): boolean {
+  return store.hasRequestForDebug(requestId);
+}
+
+export function hasResponsesConversationResponseForDebug(responseId?: string): boolean {
+  return store.hasResponseForDebug(responseId);
+}
+
+export function hasResponsesConversationScopeForDebug(scopeKey?: string): boolean {
+  return store.hasScopeForDebug(scopeKey);
+}
 
 // Expose raw store for memory-observer diagnostics
 (globalThis as Record<string, unknown>)[RESPONSES_CONVERSATION_STORE_GLOBAL_KEY] = store;

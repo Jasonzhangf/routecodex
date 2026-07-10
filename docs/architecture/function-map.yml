@@ -3695,7 +3695,6 @@ owners:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
@@ -3705,7 +3704,6 @@ owners:
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
     required_gates:
       - npm run verify:responses-history-protocol-contract
@@ -3728,6 +3726,7 @@ owners:
       - "Continuation store save/restore may persist and return canonical truth, but must not rewrite it to compensate for downstream shape expectations."
       - "Control semantics required across the boundary must be carried in MetadataCenter; payload/history are data-plane truth and must not receive route/provider/protocol/control pins."
       - "Response save must use the current active provider request label passed to `publishResponsesRecordPlanJson` before any stale `requestTruth.requestId`; provider request-id rebind must not record under the old router id."
+      - "Handler response-store integration tests are not continuation owner gates. Stale tests that expect `sendPipelineResponse` or SSE transport to save continuation must be migrated to bridge/Rust owner tests or deleted, not greened by adding handler-side save logic."
 
   - feature_id: server.responses_sse_bridge_surface
     status: active

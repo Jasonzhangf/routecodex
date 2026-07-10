@@ -114,4 +114,3 @@ export declare function materializeLatestResponsesContinuationByScope(args: Rest
 export declare function clearAllResponsesConversationState(): void;
 export declare function resetResponsesConversationStateForRestartSimulation(): void;
 export declare function clearUnresolvedResponsesConversationRequests(): number;
-export { store as responsesConversationStore };

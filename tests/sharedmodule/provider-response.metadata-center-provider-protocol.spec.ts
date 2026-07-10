@@ -135,9 +135,7 @@ jest.unstable_mockModule(
     captureResponsesRequestContext: jest.fn(),
     finalizeResponsesConversationRequestRetention: jest.fn(),
     recordResponsesResponse: jest.fn(),
-    responsesConversationStore: {
-      getDebugStats: jest.fn(() => ({})),
-    },
+    getResponsesConversationStoreDebugStats: jest.fn(() => ({})),
   })
 );
 

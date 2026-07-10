@@ -269,7 +269,7 @@ Out of scope:
      - `tests/red-tests/request_field_cross_protocol_equivalence_matrix.test.ts`
      - `tests/responses/responses-openai-bridge.spec.ts`
      - `tests/sharedmodule/responses-continuation-store.spec.ts`
-     - `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts`
+     - bridge/Rust-owner continuation tests only; stale handler response-store assertions must not be used as continuation owner gates.
 
 4. Delete and gate:
    - Delete `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`.

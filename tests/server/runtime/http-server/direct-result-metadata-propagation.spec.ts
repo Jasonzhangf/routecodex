@@ -7,10 +7,10 @@ const {
   captureResponsesRequestContext,
   clearResponsesConversationByRequestId,
   clearAllResponsesConversationState,
-  responsesConversationStore,
+  getResponsesConversationStoreDebugStats,
   resumeLatestResponsesContinuationByScope,
   resumeResponsesConversation,
-} = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js');
+} = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts');
 
 const TEST_METADATA_ORIGIN = {
   module: 'tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts',
@@ -327,7 +327,7 @@ describe('http-server direct result metadata propagation', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
 
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
     await server.buildRouterDirectResult({
@@ -358,7 +358,7 @@ describe('http-server direct result metadata propagation', () => {
       },
     });
 
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestMapSize).toBe(0);
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
     expect(stats.responseIndexSize).toBe(0);
@@ -427,9 +427,9 @@ describe('http-server direct result metadata propagation', () => {
     });
 
     expect(result.status).toBe(200);
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().scopeIndexSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().responseIndexSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().scopeIndexSize).toBe(0);
   });
 
   it('router-direct result clears captured responses request on recoverable upstream 502', async () => {
@@ -457,7 +457,7 @@ describe('http-server direct result metadata propagation', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBeGreaterThan(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBeGreaterThan(0);
 
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
     const result = await server.buildRouterDirectResult({
@@ -480,8 +480,8 @@ describe('http-server direct result metadata propagation', () => {
 
     expect(result.status).toBe(502);
     expect((result.body as any)?.error?.code).toBe('HTTP_502');
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('router-direct streaming wrapper clears captured responses request when no canonical response body is available to retain', async () => {
@@ -532,8 +532,8 @@ describe('http-server direct result metadata propagation', () => {
       clientModelId: 'gpt-5.3-codex',
       originalModelId: 'gpt-5.3-codex'
     });
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('provider-direct responses result records retention state for continuation', async () => {
@@ -561,7 +561,7 @@ describe('http-server direct result metadata propagation', () => {
       },
     });
 
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(1);
 
     const server = Object.create(RouteCodexHttpServer.prototype) as any;
     server.extractProviderModel = () => 'gpt-5.4';
@@ -595,7 +595,7 @@ describe('http-server direct result metadata propagation', () => {
       }
     }, {}, 'test.key1');
 
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.scopeIndexSize).toBe(1);
@@ -666,9 +666,9 @@ describe('http-server direct result metadata propagation', () => {
     }, 'test.key1');
 
     expect(result.status).toBe(200);
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().responseIndexSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().scopeIndexSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().responseIndexSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().scopeIndexSize).toBe(0);
   });
 
   it('RED: provider-direct responses retain submit_tool_outputs continuation when response only exposes required_action', async () => {
@@ -733,7 +733,7 @@ describe('http-server direct result metadata propagation', () => {
       }
     }, {}, 'test.key1');
 
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
     expect(stats.responseIndexSize).toBe(1);
 
@@ -794,8 +794,8 @@ describe('http-server direct result metadata propagation', () => {
 
     expect(result.status).toBe(502);
     expect((result.body as any)?.error?.code).toBe('HTTP_502');
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('provider-direct streaming wrapper clears captured responses request when no canonical response body is available to retain', async () => {
@@ -842,8 +842,8 @@ describe('http-server direct result metadata propagation', () => {
       }
     }, {}, 'test.key1');
 
-    expect(responsesConversationStore.getDebugStats().requestMapSize).toBe(0);
-    expect(responsesConversationStore.getDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestMapSize).toBe(0);
+    expect(getResponsesConversationStoreDebugStats().requestEntriesWithoutLastResponseId).toBe(0);
   });
 
   it('RED: router-direct responses retain submit_tool_outputs continuation when response only exposes required_action', async () => {
@@ -905,7 +905,7 @@ describe('http-server direct result metadata propagation', () => {
       metadata: {},
     });
 
-    const stats = responsesConversationStore.getDebugStats();
+    const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBe(0);
     expect(stats.responseIndexSize).toBe(1);
 

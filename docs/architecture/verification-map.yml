@@ -1497,12 +1497,10 @@ verification:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
-      - tests/modules/llmswitch/bridge/responses-response-bridge.store-release.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts
+      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract
       - npm run verify:function-map-compile-gate
@@ -1519,6 +1517,7 @@ verification:
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "Tests must lock response save request-id priority: the current active provider request label passed to the Rust record planner wins over stale `requestTruth.requestId` after request-executor rebind."
       - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
+      - "Handler response-store integration tests are stale continuation-owner evidence if they expect `sendPipelineResponse` or SSE transport to save continuation; migrate those assertions to bridge/Rust owner tests instead of reintroducing handler-side save logic."
 
   - feature_id: tool.apply_patch_freeform_contract
     change_risk: high
