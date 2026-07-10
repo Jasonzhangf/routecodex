@@ -1297,6 +1297,12 @@ describe('hub pipeline stage residue audit', () => {
     ).toBe(false);
   });
 
+  it('snapshot native production wrapper must stay physically deleted', () => {
+    expect(
+      fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.ts')),
+    ).toBe(false);
+  });
+
   it('host snapshot stage recorder must only expose factory bridge API', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder.ts'),

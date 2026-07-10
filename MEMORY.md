@@ -2034,3 +2034,9 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts` is physically deleted. Do not restore it as a production split wrapper for format envelope or SSE stream mode glue.
 - `native-hub-pipeline-req-inbound-semantics.ts` is the aggregate owner for the remaining native-call/stringify/parse/fail-fast glue: `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, and `processSseStreamWithNative`. Runtime semantics remain Rust/NAPI truth.
 - Current shell audit after this deletion is `prodTsShellCount=17`, `shellsWithProdImporters=13`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.
+
+# 2026-07-10: Snapshot native production wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.ts` is physically deleted from production source. Do not restore it as a production snapshot native wrapper.
+- Snapshot native echo tests should use test-only `tests/sharedmodule/helpers/snapshot-hooks-direct-native.ts`; runtime snapshot behavior remains Rust/NAPI truth or host bridge owner, not sharedmodule production TS shell.
+- Current shell audit after this deletion is `prodTsShellCount=16`, `shellsWithProdImporters=13`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.

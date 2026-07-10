@@ -28502,3 +28502,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted `native-hub-pipeline-edge-stage-semantics.ts`; `sanitizeFormatEnvelopeWithNative`, `resolveSseStreamModeWithNative`, and `processSseStreamWithNative` now live in aggregate `native-hub-pipeline-req-inbound-semantics.ts` as native-call/parse/fail-fast glue.
 - Tests and no-fallback rules now point to the aggregate owner; residue audit asserts the retired edge wrapper remains absent.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; focused SSE/residue Jest 209/209; focused req inbound/edge observability Jest 5/5; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=17`, `shellsWithProdImporters=13`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=17`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run build:base`; old edge path scan only residue locks; targeted `git diff --check`.
+
+# 2026-07-10: snapshot native production wrapper retired
+
+- Scope: continued zero-production-import llmswitch-core TS shell contraction after req inbound edge wrapper deletion.
+- Deleted production `native-snapshot-hooks.ts`; snapshot native echo tests now use test-only direct native helper `tests/sharedmodule/helpers/snapshot-hooks-direct-native.ts`.
+- Residue audit locks the production wrapper absent; no production source imports the retired path.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; focused snapshot/residue Jest 203/203; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=16`, `shellsWithProdImporters=13`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=16`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run build:base`; old snapshot path scan only residue lock; targeted `git diff --check`.

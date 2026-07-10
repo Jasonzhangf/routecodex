@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { normalizeSnapshotStagePayloadWithNative, writeSnapshotViaHooksWithNative, shouldRecordSnapshotsWithNative } from '../../src/native/router-hotpath/native-snapshot-hooks.js';
+import { normalizeSnapshotStagePayloadWithNative, writeSnapshotViaHooksWithNative, shouldRecordSnapshotsWithNative } from '../../../../tests/sharedmodule/helpers/snapshot-hooks-direct-native.js';
 
 describe('Snapshot Native Echo Tests (Layer 1)', () => {
   describe('normalizeSnapshotStagePayloadWithNative', () => {
