@@ -482,3 +482,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts` no longer declares legacy `importCoreDist` / `requireCoreDist` bridge loader mocks.
 - The spec now mocks the current handler-facing `responses-response-bridge.js` and `responses-sse-bridge.js` facades directly for the prestart close guard path.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` mock references returns zero matches.
+
+### 2026-07-11 responses keepalive legacy loader mock removed
+
+- `tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or declares legacy `importCoreDist` / `requireCoreDist` helpers.
+- The keepalive transport spec now mocks only the current handler-facing `responses-response-bridge.js` and `responses-sse-bridge.js` facades, preserving the SSE transport-only contract without adding TS semantic owner logic.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` mock references returns zero matches.

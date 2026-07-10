@@ -28702,3 +28702,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - `snapshot-recorder.d.ts`
   - `state-integrations.d.ts`
 - Deleted them and added one residue audit that asserts the whole absent set stays deleted.
+
+# 2026-07-11: keepalive protocol loader helper consumer removed
+
+- Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / broad `bridge.js` test consumers.
+- Change: `tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts` now mocks `responses-response-bridge.js` and `responses-sse-bridge.js` directly instead of the broad bridge barrel with old core loader helpers.
+- Contract: spec remains SSE transport-only; it does not add handler-side projection, continuation, or repair semantics.
+- Verification PASS: exact file scan for `importCoreDist|requireCoreDist|resolveImplForSubpath|resolveBaseDir|src/modules/llmswitch/bridge.js` returned zero matches; focused Jest 2/2 passed; strict shell reference audit passed with `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2`; `verify:responses-handler-single-bridge-surface`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate` passed.
