@@ -689,3 +689,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
 - Boundary: `protocol-http-providers.unit.test.ts` was checked and restored; splitting its root mock exposes provider snapshot entry-port fixture gaps, so it needs a separate provider snapshot contract slice rather than being included in this reference-only cleanup.
+
+### 2026-07-11 provider outbound param stale bridge mock removed
+
+- `tests/provider/provider-outbound-param.test.ts` no longer mocks the root `src/modules/llmswitch/bridge.ts` barrel with stale symbols that the current bridge no longer exports.
+- The provider implementations under test already import the current narrow facades (`runtime-integrations.js`, `native-exports.js`, and provider snapshot writer), so the old root bridge mock was dead test scaffolding rather than an active runtime consumer.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest loads the file but remains skipped because no local codex sample aggregates are present; this is reference-cleanup evidence only, not outbound behavior evidence. Full static/architecture gates are tracked by the slice commit.

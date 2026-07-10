@@ -7,20 +7,6 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 
-// bridge mock for responses encoding (avoid ESM import.meta and control shape)
-jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
-  extractSessionIdentifiersFromMetadata: () => ({}),
-  extractAntigravityGeminiSessionId: () => undefined,
-  cacheAntigravitySessionSignature: () => {},
-  lookupAntigravitySessionSignatureEntry: () => undefined,
-  getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
-  resetAntigravitySessionSignatureCachesForTests: () => {},
-  warmupAntigravitySessionSignatureModule: async () => {},
-  loadRoutingInstructionStateSync: () => null,
-  saveRoutingInstructionStateAsync: () => {},
-}), { virtual: true });
-
 import { HttpTransportProvider } from '../../src/providers/core/runtime/http-transport-provider.ts';
 import { AnthropicProtocolClient } from '../../src/client/anthropic/anthropic-protocol-client.js';
 import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
