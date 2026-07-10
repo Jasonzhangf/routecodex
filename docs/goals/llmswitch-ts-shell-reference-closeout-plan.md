@@ -760,3 +760,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The docs now describe the current boundary: Rust/NAPI owns Hub Pipeline semantics, and Host code may only use approved `src/modules/llmswitch/bridge/*.ts` thin IO/native-binding shells.
 - Exact file scan for root bridge paths and legacy loader helpers in the touched docs returns zero matches.
 - Verification passed: `git diff --check`, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, and `npm run build:base`.
+
+### 2026-07-11 responses bridge function-map root path allowance removed
+
+- `docs/architecture/function-map.yml` no longer lists `src/modules/llmswitch/bridge.ts` or `src/modules/llmswitch/bridge/index.ts` as allowed paths for `server.responses_request_handler_bridge_surface`, `server.responses_sse_bridge_surface`, or `server.responses_response_handler_bridge_surface`.
+- The allowed paths now name only the concrete owner submodules plus handler/gate/doc surfaces, matching the current root-bridge closeout direction.
+- Exact function-map scan for the retired root bridge allowed paths returns zero matches.
+- Verification passed: `npm run verify:server-function-map-boundary`, `npm run verify:function-map-compile-gate`, and strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).

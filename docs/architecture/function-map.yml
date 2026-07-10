@@ -3636,8 +3636,6 @@ owners:
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/server/handlers/responses-handler.ts
-      - src/modules/llmswitch/bridge.ts
-      - src/modules/llmswitch/bridge/index.ts
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
       - scripts/architecture/verify-server-function-map-boundary.mjs
@@ -3757,8 +3755,6 @@ owners:
       - src/modules/llmswitch/bridge/responses-sse-bridge.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
-      - src/modules/llmswitch/bridge.ts
-      - src/modules/llmswitch/bridge/index.ts
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
       - scripts/architecture/verify-server-function-map-boundary.mjs
@@ -3810,8 +3806,6 @@ owners:
       - src/modules/llmswitch/bridge/responses-response-bridge.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
-      - src/modules/llmswitch/bridge.ts
-      - src/modules/llmswitch/bridge/index.ts
       - docs/architecture
       - scripts/architecture/verify-server-function-map-boundary.mjs
     forbidden_paths:
