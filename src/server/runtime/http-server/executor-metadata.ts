@@ -3,7 +3,7 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
 import {
   extractSessionIdentifiersFromMetadata
-} from '../../../modules/llmswitch/bridge.js';
+} from '../../../modules/llmswitch/bridge/state-integrations.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   bindMetadataCenterRustMirror,

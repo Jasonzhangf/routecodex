@@ -1,6 +1,6 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { HubPipelineExecutionResult, HubPipelineHandle } from './types.js';
-import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
+import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge/snapshot-recorder.js';
 import { asRecord } from './provider-utils.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {

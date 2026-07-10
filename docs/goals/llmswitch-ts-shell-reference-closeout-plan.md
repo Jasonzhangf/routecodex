@@ -585,3 +585,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `src/providers/core/runtime/mimoweb/mimoweb-provider.ts` now imports `normalizeAssistantTextToToolCallsJson` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel, keeping text tool-call harvest on the Rust/native helper.
 - `tests/providers/core/runtime/mimoweb-provider.unit.test.ts` now mocks the same narrow native-export facade and has a complete current provider-error-reporter mock surface for `BaseProvider` link-time validation.
 - Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused mimoweb Jest passes 9/9, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass.
+
+### 2026-07-11 executor metadata and stage-recorder imports narrowed
+
+- `src/server/runtime/http-server/executor-pipeline.ts` now imports `createSnapshotRecorder` from `src/modules/llmswitch/bridge/snapshot-recorder.js` instead of the root bridge barrel.
+- `src/server/runtime/http-server/executor-metadata.ts` now imports `extractSessionIdentifiersFromMetadata` from `src/modules/llmswitch/bridge/state-integrations.js` instead of the root bridge barrel.
+- Removed an unused root bridge namespace import from `src/server/runtime/http-server/daemon-admin/control-handler.ts`.
+- `tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts` now mocks the same narrow snapshot-recorder facade.
+- Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; executor-pipeline and executor-metadata focused Jest passes, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass. `tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts` still has a pre-existing config-write 500 in its config editor case and is not used as passing evidence for this slice.

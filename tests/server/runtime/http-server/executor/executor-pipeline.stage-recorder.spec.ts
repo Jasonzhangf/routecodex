@@ -27,7 +27,7 @@ const resolveEntryProtocolFromEndpointNativeMock = jest.fn((entryEndpoint: strin
   throw new Error(`Unsupported hub pipeline entry endpoint: ${entryEndpoint}`);
 });
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: createSnapshotRecorderMock
 }));
 

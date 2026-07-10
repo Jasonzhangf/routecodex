@@ -10,7 +10,6 @@ import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../../../constants/in
 import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { writeUserConfigFile } from '../../../../config/user-config-writer.js';
 import { listManagedServerPidsByPort } from '../../../../utils/managed-server-pids.js';
-import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
 import {
   activateRoutingGroupAtLocation,
