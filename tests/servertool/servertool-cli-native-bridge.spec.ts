@@ -14,7 +14,6 @@ import {
   planAutoHookCallerFinalizationWithNative,
   planAutoHookCallerResultProjectionWithNative,
   planAutoHookRuntimeAttemptWithNative,
-  planStoplessCliProjectionContextWithNative,
   planServertoolExecutionBranchWithNative,
   planServertoolExecutionLoopEffectWithNative,
   planServertoolExecutionLoopRuntimeActionWithNative,
@@ -31,6 +30,19 @@ import {
   planServertoolRegistryProjectionWithNative
 } from '../../sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../sharedmodule/helpers/native-router-hotpath-loader.js';
+
+function planStoplessCliProjectionContextNative(input: unknown): unknown {
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.planStoplessCliProjectionContextJson;
+  if (typeof fn !== 'function') {
+    throw new Error('planStoplessCliProjectionContextJson not available');
+  }
+  const raw = (fn as (inputJson: string) => unknown)(JSON.stringify(input ?? null));
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error('planStoplessCliProjectionContextJson returned empty result');
+  }
+  return JSON.parse(raw);
+}
 
 describe('servertool CLI native bridge', () => {
   it('uses Rust-owned projection output and client-visible shell', () => {
@@ -673,7 +685,7 @@ describe('servertool CLI native bridge', () => {
 
   it('uses Rust-owned stopless CLI projection context planning', () => {
     expect(
-      planStoplessCliProjectionContextWithNative({
+      planStoplessCliProjectionContextNative({
         metadataWritePlan: {
           stopless: {
             repeatCount: 4,
@@ -703,7 +715,7 @@ describe('servertool CLI native bridge', () => {
 
   it('does not read legacy execution context or serverToolLoopState as stopless control', () => {
     expect(
-      planStoplessCliProjectionContextWithNative({
+      planStoplessCliProjectionContextNative({
         chatStopText: '来自 chat 的 stop 文本'
       })
     ).toEqual({

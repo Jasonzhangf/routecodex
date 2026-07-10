@@ -119,12 +119,7 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
         await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
       }
       const activeServertoolWrapperExports = [
-        'buildServertoolDispatchPlanInputWithNative',
-        'buildServertoolOutcomePlanInputWithNative',
         'formatStopMessageCompareContextWithNative',
-        'planServertoolOutcomeWithNative',
-        'readServertoolPrimaryAutoHookIdsWithNative',
-        'runServertoolResponseStageWithNative',
         'planEngineSelectionStartWithNative',
         'resolveEngineSelectionAfterRunWithNative',
         'resolveServertoolExecutionLoopInitialDecisionWithNative',

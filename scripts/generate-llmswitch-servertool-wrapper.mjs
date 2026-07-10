@@ -429,42 +429,6 @@ export type NativeServertoolRegistryAutoHookEntry = {
   execution: Record<string, unknown>;
 };
 
-export declare function detectEmptyAssistantPayloadContractSignalWithNative(payload: unknown): NativePayloadContractSignal | null;
-export declare function detectProviderResponseShapeWithNative(payload: unknown): 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'unknown';
-export declare function containsSyntheticRouteCodexControlTextWithNative(payload: unknown): boolean;
-export declare function planChatWebSearchOperationsWithNative(request: unknown, runtimeMetadata?: Record<string, unknown>): NativeChatWebSearchPlan;
-export declare function runServertoolResponseStageWithNative(payload: unknown, requestId: string): NativeServertoolResponseStage;
-export declare function planServertoolResponseStageGateWithNative(input: unknown): ServertoolResponseStageGatePayload;
-export declare function planServertoolSkeletonDerivedConfigWithNative(input?: unknown): ServertoolSkeletonDerivedConfig;
-export declare function readServertoolPrimaryAutoHookIdsWithNative(input?: unknown): string[];
-export declare function buildServertoolDispatchPlanInputWithNative(input: unknown): ServertoolDispatchPlanInput;
-export declare function buildServertoolOutcomePlanInputWithNative(input: unknown): ServertoolOutcomePlanInput;
-export declare function planServertoolHandlerContractWithNative(input: unknown): ServertoolHandlerContractPlan;
-export declare function normalizeServertoolRegistrationSpecWithNative(input: unknown): ServertoolRegistrationSpec | null;
-export declare function resolveServertoolToolSpecWithNative(input: unknown): ServertoolToolSpec | null;
-export declare function planServertoolBuiltinHandlerEntryWithNative(input: unknown): ServertoolBuiltinHandlerEntryPlan;
-export declare function resolveServertoolBuiltinHandlerEntryWithNative(input: unknown): Record<string, unknown> | null;
-export declare function planServertoolBuiltinHandlerNamesWithNative(input?: unknown): ServertoolBuiltinHandlerNamesPlan;
-export declare function planServertoolBuiltinAutoHandlerEntriesWithNative(input?: unknown): ServertoolBuiltinHandlerEntriesPlan;
-export declare function planServertoolBuiltinHandlerRecordEntriesWithNative(input?: unknown): ServertoolBuiltinHandlerEntriesPlan;
-export declare function planServertoolRegistryLookupFromSkeletonWithNative(input: unknown): ServertoolRegistryLookupActionPlan;
-export declare function resolveServertoolRegistryHandlerWithNative(input: unknown): Record<string, unknown> | null;
-export declare function resolveServertoolRegisteredNameWithNative(input: unknown): boolean;
-export declare function resolveServertoolProgressToolNameWithNative(input: unknown): string;
-export declare function shouldUseServertoolGoldProgressHighlightWithNative(input: unknown): boolean;
-export declare function resolveServertoolProgressStageWithNative(input: unknown): string;
-export declare function normalizeServertoolProgressResultWithNative(input: unknown): string;
-export declare function normalizeServertoolProgressTokenWithNative(input: unknown): string;
-export declare function normalizeServertoolProgressFlowIdWithNative(input: unknown): string;
-export declare function buildServertoolMatchSkippedProgressEventWithNative(input: unknown): ServertoolProgressEvent;
-export declare function buildServertoolAutoHookTraceProgressEventWithNative(input: unknown): ServertoolProgressEvent;
-export declare function buildServertoolStopEntryProgressEventWithNative(input: unknown): ServertoolProgressEvent;
-export declare function buildServertoolStopCompareProgressEventWithNative(input: unknown): ServertoolProgressEvent;
-export declare function planServertoolToolCallDispatchWithNative(input: unknown): ServertoolDispatchPlan;
-export declare function planServertoolOutcomeWithNative(input: unknown): ServertoolOutcomePlan;
-export declare function planServertoolAutoHookQueuesWithNative(input: unknown): ServertoolAutoHookQueues;
-export declare function planServertoolAutoHookQueueItemsWithNative<T>(input: unknown): ServertoolAutoHookQueueItems<T>;
-
 // 18 servertool-core native wrappers consumed by shell files
 export declare function extractTextFromChatLikeWithNative(payload: unknown): string;
 export declare function inspectStopGatewaySignalWithNative(payload: unknown): ServertoolStopGatewayContext;
@@ -482,31 +446,7 @@ export declare function planServertoolTimeoutWatcherWithNative(input: unknown): 
 export declare function isAdapterClientDisconnectedWithNative(adapterContext: unknown): boolean;
 export declare function createServertoolExecutionLoopStateWithNative(): ServertoolExecutionLoopState;
 
-export declare function runServertoolOrchestrationMutationWithNative(input: Record<string, unknown>): unknown;
-export declare function planServertoolFollowupRuntimeWithNative(flowId: string): ServertoolFollowupRuntimePlan;
-export declare function extractCapturedChatSeedWithNative(captured: unknown): Record<string, unknown> | null;
-export declare function extractAssistantFollowupMessageWithNative(finalChatResponse: unknown): Record<string, unknown> | null;
-export declare function normalizeFollowupParametersWithNative(parameters: unknown): Record<string, unknown> | undefined;
-export declare function buildServertoolToolOutputPayloadWithNative(input: unknown): Record<string, unknown>;
-export declare function buildServertoolHandlerErrorToolOutputPayloadWithNative(input: unknown): Record<string, unknown>;
-export declare function collectServertoolAdditionalClientToolCallsWithNative(input: unknown): unknown[];
-export declare function isServertoolClientExecCliProjectionToolCallWithNative(input: unknown): boolean;
-export declare function webSearchIsGeminiEngineWithNative(providerKey: string): boolean;
-export declare function webSearchIsQwenEngineWithNative(providerKey: string): boolean;
-export declare function webSearchIsGlmEngineWithNative(providerKey: string): boolean;
-export declare function webSearchNormalizeResultCountWithNative(valueJson: string): number;
-export declare function webSearchBuildSystemPromptWithNative(targetCount: number): string;
-export declare function webSearchSanitizeBackendErrorWithNative(message: string): string;
-export declare function webSearchCollectHitsWithNative(chatResponseJson: string, targetCount: number): string;
-export declare function webSearchFormatHitsSummaryWithNative(hitsJson: string): string;
-export declare function webSearchLimitHitsWithNative(hitsJson: string): string;
-export declare function webSearchExtractAssistantMessageWithNative(chatResponseJson: string): string;
-export declare function webSearchBuildToolMessagesWithNative(chatResponseJson: string): string;
-export declare function visionBuildAnalysisPayloadWithNative(sourceJson: string): string;
-export declare function visionBuildPinnedMetadataWithNative(adapterContextJson: string, payloadJson: string): string;
-export declare function visionExtractOriginalUserPromptWithNative(messagesJson: string): string;
 export declare function appendServertoolExecutedRecordWithNative(input: unknown): NativeServertoolExecutionLoopState;
-export declare function applyFollowupDeltaPlanWithNative(input: unknown): unknown;
 export declare function applyServertoolExecutionLoopInitialDecisionWithNative<T>(
   decision: NativeExecutionLoopInitialDecision,
   application: {
@@ -527,7 +467,6 @@ export declare function buildClientExecCliProjectionOutputWithNative(input: unkn
 export declare function buildClientVisibleProjectionShellWithNative(input: unknown): unknown;
 export declare function buildServertoolCliProjectionRuntimeBranchWithNative(input: unknown): { result: NativeServerSideToolEngineResult };
 export declare function buildServertoolPostflightObservationSummaryWithNative(input: unknown): Record<string, unknown>;
-export declare function buildServertoolReq04FollowupPayloadWithNative(input: unknown): unknown;
 export declare function buildStopMessageTerminalVisiblePayloadWithNative(input: unknown): unknown;
 export declare function buildStoplessAutoCliProjectionFromEngineWithNative(input: unknown): unknown;
 export declare function calculateBudgetWithNative(input: unknown): unknown;
@@ -540,7 +479,6 @@ export declare function extractServertoolResponseStageOrchestrationShellResultWi
 export declare function extractStopMessageBlockedReportFromMessagesWithNative(input: unknown): unknown;
 export declare function finalizeServertoolHandlerPlanWithNative(planned: unknown, requestId: string): Promise<NativeServertoolHandlerResult | null>;
 export declare function finalizeServertoolResponseStageWithNative(input: unknown): NativeServerSideToolEngineResult;
-export declare function getDefaultServertoolSkeletonDocumentWithNative(input: unknown): unknown;
 export declare function hasArmedStopMessageStateWithNative(input: unknown): unknown;
 export declare function hasCompactionFlagWithNative(input: unknown): unknown;
 export declare function hasStopMessageAutoCliResultInRequestWithNative(input: unknown): unknown;
@@ -592,7 +530,6 @@ export declare function planStopMessageRoutingStateClearWithNative(input: unknow
 export declare function planStoplessExecutionWithNative(input: unknown): NativeStoplessExecutionPlan;
 export declare function planStoplessLearnedNoteWriteWithNative(input: unknown): unknown;
 export declare function readClientInjectOnlyWithNative(input: unknown): unknown;
-export declare function readFollowupClientInjectSourceWithNative(input: unknown): unknown;
 export declare function readServertoolEntryBaseObjectWithNative(input: unknown): JsonObject | null;
 export declare function readServertoolLoopStateWithNative(input: unknown): unknown;
 export declare function resolveAdapterContextProviderKeyWithNative(input: unknown): unknown;
@@ -603,7 +540,6 @@ export declare function resolveClientConnectionStateWithNative(input: unknown): 
 export declare function resolveDefaultStopMessageSnapshotWithNative(input: unknown): unknown;
 export declare function resolveEngineSelectionAfterRunWithNative(input: unknown): NativeEngineSelectionAfterRunDecision;
 export declare function resolveEntryEndpointWithNative(input: unknown): unknown;
-export declare function resolveFollowupModelWithNative(input: unknown): unknown;
 export declare function resolveImplicitGeminiStopMessageSnapshotWithNative(input: unknown): unknown;
 export declare function resolveServertoolEngineMatchHitWithNative(input: unknown): NativeEngineMatchHit;
 export declare function resolveServertoolEngineOrchestrationPreflightDecisionWithNative(input: unknown): NativeEngineOrchestrationPreflightDecision;

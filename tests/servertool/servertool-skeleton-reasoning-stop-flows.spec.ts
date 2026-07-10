@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, jest, test } from '@jest/globals';
+import { describe, expect, test } from '@jest/globals';
 
 const skeletonDocument = {
   version: 1,
@@ -24,44 +24,6 @@ const skeletonDocument = {
     }
   }
 };
-
-jest.unstable_mockModule(
-  'rcc-llmswitch-core/native/servertool-wrapper',
-  () => ({
-    getDefaultServertoolSkeletonDocumentWithNative: jest.fn(() => skeletonDocument),
-    planServertoolSkeletonDerivedConfigWithNative: jest.fn(() => ({
-      document: skeletonDocument,
-      toolSpecs: {},
-      toolSpecList: [],
-      autoHookQueueConfig: { optionalPrimaryOrder: [], mandatoryOrder: [] },
-      pendingInjectionConfig: { messageKinds: [] },
-      followupConfig: {
-        genericInjectionOps: [],
-        nativeSupportedOps: [],
-        flowPolicy: {
-          profilesByFlowId: skeletonDocument.servertool.skeleton.followup.flowPolicy.profilesByFlowId,
-          noFollowupFlowIds: [],
-          autoLimitFlowIds: [],
-          flowOnlyLoopLimitFlowIds: [],
-          clientInjectOnlyFlowIds: [],
-          seedLoopPayloadFlowIds: [],
-          clientInjectSourceByFlowId: {},
-          transparentReplayRequestSuffixByFlowId: {},
-          ignoreRequiresActionFollowupFlowIds: []
-        }
-      },
-      stateConfig: skeletonDocument.servertool.state
-    })),
-    normalizeServertoolRegistrationSpecWithNative: jest.fn(() => null),
-    resolveServertoolToolSpecWithNative: jest.fn(() => null),
-    planServertoolBuiltinAutoHandlerEntriesWithNative: jest.fn(() => ({ entries: [] })),
-    planServertoolBuiltinHandlerEntryWithNative: jest.fn(() => ({})),
-    planServertoolBuiltinHandlerNamesWithNative: jest.fn(() => ({ names: [] })),
-    planServertoolBuiltinHandlerRecordEntriesWithNative: jest.fn(() => ({ entries: [] })),
-    planServertoolRegistryLookupFromSkeletonWithNative: jest.fn(() => ({ action: 'return_null' })),
-    resolveServertoolBuiltinHandlerEntryWithNative: jest.fn(() => null)
-  })
-);
 
 describe('servertool skeleton reasoning-stop flow profiles', () => {
   test('does not expose reasoning stop flows through server-side skeleton policy', () => {

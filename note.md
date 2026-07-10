@@ -28621,3 +28621,21 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Gate evidence: `npm run verify:llmswitch-core-tsc` PASS; focused residue Jest 206/206 PASS; strict shell reference audit `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`; rustification audit baseline compare PASS; minimal TS surface audit PASS; function-map gate PASS; mainline-call-map PASS; fallback denylist PASS; deleted-path PASS; thin-wrapper PASS; Node.js runtime confirm root import blocked with `ERR_PACKAGE_PATH_NOT_EXPORTED`, native subpath `./native/servertool-wrapper` still resolves 255 exports.
 - Commit: `16395ae09 refactor(hub): retire llmswitch-core root TS barrel`.
 - Note: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` was already deleted by another worker in the same session; the rename detection caused staging conflicts when adding `src/index.ts` via `git add`. Resolved by carefully resetting the loader file and re-adding only the zero-shell closeout files.
+
+# 2026-07-10: native-exports Phase 3 servertool wrapper fan-out retired
+
+- Scope: continued external-reference contraction for `src/modules/llmswitch/bridge/native-exports.ts` after llmswitch-core production TS reached zero.
+- Change: removed the large `SERVERTOOL ORCHESTRATION WRAPPERS (Phase 3)` block from `native-exports.ts` and regenerated `native-exports.js`; package wrapper generator no longer declares those removed Phase 3 `*WithNative` functions.
+- Change: retained the two still-needed outcome plan calls as private non-exported native helper calls inside `materializeNativeToolCallExecutionOutcomeWithNative`; this avoids restoring `buildServertoolOutcomePlanInputWithNative` / `planServertoolOutcomeWithNative` as external surface.
+- Test/script migration: `servertool-cli-native-bridge.spec.ts` now tests `planStoplessCliProjectionContextJson` through direct Rust/NAPI binding; skeleton flow test no longer mocks deleted package wrapper exports; release install verifier no longer requires removed Phase 3 exports.
+- Gate: `hub-pipeline-stage-residue-audit.spec.ts` now forbids the Phase 3 wrapper marker and representative deleted wrapper names from both `native-exports.ts` and `native-exports.js`.
+- Verification PASS: `npm run build:base`; `npm run verify:servertool-rust-only`; strict shell reference audit `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`; rustification audit `prodTsFileCount=0`, `nonNativeFileCount=0`; minimal TS surface; focused Jest 4 suites / 246 tests; function-map compile gate; architecture deleted-path, thin-wrapper-only, fallback denylist, mainline-call-map; `git diff --check`.
+- Exact scan: `SERVERTOOL ORCHESTRATION WRAPPERS` remains only as forbidden-token residue test. `runServertoolResponseStageWithNative` remains only in historical docs/note/old lesson plus forbidden-token residue test, not active source.
+
+# 2026-07-10: native-exports servertool Phase 3 fan-out closeout in progress
+
+- Target: `src/modules/llmswitch/bridge/native-exports.ts/js` Phase 3 `SERVERTOOL ORCHESTRATION WRAPPERS` block.
+- Current edit removes the hand-written Phase 3 `*WithNative` exports from TS and tracked JS, removes stale Phase 3 declarations from `scripts/generate-llmswitch-servertool-wrapper.mjs`, and drops Phase 3 exports from release install checks.
+- Test-only `planStoplessCliProjectionContextWithNative` usage in `tests/servertool/servertool-cli-native-bridge.spec.ts` is now a local direct native helper calling `planStoplessCliProjectionContextJson`.
+- Stale servertool wrapper Jest mock in `tests/servertool/servertool-skeleton-reasoning-stop-flows.spec.ts` is removed; residue audit now locks the Phase 3 block and key wrapper names absent from `native-exports.ts/js`.
+- Active source scan after edits finds removed wrapper names only in residue tests and historical/docs goal text, not in production source/scripts/sharedmodule generated declarations.

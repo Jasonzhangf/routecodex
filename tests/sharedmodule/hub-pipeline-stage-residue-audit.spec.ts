@@ -809,6 +809,29 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostNativeSource).toContain('buildChatResponseFromResponsesNative');
   });
 
+  it('native exports must not restore the Phase 3 servertool wrapper fan-out', () => {
+    const files = [
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts'),
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.js'),
+    ];
+    const forbidden = [
+      'SERVERTOOL ORCHESTRATION WRAPPERS',
+      'planStoplessCliProjectionContextWithNative',
+      'runServertoolResponseStageWithNative',
+      'buildServertoolDispatchPlanInputWithNative',
+      'readServertoolPrimaryAutoHookIdsWithNative',
+      'webSearchIsGeminiEngineWithNative',
+      'visionBuildAnalysisPayloadWithNative',
+    ];
+
+    for (const file of files) {
+      const source = fs.readFileSync(file, 'utf8');
+      for (const token of forbidden) {
+        expect(source).not.toContain(token);
+      }
+    }
+  });
+
   it('responses response payload bridge must call native pipeline without TS wrapper or swallowed errors', () => {
     const retiredPath = path.join(
       process.cwd(),
