@@ -519,3 +519,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/sse-timeout.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` for native error projection or snapshot hooks.
 - The timeout regression now exercises the real current response/SSE facade/native path for stalled SSE stream timeout while keeping only snapshot writer disabled for IO isolation.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.
+
+### 2026-07-11 request-timeout broad bridge mock removed
+
+- `tests/server/handlers/responses-handler.request-timeout.blackbox.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge.js` or old handler-facing bridge helpers.
+- The blackbox now exercises the real current request/response/SSE facade/native path for Responses request timeout and fast-stream completion while keeping only snapshot writer disabled for IO isolation.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad bridge mock references returns zero matches.

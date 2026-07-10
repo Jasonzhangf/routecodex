@@ -6,26 +6,6 @@ import { Readable } from 'node:stream';
 
 import { getClientConnectionAbortSignal } from '../../../src/server/utils/client-connection-state.js';
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () =>
-  ({
-    captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
-    clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-    clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
-    convertProviderResponse: jest.fn(async (value) => value),
-    createSnapshotRecorder: jest.fn(async () => ({ record: jest.fn() })),
-    deriveFinishReasonNative: jest.fn(() => undefined),
-    extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
-    finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-    isToolCallContinuationResponseNative: jest.fn(() => false),
-    planResponsesHandlerEntry: async (payload: Record<string, unknown>) => ({
-      mode: 'none',
-      payload,
-    }),
-    rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-    recordResponsesResponseForRequest: jest.fn(async () => undefined),
-  })
-);
-
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
   isSnapshotsEnabled: () => false,
   writeServerSnapshot: async () => undefined
