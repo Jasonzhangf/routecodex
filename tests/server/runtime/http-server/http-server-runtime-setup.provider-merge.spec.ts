@@ -104,7 +104,6 @@ jest.unstable_mockModule(ROUTING_INTEGRATIONS_PATH, () => ({
   resolveRccPathNativeSync: (segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/'),
   resolveRccSnapshotsDirNativeSync: () => '/tmp/.rcc/snapshots',
   resolveRccUserDirNativeSync: () => '/tmp/.rcc',
-  resolveBaseDir: () => process.cwd(),
   createHubPipelineNative: mockCreateHubPipelineNative,
   executeHubPipelineNative: mockExecuteHubPipelineNative,
   updateHubPipelineVirtualRouterConfigNative: mockUpdateHubPipelineVirtualRouterConfigNative,

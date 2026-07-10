@@ -820,3 +820,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
 - Verification passed: strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
 - Verification gap: `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` baseline is currently red before this edit (22/33 pass, 11 fail/time out), so this slice does not claim focused direct-passthrough behavior closure.
+
+### 2026-07-11 runtime setup routing mock helper residue removed
+
+- `tests/server/runtime/http-server/http-server-runtime-setup.provider-merge.spec.ts` no longer exposes the retired `resolveBaseDir` helper from its `routing-integrations.js` mock.
+- The spec already mocks concrete config/runtime native helper entrypoints; the removed field was legacy loader-helper surface and was not consumed by the tested runtime setup contract.
+- Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
+- Verification gap: the focused spec remains red on the pre-existing `server.hubPipeline?.getVirtualRouter` expectation (4/6 pass, 2 fail), so this slice does not claim runtime setup behavior closure.
