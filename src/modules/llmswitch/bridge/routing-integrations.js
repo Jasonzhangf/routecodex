@@ -1,10 +1,8 @@
 /**
  * Routing Integrations Bridge
  *
- * Virtual router bootstrap + hub pipeline constructor + host base dir resolver.
+ * Virtual router bootstrap + hub pipeline constructor.
  */
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 let cachedNativeHubPipelineOrchestrationSemantics = null;
 function getNativeHubPipelineOrchestrationSemantics() {
@@ -20,14 +18,6 @@ function requireNativeHubPipelineFn(name) {
         throw new Error(`[llmswitch-bridge] ${String(name)} not available`);
     }
     return fn;
-}
-function getImportMetaUrlUnsafe() {
-    try {
-        return Function('return import.meta.url')();
-    }
-    catch {
-        return undefined;
-    }
 }
 function parseNativeJsonResult(raw) {
     const text = String(raw);
@@ -904,21 +894,5 @@ export function disposeHubPipelineNative(handle) {
     }
     const disposeHubPipelineEngineJson = requireNativeHubPipelineFn('disposeHubPipelineEngineJson');
     disposeHubPipelineEngineJson(handle);
-}
-export function resolveBaseDir() {
-    const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
-    if (env)
-        return env;
-    const metaUrl = getImportMetaUrlUnsafe();
-    if (typeof metaUrl === 'string' && metaUrl.length > 0) {
-        try {
-            const __filename = fileURLToPath(metaUrl);
-            return path.resolve(path.dirname(__filename), '../../../..');
-        }
-        catch {
-            // fall through
-        }
-    }
-    return process.cwd();
 }
 //# sourceMappingURL=routing-integrations.js.map

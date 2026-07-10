@@ -61,8 +61,7 @@ export {
   getHubPipelineVirtualRouterStatusNative,
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative,
-  disposeHubPipelineNative,
-  resolveBaseDir
+  disposeHubPipelineNative
 } from './routing-integrations.js';
 
 export {

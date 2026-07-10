@@ -46,7 +46,7 @@ const mockBridgeWithStoplessStateStubs = async () => {
     diagnoseHubPipelineVirtualRouterNative: routing.diagnoseHubPipelineVirtualRouterNative,
     getHubPipelineVirtualRouterStatusNative: routing.getHubPipelineVirtualRouterStatusNative,
     markHubPipelineVirtualRouterConcurrencyScopeBusyNative: routing.markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
-    resolveBaseDir: routing.resolveBaseDir,
+    resolveBaseDir: () => process.cwd(),
   };
 };
 

@@ -11,7 +11,7 @@ export { buildClientSseKeepaliveFrameForHttp, } from './responses-sse-bridge.js'
 export { buildResponsesRequestLogContextForHttp, normalizeResponsesClientPayloadForHttp, normalizeResponsesJsonBodyForHttp, prepareResponsesJsonClientDispatchPlanForHttp, rebindResponsesConversationRequestIdForHttp, } from './responses-response-bridge.js';
 export { writeSnapshotViaHooks, preloadCriticalBridgeRuntimeModules, resumeResponsesConversation, resumeLatestResponsesContinuationByScope, rebindResponsesConversationRequestId, clearUnresolvedResponsesConversationRequests, buildResponsesJsonFromSseStreamWithNative, reportProviderErrorToRouterPolicy, reportProviderSuccessToRouterPolicy } from './runtime-integrations.js';
 export { loadRoutingInstructionStateSync, saveRoutingInstructionStateAsync, saveRoutingInstructionStateSync, extractSessionIdentifiersFromMetadata } from './state-integrations.js';
-export { bootstrapVirtualRouterConfig, resolveBaseDir } from './routing-integrations.js';
+export { bootstrapVirtualRouterConfig } from './routing-integrations.js';
 export { mapChatToolsToBridgeJson, buildAnthropicResponseFromChatJson, injectMcpToolsForChatJson, injectMcpToolsForResponsesJson } from './native-exports.js';
 export { classifyProviderFailure, describeHubPipelineContractsNative, describeMetaCarrierContractsNative, describePipelineContractNative, describeVirtualRouterContractsNative, deriveFinishReasonNative, projectSseErrorEventPayloadNative, isToolCallContinuationResponseNative, validatePipelineNodeContractBoundaryNative, getNetworkErrorCodes } from './native-exports.js';
 //# sourceMappingURL=index.js.map

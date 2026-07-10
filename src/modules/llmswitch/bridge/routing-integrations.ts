@@ -1,11 +1,9 @@
 /**
  * Routing Integrations Bridge
  *
- * Virtual router bootstrap + hub pipeline constructor + host base dir resolver.
+ * Virtual router bootstrap + hub pipeline constructor.
  */
 
-import path from 'path';
-import { fileURLToPath } from 'url';
 import type { AnyRecord } from './module-loader.js';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
@@ -52,14 +50,6 @@ function requireNativeHubPipelineFn<T extends Function>(
     throw new Error(`[llmswitch-bridge] ${String(name)} not available`);
   }
   return fn as unknown as T;
-}
-
-function getImportMetaUrlUnsafe(): string | undefined {
-  try {
-    return Function('return import.meta.url')() as string | undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function parseNativeJsonResult(raw: unknown): unknown {
@@ -1154,19 +1144,4 @@ export function disposeHubPipelineNative(handle: string): void {
     'disposeHubPipelineEngineJson'
   );
   disposeHubPipelineEngineJson(handle);
-}
-
-export function resolveBaseDir(): string {
-  const env = String(process.env.ROUTECODEX_BASEDIR || process.env.RCC_BASEDIR || '').trim();
-  if (env) return env;
-  const metaUrl = getImportMetaUrlUnsafe();
-  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
-    try {
-      const __filename = fileURLToPath(metaUrl);
-      return path.resolve(path.dirname(__filename), '../../../..');
-    } catch {
-      // fall through
-    }
-  }
-  return process.cwd();
 }

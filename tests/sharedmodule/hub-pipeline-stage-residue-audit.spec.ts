@@ -4211,6 +4211,29 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('routing integrations bridge must not re-export legacy base-dir resolver', () => {
+    const repoRoot = process.cwd();
+    const bridgeFiles = [
+      'src/modules/llmswitch/bridge/routing-integrations.ts',
+      'src/modules/llmswitch/bridge/routing-integrations.js',
+      'src/modules/llmswitch/bridge/routing-integrations.d.ts',
+      'src/modules/llmswitch/bridge.ts',
+      'src/modules/llmswitch/bridge.js',
+      'src/modules/llmswitch/bridge.d.ts',
+      'src/modules/llmswitch/bridge/index.ts',
+      'src/modules/llmswitch/bridge/index.js',
+      'src/modules/llmswitch/bridge/index.d.ts',
+    ];
+    const findings = bridgeFiles.flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      return collectMatches(source, [
+        { label: `${relativePath}: legacy resolveBaseDir export`, pattern: /\bresolveBaseDir\b/ },
+      ]);
+    });
+
+    expect(findings).toEqual([]);
+  });
+
   it('HubPipeline deleted type shell must not be re-exported or restored', () => {
     const deletedHubPipelinePath = path.join(
       process.cwd(),

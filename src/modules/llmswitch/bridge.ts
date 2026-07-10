@@ -123,8 +123,7 @@ export {
   getHubPipelineVirtualRouterStatusNative,
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative,
-  disposeHubPipelineNative,
-  resolveBaseDir
+  disposeHubPipelineNative
 } from './bridge/routing-integrations.js';
 
 export {

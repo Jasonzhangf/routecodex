@@ -1,7 +1,7 @@
 /**
  * Routing Integrations Bridge
  *
- * Virtual router bootstrap + hub pipeline constructor + host base dir resolver.
+ * Virtual router bootstrap + hub pipeline constructor.
  */
 import type { AnyRecord } from './module-loader.js';
 export declare function bootstrapVirtualRouterConfig(input: AnyRecord): Promise<AnyRecord>;
@@ -153,4 +153,3 @@ export declare function getHubPipelineVirtualRouterStatusNative(handle: string):
 export declare function markHubPipelineVirtualRouterConcurrencyScopeBusyNative(handle: string, scopeKey: string): void;
 export declare function markHubPipelineVirtualRouterConcurrencyScopeIdleNative(handle: string, scopeKey: string): void;
 export declare function disposeHubPipelineNative(handle: string): void;
-export declare function resolveBaseDir(): string;
