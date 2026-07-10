@@ -593,3 +593,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Removed an unused root bridge namespace import from `src/server/runtime/http-server/daemon-admin/control-handler.ts`.
 - `tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts` now mocks the same narrow snapshot-recorder facade.
 - Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; executor-pipeline and executor-metadata focused Jest passes, `npx tsc --noEmit --pretty false` passes, and shell reference plus architecture gates pass. `tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts` still has a pre-existing config-write 500 in its config editor case and is not used as passing evidence for this slice.
+
+### 2026-07-11 provider response converter production root import narrowed
+
+- `src/server/runtime/http-server/executor/provider-response-converter.ts` now imports `convertProviderResponse` from `src/modules/llmswitch/bridge/response-converter.js` and `createSnapshotRecorder` from `src/modules/llmswitch/bridge/snapshot-recorder.js` instead of the root bridge barrel.
+- Focused provider response converter tests now mock those two narrow facades directly for error logging, MetadataCenter provider protocol, and stopless runtime sync coverage.
+- Production root bridge scan now reports only `src/providers/core/runtime/responses-provider.ts`, `src/server/runtime/http-server/index.ts`, and `src/server/runtime/http-server/request-executor.ts` as remaining root bridge importers.
+- Verification passed: focused Jest 3 suites / 8 tests, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+- Boundary: some provider response converter focused tests still carry root bridge mocks for adjacent not-yet-narrowed symbols; those are test debt for the next cleanup wave, not production import evidence for this slice.

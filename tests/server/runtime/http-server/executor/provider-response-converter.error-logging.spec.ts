@@ -1,13 +1,20 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockSyncReasoningStopModeFromRequest = jest.fn(() => 'off');
 const logStageSpy = jest.fn();
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
   syncReasoningStopModeFromRequest: mockSyncReasoningStopModeFromRequest,
   createChatJsonToSseConverterForHttp: async () => ({
     convertResponseToJsonToSse: async () => ({ pipe: () => undefined })
@@ -25,6 +32,23 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () =>
 jest.unstable_mockModule('../../../../../src/server/utils/stage-logger.js', () => ({
   logPipelineStage: logStageSpy
 }));
+
+const TEST_METADATA_WRITER = {
+  module: 'tests/server/runtime/http-server/executor/provider-response-converter.error-logging.spec.ts',
+  symbol: 'buildPipelineMetadata',
+  stage: 'test_runtime_control_provider_protocol'
+} as const;
+
+function buildPipelineMetadata(providerProtocol: string): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  MetadataCenter.attach(metadata).writeRuntimeControl(
+    'providerProtocol',
+    providerProtocol,
+    TEST_METADATA_WRITER,
+    'seed provider protocol for error logging test'
+  );
+  return metadata;
+}
 
 describe('provider-response-converter error logging', () => {
   it('surfaces SSE wrapper error in chat mode', async () => {
@@ -57,7 +81,7 @@ describe('provider-response-converter error logging', () => {
             }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -110,7 +134,7 @@ describe('provider-response-converter error logging', () => {
             }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -206,7 +230,7 @@ describe('provider-response-converter error logging', () => {
             }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -266,7 +290,7 @@ describe('provider-response-converter error logging', () => {
         requestId: 'req_no_duplicate_convert_bridge_2056',
         wantsStream: false,
         response: { body: { id: 'upstream_body' } } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-responses')
       },
       {
         runtimeManager: {
@@ -342,7 +366,7 @@ describe('provider-response-converter error logging', () => {
             }
           }
         } as any,
-        pipelineMetadata: {}
+        pipelineMetadata: buildPipelineMetadata('openai-chat')
       },
       {
         runtimeManager: {

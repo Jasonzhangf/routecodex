@@ -13,6 +13,15 @@ const mockBridgeModule = () => ({
   deriveFinishReasonNative: () => undefined,
 });
 
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+  convertProviderResponse: mockConvertProviderResponse,
+}));
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
+  createSnapshotRecorder: async () => ({
+    record: async () => undefined,
+    flush: async () => undefined,
+  }),
+}));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
 

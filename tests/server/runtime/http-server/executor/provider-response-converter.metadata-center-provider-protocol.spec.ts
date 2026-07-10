@@ -3,9 +3,15 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder,
+}));
+
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', () => ({
   deriveFinishReasonNative: jest.fn(() => 'stop'),
   sanitizeFollowupText: jest.fn(async (text: string) => text),
   resolveRelayResponsesClientSseStreamForHttp: jest.fn(async ({ sseStream }: { sseStream: unknown }) => sseStream),

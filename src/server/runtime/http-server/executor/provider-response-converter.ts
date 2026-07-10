@@ -4,8 +4,10 @@ import type { ProviderHandle } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
+} from '../../../../modules/llmswitch/bridge/response-converter.js';
+import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
-} from '../../../../modules/llmswitch/bridge.js';
+} from '../../../../modules/llmswitch/bridge/snapshot-recorder.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
