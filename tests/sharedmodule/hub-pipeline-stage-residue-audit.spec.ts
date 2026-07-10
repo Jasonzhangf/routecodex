@@ -4262,10 +4262,12 @@ describe('hub pipeline stage residue audit', () => {
 
   it('unused llmswitch bridge dts mirrors must stay deleted', () => {
     const deletedBridgeDeclarations = [
+      'src/modules/llmswitch/bridge/native-exports.d.ts',
       'src/modules/llmswitch/bridge/provider-response-converter-host.d.ts',
       'src/modules/llmswitch/bridge/response-converter.d.ts',
       'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts',
       'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
+      'src/modules/llmswitch/bridge/responses-response-bridge.d.ts',
       'src/modules/llmswitch/bridge/runtime-integrations.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-runtime.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.d.ts',

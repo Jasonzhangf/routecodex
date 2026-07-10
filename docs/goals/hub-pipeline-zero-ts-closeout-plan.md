@@ -424,9 +424,11 @@ Additional gates if touched paths require them:
 ### 2026-07-10 Progress: zero-ref bridge d.ts leaf mirrors deleted
 
 - Exact source-tracked scan found these bridge declaration mirrors had no active runtime/test importers outside residue coverage:
+  - `native-exports.d.ts`
   - `provider-response-converter-host.d.ts`
   - `response-converter.d.ts`
   - `responses-request-bridge.d.ts`
+  - `responses-response-bridge.d.ts`
   - `runtime-integrations.d.ts`
   - `snapshot-recorder-runtime.d.ts`
   - `snapshot-recorder-tool-failures.d.ts`
