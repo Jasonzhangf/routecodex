@@ -767,3 +767,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The allowed paths now name only the concrete owner submodules plus handler/gate/doc surfaces, matching the current root-bridge closeout direction.
 - Exact function-map scan for the retired root bridge allowed paths returns zero matches.
 - Verification passed: `npm run verify:server-function-map-boundary`, `npm run verify:function-map-compile-gate`, and strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).
+
+### 2026-07-11 stale session-daemon bootstrap test deleted
+
+- Physically deleted `tests/server/http-server/http-server-session-daemon.bootstrap.spec.ts`.
+- The spec was a stale clock/heartbeat bootstrap test left after `refactor: remove clock heartbeat features`; its only exercised symbol, `tickSessionDaemonInjectLoop`, no longer exists, and it carried an empty root `src/modules/llmswitch/bridge.js` / `.ts` mock solely as dead scaffolding.
+- Exact repo scan for `http-server-session-daemon.bootstrap` / `tickSessionDaemonInjectLoop` now has no active source references after deletion.
+- The still-live `tests/server/http-server/http-server-session-daemon.spec.ts` covers the remaining exported `extractWorkdirHintFromReservationTasks` helper and passes 3/3.
