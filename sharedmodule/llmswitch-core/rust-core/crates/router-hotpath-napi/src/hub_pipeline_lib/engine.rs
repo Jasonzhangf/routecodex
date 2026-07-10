@@ -192,6 +192,45 @@ impl HubPipelineEngine {
         Ok(router.get_status())
     }
 
+    pub(crate) fn owns_provider_runtime_event_for_group(
+        &self,
+        provider_key: &str,
+        routing_policy_group: &str,
+    ) -> bool {
+        let Some(router) = self.virtual_router_core.as_ref() else {
+            return false;
+        };
+        let Some(expected_group) = self.expected_routing_policy_group() else {
+            return false;
+        };
+        expected_group == routing_policy_group
+            && crate::virtual_router_engine::provider_runtime_ingress::runtime_owns_provider_event(
+                router,
+                provider_key,
+            )
+    }
+
+    pub(crate) fn owns_provider_runtime_event(&self, provider_key: &str) -> bool {
+        self.virtual_router_core.as_ref().is_some_and(|router| {
+            crate::virtual_router_engine::provider_runtime_ingress::runtime_owns_provider_event(
+                router,
+                provider_key,
+            )
+        })
+    }
+
+    pub(crate) fn handle_provider_runtime_error(&mut self, event: &Value) {
+        if let Some(router) = self.virtual_router_core.as_mut() {
+            router.handle_provider_error(event);
+        }
+    }
+
+    pub(crate) fn handle_provider_runtime_success(&mut self, event: &Value) {
+        if let Some(router) = self.virtual_router_core.as_mut() {
+            router.handle_provider_success(event);
+        }
+    }
+
     pub fn mark_virtual_router_concurrency_scope_busy(
         &mut self,
         scope_key: &str,

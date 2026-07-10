@@ -55,12 +55,14 @@ pub(crate) fn test_registry_guard() -> std::sync::MutexGuard<'static, ()> {
 pub(crate) fn report_provider_error(event: &Value) -> Value {
     let normalized = normalize_provider_error_event(event);
     dispatch_to_registered_runtimes(&normalized, RuntimeEventKind::Error);
+    crate::hub_pipeline_engine::dispatch_provider_error_to_registered_engines(&normalized);
     normalized
 }
 
 pub(crate) fn report_provider_success(event: &Value) -> Value {
     let normalized = normalize_provider_success_event(event);
     dispatch_to_registered_runtimes(&normalized, RuntimeEventKind::Success);
+    crate::hub_pipeline_engine::dispatch_provider_success_to_registered_engines(&normalized);
     normalized
 }
 
@@ -267,7 +269,10 @@ fn mirror_runtime_event(core: &mut VirtualRouterEngineCore, event: &Value, kind:
     }
 }
 
-fn runtime_owns_provider_event(core: &VirtualRouterEngineCore, provider_key: &str) -> bool {
+pub(crate) fn runtime_owns_provider_event(
+    core: &VirtualRouterEngineCore,
+    provider_key: &str,
+) -> bool {
     core.provider_registry.get(provider_key).is_some()
         || resolve_runtime_key_from_provider_event(provider_key)
             .as_deref()
@@ -275,7 +280,7 @@ fn runtime_owns_provider_event(core: &VirtualRouterEngineCore, provider_key: &st
             .is_some()
 }
 
-fn runtime_owns_provider_event_for_group(
+pub(crate) fn runtime_owns_provider_event_for_group(
     core: &VirtualRouterEngineCore,
     provider_key: &str,
     routing_policy_group: &str,
@@ -293,7 +298,7 @@ fn runtime_owns_provider_event_for_group(
     runtime_group == group && runtime_owns_provider_event(core, provider_key)
 }
 
-fn resolve_event_provider_key(event: &Value) -> Option<String> {
+pub(crate) fn resolve_event_provider_key(event: &Value) -> Option<String> {
     event
         .get("providerKey")
         .and_then(|value| value.as_str())
@@ -321,7 +326,7 @@ fn resolve_event_provider_key(event: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn resolve_event_routing_policy_group(event: &Value) -> Option<String> {
+pub(crate) fn resolve_event_routing_policy_group(event: &Value) -> Option<String> {
     event
         .get("routecodexRoutingPolicyGroup")
         .and_then(|value| value.as_str())

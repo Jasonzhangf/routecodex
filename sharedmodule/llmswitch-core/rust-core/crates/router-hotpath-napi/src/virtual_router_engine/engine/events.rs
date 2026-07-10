@@ -14,19 +14,6 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.health_manager.record_success(provider_key);
-        if let Some(runtime_key) = event
-            .get("runtime")
-            .and_then(|v| v.get("runtimeKey"))
-            .and_then(|v| v.as_str())
-            .filter(|value| !value.trim().is_empty() && *value != provider_key)
-        {
-            self.health_manager.record_success(runtime_key);
-        }
-        if let Some(alias_key) = provider_key.rsplit_once('.').map(|(base, _)| base) {
-            if alias_key != provider_key {
-                self.health_manager.record_success(alias_key);
-            }
-        }
     }
 
     pub(crate) fn mirror_provider_success_in_memory(&mut self, event: &Value) {
@@ -39,19 +26,6 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.health_manager.record_success(provider_key);
-        if let Some(runtime_key) = event
-            .get("runtime")
-            .and_then(|v| v.get("runtimeKey"))
-            .and_then(|v| v.as_str())
-            .filter(|value| !value.trim().is_empty() && *value != provider_key)
-        {
-            self.health_manager.record_success(runtime_key);
-        }
-        if let Some(alias_key) = provider_key.rsplit_once('.').map(|(base, _)| base) {
-            if alias_key != provider_key {
-                self.health_manager.record_success(alias_key);
-            }
-        }
     }
 
     pub(crate) fn handle_provider_failure(&mut self, event: &Value) {
@@ -504,6 +478,36 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(PathBuf::from(temp_dir));
+    }
+
+    #[test]
+    fn other_provider_success_does_not_clear_failure_window_via_runtime_key() {
+        let primary_key = "primary.key1.gpt-5.5";
+        let backup_key = "backup.key1.gpt-5.5";
+        let mut core =
+            build_test_core_with_providers(&[(primary_key, "gpt-5.5"), (backup_key, "gpt-5.5")]);
+
+        core.handle_provider_error(&build_error_event(primary_key, "recoverable"));
+        core.handle_provider_error(&build_error_event(primary_key, "recoverable"));
+        let before_success = provider_state(&core, primary_key);
+        assert_eq!(before_success.state, "healthy");
+        assert_eq!(before_success.failure_count, 2);
+
+        core.handle_provider_success(&json!({
+            "runtime": {
+                "requestId": "backup-success-after-primary-failure",
+                "providerKey": backup_key,
+                "runtimeKey": "primary.key1"
+            },
+            "timestamp": now_ms()
+        }));
+
+        let primary_after_backup_success = provider_state(&core, primary_key);
+        assert_eq!(primary_after_backup_success.state, "healthy");
+        assert_eq!(
+            primary_after_backup_success.failure_count, 2,
+            "backup success must not clear primary provider failure window"
+        );
     }
 
     #[test]

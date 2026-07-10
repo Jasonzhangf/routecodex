@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use crate::hub_pipeline_lib::engine::HubPipelineEngine;
 use crate::hub_pipeline_lib::types::HubPipelineConfig;
+use serde_json::Value;
 
 // feature_id: hub.runtime_ingress_bridge
 static ENGINE_REGISTRY: std::sync::LazyLock<Mutex<HashMap<String, HubPipelineEngine>>> =
@@ -14,6 +15,44 @@ fn next_handle_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     format!("hp_{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+pub(crate) fn dispatch_provider_error_to_registered_engines(event: &Value) {
+    dispatch_provider_runtime_event_to_registered_engines(event, true);
+}
+
+pub(crate) fn dispatch_provider_success_to_registered_engines(event: &Value) {
+    dispatch_provider_runtime_event_to_registered_engines(event, false);
+}
+
+fn dispatch_provider_runtime_event_to_registered_engines(event: &Value, is_error: bool) {
+    let Some(provider_key) =
+        crate::virtual_router_engine::provider_runtime_ingress::resolve_event_provider_key(event)
+    else {
+        return;
+    };
+    let routing_policy_group =
+        crate::virtual_router_engine::provider_runtime_ingress::resolve_event_routing_policy_group(
+            event,
+        );
+    let Ok(mut reg) = ENGINE_REGISTRY.lock() else {
+        return;
+    };
+    for engine in reg.values_mut() {
+        let owns_event = if let Some(group) = routing_policy_group.as_deref() {
+            engine.owns_provider_runtime_event_for_group(&provider_key, group)
+        } else {
+            engine.owns_provider_runtime_event(&provider_key)
+        };
+        if !owns_event {
+            continue;
+        }
+        if is_error {
+            engine.handle_provider_runtime_error(event);
+        } else {
+            engine.handle_provider_runtime_success(event);
+        }
+    }
 }
 
 #[napi(js_name = "createHubPipelineEngineJson")]
@@ -218,4 +257,129 @@ pub fn hub_pipeline_virtual_router_mark_concurrency_scope_idle_json(
     engine
         .mark_virtual_router_concurrency_scope_idle(&scope_key)
         .map_err(|e| napi::Error::from_reason(format!("{}: {}", e.code, e.message)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn create_test_engine_handle(routing_policy_group: &str) -> String {
+        let created: Value = serde_json::from_str(
+            &create_hub_pipeline_engine_json(
+                json!({
+                    "virtualRouter": {
+                        "routingPolicyGroup": routing_policy_group,
+                        "providers": {
+                            "primary.key1.gpt-5.5": {
+                                "providerKey": "primary.key1.gpt-5.5",
+                                "providerType": "responses",
+                                "providerProtocol": "openai-responses",
+                                "runtimeKey": "primary.key1",
+                                "modelId": "gpt-5.5",
+                                "enabled": true,
+                                "outboundProfile": "openai-responses",
+                                "endpoint": "mock://primary",
+                                "auth": { "type": "apikey", "apiKey": "primary-key" }
+                            },
+                            "backup.key1.gpt-5.5": {
+                                "providerKey": "backup.key1.gpt-5.5",
+                                "providerType": "responses",
+                                "providerProtocol": "openai-responses",
+                                "runtimeKey": "backup.key1",
+                                "modelId": "gpt-5.5",
+                                "enabled": true,
+                                "outboundProfile": "openai-responses",
+                                "endpoint": "mock://backup",
+                                "auth": { "type": "apikey", "apiKey": "backup-key" }
+                            }
+                        },
+                        "routing": {
+                            "thinking": [{
+                                "id": "thinking-priority",
+                                "priority": 100,
+                                "mode": "priority",
+                                "targets": ["primary.key1.gpt-5.5", "backup.key1.gpt-5.5"]
+                            }],
+                            "default": [{
+                                "id": "default-priority",
+                                "priority": 100,
+                                "mode": "priority",
+                                "targets": ["primary.key1.gpt-5.5", "backup.key1.gpt-5.5"]
+                            }]
+                        },
+                        "health": {
+                            "failureThreshold": 3,
+                            "cooldownMs": 30000
+                        }
+                    }
+                })
+                .to_string(),
+            )
+            .expect("create hub pipeline engine"),
+        )
+        .expect("create output json");
+        created
+            .get("handle")
+            .and_then(Value::as_str)
+            .expect("handle")
+            .to_string()
+    }
+
+    fn read_primary_health_state(handle: &str) -> Value {
+        let status: Value = serde_json::from_str(
+            &hub_pipeline_virtual_router_status_json(handle.to_string()).unwrap(),
+        )
+        .expect("status json");
+        status
+            .get("health")
+            .and_then(Value::as_array)
+            .and_then(|entries| {
+                entries.iter().find(|entry| {
+                    entry
+                        .get("providerKey")
+                        .or_else(|| entry.get("provider_key"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|key| key == "primary.1.gpt-5.5")
+                })
+            })
+            .cloned()
+            .expect("primary health state")
+    }
+
+    #[test]
+    fn provider_runtime_ingress_mutates_hub_pipeline_handle_virtual_router_health() {
+        let routing_policy_group = "gateway_priority_handle_test";
+        let handle = create_test_engine_handle(routing_policy_group);
+        for index in 1..=3 {
+            crate::virtual_router_engine::provider_runtime_ingress::report_provider_error(&json!({
+                "code": "HTTP_502",
+                "message": format!("primary unavailable #{index}"),
+                "stage": "provider.send",
+                "status": 502,
+                "affectsHealth": true,
+                "runtime": {
+                    "requestId": format!("req-handle-runtime-health-{index}"),
+                    "providerKey": "primary.key1.gpt-5.5",
+                    "routecodexRoutingPolicyGroup": routing_policy_group
+                }
+            }));
+            crate::virtual_router_engine::provider_runtime_ingress::report_provider_success(
+                &json!({
+                    "runtime": {
+                        "requestId": format!("req-handle-backup-success-{index}"),
+                        "providerKey": "backup.key1.gpt-5.5",
+                        "runtimeKey": "primary.key1",
+                        "routecodexRoutingPolicyGroup": routing_policy_group
+                    }
+                }),
+            );
+        }
+
+        let state = read_primary_health_state(&handle);
+        assert_eq!(state.get("state").and_then(Value::as_str), Some("tripped"));
+        assert_eq!(state.get("failureCount").and_then(Value::as_i64), Some(3));
+
+        dispose_hub_pipeline_engine_json(handle).expect("dispose handle");
+    }
 }

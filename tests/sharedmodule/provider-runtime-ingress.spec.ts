@@ -193,6 +193,16 @@ describe('provider runtime ingress', () => {
           },
           timestamp: Date.now()
         } as any);
+        reportProviderSuccessToRouterPolicy({
+          runtime: {
+            requestId: `req-backup-success-after-http-502-${index}`,
+            providerKey: backupKey,
+            runtimeKey: 'primary.key1',
+            routeName: 'thinking',
+            routecodexRoutingPolicyGroup: 'gateway_priority_5520'
+          },
+          timestamp: Date.now()
+        } as any);
       }
 
       const status = engine.getStatus();
