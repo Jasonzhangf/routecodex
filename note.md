@@ -28580,3 +28580,10 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Moved only native binding/stringify/parse/error glue into loader; no Hub/VR/provider semantics added to TS.
 - Updated tests/scripts/build-core output checks to use `native-router-hotpath-loader.js`; strict audit now reports `prodTsShellCount=7`, `shellsWithProdImporters=6`, `coreModuleSubpathRefs=3`.
 - Verification passed: focused Jest 222 + 23 tests, sharedmodule tsc, strict shell audit, minimal TS surface, rustification audit, function-map gate, mainline-call-map gate, deleted-path, thin-wrapper-only, build:base, git diff --check.
+# 2026-07-10: native-router-hotpath production shell retired
+
+- Scope: continued llmswitch-core zero-TS closeout after `virtual-router-hit-log.ts` deletion.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`; the only production caller (`native-virtual-router-runtime.ts`) now imports `callNativeJson` from `native-router-hotpath-loader.ts`.
+- Moved remaining loader/binding helper access to `native-router-hotpath-loader.ts`; tests that need old helper-shaped calls use test-only `tests/sharedmodule/helpers/native-router-hotpath-direct-native.ts`.
+- Updated legacy script probes to call the loader/native binding directly instead of importing the deleted dist shell.
+- Verification PASS: `verify:llmswitch-core-tsc`; focused Jest 4 suites / 261 tests; strict shell audit `prodTsShellCount=3`, `shellsWithProdImporters=1`; rustification audit `prodTsFileCount=3`, `nonNativeFileCount=0`; minimal TS surface; function-map gate; mainline-call-map; fallback denylist; deleted-path; thin-wrapper-only; `build:base`; updated script probes; `git diff --check`.

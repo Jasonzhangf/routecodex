@@ -2106,3 +2106,10 @@
 - Runtime host code must call those exports through existing native loader/host binding surfaces: `native-virtual-router-runtime.ts` for VR hit emission and `src/modules/llmswitch/bridge/native-exports.ts::getRouterHotpathJsonBindingSync` for host session log color helpers.
 - Tests that need the deleted facade API shape use test-only `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`, not production TS shell imports.
 - Current strict shell audit after deletion is `prodTsShellCount=4`, `shellsWithProdImporters=2`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=4`, `prodTsLocTotal=2184`, `nonNativeFileCount=0`.
+
+# 2026-07-10: Native router hotpath production shell is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts` is physically deleted. Do not restore it as a production helper shell, dist script target, or test mock target.
+- The remaining production native binding helpers (`callNativeJson`, `loadNativeRouterHotpathBindingForInternalUse`, `failNative`) are owned by `native-router-hotpath-loader.ts`; this is loader plumbing only, not a second semantics owner.
+- Direct tests that need the old helper-shaped analyzer functions use `tests/sharedmodule/helpers/native-router-hotpath-direct-native.ts`; scripts should call `dist/native/router-hotpath/native-router-hotpath-loader.js` and the NAPI binding directly.
+- Current strict shell audit after deletion is `prodTsShellCount=3`, `shellsWithProdImporters=1`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=3`, `prodTsLocTotal=1980`, `nonNativeFileCount=0`.

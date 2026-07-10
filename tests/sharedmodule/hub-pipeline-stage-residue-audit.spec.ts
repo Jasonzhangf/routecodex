@@ -2072,15 +2072,12 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts',
       'sharedmodule/llmswitch-core/src/conversion/types/text-markup-normalizer.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts',
     ];
 
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
     const existingTests = legacyTests.filter((relativePath) => fs.existsSync(path.join(testRoot, relativePath)));
     const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
-    const nativeWrapper = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts'),
-      'utf8',
-    );
     const requiredExports = fs.readFileSync(
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
       'utf8',
@@ -2107,7 +2104,7 @@ describe('hub pipeline stage residue audit', () => {
       existingTests: [],
       existingRetiredFiles: [],
     });
-    for (const source of [nativeWrapper, requiredExports]) {
+    for (const source of [requiredExports]) {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
       expect(source).not.toMatch(/applyTargetMetadataJson|applyTargetToSubjectJson|extractTargetModelIdJson/);
       expect(source).not.toMatch(/buildImageAttachmentMetadataJson/);

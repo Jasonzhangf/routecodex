@@ -1,8 +1,8 @@
 import {
   failNativeRequired,
-  isNativeDisabledByEnv
+  isNativeDisabledByEnv,
+  loadNativeRouterHotpathBindingForInternalUse
 } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 
 export interface NativeReqInboundChatToStandardizedInput {
   chatEnvelope: Record<string, unknown>;

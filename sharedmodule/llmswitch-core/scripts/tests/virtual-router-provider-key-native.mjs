@@ -11,30 +11,36 @@ function importFresh(relPath, tag) {
 }
 
 async function main() {
-  const hotpath = await importFresh('native/router-hotpath/native-router-hotpath.js', 'hotpath');
+  const { loadNativeRouterHotpathBinding } = await importFresh(
+    'native/router-hotpath/native-router-hotpath-loader.js',
+    'loader'
+  );
+  const binding = loadNativeRouterHotpathBinding();
+  const parseProviderKey = binding?.parseVirtualRouterHitProviderKeyJson;
+  assert.equal(typeof parseProviderKey, 'function');
 
-  const nativeParsed = hotpath.analyzeProviderKey('iflow.3-138.kimi-k2.5');
+  const nativeParsed = JSON.parse(parseProviderKey('iflow.3-138.kimi-k2.5'));
   assert.equal(nativeParsed.providerId, 'iflow');
-  assert.equal(nativeParsed.alias, '3-138');
-  assert.equal(nativeParsed.source, 'native');
+  assert.equal(nativeParsed.keyAlias, '3-138');
+  assert.equal(nativeParsed.modelId, 'kimi-k2.5');
 
-  const prefixedAlias = hotpath.analyzeProviderKey('openai.3-main.gpt-5.2');
+  const prefixedAlias = JSON.parse(parseProviderKey('openai.3-main.gpt-5.2'));
   assert.equal(prefixedAlias.providerId, 'openai');
-  assert.equal(prefixedAlias.alias, '3-main');
+  assert.equal(prefixedAlias.keyAlias, '3-main');
 
-  const numericAlias = hotpath.analyzeProviderKey('tabglm.12');
+  const numericAlias = JSON.parse(parseProviderKey('tabglm.12'));
   assert.equal(numericAlias.providerId, 'tabglm');
-  assert.equal(numericAlias.alias, null);
-  assert.equal(numericAlias.keyIndex, 12);
+  assert.equal(numericAlias.keyAlias, undefined);
+  assert.equal(numericAlias.modelId, '12');
 
-  const dottedModel = hotpath.analyzeProviderKey('tabglm.12.extra');
+  const dottedModel = JSON.parse(parseProviderKey('tabglm.12.extra'));
   assert.equal(dottedModel.providerId, 'tabglm');
-  assert.equal(dottedModel.alias, '12');
+  assert.equal(dottedModel.keyAlias, '12');
 
-  console.log('✅ virtual-router-provider-key-native passed');
+  console.log('virtual-router-provider-key-native passed');
 }
 
 main().catch((error) => {
-  console.error('❌ virtual-router-provider-key-native failed:', error);
+  console.error('virtual-router-provider-key-native failed:', error);
   process.exit(1);
 });

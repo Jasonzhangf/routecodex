@@ -28,7 +28,7 @@ import {
   parseVirtualRouterNativeError,
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './native-router-hotpath-loader.js';
-import { callNativeJson } from './native-router-hotpath.js';
+import { callNativeJson } from './native-router-hotpath-loader.js';
 
 export type {
   ClassificationResult,

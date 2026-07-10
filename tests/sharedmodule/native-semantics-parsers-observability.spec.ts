@@ -14,21 +14,59 @@ async function importWithNativeParseFailureMock<TModule>(
   jest.resetModules();
 
   jest.unstable_mockModule(
-    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js',
-    () => ({
-      loadNativeRouterHotpathBindingForInternalUse: () => ({
-        [bindingExport]: () => invalidRaw
-      })
-    })
-  );
-
-  jest.unstable_mockModule(
     '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
     () => ({
       isNativeDisabledByEnv: () => false,
+      loadNativeRouterHotpathBindingForInternalUse: () => ({
+        [bindingExport]: () => invalidRaw
+      }),
       failNativeRequired: (_capability: string, reason?: string) => {
         throw new Error(`native-fail:${reason ?? 'unknown'}`);
-      }
+      },
+      failNative: (_capability: string, reason?: string) => {
+        throw new Error(`native-fail:${reason ?? 'unknown'}`);
+      },
+      extractNativeErrorMessage: (error: unknown) =>
+        error instanceof Error ? error.message : String(error ?? ''),
+      formatUnknownError: (error: unknown) =>
+        error instanceof Error ? error.message : String(error ?? ''),
+      callNativeJson: (
+        _capability: string,
+        _exportName: string,
+        _args: string[],
+        parse: (raw: string) => unknown
+      ) => {
+        const parsed = parse(invalidRaw);
+        if (!parsed) throw new Error('native-fail:invalid payload');
+        return parsed;
+      },
+      parseNativeJsonValueOrFail: (_capability: string, raw: string) => {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          console.warn('resolveBridgePolicyWithNative parse failed (non-blocking): invalid payload');
+          throw new Error('native-fail:invalid payload');
+        }
+      },
+      parseNativeJsonObjectOrFail: (_capability: string, raw: string) => {
+        try {
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('invalid payload');
+          }
+          return parsed;
+        } catch {
+          console.warn('resolveBridgePolicyWithNative parse failed (non-blocking): invalid payload');
+          throw new Error('native-fail:invalid payload');
+        }
+      },
+      readNativeFunction: (name: string) => {
+        const binding = { [bindingExport]: () => invalidRaw } as Record<string, unknown>;
+        const fn = binding[name];
+        return typeof fn === 'function' ? fn : null;
+      },
+      safeStringify: (value: unknown) => JSON.stringify(value),
+      stringifyNativePayloadForError: (value: unknown) => String(value ?? '')
     })
   );
 
@@ -50,11 +88,26 @@ async function importRouterHotpathWithNativeParseFailureMock<TModule>(
       loadNativeRouterHotpathBinding: () => ({
         [bindingExport]: () => invalidRaw
       }),
+      loadNativeRouterHotpathBindingForInternalUse: () => ({
+        [bindingExport]: () => invalidRaw
+      }),
+      callNativeJson: (
+        capability: string,
+        _exportName: string,
+        _args: string[],
+        parse: (raw: string) => unknown
+      ) => {
+        const parsed = parse(invalidRaw);
+        if (!parsed) {
+          throw new Error(`[virtual-router-native-hotpath] native ${capability} is required but unavailable: invalid payload`);
+        }
+        return parsed;
+      },
       parseVirtualRouterNativeError: () => null
     })
   );
 
-  return import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js') as Promise<TModule>;
+  return import('./helpers/native-router-hotpath-direct-native.js') as Promise<TModule>;
 }
 
 function warnCallsContain(warnSpy: jest.SpiedFunction<typeof console.warn>, expected: string): boolean {

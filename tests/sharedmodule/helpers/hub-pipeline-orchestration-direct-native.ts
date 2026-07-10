@@ -1,6 +1,7 @@
-import { failNativeRequired, isNativeDisabledByEnv } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js';
 import {
+  failNativeRequired,
+  isNativeDisabledByEnv,
+  loadNativeRouterHotpathBindingForInternalUse,
   stringifyNativePayloadForError
 } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 

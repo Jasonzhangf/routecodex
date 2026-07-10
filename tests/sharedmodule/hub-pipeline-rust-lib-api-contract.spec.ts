@@ -3,20 +3,15 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 // Mock the native binding loader so we can control which functions exist
 const nativeBindings: Record<string, unknown> = {};
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js',
-  () => ({
-    loadNativeRouterHotpathBindingForInternalUse: () => nativeBindings,
-  })
-);
-
-// Mock native router hotpath policy
-jest.unstable_mockModule(
   '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
   () => ({
     isNativeDisabledByEnv: () => false,
+    loadNativeRouterHotpathBindingForInternalUse: () => nativeBindings,
     failNativeRequired: (_capability: string, reason?: string) => {
       throw new Error(reason ? `native required: ${reason}` : 'native required');
     },
+    stringifyNativePayloadForError: (value: unknown) =>
+      value instanceof Error ? value.message : String(value ?? ''),
   })
 );
 

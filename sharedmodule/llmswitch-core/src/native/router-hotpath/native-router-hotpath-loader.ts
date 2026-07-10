@@ -46,6 +46,10 @@ export function failNativeRequired<T>(capability: string, reason?: string): T {
   throw makeNativeRequiredError(capability, reason);
 }
 
+export function failNative<T>(capability: string, reason?: string): T {
+  return failNativeRequired<T>(capability, reason);
+}
+
 export const VIRTUAL_ROUTER_ERROR_PREFIX = "VIRTUAL_ROUTER_ERROR:";
 
 // Required-export contract for the native-router-hotpath binding.
@@ -664,6 +668,10 @@ export function readNativeFunction(name: string): ((...args: unknown[]) => unkno
   return typeof fn === "function" ? (fn as (...args: unknown[]) => unknown) : null;
 }
 
+export function loadNativeRouterHotpathBindingForInternalUse(): NativeRouterHotpathBinding | null {
+  return loadNativeRouterHotpathBinding();
+}
+
 export function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
@@ -852,6 +860,59 @@ export function parseStringArray(raw: string): string[] | null {
     out.push(item);
   }
   return out;
+}
+
+function requireNativeFunction(capability: string, exportName: string): (...args: string[]) => unknown {
+  if (isNativeDisabledByEnv()) {
+    throw makeNativeRequiredError(capability, "native disabled");
+  }
+  const binding = loadNativeRouterHotpathBinding() as Record<string, unknown> | null;
+  const fn = binding?.[exportName];
+  if (typeof fn !== "function") {
+    throw makeNativeRequiredError(capability);
+  }
+  return fn as (...args: string[]) => unknown;
+}
+
+export function callNativeJson<T>(
+  capability: string,
+  exportName: string,
+  args: string[],
+  parse: (raw: string) => T | null,
+  options?: {
+    createEmptyError?: () => Error;
+    emptyReason?: string;
+    invalidReason?: string;
+    mapVirtualRouterErrors?: boolean;
+    rethrowUnknownErrors?: boolean;
+  },
+): T {
+  const fn = requireNativeFunction(capability, exportName);
+  let raw: unknown;
+  try {
+    raw = fn(...args);
+  } catch (error) {
+    if (options?.mapVirtualRouterErrors) {
+      const virtualRouterError = parseVirtualRouterNativeError(error);
+      if (virtualRouterError) throw virtualRouterError;
+    }
+    if (options?.rethrowUnknownErrors) throw error;
+    const reason = error instanceof Error ? error.message : String(error ?? "unknown");
+    throw makeNativeRequiredError(capability, reason);
+  }
+  if (options?.mapVirtualRouterErrors) {
+    const virtualRouterError = parseVirtualRouterNativeError(raw);
+    if (virtualRouterError) throw virtualRouterError;
+  }
+  if (typeof raw !== "string" || !raw) {
+    if (options?.createEmptyError) throw options.createEmptyError();
+    throw makeNativeRequiredError(capability, options?.emptyReason ?? "empty result");
+  }
+  const parsed = parse(raw);
+  if (!parsed) {
+    throw makeNativeRequiredError(capability, options?.invalidReason ?? "invalid payload");
+  }
+  return parsed;
 }
 
 function resolvePackageRoot(startDir: string): string {
