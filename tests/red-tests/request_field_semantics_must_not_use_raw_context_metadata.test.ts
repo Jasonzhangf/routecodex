@@ -9,13 +9,15 @@ function read(relative: string): string {
 
 describe('request field semantics no raw/context/metadata backfill', () => {
   it('does not revive removed followup request-field patch DSL', () => {
-    const files = [
+    const deletedFiles = [
       'src/server/runtime/http-server/executor/servertool-followup-dispatch.ts',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs',
-      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
       'sharedmodule/llmswitch-core/src/servertool/handlers/vision.ts',
       'sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts',
       'sharedmodule/llmswitch-core/src/servertool/types.ts',
+    ];
+    const files = [
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
     ];
     const forbidden = [
       'restoreFollowupRootToolsIfNeeded',
@@ -32,6 +34,7 @@ describe('request field semantics no raw/context/metadata backfill', () => {
         if (source.includes(token)) violations.push(`${file}: ${token}`);
       }
     }
+    expect(deletedFiles.filter((file) => fs.existsSync(path.join(ROOT, file)))).toEqual([]);
     expect(violations).toEqual([]);
   });
 
