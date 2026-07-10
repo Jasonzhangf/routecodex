@@ -2136,3 +2136,11 @@
 - Required NAPI export truth is `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`; `sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` parses that JSON contract and validates the packaged `.node` binding against it.
 - Test-only direct native loading lives in `tests/sharedmodule/helpers/native-router-hotpath-loader.ts`; script-only direct native loading lives in `sharedmodule/llmswitch-core/scripts/helpers/native-router-hotpath-loader.mjs`. Both are helper surfaces, not production TS runtime.
 - Source verification after this closeout reports `prodTsShellCount=0` and rustification `prodTsFileCount=0`; exact active source/script/doc scan no longer references the deleted production loader path.
+
+# 2026-07-10: Native exports Phase 3 servertool wrapper fan-out is retired
+
+- `src/modules/llmswitch/bridge/native-exports.ts` must not restore the `SERVERTOOL ORCHESTRATION WRAPPERS (Phase 3)` hand-written export block. The former wrapper names, including `runServertoolResponseStageWithNative`, `buildServertoolDispatchPlanInputWithNative`, `planServertoolOutcomeWithNative`, web-search wrappers, and vision wrappers are no longer package/native-exports surface.
+- If a remaining servertool bridge needs an old Phase 3 native capability internally, call the Rust/NAPI JSON capability through a private non-exported helper. Do not re-export the old `*WithNative` name from `native-exports.ts` or generated `servertool-wrapper.d.ts`.
+- Tests that need removed Phase 3 behavior must use direct Rust/NAPI binding evidence under test helpers, as `servertool-cli-native-bridge.spec.ts` now does for `planStoplessCliProjectionContextJson`.
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` locks both `native-exports.ts` and `native-exports.js` against restoring the Phase 3 wrapper marker and representative deleted wrapper names.
+- Verification evidence for this closeout: `build:base`, `verify:servertool-rust-only`, strict llmswitch shell audit with `prodTsShellCount=0`, rustification/minimal TS audits, focused servertool/residue Jest 246/246, function-map/mainline/deleted-path/thin-wrapper/fallback gates, and `git diff --check` pass.
