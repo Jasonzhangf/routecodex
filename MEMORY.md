@@ -2200,3 +2200,11 @@
 - The Rust dispatch path is `provider_runtime_ingress::{report_provider_error, report_provider_success}` -> `hub_pipeline_engine::registry::{dispatch_provider_error_to_registered_engines, dispatch_provider_success_to_registered_engines}` -> `HubPipelineEngine::{handle_provider_runtime_error, handle_provider_runtime_success}`.
 - Provider success must clear only the exact provider key from the event. It must not also clear `runtimeKey` or provider-key aliases; otherwise a backup provider success can erase the primary provider failure window and keep routing to a repeatedly failing primary.
 - Verification evidence: `cargo test -p router-hotpath-napi provider_`, focused provider runtime / Hub runtime / error pipeline Jest 26 tests, `build:native-hotpath`, `verify:error-pipeline-contract`, `verify:provider-failure-ban-blackbox`, `verify:vr-no-ts-runtime`, llmswitch shell/minimal/rustification audits, architecture mainline/function gates, root/sharedmodule TypeScript, `build:base`, and `git diff --check` pass.
+
+# 2026-07-11: Hub Pipeline / llmswitch-core zero production TS audit is green
+
+- Current source/doc-only closeout gates prove zero hand-authored production TS runtime surface under `sharedmodule/llmswitch-core/src`: `verify:llmswitch-zero-ts-closeout`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface, and rustification audit all pass with zero production/non-native TS metrics.
+- `git ls-files 'sharedmodule/llmswitch-core/src/**/*.ts'` currently finds only test files plus `virtual-router-contracts.d.ts` and `servertool/types.d.ts` declaration artifacts; no production runtime `.ts` files remain.
+- Architecture/build evidence for the audit: function-map compile gate, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, Responses history protocol contract, sharedmodule/root TypeScript, `build:native-hotpath`, and `build:base` all pass.
+- Installed runtime evidence is consistent at `0.90.3789`: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on `4444`, `5520`, `5555`, and `10000` all report `0.90.3789` with `ready=true` and `pipelineReady=true`.
+- No runtime behavior changed in this audit slice; treat this as source/reference/build/install evidence, not a new live same-entry behavior replay.

@@ -211,3 +211,12 @@ Actions:
 - No TS fallback, compatibility path, duplicate owner, or hidden semantic shell remains.
 - Verification evidence is recorded in `note.md` and durable conclusions in `MEMORY.md`.
 - A commit exists for the closeout.
+
+## 2026-07-11 Current Closeout Audit
+
+- Source/doc-only gates now report literal zero hand-authored production TS in `sharedmodule/llmswitch-core/src`: `verify:llmswitch-zero-ts-closeout`, strict shell reference audit, minimal TS surface, and rustification audit all pass with zero production/non-native TS metrics.
+- Source inventory via `git ls-files 'sharedmodule/llmswitch-core/src/**/*.ts'` finds only test files plus two declaration artifacts: `native/router-hotpath/virtual-router-contracts.d.ts` and `servertool/types.d.ts`. Production runtime TS files are absent.
+- Architecture gates pass: function-map compile gate, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, and Responses history protocol contract.
+- Build gates pass: `verify:llmswitch-core-tsc`, root `tsc --noEmit`, `build:native-hotpath`, and `build:base`.
+- Installed runtime evidence: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on ports `4444`, `5520`, `5555`, and `10000` all report `0.90.3789`; health responses are `ready=true` and `pipelineReady=true`.
+- No new runtime behavior was changed in this audit slice, so no managed restart or live replay is claimed for this documentation/evidence closeout.

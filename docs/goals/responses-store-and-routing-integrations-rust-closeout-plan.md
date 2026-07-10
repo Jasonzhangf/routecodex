@@ -218,6 +218,14 @@ Additional runtime closure, when behavior changes:
 1. Re-read the relevant function map, mainline call map, verification map, and this plan.
 2. Generate a current source-only reference graph for both files and their exports/importers.
 3. Add failing tests for the smallest boundary being moved before changing implementation.
+
+## 2026-07-11 Current Closeout Audit
+
+- Responses store state is currently Rust operation-owned by `executeResponsesConversationStoreOperationJson`; the TS host is a native-call/host-IO shell only. The Responses history protocol contract passes its Rust regression set with 78/78 tests.
+- Routing integrations route host-effects are Rust-planned/finalized, and the current strict llmswitch shell audit reports no production TS shell graph.
+- Current zero-TS gates pass: `verify:llmswitch-zero-ts-closeout`, strict shell reference audit, minimal TS surface, and rustification audit all report zero production/non-native TS shell debt.
+- Architecture/build gates passed in the closeout audit: function-map compile, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, sharedmodule/root TypeScript, `build:native-hotpath`, and `build:base`.
+- Installed runtime evidence is `0.90.3789` for `routecodex`, `rcc`, current package, and `/health` on `4444/5520/5555/10000`; health is ready and pipeline-ready.
 4. Move one action group at a time into Rust and expose direct NAPI functions.
 5. Replace TS local decisions with native operation calls.
 6. Delete old TS helper code after exact references and focused tests prove it is dead.

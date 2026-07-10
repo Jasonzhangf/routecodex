@@ -164,3 +164,11 @@ Then replay the same endpoint/sample that proves the installed runtime consumes 
 - Focused tests, architecture gates, rustification audits, and build pass.
 - Runtime-impacting changes are globally installed and live-replayed.
 - `note.md`, `MEMORY.md`, and local lessons are updated only with durable, verified facts.
+
+## 2026-07-11 Current Reference Audit
+
+- Strict shell reference audit now passes with `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`; there are no active production or host bridge references to llmswitch-core TS runtime shells.
+- The only `coreModuleSubpathRefs` reported by the strict audit are historical `note.md` references, not runtime/test/script/doc owner locks.
+- `verify:llmswitch-zero-ts-closeout`, `verify:llmswitch-minimal-ts-surface -- --json`, and `verify:llmswitch-rustification-audit -- --json` all pass with zero production/non-native TS metrics.
+- Architecture and build closure passed: function-map compile, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, Responses history protocol contract, `build:native-hotpath`, sharedmodule/root TypeScript, and `build:base`.
+- Runtime install evidence is consistent at `0.90.3789` across CLI entrypoints, current release package, and health checks on the managed port group.

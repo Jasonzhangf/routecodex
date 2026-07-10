@@ -195,6 +195,14 @@ Source/test/script import audit on 2026-07-07:
 - Runtime-impacting changes are globally installed and live-verified.
 - Commit is scoped and does not include unrelated dirty worktree changes.
 
+## 2026-07-11 Current Closeout Audit
+
+- The Hub Pipeline / llmswitch-core watchlist is at zero hand-authored production TS by current gates: strict shell reference audit reports `prodTsShellCount=0`, minimal TS surface reports `entries=0`, and rustification audit reports `prodTsFileCount=0`, `prodTsLocTotal=0`, `nonNativeFileCount=0`, `nonNativeLocTotal=0`.
+- Current source inventory under `sharedmodule/llmswitch-core/src` has no production `.ts` runtime files. Tracked `.ts` files are tests only; the remaining `.d.ts` files are declaration artifacts for VR and servertool compile consumers, not runtime semantic owners.
+- Public/package/runtime external references no longer keep Hub Pipeline TS shells alive: strict shell audit reports `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`; remaining core subpath references are historical `note.md` entries only.
+- Required gates passed in the audit slice: zero-TS closeout, strict shell audit, minimal TS surface, rustification audit, function-map compile, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, Responses history protocol contract, sharedmodule/root TypeScript, native hotpath build, and `build:base`.
+- Installed runtime version is consistent at `0.90.3789` across `routecodex`, `rcc`, `~/.rcc/install/current/package.json`, and `/health` for `4444/5520/5555/10000` with `pipelineReady=true`.
+
 ## 2026-07-10 Addendum: Delete `responses-openai-bridge.ts`
 
 ### Goal And Acceptance
