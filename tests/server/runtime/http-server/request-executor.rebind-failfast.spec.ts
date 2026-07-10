@@ -42,7 +42,6 @@ const mockBridgeModule = () => ({
   getHubPipelineVirtualRouterStatusNative: jest.fn(async () => ({})),
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   disposeHubPipelineNative: jest.fn(),
-  resolveBaseDir: jest.fn(),
   mapChatToolsToBridgeJson: jest.fn(async () => []),
   buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
   injectMcpToolsForChatJson: jest.fn(async () => []),
@@ -54,14 +53,6 @@ const mockBridgeModule = () => ({
   classifyProviderFailure: jest.fn(() => ({ code: 'UNKNOWN', retryable: false })),
   getNetworkErrorCodes: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn(() => undefined),
-  importCoreDist: jest.fn(async (subpath?: string) => {
-    if (!subpath) {
-      return {
-        normalizeResponsesToolCallArgumentsForClientWithNative: () => ({})
-      };
-    }
-    return {};
-  })
 });
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
@@ -138,7 +129,6 @@ const mockRoutingIntegrationsModule = () => ({
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
   disposeHubPipelineNative: jest.fn(),
-  resolveBaseDir: jest.fn(() => process.cwd()),
 });
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', mockRoutingIntegrationsModule);

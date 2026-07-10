@@ -729,3 +729,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels.
 - The spec already mocks the active collaborators through `response-converter.js` and `snapshot-recorder.js`; the removed root barrel mock was dead test surface.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
+
+### 2026-07-11 request executor reroute loader helper residue removed
+
+- `tests/server/runtime/http-server/request-executor.pre-send-reroute.spec.ts` and `tests/server/runtime/http-server/request-executor.rebind-failfast.spec.ts` no longer expose retired `resolveBaseDir` or `importCoreDist` helper fields from their bridge/routing mocks.
+- The specs still keep only the explicit request-executor runtime mocks needed for reroute/rebind behavior; no TS semantic owner or legacy loader path was added.
+- Exact file scan for `importCoreDist` / `resolveBaseDir` in both specs returns zero matches.
