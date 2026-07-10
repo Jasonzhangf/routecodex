@@ -8,8 +8,8 @@ import { recordTokens } from './token-stats-store.js';
 import {
   formatProjectPort,
   formatRouteName,
+  formatUsageRequestId,
   highlightLogKeyValues,
-  shortRequestIdTail,
 } from './log-rollup-format-blocks.js';
 
 const ANSI_RESET = '\x1b[0m';
@@ -276,7 +276,7 @@ export function logUsageSummary(
     : undefined;
   const projectPort = formatProjectPort(project, entryPort);
   const routeLabel = formatRouteName(route);
-  const shortReq = shortRequestIdTail(requestId);
+  const shortReq = formatUsageRequestId(requestId);
   const timingSuffix = formatRequestTimingSummary(requestId, {
     latencyMs: info.latencyMs,
     requestIds: info.timingRequestIds,

@@ -98,6 +98,24 @@ describe('usage logger timing summary', () => {
     homedirSpy.mockRestore();
   });
 
+  it('prints the full provider request sequence instead of the fixed-width tail', async () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('openai-responses-router-gpt-5.4-20260710T152458694-490002-1155', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      finishReason: 'stop',
+      latencyMs: 120,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    expect(plain).toContain('[usage] req=490002-1155');
+    expect(plain).not.toContain('req=002-1155');
+  });
+
   it('records token totals even when finishReason is tool_calls', async () => {
     const fakeHome = path.join(os.tmpdir(), `usage-logger-tool-calls-${process.pid}-${randomUUID()}`);
     const homedirSpy = jest.spyOn(os, 'homedir').mockReturnValue(fakeHome);

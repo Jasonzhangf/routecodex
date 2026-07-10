@@ -52,7 +52,7 @@ let requestCounterState: RequestCounterState = {
   version: 1,
   totalCount: 0,
   windowCount: 0,
-  windowKey: resolveNoonWindowKey(),
+  windowKey: resolveLocalDayWindowKey(),
   updatedAt: new Date(0).toISOString()
 };
 
@@ -216,14 +216,10 @@ function resolveRequestCounterStateFilePath(): string {
   return path.join(resolveRccStateDir(), 'request-id-counter.json');
 }
 
-function resolveNoonWindowKey(now: Date = new Date()): string {
-  const local = new Date(now.getTime());
-  if (local.getHours() < 12) {
-    local.setDate(local.getDate() - 1);
-  }
-  const yyyy = local.getFullYear();
-  const mm = String(local.getMonth() + 1).padStart(2, '0');
-  const dd = String(local.getDate()).padStart(2, '0');
+function resolveLocalDayWindowKey(now: Date = new Date()): string {
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
   return `${yyyy}${mm}${dd}`;
 }
 
@@ -256,7 +252,7 @@ function ensureRequestCounterStateLoaded(): void {
       windowKey:
         typeof parsed.windowKey === 'string' && parsed.windowKey.trim()
           ? parsed.windowKey.trim()
-          : resolveNoonWindowKey(),
+          : resolveLocalDayWindowKey(),
       updatedAt:
         typeof parsed.updatedAt === 'string' && parsed.updatedAt.trim()
           ? parsed.updatedAt
@@ -269,7 +265,7 @@ function ensureRequestCounterStateLoaded(): void {
 }
 
 function rolloverDailyWindowIfNeeded(now: Date): void {
-  const currentKey = resolveNoonWindowKey(now);
+  const currentKey = resolveLocalDayWindowKey(now);
   if (requestCounterState.windowKey === currentKey) {
     return;
   }
@@ -408,7 +404,7 @@ export function __unsafeResetRequestIdCounterForTests(
     windowKey:
       typeof next?.windowKey === 'string' && next.windowKey.trim()
         ? next.windowKey.trim()
-        : resolveNoonWindowKey(),
+        : resolveLocalDayWindowKey(),
     updatedAt: new Date().toISOString()
   };
   try {

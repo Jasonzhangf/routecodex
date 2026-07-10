@@ -197,6 +197,23 @@ export function shortRequestIdTail(value: string): string {
   return normalized.slice(-8);
 }
 
+export function formatUsageRequestId(value: string): string {
+  const normalized = normalizeLabel(value, 'unknown-request');
+  const directSequence = normalized.match(/^(\d+)-(\d+)$/);
+  if (directSequence) {
+    return `${directSequence[1]}-${directSequence[2]}`;
+  }
+  const rustSequence = normalized.match(/^req_(\d+)_(\d+)$/);
+  if (rustSequence) {
+    return `${rustSequence[1]}-${rustSequence[2]}`;
+  }
+  const providerSequence = normalized.match(/-(\d+)-(\d+)(?::.*)?$/);
+  if (providerSequence) {
+    return `${providerSequence[1]}-${providerSequence[2]}`;
+  }
+  return shortRequestIdTail(normalized);
+}
+
 export function trimPathForLog(value: string, maxLen = 96): string {
   if (value.length <= maxLen) {
     return value;
