@@ -651,3 +651,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - This keeps ErrorErr06 client projection owned by `src/server/utils/http-error-mapper.ts` while removing one test-only root bridge consumer.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:error-pipeline-contract`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+
+### 2026-07-11 snapshot writer payload guard mock narrowed
+
+- `tests/server/utils/snapshot-writer.payload-guard.spec.ts` now mocks `writeSnapshotViaHooks` through `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- This keeps snapshot hook observation on the current runtime integration facade and removes one test-only root bridge consumer without changing snapshot writer behavior.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 3/3 with 2 skipped existing tests, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
