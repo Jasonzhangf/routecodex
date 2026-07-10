@@ -1,40 +1,40 @@
 import { Readable, PassThrough } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
-  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
-  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-  createResponsesJsonToSseConverter: jest.fn(async () => ({
-    convertResponseToJsonToSse: async () => {
-      throw new Error('json_to_sse_not_expected_in_this_test');
-    },
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => ({
+  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
+  prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(() => ({ mode: 'json' })),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => ({
+  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
+  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
   })),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-  importCoreDist: jest.fn(async () => ({
-    projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
-      emit: true,
-      frame: input.frame,
-      state: input.state,
-    }),
-    projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
+  projectResponsesSseFrameForClientForHttp: jest.fn((input: { frame: string; state: unknown }) => ({
+    emit: true,
+    frame: input.frame,
+    state: input.state,
   })),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
-  projectSseErrorEventPayloadNative: jest.fn(
-    (args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
-      type: 'error',
-      request_id: args.requestId,
-      status: args.status ?? 500,
-      message: args.message ?? 'sse error',
-      code: args.code ?? 'ERR_SSE_ERROR',
-    })
-  ),
-  recordResponsesResponseForRequest: jest.fn(async () => undefined),
-  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-  requireCoreDist: jest.fn(() => ({})),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-  writeSnapshotViaHooks: jest.fn(async () => undefined),
+  updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: {
+    chunk: unknown;
+    state: Record<string, unknown> | undefined;
+  }) => {
+    const chunk = typeof input.chunk === 'string' ? input.chunk : '';
+    const observedTerminal =
+      chunk.includes('event: response.completed')
+      || chunk.includes('event: response.done')
+      || chunk.includes('data: [DONE]');
+    return {
+      state: {
+        ...(input.state ?? {}),
+        observedTerminal: Boolean((input.state ?? {}).observedTerminal) || observedTerminal,
+      },
+      observedTerminal,
+    };
+  }),
 }));
 
 jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

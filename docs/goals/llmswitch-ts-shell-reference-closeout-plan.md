@@ -476,3 +476,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now mocks the current handler-facing facades directly: `responses-response-bridge.js` and `responses-sse-bridge.js`, with SSE projection/terminal state kept as explicit file-local test doubles.
 - Stale SSE-side repair expectations were removed: the blackbox now locks the current transport-only contract that SSE passes projected frames, does not synthesize function-call repair frames, and does not turn a normally ended non-terminal upstream stream into a handler-owned semantic error.
 - Source-tracked active consumer scan showed `createBridgeHttpServerMock(...)` was referenced only by the helper itself, so `tests/helpers/bridge-http-server-mock.ts` was physically deleted.
+
+### 2026-07-11 prestart close guard loader helper removed
+
+- `tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts` no longer declares legacy `importCoreDist` / `requireCoreDist` bridge loader mocks.
+- The spec now mocks the current handler-facing `responses-response-bridge.js` and `responses-sse-bridge.js` facades directly for the prestart close guard path.
+- Exact file scan for `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / `resolveBaseDir` / broad `bridge.js` mock references returns zero matches.
