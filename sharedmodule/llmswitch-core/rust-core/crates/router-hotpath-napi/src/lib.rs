@@ -4001,3 +4001,108 @@ mod metadata_center_snapshot_input_tests {
         );
     }
 }
+
+#[napi(js_name = "safeStringifyJson")]
+pub fn safe_stringify_json(value_json: String) -> NapiResult<Option<String>> {
+    let parsed: Option<Value> = if value_json.trim().is_empty() {
+        None
+    } else {
+        match serde_json::from_str::<Value>(&value_json) {
+            Ok(value) => Some(value),
+            Err(_) => return Ok(None),
+        }
+    };
+    match parsed {
+        Some(value) => serde_json::to_string(&value)
+            .map(Some)
+            .map_err(|e| napi::Error::from_reason(e.to_string())),
+        None => Ok(None),
+    }
+}
+
+#[napi(js_name = "parseRecordJson")]
+pub fn parse_record_json(value_json: String) -> NapiResult<Option<String>> {
+    if value_json.trim().is_empty() {
+        return Ok(None);
+    }
+    let parsed: Value = match serde_json::from_str(&value_json) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    if !parsed.is_object() {
+        return Ok(None);
+    }
+    serde_json::to_string(&parsed)
+        .map(Some)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi(js_name = "formatUnknownErrorJson")]
+pub fn format_unknown_error_json(value_json: String) -> NapiResult<String> {
+    if value_json.trim().is_empty() {
+        return Ok("Error: empty payload".to_string());
+    }
+    let parsed: Value = match serde_json::from_str(&value_json) {
+        Ok(value) => value,
+        Err(error) => return Ok(format!("Error: {}", error)),
+    };
+    if let Some(name) = parsed.get("name").and_then(Value::as_str) {
+        let message = parsed
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let stack = parsed.get("stack").and_then(Value::as_str);
+        if let Some(stack) = stack {
+            if !stack.trim().is_empty() {
+                return Ok(stack.to_string());
+            }
+        }
+        if message.is_empty() {
+            return Ok(name.to_string());
+        }
+        return Ok(format!("{}: {}", name, message));
+    }
+    if let Some(message) = parsed.get("message").and_then(Value::as_str) {
+        if !message.is_empty() {
+            return Ok(message.to_string());
+        }
+    }
+    serde_json::to_string(&parsed)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod native_json_tool_function_tests {
+    use super::{format_unknown_error_json, parse_record_json, safe_stringify_json};
+
+    #[test]
+    fn safe_stringify_json_returns_none_for_invalid_json() {
+        assert_eq!(safe_stringify_json("{bad".to_string()).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_record_json_accepts_only_json_objects() {
+        assert_eq!(parse_record_json("[]".to_string()).unwrap(), None);
+        assert_eq!(
+            parse_record_json("{\"ok\":true}".to_string()).unwrap(),
+            Some("{\"ok\":true}".to_string())
+        );
+    }
+
+    #[test]
+    fn format_unknown_error_json_prefers_stack_then_name_message() {
+        assert_eq!(
+            format_unknown_error_json(
+                "{\"name\":\"TypeError\",\"message\":\"bad\",\"stack\":\"stack line\"}"
+                    .to_string()
+            )
+            .unwrap(),
+            "stack line"
+        );
+        assert_eq!(
+            format_unknown_error_json("{\"name\":\"TypeError\",\"message\":\"bad\"}".to_string())
+                .unwrap(),
+            "TypeError: bad"
+        );
+    }
+}
