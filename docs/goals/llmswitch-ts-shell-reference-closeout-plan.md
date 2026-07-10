@@ -226,6 +226,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now proves `runtime-integrations.ts` reaches the authoritative process-global Responses conversation store without preserving `requireCoreDist` / `importCoreDist` as a test consumer.
 - Exact file scan for `importCoreDist` / `requireCoreDist` / `module-loader` / `resolveImplForSubpath` / `resolveBaseDir` in that spec now returns zero matches.
 
+### 2026-07-10 responses debug diag spec shared mock consumer removed
+
+- `tests/server/handlers/responses-handler.debug-diag.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The spec now uses a local minimal bridge mock for the exact handler failure path it exercises, reducing `createBridgeHttpServerMock(...)` source consumers from 19 to 18.
+- Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.

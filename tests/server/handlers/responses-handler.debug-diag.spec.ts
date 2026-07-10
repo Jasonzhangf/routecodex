@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 const writeDebugErrorDiagArtifact = jest.fn(async () => '/tmp/fake-diag.json');
 
@@ -9,15 +8,25 @@ jest.unstable_mockModule('../../../src/debug/diag/index.js', () => ({
 
 jest.unstable_mockModule(
   '../../../src/modules/llmswitch/bridge.js',
-  () => createBridgeHttpServerMock({
+  () => ({
     buildResponsesConversationPortScopeForHttp: jest.fn(),
     buildResponsesPipelineMetadataForHttp: jest.fn(),
+    captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
     captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
+    clearResponsesConversationByRequestId: jest.fn(async () => undefined),
     clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
+    convertProviderResponse: jest.fn(async (value) => value),
+    createSnapshotRecorder: jest.fn(async () => ({ record: jest.fn() })),
+    deriveFinishReasonNative: jest.fn(() => undefined),
+    extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
     finalizeResponsesPipelineResultForHttp: jest.fn((result) => result),
+    finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+    isToolCallContinuationResponseNative: jest.fn(() => false),
     planResponsesHandlerStreamForHttp: jest.fn(() => ({ outboundStream: false })),
     prepareResponsesRequestBodyForHttp: jest.fn((payload) => ({ payload, responseIdFromPayload: undefined })),
     prepareResponsesHandlerRuntimeForHttp: jest.fn(() => ({ requestContext: undefined, portScope: undefined, matchedPort: undefined })),
+    rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+    recordResponsesResponseForRequest: jest.fn(async () => undefined),
   }),
 );
 
