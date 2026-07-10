@@ -250,6 +250,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The SSE timeout test now uses a local minimal bridge mock for finish-reason/error-frame projection and passes the stream through the current `PipelineExecutionResult.sseStream` contract instead of the stale `body.sseStream` shape.
 - `createBridgeHttpServerMock(...)` source consumers are reduced from 16 to 15, and exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
 
+### 2026-07-10 submit tool outputs SSE error shared mock consumer removed
+
+- `tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The submit-tool-outputs SSE error regression now uses local minimal mocks for the handler-facing request bridge, response/SSE bridge, bridge barrel session extraction, and native export projection symbols required by the tested path.
+- Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` / legacy core loader helpers in that spec now returns zero matches, and `createBridgeHttpServerMock(...)` source consumers are reduced from 15 to 14.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.
