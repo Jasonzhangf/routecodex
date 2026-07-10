@@ -4047,10 +4047,7 @@ pub fn format_unknown_error_json(value_json: String) -> NapiResult<String> {
         Err(error) => return Ok(format!("Error: {}", error)),
     };
     if let Some(name) = parsed.get("name").and_then(Value::as_str) {
-        let message = parsed
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let message = parsed.get("message").and_then(Value::as_str).unwrap_or("");
         let stack = parsed.get("stack").and_then(Value::as_str);
         if let Some(stack) = stack {
             if !stack.trim().is_empty() {
@@ -4067,8 +4064,7 @@ pub fn format_unknown_error_json(value_json: String) -> NapiResult<String> {
             return Ok(message.to_string());
         }
     }
-    serde_json::to_string(&parsed)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&parsed).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
@@ -4093,8 +4089,7 @@ mod native_json_tool_function_tests {
     fn format_unknown_error_json_prefers_stack_then_name_message() {
         assert_eq!(
             format_unknown_error_json(
-                "{\"name\":\"TypeError\",\"message\":\"bad\",\"stack\":\"stack line\"}"
-                    .to_string()
+                "{\"name\":\"TypeError\",\"message\":\"bad\",\"stack\":\"stack line\"}".to_string()
             )
             .unwrap(),
             "stack line"

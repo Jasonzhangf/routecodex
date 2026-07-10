@@ -127,7 +127,7 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['sdfv.key1.gpt-5.5']);
   });
 
-  it('reroutes provider protocol mismatch instead of blocking provider switching', async () => {
+  it('does not reroute provider protocol mismatch as provider availability failure', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(
       new Error('Provider protocol mismatch: handle=openai-responses target=anthropic-messages'),
@@ -157,10 +157,11 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
       logNonBlockingError: jest.fn()
     });
 
-    expect(plan.shouldRetry).toBe(true);
-    expect(plan.excludedCurrentProvider).toBe(true);
-    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
-    expect(Array.from(excludedProviderKeys)).toEqual(['minimax.key1.MiniMax-M3']);
+    expect(plan.shouldRetry).toBe(false);
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.mayProject).toBe(true);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
   });
 
   it('does not reroute provider-owned continuation failures across providers', async () => {
