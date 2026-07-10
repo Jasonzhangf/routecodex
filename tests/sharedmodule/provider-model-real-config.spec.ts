@@ -1,6 +1,6 @@
 import { bootstrapVirtualRouterConfig, type VirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
 import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
-import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { VirtualRouterErrorCode } from './helpers/native-router-hotpath-loader.js';
 
 describe('provider.model with real config structure', () => {
   it('should work with glm provider.model when routing.default has targets', async () => {

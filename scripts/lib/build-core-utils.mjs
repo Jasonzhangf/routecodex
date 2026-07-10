@@ -5,7 +5,6 @@ export function createRequiredCoreOutputs(outDir) {
   return [
     path.join(outDir, 'native', 'servertool-wrapper.js'),
     path.join(outDir, 'native', 'servertool-wrapper.d.ts'),
-    path.join(outDir, 'native', 'router-hotpath', 'native-router-hotpath-loader.js'),
   ];
 }
 

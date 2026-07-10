@@ -1,4 +1,4 @@
-import { readNativeFunction } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { readNativeFunction } from './native-router-hotpath-loader.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

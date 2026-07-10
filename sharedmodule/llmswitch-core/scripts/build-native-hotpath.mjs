@@ -15,10 +15,7 @@ const distBinDir = path.join(projectRoot, 'dist', 'bin');
 const packagedNodeTarget = path.join(distNativeDir, 'router_hotpath_napi.node');
 const requiredNativeExportsSource = path.join(
   projectRoot,
-  'src',
-  'native',
-  'router-hotpath',
-  'native-router-hotpath-loader.ts'
+  'native-hotpath-required-exports.json'
 );
 const servertoolBinaryName = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
 const releaseServertoolBinary = path.join(targetRelease, servertoolBinaryName);
@@ -191,14 +188,18 @@ function readRequiredNativeExports() {
     console.error(`[native-build] missing required export contract: ${requiredNativeExportsSource}`);
     process.exit(1);
   }
-  const source = fs.readFileSync(requiredNativeExportsSource, 'utf8');
-  const arrayMatch = source.match(/export const REQUIRED_NATIVE_HOTPATH_EXPORTS\s*=\s*\[([\s\S]*?)^]\s*(?:as const)?;/m);
-  if (!arrayMatch) {
-    console.error('[native-build] required export contract array not found');
+  let exports;
+  try {
+    exports = JSON.parse(fs.readFileSync(requiredNativeExportsSource, 'utf8'));
+  } catch (error) {
+    console.error(`[native-build] required export contract JSON failed to parse: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-  const arraySource = arrayMatch[1];
-  const exports = [...new Set([...arraySource.matchAll(/"([^"]+)"/g)].map((match) => match[1]))].filter(Boolean);
+  if (!Array.isArray(exports) || !exports.every((entry) => typeof entry === 'string' && entry.trim())) {
+    console.error('[native-build] required export contract JSON must be a string array');
+    process.exit(1);
+  }
+  exports = [...new Set(exports)];
   if (!exports.includes('compileRouteCodexRuntimeManifestJson')) {
     console.error('[native-build] required export contract missing compileRouteCodexRuntimeManifestJson');
     process.exit(1);

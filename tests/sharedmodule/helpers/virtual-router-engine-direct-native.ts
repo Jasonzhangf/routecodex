@@ -6,7 +6,7 @@ import {
   VIRTUAL_ROUTER_ERROR_PREFIX,
   VirtualRouterError,
   VirtualRouterErrorCode
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 import type {
   ProviderErrorEvent,
   ProviderFailureEvent,

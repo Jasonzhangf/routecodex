@@ -52,8 +52,7 @@ describe('install-release-snapshot', () => {
       'llmswitch-core',
       'dist',
       'native',
-      'router-hotpath',
-      'native-router-hotpath-loader.js'
+      'servertool-wrapper.js'
     );
 
     expect(fs.existsSync(requiredFile)).toBe(true);

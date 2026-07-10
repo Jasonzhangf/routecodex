@@ -489,7 +489,7 @@
 
 #### 关键文件
 
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+- `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`
 - remaining host shells in `src/server/**` / `src/modules/**`
 

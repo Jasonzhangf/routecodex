@@ -25,7 +25,7 @@ function callJson(binding, name, ...args) {
 
 async function main() {
   const { loadNativeRouterHotpathBinding } = await import(
-    path.join(repoRoot, 'dist', 'native', 'router-hotpath', 'native-router-hotpath-loader.js')
+    path.join(repoRoot, 'scripts', 'helpers', 'native-router-hotpath-loader.mjs')
   );
   const binding = loadNativeRouterHotpathBinding();
 

@@ -30,7 +30,7 @@ import {
   planServertoolRegistryLookupActionWithNative,
   planServertoolRegistryProjectionWithNative
 } from '../../sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from '../sharedmodule/helpers/native-router-hotpath-loader.js';
 
 describe('servertool CLI native bridge', () => {
   it('uses Rust-owned projection output and client-visible shell', () => {

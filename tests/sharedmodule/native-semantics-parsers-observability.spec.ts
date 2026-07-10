@@ -14,7 +14,7 @@ async function importWithNativeParseFailureMock<TModule>(
   jest.resetModules();
 
   jest.unstable_mockModule(
-    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
+    './helpers/native-router-hotpath-loader.js',
     () => ({
       isNativeDisabledByEnv: () => false,
       loadNativeRouterHotpathBindingForInternalUse: () => ({
@@ -80,7 +80,7 @@ async function importRouterHotpathWithNativeParseFailureMock<TModule>(
   jest.resetModules();
 
   jest.unstable_mockModule(
-    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
+    './helpers/native-router-hotpath-loader.js',
     () => ({
       isNativeDisabledByEnv: () => false,
       makeNativeRequiredError: (capability: string, reason?: string) =>

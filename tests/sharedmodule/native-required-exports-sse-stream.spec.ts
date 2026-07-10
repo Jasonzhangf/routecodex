@@ -2,7 +2,7 @@ import { describe, expect, test } from '@jest/globals';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from './helpers/native-router-hotpath-loader.js';
 import { captureReqInboundResponsesContextSnapshotWithNative } from './helpers/req-inbound-direct-native.js';
 
 const nodeRequire = createRequire(import.meta.url);

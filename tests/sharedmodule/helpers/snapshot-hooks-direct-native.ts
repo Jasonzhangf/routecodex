@@ -2,7 +2,7 @@ import {
   failNativeRequired,
   isNativeDisabledByEnv,
   loadNativeRouterHotpathBindingForInternalUse
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;

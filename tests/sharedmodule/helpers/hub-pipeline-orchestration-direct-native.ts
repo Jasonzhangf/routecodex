@@ -3,7 +3,7 @@ import {
   isNativeDisabledByEnv,
   loadNativeRouterHotpathBindingForInternalUse,
   stringifyNativePayloadForError
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 
 // feature_id: hub.request_stage_pipeline_bridge
 // Rust owner symbols: run_hub_pipeline_lib_json, build_request_stage_metadata_dispatch_json,

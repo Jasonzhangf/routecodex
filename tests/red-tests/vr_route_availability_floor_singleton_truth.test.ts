@@ -24,7 +24,7 @@ const RUST_LIB =
 const RUST_PRIMARY_EXHAUSTED_BLOCKS =
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs';
 const REQUIRED_EXPORTS =
-  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts';
+  'sharedmodule/llmswitch-core/native-hotpath-required-exports.json';
 const NATIVE_EXPORTS = 'src/modules/llmswitch/bridge/native-exports.ts';
 const EXECUTOR_CORE_UTILS =
   'src/server/runtime/http-server/executor/request-executor-core-utils.ts';

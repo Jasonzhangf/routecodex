@@ -9,7 +9,7 @@ function read(relPath) {
 }
 
 const rustRequestCompat = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs');
-const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
+const requiredExports = read('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
 const directNativeHelper = read('tests/sharedmodule/helpers/compat-engine-direct-native.ts');
 const functionMap = read('docs/architecture/function-map.yml');
 const verificationMap = read('docs/architecture/verification-map.yml');

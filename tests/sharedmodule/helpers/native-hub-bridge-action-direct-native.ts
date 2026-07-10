@@ -2,7 +2,7 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 import {
   parseNativeJsonObjectOrFail,
   parseNativeJsonValueOrFail,
@@ -10,7 +10,7 @@ import {
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 
 
 // Inlined from retired native-hub-bridge-action-semantics-tools-request.ts

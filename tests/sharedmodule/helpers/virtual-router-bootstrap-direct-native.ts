@@ -10,7 +10,7 @@ import {
   callNativeJson,
   VirtualRouterError,
   VirtualRouterErrorCode
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 
 export type {
   ProviderProfile,

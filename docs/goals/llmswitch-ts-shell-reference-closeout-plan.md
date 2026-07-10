@@ -69,7 +69,7 @@ Primary host bridge blockers:
 
 Primary internal fan-out blockers:
 
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+- `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-shared.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts`
@@ -326,7 +326,7 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts` is physically deleted after exact source refs were migrated to the existing native router hotpath loader.
 - The moved surface is only binding/stringify/parse/error glue around required Rust/NAPI exports; no Hub/VR/provider semantics were added to TS.
-- Build-core required dist output now keys on `native-router-hotpath-loader.js` instead of the retired shared conversion core shell.
+- Build-core required dist output no longer packages a router-hotpath TS loader; required native exports are tracked by `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`.
 - Verification passed: sharedmodule `tsc`, focused VR/stopmessage/residue/build-core Jest, strict shell reference audit, minimal TS surface, and rustification audit.
 
 ### 2026-07-10 virtual-router hit-log facade retired

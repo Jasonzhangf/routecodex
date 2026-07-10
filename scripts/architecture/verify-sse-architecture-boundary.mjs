@@ -118,7 +118,7 @@ for (const required of [
   if (!lib.includes(required)) failures.push(`router-hotpath lib.rs missing ${required}`);
 }
 
-const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
+const requiredExports = read('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
 for (const required of [
   '"buildSseFramesFromJsonJson"',
   '"buildJsonFromSseJson"',

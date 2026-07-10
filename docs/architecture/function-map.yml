@@ -57,7 +57,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
@@ -144,7 +144,7 @@ owners:
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/stopless-metadata-center.spec.ts
@@ -753,7 +753,7 @@ owners:
       - build_servertool_stop_compare_progress_event_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
@@ -893,7 +893,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/native-exports.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - sharedmodule/llmswitch-core/src/servertool/types.d.ts
@@ -1278,7 +1278,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/utils/session-log-color.ts
       - tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts
@@ -2565,7 +2565,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
       - src/providers/core/runtime
@@ -3051,7 +3051,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - src/modules/llmswitch/bridge/routing-integrations.ts
       - src/providers/profile/provider-profile-loader.ts
       - src/providers/profile/forwarder-types.ts
@@ -3904,7 +3904,7 @@ owners:
       - build_json_from_sse_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge/runtime-integrations.ts
       - scripts/helpers/sse-direct-native.mjs
@@ -3948,7 +3948,7 @@ owners:
       - parse_sse_stream_chunk_with_config_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
       - src/providers/core/runtime

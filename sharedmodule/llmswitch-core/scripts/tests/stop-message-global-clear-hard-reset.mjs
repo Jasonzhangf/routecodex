@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { VirtualRouterEngine } from '../helpers/virtual-router-engine-direct-native.mjs';
-import { readNativeFunction } from '../../dist/native/router-hotpath/native-router-hotpath-loader.js';
+import { readNativeFunction } from '../helpers/native-router-hotpath-loader.mjs';
 
 const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||
   new URL('../../dist/native/router_hotpath_napi.node', import.meta.url).pathname;

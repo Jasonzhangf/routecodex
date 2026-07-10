@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const root = process.cwd();
 const requireFromRoot = createRequire(path.join(root, 'package.json'));
 
-const { REQUIRED_NATIVE_HOTPATH_EXPORTS } = requireFromRoot('./sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
+const REQUIRED_NATIVE_HOTPATH_EXPORTS = requireFromRoot('./sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
 
 const candidate = path.join(root, 'sharedmodule/llmswitch-core/rust-core/target/release/router_hotpath_napi.node');
 const binding = requireFromRoot(candidate);

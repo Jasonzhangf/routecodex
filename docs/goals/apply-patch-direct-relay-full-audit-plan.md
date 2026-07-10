@@ -1068,7 +1068,7 @@ live 证据：
 - 唯一 owner：
   - relay request-side native binding / shared semantics barrel：
     - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-responses.ts`
-    - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+    - `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
   - bridge loading/assert facade：
     - `src/modules/llmswitch/bridge/native-exports.ts`
   - request handler facade consumer：
@@ -1083,10 +1083,10 @@ live 证据：
   - 它证明 `5555` relay request-side 仍依赖 `captureReqInboundResponsesContextSnapshotJson` 这条 native export；一旦安装/打包/require 失配，请求会在 bridge facade 前失败。
   - 这不是第二套协议 owner，而是 runtime 交付/required-export 契约问题。
   - 2026-06-15 进一步核实：
-    - 仓库源码 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` 包含 `captureReqInboundResponsesContextSnapshotJson`。
+    - required-export contract `sharedmodule/llmswitch-core/native-hotpath-required-exports.json` 包含 `captureReqInboundResponsesContextSnapshotJson`。
     - 仓库 `dist` 与全局安装包 `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js` 都 re-export 了 `captureReqInboundResponsesContextSnapshotWithNative`。
     - 直接 `require('/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')` 时，该 binding 也确实暴露 `captureReqInboundResponsesContextSnapshotJson` 函数。
-    - 直接 `import('/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-router-hotpath-loader.js')` 后执行 `loadNativeRouterHotpathBinding()`，返回 binding 同样含该 export。
+    - 直接加载 `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node`，返回 binding 同样含该 export。
   - 2026-06-16 wiring 复核：
     - `src/modules/llmswitch/bridge/responses-request-bridge.ts:365-383`
       - `buildResponsesRequestContextForHttp(...)` 真实会调用 `captureReqInboundResponsesContextSnapshot(...)`

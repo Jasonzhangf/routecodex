@@ -2129,3 +2129,10 @@
 - `scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` is the canonical shell gate and now reports `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`.
 - `npm run verify:llmswitch-rustification-audit -- --json` now compares against baseline `prodTsFileCount=0`, `prodTsLocTotal=0`, `nonNativeFileCount=0`.
 - Commit: `16395ae09 refactor(hub): retire llmswitch-core root TS barrel`; note commit: `b51b8a691 docs(note): record llmswitch-core zero TS shell closeout`.
+
+# 2026-07-10: Native router hotpath loader production shell is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` is physically deleted from production source; do not restore it as a dist/package runtime loader, required-export owner, root export, or package required output.
+- Required NAPI export truth is `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`; `sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` parses that JSON contract and validates the packaged `.node` binding against it.
+- Test-only direct native loading lives in `tests/sharedmodule/helpers/native-router-hotpath-loader.ts`; script-only direct native loading lives in `sharedmodule/llmswitch-core/scripts/helpers/native-router-hotpath-loader.mjs`. Both are helper surfaces, not production TS runtime.
+- Source verification after this closeout reports `prodTsShellCount=0` and rustification `prodTsFileCount=0`; exact active source/script/doc scan no longer references the deleted production loader path.

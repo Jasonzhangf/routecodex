@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+import { VirtualRouterError } from './helpers/native-router-hotpath-loader.js';
 
 describe('bootstrapVirtualRouterConfig routing model validation', () => {
   it('throws when routing references an unknown model for a provider with declared models', () => {

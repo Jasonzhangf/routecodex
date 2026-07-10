@@ -1,14 +1,14 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 import {
   parseArray,
   parseJson,
   parseRecord,
   readNativeFunction,
   safeStringify
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
+} from './native-router-hotpath-loader.js';
 
 function parseChatProcessMediaStripPayload(raw: string): { changed: boolean; messages: unknown[] } | null {
   const parsed = parseJson(raw);

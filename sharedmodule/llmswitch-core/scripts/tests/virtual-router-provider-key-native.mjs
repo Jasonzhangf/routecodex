@@ -6,13 +6,13 @@ import { pathToFileURL } from 'node:url';
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
 function importFresh(relPath, tag) {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'dist', relPath)).href;
+  const moduleUrl = pathToFileURL(path.join(repoRoot, relPath)).href;
   return import(`${moduleUrl}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 }
 
 async function main() {
   const { loadNativeRouterHotpathBinding } = await importFresh(
-    'native/router-hotpath/native-router-hotpath-loader.js',
+    'scripts/helpers/native-router-hotpath-loader.mjs',
     'loader'
   );
   const binding = loadNativeRouterHotpathBinding();

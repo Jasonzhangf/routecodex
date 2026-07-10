@@ -319,7 +319,7 @@ type NativeStopMessagePersistedLookupPlan = {
 
 #### B1. 扩展 required exports 白名单
 - 文件：
-  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+  - `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - 动作：
   - 新增 `"planStopMessagePersistedLookupJson"`
 - 责任边界：
@@ -393,7 +393,7 @@ type NativeStopMessagePersistedLookupPlan = {
 
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+- `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`

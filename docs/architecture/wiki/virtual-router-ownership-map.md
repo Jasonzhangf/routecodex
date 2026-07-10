@@ -173,7 +173,7 @@ Canonical builders:
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
+- `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - `src/modules/llmswitch/bridge/routing-integrations.ts`
 - `src/utils/session-log-color.ts`
 - `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`
