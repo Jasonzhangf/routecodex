@@ -783,3 +783,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The streamed `/v1/responses` test input now supplies top-level `metadataCenterSnapshot.runtimeControl` required by the Rust HubPipeline/VR metadata contract and returns a real `sseStream` for a streaming client request.
 - Exact file scan for root bridge paths, stale helper path, and legacy loader helpers in the touched files returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 1/1 test; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).
+
+### 2026-07-11 provider response finish-reason mock narrowed
+
+- `tests/server/runtime/http-server/executor/provider-response-converter.finish-reason.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels and no longer declares legacy `importCoreDist` / `requireCoreDist` loader helpers.
+- The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; finish-reason derivation runs through the current `server/utils/finish-reason.ts` native wrapper instead of a test-local TS copy.
+- Exact file scan for root bridge paths, legacy loader helpers, and the retired `syncReasoningStopModeFromRequest` mock returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 5/5 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
