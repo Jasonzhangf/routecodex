@@ -60,21 +60,7 @@ interface ResponsesStoreLookupResult {
     requestId?: string;
 }
 declare class ResponsesConversationStore {
-    private requestMap;
-    private responseIndex;
-    private scopeIndex;
     private pruneTimer;
-    private lastPruneAt;
-    private persistenceLoaded;
-    private ensurePersistenceLoaded;
-    private flushPersistence;
-    getDebugStats(): {
-        requestMapSize: number;
-        responseIndexSize: number;
-        scopeIndexSize: number;
-        requestEntriesWithoutLastResponseId: number;
-        retainedInputItems: number;
-    };
     rebindRequestId(oldId: string | undefined, newId: string | undefined): void;
     captureRequestContext(args: CaptureContextArgs): void;
     recordResponse(args: RecordResponseArgs): void;
@@ -88,18 +74,12 @@ declare class ResponsesConversationStore {
     }): void;
     resumeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null;
     materializeLatestContinuationByScope(args: RestoreByScopeArgs): ResumeResult | null;
-    private cleanupEntry;
-    private attachEntryScopes;
-    private detachEntry;
-    private prune;
-    private pruneIndexes;
     startPruneTimer(): void;
     private stopPruneTimer;
     clearAll(): void;
     clearAllAndPersist(): void;
     getLastPruneAt(): number;
 }
-declare const store: ResponsesConversationStore;
 export declare function captureResponsesRequestContext(args: CaptureContextArgs): void;
 export declare function recordResponsesResponse(args: RecordResponseArgs): void;
 export declare function resumeResponsesConversation(responseId: string, submitPayload: AnyRecord, options?: ResumeOptions): ResumeResult;
@@ -114,3 +94,5 @@ export declare function materializeLatestResponsesContinuationByScope(args: Rest
 export declare function clearAllResponsesConversationState(): void;
 export declare function resetResponsesConversationStateForRestartSimulation(): void;
 export declare function clearUnresolvedResponsesConversationRequests(): number;
+export declare function releaseResponsesConversationRequestPayload(requestId?: string): void;
+export {};

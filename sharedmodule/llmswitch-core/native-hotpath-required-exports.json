@@ -195,6 +195,7 @@
   "planResponsesConversationResumeEntryMatchJson",
   "planResponsesContinuationLookupByResponseIdJson",
   "planResponsesContinuationMetaJson",
+  "executeResponsesConversationStoreOperationJson",
   "publishResponsesRecordPlanJson",
   "materializeResponsesContinuationPayloadJson",
   "restoreResponsesContinuationPayloadJson",

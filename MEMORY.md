@@ -2151,3 +2151,11 @@
 - Runtime VR route host-effects are Rust-owned by `virtual_router_engine/virtual_router_host_effects.rs` through NAPI exports `planVirtualRouterRouteHostEffectsJson` and `finalizeVirtualRouterRouteHostEffectsJson`.
 - The TS bridge may only call the Rust plan before route, call the Rust finalizer after route, apply returned `cleanedRequest` to the original request object, and `console.log` the optional returned hit-log line.
 - `vr.route_host_effects` and the VR hit-log mainline point to the Rust finalizer; function-map/wiki gates lock this owner so stop-message parse logs, request/session id selection, hit-log record creation, line formatting, and forced stop-status labels do not return to TS bridge logic.
+
+# 2026-07-10: Responses conversation store state is Rust operation-owned
+
+- `src/modules/llmswitch/bridge/responses-conversation-store-host.ts` must remain a thin native operation shell around `executeResponsesConversationStoreOperationJson`; do not restore TS `Map`/index/persistence/prune/rebind/release state logic there.
+- `shared_responses_conversation_utils.rs` owns Responses conversation request map, response index, scope index, persistence eligibility/load/flush, restart-simulation reset, prune, release, clear, rebind, lookup, resume, and materialize behavior.
+- The host shell may pass `ROUTECODEX_RESPONSES_CONVERSATION_STORE` as operation-level IO context because Jest/runtime host env is not always visible as OS env to Rust; Rust applies the path and resets store state only when that explicit path changes.
+- Checked-in `responses-conversation-store-host.js` / `.d.ts` mirrors must not receive debug API backfill. Debug accessors may exist only on canonical TS source/tests until the source mirror imports are fully retired.
+- Residue gate must keep old per-plan native helper names out of `responses-conversation-store-host.ts/js/d.ts`; the allowed production surface is the single operation API plus thin host wrappers.

@@ -8,6 +8,11 @@ use crate::shared_json_utils::{
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn stage_a_conversion_responses_store_owner_boundary() {}
 
@@ -3249,6 +3254,1512 @@ fn build_responses_conversation_scope_plan(input: &Value) -> Value {
     })
 }
 
+const RESPONSES_STORE_TTL_MS: i64 = 1000 * 60 * 30;
+const RESPONSES_STORE_PERSIST_SCHEMA_VERSION: i64 = 1;
+
+#[derive(Default)]
+struct ResponsesConversationStoreState {
+    request_map: HashMap<String, Value>,
+    response_index: HashMap<String, String>,
+    scope_index: HashMap<String, String>,
+    last_prune_at: i64,
+    persistence_loaded: bool,
+    persistence_file_path: Option<PathBuf>,
+}
+
+static RESPONSES_CONVERSATION_STORE: LazyLock<Mutex<ResponsesConversationStoreState>> =
+    LazyLock::new(|| Mutex::new(ResponsesConversationStoreState::default()));
+
+fn responses_store_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn responses_store_persist_file_path() -> PathBuf {
+    if let Ok(explicit) = env::var("ROUTECODEX_RESPONSES_CONVERSATION_STORE") {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let home = env::var("ROUTECODEX_HOME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from(".rcc"));
+    let root = if env::var("ROUTECODEX_HOME")
+        .ok()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        home
+    } else {
+        home.join(".rcc")
+    };
+    root.join("state").join("responses-conversation-store.json")
+}
+
+fn responses_store_ok(result: Value) -> Value {
+    serde_json::json!({
+        "ok": true,
+        "result": result,
+    })
+}
+
+fn responses_store_error(code: &str, message: &str, category: &str, details: Value) -> Value {
+    serde_json::json!({
+        "ok": false,
+        "error": {
+            "code": code,
+            "message": message,
+            "protocol": "openai-responses",
+            "providerType": "responses",
+            "category": category,
+            "details": details,
+        }
+    })
+}
+
+fn responses_store_malformed_request(message: &str, reason: &str, details: Value) -> Value {
+    let mut detail_obj = details.as_object().cloned().unwrap_or_default();
+    detail_obj.insert("reason".to_string(), Value::String(reason.to_string()));
+    responses_store_error(
+        "MALFORMED_REQUEST",
+        message,
+        "EXTERNAL_ERROR",
+        Value::Object(detail_obj),
+    )
+}
+
+fn responses_store_malformed_response(message: &str, reason: &str, details: Value) -> Value {
+    let mut detail_obj = details.as_object().cloned().unwrap_or_default();
+    detail_obj.insert("reason".to_string(), Value::String(reason.to_string()));
+    responses_store_error(
+        "MALFORMED_RESPONSE",
+        message,
+        "EXTERNAL_ERROR",
+        Value::Object(detail_obj),
+    )
+}
+
+fn responses_store_read_entry_request_id(entry: &Value) -> Option<String> {
+    entry
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("requestId")))
+}
+
+fn responses_store_read_entry_last_response_id(entry: &Value) -> Option<String> {
+    entry
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("lastResponseId")))
+}
+
+fn responses_store_read_entry_scope_keys(entry: &Value) -> Vec<String> {
+    entry.as_object().map(read_scope_keys).unwrap_or_default()
+}
+
+fn responses_store_set_value(entry: &mut Value, key: &str, value: Value) {
+    if let Some(row) = entry.as_object_mut() {
+        row.insert(key.to_string(), value);
+    }
+}
+
+fn responses_store_set_string(entry: &mut Value, key: &str, value: Option<String>) {
+    if let Some(value) = value {
+        responses_store_set_value(entry, key, Value::String(value));
+    }
+}
+
+fn responses_store_tokens(input: Value) -> Map<String, Value> {
+    plan_responses_store_tokens(&input)
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn responses_store_build_scope_keys(scope: Value, mode: &str) -> (Vec<String>, Option<String>) {
+    let plan = build_responses_conversation_scope_plan(&serde_json::json!({
+        "mode": mode,
+        "scope": scope,
+    }));
+    let keys = plan
+        .as_object()
+        .and_then(|row| row.get("keys"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_trimmed_string(Some(item)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let port_scope_key = plan
+        .as_object()
+        .and_then(|row| read_trimmed_string(row.get("portScopeKey")));
+    (keys, port_scope_key)
+}
+
+fn responses_store_read_port_scope_key(scope: &Value) -> Option<String> {
+    responses_store_build_scope_keys(scope.clone(), "stored").1
+}
+
+fn responses_store_build_stored_scope_keys_from_resolved(
+    session_id: Option<String>,
+    conversation_id: Option<String>,
+    entry_kind: String,
+    continuation_owner: String,
+    port_scope_key: Option<String>,
+) -> Vec<String> {
+    let mut scope = Map::new();
+    if let Some(session_id) = session_id {
+        scope.insert("sessionId".to_string(), Value::String(session_id));
+    }
+    if let Some(conversation_id) = conversation_id {
+        scope.insert("conversationId".to_string(), Value::String(conversation_id));
+    }
+    scope.insert("entryKind".to_string(), Value::String(entry_kind));
+    scope.insert(
+        "continuationOwner".to_string(),
+        Value::String(continuation_owner),
+    );
+    if let Some(port_scope_key) = port_scope_key {
+        scope.insert("portScopeKey".to_string(), Value::String(port_scope_key));
+    }
+    responses_store_build_scope_keys(Value::Object(scope), "stored").0
+}
+
+fn responses_store_resume_scope_keys_from_submit_payload(payload: &Value) -> Vec<String> {
+    build_responses_conversation_scope_plan(&serde_json::json!({
+        "mode": "submit_payload",
+        "payload": payload,
+    }))
+    .as_object()
+    .and_then(|row| row.get("keys"))
+    .and_then(Value::as_array)
+    .map(|items| {
+        items
+            .iter()
+            .filter_map(|item| read_trimmed_string(Some(item)))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default()
+}
+
+fn responses_store_project_resume_candidate(
+    entry: &Value,
+    source: &str,
+    scope_key: Option<&str>,
+) -> Value {
+    let entry_obj = entry.as_object().cloned().unwrap_or_default();
+    let tokens = responses_store_tokens(serde_json::json!({
+        "entryKind": entry_obj.get("entryKind").cloned().unwrap_or(Value::Null),
+        "continuationOwner": entry_obj.get("continuationOwner").cloned().unwrap_or(Value::Null),
+    }));
+    serde_json::json!({
+        "source": source,
+        "scopeKey": scope_key.unwrap_or(""),
+        "requestId": read_trimmed_string(entry_obj.get("requestId")),
+        "lastResponseId": read_trimmed_string(entry_obj.get("lastResponseId")),
+        "allowContinuation": entry_obj.get("allowContinuation").and_then(Value::as_bool).unwrap_or(false),
+        "continuationOwner": tokens.get("continuationOwner").cloned().unwrap_or(Value::Null),
+        "portScopeKey": entry_obj.get("portScopeKey").cloned().unwrap_or(Value::Null),
+        "entryKind": tokens.get("entryKind").cloned().unwrap_or(Value::String("responses".to_string())),
+    })
+}
+
+fn responses_store_merge_meta(meta: Value, entry: &Value) -> Value {
+    plan_responses_continuation_meta(&serde_json::json!({
+        "meta": meta,
+        "entry": entry,
+    }))
+    .as_object()
+    .and_then(|row| row.get("meta"))
+    .cloned()
+    .unwrap_or_else(|| Value::Object(Map::new()))
+}
+
+impl ResponsesConversationStoreState {
+    fn ensure_persistence_loaded(&mut self) {
+        if self.persistence_loaded {
+            return;
+        }
+        self.persistence_loaded = true;
+        let persist_file_path = self.persist_file_path();
+        let Ok(raw) = fs::read_to_string(&persist_file_path) else {
+            return;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
+            return;
+        };
+        let Some(root) = parsed.as_object() else {
+            return;
+        };
+        if root.get("version").and_then(Value::as_i64)
+            != Some(RESPONSES_STORE_PERSIST_SCHEMA_VERSION)
+        {
+            return;
+        }
+        let Some(entries) = root.get("entries").and_then(Value::as_array) else {
+            return;
+        };
+        let now_ms = responses_store_now_ms();
+        for row in entries {
+            let plan = plan_responses_persisted_entry(&serde_json::json!({
+                "mode": "deserialize",
+                "entry": row,
+                "nowMs": now_ms,
+            }));
+            let Some(entry) = plan.as_object().and_then(|plan| plan.get("entry")).cloned() else {
+                continue;
+            };
+            let eligibility = plan_responses_conversation_persistence_eligibility(
+                &entry,
+                &serde_json::json!({
+                    "mode": "load",
+                    "nowMs": now_ms,
+                    "ttlMs": RESPONSES_STORE_TTL_MS,
+                }),
+            );
+            let Some(last_response_id) = eligibility
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("lastResponseId")))
+            else {
+                continue;
+            };
+            if eligibility
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("action")))
+                .as_deref()
+                != Some("persist")
+            {
+                continue;
+            }
+            let Some(request_id) = responses_store_read_entry_request_id(&entry) else {
+                continue;
+            };
+            self.request_map.insert(request_id.clone(), entry);
+            self.response_index
+                .insert(last_response_id, request_id.clone());
+            self.attach_entry_scopes_by_request_id(&request_id);
+        }
+    }
+
+    fn flush_persistence(&self) {
+        if !self.persistence_loaded {
+            return;
+        }
+        let mut entries = Vec::new();
+        let mut seen = HashSet::new();
+        for request_id in self.response_index.values() {
+            if !seen.insert(request_id.clone()) {
+                continue;
+            }
+            let Some(entry) = self.request_map.get(request_id) else {
+                continue;
+            };
+            let eligibility = plan_responses_conversation_persistence_eligibility(
+                entry,
+                &serde_json::json!({
+                    "mode": "flush",
+                }),
+            );
+            if eligibility
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("action")))
+                .as_deref()
+                != Some("persist")
+            {
+                continue;
+            }
+            let serialized = plan_responses_persisted_entry(&serde_json::json!({
+                "mode": "serialize",
+                "entry": entry,
+            }));
+            if let Some(entry) = serialized
+                .as_object()
+                .and_then(|row| row.get("entry"))
+                .cloned()
+            {
+                entries.push(entry);
+            }
+        }
+        let persist_file_path = self.persist_file_path();
+        if let Some(parent) = persist_file_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let tmp_file = persist_file_path.with_extension(format!("{}.tmp", std::process::id()));
+        let payload = serde_json::json!({
+            "version": RESPONSES_STORE_PERSIST_SCHEMA_VERSION,
+            "entries": entries,
+        });
+        if let Ok(raw) = serde_json::to_string_pretty(&payload) {
+            if fs::write(&tmp_file, raw).is_ok() {
+                let _ = fs::rename(&tmp_file, &persist_file_path);
+            }
+        }
+    }
+
+    fn debug_stats(&self) -> Value {
+        let mut request_entries_without_last_response_id = 0usize;
+        let mut retained_input_items = 0usize;
+        for entry in self.request_map.values() {
+            if responses_store_read_entry_last_response_id(entry).is_none() {
+                request_entries_without_last_response_id += 1;
+            }
+            retained_input_items += entry
+                .as_object()
+                .and_then(|row| row.get("input"))
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0);
+        }
+        serde_json::json!({
+            "requestMapSize": self.request_map.len(),
+            "responseIndexSize": self.response_index.len(),
+            "scopeIndexSize": self.scope_index.len(),
+            "requestEntriesWithoutLastResponseId": request_entries_without_last_response_id,
+            "retainedInputItems": retained_input_items,
+        })
+    }
+
+    fn persist_file_path(&self) -> PathBuf {
+        self.persistence_file_path
+            .clone()
+            .unwrap_or_else(responses_store_persist_file_path)
+    }
+
+    fn apply_operation_context(&mut self, input: &Value) {
+        let next_path = input
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("persistenceFilePath")))
+            .map(PathBuf::from);
+        if next_path == self.persistence_file_path {
+            return;
+        }
+        self.request_map.clear();
+        self.response_index.clear();
+        self.scope_index.clear();
+        self.persistence_loaded = false;
+        self.persistence_file_path = next_path;
+    }
+
+    fn detach_request_id(&mut self, request_id: &str) {
+        self.request_map.remove(request_id);
+        self.response_index
+            .retain(|_, candidate_request_id| candidate_request_id != request_id);
+        self.scope_index
+            .retain(|_, candidate_request_id| candidate_request_id != request_id);
+    }
+
+    fn prune_indexes(&mut self) {
+        self.response_index
+            .retain(|_, request_id| self.request_map.contains_key(request_id));
+        self.scope_index
+            .retain(|_, request_id| self.request_map.contains_key(request_id));
+    }
+
+    fn attach_entry_scopes_by_request_id(&mut self, request_id: &str) {
+        let Some(entry) = self.request_map.get(request_id).cloned() else {
+            return;
+        };
+        let scope_keys = responses_store_read_entry_scope_keys(&entry);
+        let candidates = scope_keys
+            .iter()
+            .map(|scope_key| {
+                serde_json::json!({
+                    "scopeKey": scope_key,
+                    "requestId": self.scope_index.get(scope_key).cloned().unwrap_or_default(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let plan = plan_responses_attach_entry_scopes(&serde_json::json!({
+            "requestId": request_id,
+            "scopeKeys": scope_keys,
+            "candidates": candidates,
+        }));
+        let detach_request_ids = plan
+            .as_object()
+            .and_then(|row| row.get("detachRequestIds"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| read_trimmed_string(Some(item)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for detach_request_id in detach_request_ids {
+            self.detach_request_id(&detach_request_id);
+        }
+        let attach_scope_keys = plan
+            .as_object()
+            .and_then(|row| row.get("scopeKeys"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| read_trimmed_string(Some(item)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for scope_key in attach_scope_keys {
+            self.scope_index.insert(scope_key, request_id.to_string());
+        }
+    }
+
+    fn prune_expired(&mut self) -> usize {
+        self.ensure_persistence_loaded();
+        self.last_prune_at = responses_store_now_ms();
+        let candidates = self
+            .request_map
+            .values()
+            .map(|entry| {
+                let row = entry.as_object().cloned().unwrap_or_default();
+                serde_json::json!({
+                    "requestId": read_trimmed_string(row.get("requestId")),
+                    "lastResponseId": read_trimmed_string(row.get("lastResponseId")),
+                    "updatedAt": row.get("updatedAt").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect::<Vec<_>>();
+        let plan = plan_responses_store_sweep(&serde_json::json!({
+            "mode": "prune_expired",
+            "nowMs": self.last_prune_at,
+            "ttlMs": RESPONSES_STORE_TTL_MS,
+            "candidates": candidates,
+        }));
+        let detach_request_ids = plan
+            .as_object()
+            .and_then(|row| row.get("detachRequestIds"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| read_trimmed_string(Some(item)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let cleared = detach_request_ids.len();
+        for request_id in detach_request_ids {
+            self.detach_request_id(&request_id);
+        }
+        self.prune_indexes();
+        self.flush_persistence();
+        cleared
+    }
+
+    fn capture_request_context(&mut self, args: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        let args_obj = args.as_object().cloned().unwrap_or_default();
+        let payload = args_obj.get("payload").cloned().unwrap_or(Value::Null);
+        let context = args_obj.get("context").cloned().unwrap_or(Value::Null);
+        let preflight = plan_responses_conversation_preflight(&serde_json::json!({
+            "mode": "capture_request",
+            "requestId": args_obj.get("requestId").cloned().unwrap_or(Value::Null),
+            "payload": payload,
+        }));
+        if preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")))
+            .as_deref()
+            != Some("continue")
+        {
+            return responses_store_ok(serde_json::json!({
+                "action": "skip",
+                "reason": preflight.as_object().and_then(|row| read_trimmed_string(row.get("reason"))).unwrap_or_else(|| "preflight_skip".to_string()),
+            }));
+        }
+        let Some(request_id) = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+        else {
+            return responses_store_malformed_request(
+                "Responses conversation request capture requires request id",
+                "missing_request_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.captureRequestContext",
+                }),
+            );
+        };
+        self.prune_expired();
+        if self.request_map.contains_key(&request_id) {
+            self.detach_request_id(&request_id);
+        }
+        let entry_kind = responses_store_tokens(serde_json::json!({
+            "entryKind": args_obj.get("entryKind").cloned().unwrap_or(Value::Null),
+        }))
+        .get("entryKind")
+        .and_then(Value::as_str)
+        .unwrap_or("responses")
+        .to_string();
+        let mut scope = Map::new();
+        for key in [
+            "sessionId",
+            "conversationId",
+            "matchedPort",
+            "routingPolicyGroup",
+        ] {
+            if let Some(value) = args_obj.get(key).cloned() {
+                scope.insert(key.to_string(), value);
+            }
+        }
+        scope.insert("entryKind".to_string(), Value::String(entry_kind));
+        scope.insert(
+            "continuationOwner".to_string(),
+            Value::String("relay".to_string()),
+        );
+        let (scope_keys, port_scope_key) =
+            responses_store_build_scope_keys(Value::Object(scope), "stored");
+        let cleanup_candidates = self
+            .request_map
+            .values()
+            .map(|entry| {
+                let row = entry.as_object().cloned().unwrap_or_default();
+                serde_json::json!({
+                    "requestId": read_trimmed_string(row.get("requestId")),
+                    "lastResponseId": read_trimmed_string(row.get("lastResponseId")),
+                    "scopeKeys": row.get("scopeKeys").cloned().unwrap_or(Value::Array(Vec::new())),
+                })
+            })
+            .collect::<Vec<_>>();
+        let cleanup_plan = plan_responses_capture_pending_cleanup(&serde_json::json!({
+            "requestId": request_id,
+            "scopeKeys": scope_keys,
+            "candidates": cleanup_candidates,
+        }));
+        if let Some(items) = cleanup_plan
+            .as_object()
+            .and_then(|row| row.get("detachRequestIds"))
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                if let Some(detach_request_id) = read_trimmed_string(Some(item)) {
+                    self.detach_request_id(&detach_request_id);
+                }
+            }
+        }
+        let entry_tokens = responses_store_tokens(serde_json::json!({
+            "providerKey": args_obj.get("providerKey").cloned().unwrap_or(Value::Null),
+            "fallbackProviderKey": payload.as_object().and_then(|row| row.get("providerKey")).cloned().unwrap_or(Value::Null),
+            "sessionId": args_obj.get("sessionId").cloned().unwrap_or(Value::Null),
+            "conversationId": args_obj.get("conversationId").cloned().unwrap_or(Value::Null),
+            "entryKind": args_obj.get("entryKind").cloned().unwrap_or(Value::Null),
+        }));
+        let entry_plan = plan_responses_captured_entry(&serde_json::json!({
+            "requestId": request_id,
+            "providerKey": entry_tokens.get("providerKey").cloned().unwrap_or(Value::Null),
+            "sessionId": entry_tokens.get("sessionId").cloned().unwrap_or(Value::Null),
+            "conversationId": entry_tokens.get("conversationId").cloned().unwrap_or(Value::Null),
+            "entryKind": entry_tokens.get("entryKind").cloned().unwrap_or(Value::Null),
+            "payload": payload,
+            "context": context,
+            "scopeKeys": scope_keys,
+            "portScopeKey": port_scope_key,
+            "nowMs": responses_store_now_ms(),
+        }));
+        let Some(entry) = entry_plan
+            .as_object()
+            .and_then(|row| row.get("entry"))
+            .cloned()
+        else {
+            return responses_store_ok(serde_json::json!({
+                "action": "skip",
+                "reason": "entry_plan_skip",
+            }));
+        };
+        self.request_map.insert(request_id, entry);
+        self.flush_persistence();
+        responses_store_ok(serde_json::json!({
+            "action": "captured",
+        }))
+    }
+
+    fn record_response(&mut self, args: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        let args_obj = args.as_object().cloned().unwrap_or_default();
+        let response = args_obj.get("response").cloned().unwrap_or(Value::Null);
+        let preflight = plan_responses_conversation_preflight(&serde_json::json!({
+            "mode": "record_response",
+            "requestId": args_obj.get("requestId").cloned().unwrap_or(Value::Null),
+            "response": response,
+        }));
+        let request_id = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+            .unwrap_or_default();
+        let response_id = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("responseId")));
+        let preflight_action = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")));
+        let preflight_reason = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("reason")))
+            .unwrap_or_else(|| "unknown".to_string());
+        if preflight_action.as_deref() == Some("throw") && preflight_reason == "missing_request_id"
+        {
+            return responses_store_malformed_response(
+                "Responses conversation response capture requires request context",
+                "missing_request_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "responseId": response_id,
+                }),
+            );
+        }
+        let entry_request_id = if self.request_map.contains_key(&request_id) {
+            Some(request_id.clone())
+        } else {
+            response_id
+                .as_ref()
+                .filter(|value| self.request_map.contains_key(*value))
+                .cloned()
+        };
+        let Some(entry_request_id) = entry_request_id else {
+            return responses_store_error(
+                "RESPONSES_STORE_MISSING_REQUEST_CONTEXT",
+                "Responses conversation request context missing for response capture",
+                "INTERNAL_ERROR",
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "reason": "missing_request_context",
+                    "requestId": request_id,
+                    "responseId": response_id,
+                    "providerKey": args_obj.get("providerKey").cloned().unwrap_or(Value::Null),
+                    "sessionId": args_obj.get("sessionId").cloned().unwrap_or(Value::Null),
+                    "conversationId": args_obj.get("conversationId").cloned().unwrap_or(Value::Null),
+                    "matchedPort": args_obj.get("matchedPort").cloned().unwrap_or(Value::Null),
+                    "routingPolicyGroup": args_obj.get("routingPolicyGroup").cloned().unwrap_or(Value::Null),
+                }),
+            );
+        };
+        if preflight_action.as_deref() == Some("throw") && preflight_reason == "missing_response_id"
+        {
+            return responses_store_malformed_response(
+                "Responses conversation response capture requires response id",
+                "missing_response_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "requestId": request_id,
+                }),
+            );
+        }
+        if preflight_action.as_deref() != Some("continue") {
+            return responses_store_malformed_response(
+                "Responses conversation response capture preflight failed",
+                &preflight_reason,
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "requestId": request_id,
+                    "responseId": response_id,
+                }),
+            );
+        }
+        let Some(response_id) = response_id else {
+            return responses_store_malformed_response(
+                "Responses conversation response capture requires response id",
+                "missing_response_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "requestId": request_id,
+                }),
+            );
+        };
+        let Some(mut entry) = self.request_map.get(&entry_request_id).cloned() else {
+            return responses_store_error(
+                "RESPONSES_STORE_MISSING_REQUEST_CONTEXT",
+                "Responses conversation request context missing for response capture",
+                "INTERNAL_ERROR",
+                serde_json::json!({
+                    "context": "responses-conversation-store.recordResponse",
+                    "reason": "missing_request_context",
+                    "requestId": request_id,
+                    "responseId": response_id,
+                }),
+            );
+        };
+        let response_port_scope_key = responses_store_read_port_scope_key(args);
+        if response_port_scope_key.is_some()
+            && entry
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("portScopeKey")))
+                .is_none()
+        {
+            responses_store_set_string(&mut entry, "portScopeKey", response_port_scope_key.clone());
+        }
+        let entry_obj = entry.as_object().cloned().unwrap_or_default();
+        let response_tokens = responses_store_tokens(serde_json::json!({
+            "providerKey": args_obj.get("providerKey").cloned().unwrap_or(Value::Null),
+            "sessionId": args_obj.get("sessionId").cloned().unwrap_or(Value::Null),
+            "conversationId": args_obj.get("conversationId").cloned().unwrap_or(Value::Null),
+            "entryKind": args_obj.get("entryKind").cloned().unwrap_or_else(|| entry_obj.get("entryKind").cloned().unwrap_or(Value::Null)),
+            "continuationOwner": args_obj.get("continuationOwner").cloned().unwrap_or(Value::Null),
+            "fallbackContinuationOwner": entry_obj.get("continuationOwner").cloned().unwrap_or(Value::String("relay".to_string())),
+        }));
+        responses_store_set_string(
+            &mut entry,
+            "providerKey",
+            response_tokens
+                .get("providerKey")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+        responses_store_set_string(
+            &mut entry,
+            "sessionId",
+            response_tokens
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    entry_obj
+                        .get("sessionId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                }),
+        );
+        responses_store_set_string(
+            &mut entry,
+            "conversationId",
+            response_tokens
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    entry_obj
+                        .get("conversationId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                }),
+        );
+        let entry_kind = response_tokens
+            .get("entryKind")
+            .and_then(Value::as_str)
+            .unwrap_or("responses")
+            .to_string();
+        let continuation_owner = response_tokens
+            .get("continuationOwner")
+            .and_then(Value::as_str)
+            .unwrap_or("relay")
+            .to_string();
+        responses_store_set_value(&mut entry, "entryKind", Value::String(entry_kind.clone()));
+        responses_store_set_value(
+            &mut entry,
+            "continuationOwner",
+            Value::String(continuation_owner.clone()),
+        );
+        let updated_entry_obj = entry.as_object().cloned().unwrap_or_default();
+        let next_scope_keys = responses_store_build_stored_scope_keys_from_resolved(
+            read_trimmed_string(updated_entry_obj.get("sessionId")),
+            read_trimmed_string(updated_entry_obj.get("conversationId")),
+            entry_kind,
+            continuation_owner,
+            response_port_scope_key
+                .or_else(|| read_trimmed_string(updated_entry_obj.get("portScopeKey"))),
+        );
+        responses_store_set_value(
+            &mut entry,
+            "scopeKeys",
+            Value::Array(next_scope_keys.iter().cloned().map(Value::String).collect()),
+        );
+        if let Some(old_last_response_id) = responses_store_read_entry_last_response_id(&entry) {
+            self.response_index.remove(&old_last_response_id);
+        }
+        let assistant_blocks = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if let Some(row) = entry.as_object_mut() {
+            let input = row
+                .entry("input".to_string())
+                .or_insert_with(|| Value::Array(Vec::new()));
+            if let Some(items) = input.as_array_mut() {
+                items.extend(assistant_blocks);
+                let pending_ids =
+                    collect_responses_pending_tool_call_ids(&Value::Array(items.clone()));
+                let continuation_plan = plan_responses_record_continuation_flag(
+                    &serde_json::json!({
+                        "allowContinuation": row.get("allowContinuation").and_then(Value::as_bool).unwrap_or(false),
+                        "pendingToolCallIds": pending_ids,
+                    }),
+                );
+                row.insert(
+                    "allowContinuation".to_string(),
+                    continuation_plan
+                        .as_object()
+                        .and_then(|plan| plan.get("allowContinuation"))
+                        .cloned()
+                        .unwrap_or(Value::Bool(false)),
+                );
+            }
+            row.insert(
+                "lastResponseId".to_string(),
+                Value::String(response_id.clone()),
+            );
+            row.insert(
+                "updatedAt".to_string(),
+                serde_json::json!(responses_store_now_ms()),
+            );
+        }
+        let actual_request_id = responses_store_read_entry_request_id(&entry)
+            .unwrap_or_else(|| entry_request_id.clone());
+        self.request_map
+            .insert(actual_request_id.clone(), entry.clone());
+        self.response_index
+            .insert(response_id.clone(), actual_request_id.clone());
+        let mut record_cleanup_candidates: HashMap<String, Value> = HashMap::new();
+        for scope_key in responses_store_read_entry_scope_keys(&entry) {
+            if let Some(previous_request_id) = self.scope_index.get(&scope_key) {
+                if let Some(previous) = self.request_map.get(previous_request_id) {
+                    record_cleanup_candidates.insert(
+                        previous_request_id.clone(),
+                        serde_json::json!({
+                            "requestId": previous_request_id,
+                            "lastResponseId": responses_store_read_entry_last_response_id(previous),
+                            "scopeKeys": responses_store_read_entry_scope_keys(previous),
+                        }),
+                    );
+                }
+            }
+        }
+        for (candidate_request_id, candidate) in &self.request_map {
+            record_cleanup_candidates.insert(
+                candidate_request_id.clone(),
+                serde_json::json!({
+                    "requestId": candidate_request_id,
+                    "lastResponseId": responses_store_read_entry_last_response_id(candidate),
+                    "scopeKeys": responses_store_read_entry_scope_keys(candidate),
+                }),
+            );
+        }
+        let record_cleanup_plan = plan_responses_record_scope_cleanup(&serde_json::json!({
+            "requestId": actual_request_id,
+            "scopeKeys": responses_store_read_entry_scope_keys(&entry),
+            "candidates": record_cleanup_candidates.into_values().collect::<Vec<_>>(),
+        }));
+        if let Some(items) = record_cleanup_plan
+            .as_object()
+            .and_then(|row| row.get("detachRequestIds"))
+            .and_then(Value::as_array)
+        {
+            for item in items {
+                if let Some(detach_request_id) = read_trimmed_string(Some(item)) {
+                    self.detach_request_id(&detach_request_id);
+                }
+            }
+        }
+        self.attach_entry_scopes_by_request_id(&actual_request_id);
+        self.flush_persistence();
+        responses_store_ok(serde_json::json!({
+            "action": "recorded",
+            "responseId": response_id,
+        }))
+    }
+
+    fn resume_conversation(&mut self, payload: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        let obj = payload.as_object().cloned().unwrap_or_default();
+        let response_id_input = obj.get("responseId").cloned().unwrap_or(Value::Null);
+        let submit_payload = obj.get("submitPayload").cloned().unwrap_or(Value::Null);
+        let options = obj.get("options").cloned().unwrap_or(Value::Null);
+        let preflight = plan_responses_conversation_preflight(&serde_json::json!({
+            "mode": "resume_conversation",
+            "responseId": response_id_input,
+            "submitPayload": submit_payload,
+        }));
+        let response_id = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("responseId")));
+        let action = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")));
+        let reason = preflight
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("reason")))
+            .unwrap_or_else(|| "unknown".to_string());
+        if action.as_deref() == Some("throw") && reason == "missing_or_empty_response_id" {
+            return responses_store_malformed_request(
+                "Responses conversation requires valid response_id",
+                "missing_or_empty_response_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                }),
+            );
+        }
+        let Some(response_id) = response_id else {
+            return responses_store_malformed_request(
+                "Responses conversation resume preflight failed",
+                &reason,
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                }),
+            );
+        };
+        self.prune_expired();
+        let requested_port_scope_key = responses_store_read_port_scope_key(&options);
+        let mut entries_by_request_id: HashMap<String, Value> = HashMap::new();
+        let mut candidates = Vec::new();
+        if let Some(indexed_request_id) = self.response_index.get(&response_id) {
+            if let Some(indexed_entry) = self.request_map.get(indexed_request_id) {
+                entries_by_request_id.insert(indexed_request_id.clone(), indexed_entry.clone());
+                candidates.push(responses_store_project_resume_candidate(
+                    indexed_entry,
+                    "response_index",
+                    None,
+                ));
+            }
+        } else {
+            for (request_id, candidate) in &self.request_map {
+                entries_by_request_id.insert(request_id.clone(), candidate.clone());
+                candidates.push(responses_store_project_resume_candidate(
+                    candidate,
+                    "request_map",
+                    None,
+                ));
+            }
+        }
+        for scope_key in responses_store_resume_scope_keys_from_submit_payload(&submit_payload) {
+            if let Some(request_id) = self.scope_index.get(&scope_key) {
+                if let Some(candidate) = self.request_map.get(request_id) {
+                    entries_by_request_id.insert(request_id.clone(), candidate.clone());
+                    candidates.push(responses_store_project_resume_candidate(
+                        candidate,
+                        "scope",
+                        Some(&scope_key),
+                    ));
+                }
+            }
+        }
+        let plan = plan_responses_conversation_resume_entry_match(&serde_json::json!({
+            "responseId": response_id,
+            "requestedPortScopeKey": requested_port_scope_key,
+            "options": options,
+            "candidates": candidates,
+        }));
+        let plan_action = plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")));
+        if plan_action.as_deref() == Some("ambiguous") {
+            return responses_store_malformed_request(
+                "Responses conversation response_id index is ambiguous",
+                "ambiguous_response_id_index",
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                    "responseId": response_id,
+                }),
+            );
+        }
+        let entry = plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+            .and_then(|request_id| entries_by_request_id.get(&request_id).cloned());
+        let Some(entry) = entry else {
+            return responses_store_malformed_request(
+                "Responses conversation expired or not found",
+                "expired_or_unknown_response_id",
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                    "responseId": response_id,
+                }),
+            );
+        };
+        if plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("source")))
+            .as_deref()
+            == Some("request_map")
+        {
+            if let Some(request_id) = responses_store_read_entry_request_id(&entry) {
+                self.response_index.insert(response_id.clone(), request_id);
+            }
+        }
+        if action.as_deref() == Some("throw") && reason == "missing_tool_outputs" {
+            return responses_store_malformed_request(
+                "tool_outputs array is required when submitting Responses tool results",
+                "missing_tool_outputs",
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                    "responseId": response_id,
+                }),
+            );
+        }
+        if action.as_deref() != Some("continue") {
+            return responses_store_malformed_request(
+                "Responses conversation resume preflight failed",
+                &reason,
+                serde_json::json!({
+                    "context": "responses-conversation-store.resumeConversation",
+                    "responseId": response_id,
+                }),
+            );
+        }
+        let request_id = options
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")));
+        let resumed = resume_responses_conversation_payload(
+            &entry,
+            &response_id,
+            &submit_payload,
+            request_id.as_deref(),
+        )
+        .unwrap_or_else(|reason| {
+            serde_json::json!({
+                "error": {
+                    "type": "orphan_tool_result",
+                    "message": reason,
+                    "status": 400,
+                    "code": "hub_pipeline_context_capture_failed",
+                    "origin": "client"
+                }
+            })
+        });
+        if let Some(entry_request_id) = responses_store_read_entry_request_id(&entry) {
+            self.detach_request_id(&entry_request_id);
+        }
+        self.response_index.remove(&response_id);
+        self.flush_persistence();
+        let meta = responses_store_merge_meta(
+            resumed
+                .as_object()
+                .and_then(|row| row.get("meta"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            &entry,
+        );
+        responses_store_ok(serde_json::json!({
+            "payload": resumed.as_object().and_then(|row| row.get("payload")).cloned().unwrap_or(Value::Null),
+            "meta": meta,
+        }))
+    }
+
+    fn lookup_by_response_id(&mut self, payload: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        let obj = payload.as_object().cloned().unwrap_or_default();
+        let Some(response_id) = read_trimmed_string(obj.get("responseId")) else {
+            return responses_store_ok(Value::Null);
+        };
+        self.prune_expired();
+        let options = obj.get("options").cloned().unwrap_or(Value::Null);
+        let requested_port_scope_key = responses_store_read_port_scope_key(&options);
+        let entry = self
+            .response_index
+            .get(&response_id)
+            .and_then(|request_id| self.request_map.get(request_id))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let plan = plan_responses_continuation_lookup_by_response_id(&serde_json::json!({
+            "responseId": response_id,
+            "requestedPortScopeKey": requested_port_scope_key,
+            "options": options,
+            "entry": entry,
+        }));
+        if plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")))
+            .as_deref()
+            != Some("select")
+        {
+            return responses_store_ok(Value::Null);
+        }
+        responses_store_ok(serde_json::json!({
+            "responseId": plan.as_object().and_then(|row| read_trimmed_string(row.get("responseId"))),
+            "providerKey": plan.as_object().and_then(|row| read_trimmed_string(row.get("providerKey"))),
+            "continuationOwner": plan.as_object().and_then(|row| read_trimmed_string(row.get("continuationOwner"))),
+            "entryKind": plan.as_object().and_then(|row| read_trimmed_string(row.get("entryKind"))),
+            "requestId": plan.as_object().and_then(|row| read_trimmed_string(row.get("requestId"))),
+        }))
+    }
+
+    fn clear_request(&mut self, payload: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        if let Some(request_id) = payload
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+        {
+            self.detach_request_id(&request_id);
+            self.flush_persistence();
+        }
+        responses_store_ok(Value::Null)
+    }
+
+    fn clear_unresolved(&mut self) -> Value {
+        self.ensure_persistence_loaded();
+        let candidates = self
+            .request_map
+            .values()
+            .map(|entry| {
+                serde_json::json!({
+                    "requestId": responses_store_read_entry_request_id(entry),
+                    "lastResponseId": responses_store_read_entry_last_response_id(entry),
+                    "updatedAt": entry.as_object().and_then(|row| row.get("updatedAt")).cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect::<Vec<_>>();
+        let plan = plan_responses_store_sweep(&serde_json::json!({
+            "mode": "clear_unresolved",
+            "candidates": candidates,
+        }));
+        let detach_request_ids = plan
+            .as_object()
+            .and_then(|row| row.get("detachRequestIds"))
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| read_trimmed_string(Some(item)))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let cleared = detach_request_ids.len();
+        for request_id in detach_request_ids {
+            self.detach_request_id(&request_id);
+        }
+        self.prune_indexes();
+        if cleared > 0 {
+            self.flush_persistence();
+        }
+        responses_store_ok(serde_json::json!({ "cleared": cleared }))
+    }
+
+    fn release_request_payload(&mut self, payload: &Value) -> Value {
+        self.ensure_persistence_loaded();
+        let Some(request_id) = payload
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+        else {
+            return responses_store_ok(Value::Null);
+        };
+        let Some(mut entry) = self.request_map.get(&request_id).cloned() else {
+            return responses_store_ok(Value::Null);
+        };
+        let plan = plan_responses_release_request_payload(&entry);
+        if let Some(row) = entry.as_object_mut() {
+            if let Some(plan_obj) = plan.as_object() {
+                for key in [
+                    "releasedInputPrefix",
+                    "basePayload",
+                    "releasedPendingToolCallIds",
+                    "input",
+                ] {
+                    if let Some(value) = plan_obj.get(key).cloned() {
+                        row.insert(key.to_string(), value);
+                    }
+                }
+            }
+            row.insert(
+                "updatedAt".to_string(),
+                serde_json::json!(responses_store_now_ms()),
+            );
+        }
+        self.request_map.insert(request_id.clone(), entry);
+        self.attach_entry_scopes_by_request_id(&request_id);
+        self.flush_persistence();
+        responses_store_ok(Value::Null)
+    }
+
+    fn finalize_retention(&mut self, payload: &Value) -> Value {
+        let Some(request_id) = payload
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("requestId")))
+        else {
+            return responses_store_ok(Value::Null);
+        };
+        let options = payload
+            .as_object()
+            .and_then(|row| row.get("options"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let Some(entry) = self.request_map.get(&request_id).cloned() else {
+            return responses_store_ok(Value::Null);
+        };
+        let plan = plan_responses_conversation_retention(&entry, &options);
+        match plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")))
+            .as_deref()
+        {
+            Some("clear") => {
+                self.detach_request_id(&request_id);
+                self.flush_persistence();
+            }
+            Some("release") => {
+                let _ =
+                    self.release_request_payload(&serde_json::json!({ "requestId": request_id }));
+            }
+            _ => {}
+        }
+        responses_store_ok(Value::Null)
+    }
+
+    fn rebind_request_id(&mut self, payload: &Value) -> Value {
+        let obj = payload.as_object().cloned().unwrap_or_default();
+        let old_id = read_trimmed_string(obj.get("oldId"));
+        let new_id = read_trimmed_string(obj.get("newId"));
+        let plan = plan_responses_rebind_request_id(&serde_json::json!({
+            "oldId": old_id,
+            "newId": new_id,
+            "oldEntryExists": old_id.as_ref().map(|id| self.request_map.contains_key(id)).unwrap_or(false),
+            "newEntryExists": new_id.as_ref().map(|id| self.request_map.contains_key(id)).unwrap_or(false),
+        }));
+        if plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")))
+            .as_deref()
+            != Some("rebind")
+        {
+            return responses_store_ok(Value::Null);
+        }
+        let Some(old_id) = plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("oldId")))
+        else {
+            return responses_store_ok(Value::Null);
+        };
+        let Some(new_id) = plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("newId")))
+        else {
+            return responses_store_ok(Value::Null);
+        };
+        if let Some(mut entry) = self.request_map.remove(&old_id) {
+            responses_store_set_value(&mut entry, "requestId", Value::String(new_id.clone()));
+            self.request_map.insert(new_id.clone(), entry);
+            for request_id in self.response_index.values_mut() {
+                if request_id == &old_id {
+                    *request_id = new_id.clone();
+                }
+            }
+            for request_id in self.scope_index.values_mut() {
+                if request_id == &old_id {
+                    *request_id = new_id.clone();
+                }
+            }
+        }
+        responses_store_ok(Value::Null)
+    }
+
+    fn scope_restore(&mut self, payload: &Value, mode: &str) -> Value {
+        self.ensure_persistence_loaded();
+        self.prune_expired();
+        let obj = payload.as_object().cloned().unwrap_or_default();
+        let args_payload = obj.get("payload").cloned().unwrap_or(Value::Null);
+        let request_tokens = responses_store_tokens(serde_json::json!({
+            "entryKind": obj.get("entryKind").cloned().unwrap_or(Value::Null),
+            "continuationOwner": obj.get("continuationOwner").cloned().unwrap_or(Value::Null),
+        }));
+        let mut scope = Map::new();
+        for key in [
+            "sessionId",
+            "conversationId",
+            "matchedPort",
+            "routingPolicyGroup",
+        ] {
+            if let Some(value) = obj.get(key).cloned() {
+                scope.insert(key.to_string(), value);
+            }
+        }
+        scope.insert(
+            "entryKind".to_string(),
+            request_tokens
+                .get("entryKind")
+                .cloned()
+                .unwrap_or(Value::String("responses".to_string())),
+        );
+        if let Some(owner) = request_tokens.get("continuationOwner").cloned() {
+            scope.insert("continuationOwner".to_string(), owner);
+        }
+        let scope_keys = responses_store_build_scope_keys(Value::Object(scope), "requested").0;
+        let mut entries_by_scope_key: HashMap<String, Value> = HashMap::new();
+        let mut candidates = Vec::new();
+        for scope_key in scope_keys {
+            let Some(request_id) = self.scope_index.get(&scope_key) else {
+                continue;
+            };
+            let Some(entry) = self.request_map.get(request_id) else {
+                continue;
+            };
+            entries_by_scope_key.insert(scope_key.clone(), entry.clone());
+            let entry_obj = entry.as_object().cloned().unwrap_or_default();
+            let tokens = responses_store_tokens(serde_json::json!({
+                "continuationOwner": entry_obj.get("continuationOwner").cloned().unwrap_or(Value::Null),
+            }));
+            candidates.push(serde_json::json!({
+                "scopeKey": scope_key,
+                "requestId": read_trimmed_string(entry_obj.get("requestId")),
+                "lastResponseId": read_trimmed_string(entry_obj.get("lastResponseId")),
+                "allowContinuation": entry_obj.get("allowContinuation").and_then(Value::as_bool).unwrap_or(false),
+                "continuationOwner": tokens.get("continuationOwner").cloned().unwrap_or(Value::Null),
+            }));
+        }
+        let plan = plan_responses_scope_continuation_match(&serde_json::json!({
+            "mode": mode,
+            "candidates": candidates,
+            "options": {
+                "continuationOwner": request_tokens.get("continuationOwner").cloned().unwrap_or(Value::Null),
+            },
+        }));
+        let expected_action = if mode == "resume" {
+            "restore"
+        } else {
+            "materialize"
+        };
+        if plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("action")))
+            .as_deref()
+            != Some(expected_action)
+        {
+            return responses_store_ok(Value::Null);
+        }
+        let Some(scope_key) = plan
+            .as_object()
+            .and_then(|row| read_trimmed_string(row.get("scopeKey")))
+        else {
+            return responses_store_ok(Value::Null);
+        };
+        let Some(entry) = entries_by_scope_key.get(&scope_key).cloned() else {
+            return responses_store_ok(Value::Null);
+        };
+        let request_id = obj
+            .get("requestId")
+            .and_then(|_| read_trimmed_string(obj.get("requestId")));
+        let restored = if mode == "resume" {
+            restore_responses_continuation_payload(
+                &entry,
+                &args_payload,
+                request_id.as_deref(),
+                Some(&scope_key),
+            )
+        } else {
+            materialize_responses_continuation_payload(
+                &entry,
+                &args_payload,
+                request_id.as_deref(),
+                Some(&scope_key),
+            )
+        };
+        if restored.is_null() {
+            return responses_store_ok(Value::Null);
+        }
+        let meta = responses_store_merge_meta(
+            restored
+                .as_object()
+                .and_then(|row| row.get("meta"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            &entry,
+        );
+        responses_store_ok(serde_json::json!({
+            "payload": restored.as_object().and_then(|row| row.get("payload")).cloned().unwrap_or(Value::Null),
+            "meta": meta,
+        }))
+    }
+}
+
+fn execute_responses_conversation_store_operation(input: &Value) -> Value {
+    let obj = input.as_object().cloned().unwrap_or_default();
+    let operation = read_trimmed_string(obj.get("operation")).unwrap_or_default();
+    let payload = obj.get("payload").cloned().unwrap_or(Value::Null);
+    let mut store = match RESPONSES_CONVERSATION_STORE.lock() {
+        Ok(store) => store,
+        Err(_) => {
+            return responses_store_error(
+                "RESPONSES_STORE_LOCK_POISONED",
+                "Responses conversation store lock is poisoned",
+                "INTERNAL_ERROR",
+                serde_json::json!({
+                    "context": "responses-conversation-store.native",
+                    "reason": "lock_poisoned",
+                }),
+            )
+        }
+    };
+    store.apply_operation_context(input);
+    match operation.as_str() {
+        "capture_request_context" => store.capture_request_context(&payload),
+        "record_response" => store.record_response(&payload),
+        "resume_conversation" => store.resume_conversation(&payload),
+        "lookup_by_response_id" => store.lookup_by_response_id(&payload),
+        "clear_request" => store.clear_request(&payload),
+        "clear_unresolved" => store.clear_unresolved(),
+        "release_request_payload" => store.release_request_payload(&payload),
+        "finalize_retention" => store.finalize_retention(&payload),
+        "rebind_request_id" => store.rebind_request_id(&payload),
+        "resume_latest_by_scope" => store.scope_restore(&payload, "resume"),
+        "materialize_latest_by_scope" => store.scope_restore(&payload, "materialize"),
+        "prune_expired" => {
+            let cleared = store.prune_expired();
+            responses_store_ok(serde_json::json!({ "cleared": cleared }))
+        }
+        "clear_all" => {
+            store.request_map.clear();
+            store.response_index.clear();
+            store.scope_index.clear();
+            store.persistence_loaded = false;
+            responses_store_ok(Value::Null)
+        }
+        "clear_all_and_persist" => {
+            store.ensure_persistence_loaded();
+            store.request_map.clear();
+            store.response_index.clear();
+            store.scope_index.clear();
+            store.flush_persistence();
+            store.persistence_loaded = false;
+            responses_store_ok(Value::Null)
+        }
+        "get_last_prune_at" => responses_store_ok(serde_json::json!(store.last_prune_at)),
+        "debug_stats" => responses_store_ok(store.debug_stats()),
+        "debug_delete_response_index" => {
+            if let Some(response_id) = payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("responseId")))
+            {
+                store.response_index.remove(&response_id);
+            }
+            responses_store_ok(Value::Null)
+        }
+        "debug_has_request" => {
+            let exists = payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("requestId")))
+                .map(|request_id| store.request_map.contains_key(&request_id))
+                .unwrap_or(false);
+            responses_store_ok(Value::Bool(exists))
+        }
+        "debug_has_response" => {
+            let exists = payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("responseId")))
+                .map(|response_id| store.response_index.contains_key(&response_id))
+                .unwrap_or(false);
+            responses_store_ok(Value::Bool(exists))
+        }
+        "debug_has_scope" => {
+            let exists = payload
+                .as_object()
+                .and_then(|row| read_trimmed_string(row.get("scopeKey")))
+                .map(|scope_key| store.scope_index.contains_key(&scope_key))
+                .unwrap_or(false);
+            responses_store_ok(Value::Bool(exists))
+        }
+        _ => responses_store_error(
+            "RESPONSES_STORE_UNSUPPORTED_OPERATION",
+            "Unsupported responses conversation store operation",
+            "INTERNAL_ERROR",
+            serde_json::json!({
+                "context": "responses-conversation-store.native",
+                "reason": "unsupported_operation",
+                "operation": operation,
+            }),
+        ),
+    }
+}
+
 fn strip_meta_value(value: Value) -> Value {
     match value {
         Value::Array(arr) => Value::Array(arr.into_iter().map(strip_meta_value).collect()),
@@ -4315,6 +5826,16 @@ pub fn plan_responses_continuation_meta_json(input_json: String) -> NapiResult<S
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "executeResponsesConversationStoreOperationJson")]
+pub fn execute_responses_conversation_store_operation_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = execute_responses_conversation_store_operation(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi]
 pub fn resume_responses_conversation_payload_json(
     entry_json: String,
@@ -4592,11 +6113,11 @@ pub fn publish_responses_record_plan_json(
 mod tests {
     use super::{
         build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
-        convert_responses_output_to_input_items, materialize_provider_owned_submit_context,
-        materialize_responses_continuation_payload, plan_responses_attach_entry_scopes,
-        plan_responses_capture_pending_cleanup, plan_responses_captured_entry,
-        plan_responses_continuation_lookup_by_response_id, plan_responses_continuation_meta,
-        plan_responses_continuation_request_action,
+        convert_responses_output_to_input_items, execute_responses_conversation_store_operation,
+        materialize_provider_owned_submit_context, materialize_responses_continuation_payload,
+        plan_responses_attach_entry_scopes, plan_responses_capture_pending_cleanup,
+        plan_responses_captured_entry, plan_responses_continuation_lookup_by_response_id,
+        plan_responses_continuation_meta, plan_responses_continuation_request_action,
         plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
         plan_responses_handler_entry, plan_responses_persisted_entry,
@@ -4609,6 +6130,32 @@ mod tests {
         resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
+    use std::sync::{LazyLock, Mutex};
+
+    static RESPONSES_STORE_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn responses_store_operation_for_test(
+        persistence_file_path: &str,
+        operation: &str,
+        payload: Value,
+    ) -> Value {
+        execute_responses_conversation_store_operation(&json!({
+            "operation": operation,
+            "payload": payload,
+            "persistenceFilePath": persistence_file_path,
+        }))
+    }
+
+    fn responses_store_test_persistence_file(label: &str) -> String {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "routecodex-responses-store-{}-{}-{}.json",
+            label,
+            std::process::id(),
+            super::responses_store_now_ms()
+        ));
+        path.to_string_lossy().to_string()
+    }
 
     #[test]
     fn handler_entry_plan_materializes_leading_tool_output_without_ts_tool_scan() {
@@ -7747,5 +9294,147 @@ mod tests {
                 json!("none")
             );
         }
+    }
+
+    #[test]
+    fn responses_store_operation_executes_capture_record_scope_resume_in_rust_state() {
+        let _guard = RESPONSES_STORE_TEST_LOCK
+            .lock()
+            .expect("responses store test lock");
+        let persistence_file_path =
+            responses_store_test_persistence_file("capture-record-scope-resume");
+        let _ = responses_store_operation_for_test(&persistence_file_path, "clear_all", json!({}));
+
+        let captured = responses_store_operation_for_test(
+            &persistence_file_path,
+            "capture_request_context",
+            json!({
+                "requestId": "req_native_store_1",
+                "sessionId": "sess_native_store",
+                "conversationId": "conv_native_store",
+                "providerKey": "provider.key.gpt",
+                "payload": {
+                    "model": "gpt-5.5",
+                    "store": true,
+                    "stream": true
+                },
+                "context": {
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{ "type": "input_text", "text": "hello" }]
+                        }
+                    ]
+                }
+            }),
+        );
+        assert_eq!(captured["ok"], json!(true));
+
+        let recorded = responses_store_operation_for_test(
+            &persistence_file_path,
+            "record_response",
+            json!({
+                "requestId": "req_native_store_1",
+                "sessionId": "sess_native_store",
+                "conversationId": "conv_native_store",
+                "providerKey": "provider.key.gpt",
+                "response": {
+                    "id": "resp_native_store_1",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{ "type": "output_text", "text": "world" }]
+                        }
+                    ]
+                }
+            }),
+        );
+        assert_eq!(recorded["ok"], json!(true));
+
+        let stats =
+            responses_store_operation_for_test(&persistence_file_path, "debug_stats", json!({}));
+        assert_eq!(stats["result"]["requestMapSize"], json!(1));
+        assert_eq!(stats["result"]["responseIndexSize"], json!(1));
+        assert_eq!(stats["result"]["scopeIndexSize"], json!(2));
+
+        let restored = responses_store_operation_for_test(
+            &persistence_file_path,
+            "resume_latest_by_scope",
+            json!({
+                "requestId": "req_native_store_2",
+                "sessionId": "sess_native_store",
+                "conversationId": "conv_native_store",
+                "payload": {
+                    "model": "gpt-5.5",
+                    "stream": true,
+                    "input": [
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{ "type": "input_text", "text": "hello" }]
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{ "type": "output_text", "text": "world" }]
+                        },
+                        {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{ "type": "input_text", "text": "next" }]
+                        }
+                    ]
+                }
+            }),
+        );
+        assert_eq!(restored["ok"], json!(true));
+        assert_eq!(
+            restored["result"]["payload"]["previous_response_id"],
+            json!("resp_native_store_1")
+        );
+        assert_eq!(
+            restored["result"]["payload"]["input"][0]["role"],
+            json!("user")
+        );
+        assert_eq!(
+            restored["result"]["meta"]["scopeKey"],
+            json!("entry:responses|owner:relay|conversation:conv_native_store")
+        );
+
+        let _ = responses_store_operation_for_test(&persistence_file_path, "clear_all", json!({}));
+        let _ = std::fs::remove_file(persistence_file_path);
+    }
+
+    #[test]
+    fn responses_store_operation_missing_record_context_returns_immediate_store_error() {
+        let _guard = RESPONSES_STORE_TEST_LOCK
+            .lock()
+            .expect("responses store test lock");
+        let persistence_file_path = responses_store_test_persistence_file("missing-record-context");
+        let _ = responses_store_operation_for_test(&persistence_file_path, "clear_all", json!({}));
+        let result = responses_store_operation_for_test(
+            &persistence_file_path,
+            "record_response",
+            json!({
+                "requestId": "req_native_missing_context",
+                "response": {
+                    "id": "resp_native_missing_context",
+                    "output": []
+                }
+            }),
+        );
+        assert_eq!(result["ok"], json!(false));
+        assert_eq!(
+            result["error"]["code"],
+            json!("RESPONSES_STORE_MISSING_REQUEST_CONTEXT")
+        );
+        assert_eq!(
+            result["error"]["details"]["reason"],
+            json!("missing_request_context")
+        );
+        let _ = responses_store_operation_for_test(&persistence_file_path, "clear_all", json!({}));
+        let _ = std::fs::remove_file(persistence_file_path);
     }
 }

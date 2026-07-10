@@ -4839,7 +4839,8 @@ describe('hub pipeline stage residue audit', () => {
       'utf8'
     );
 
-    expect(storeSource).toContain('buildConversationScopePlan');
+    expect(storeSource).toContain('executeResponsesConversationStoreOperationJson');
+    expect(storeSource).toContain('executeStoreOperation');
     expect(storeSource).not.toMatch(/entry:\$\{[^`]+owner:\$\{/u);
     expect(storeSource).not.toMatch(/owner:\$\{[^`]+session:\$\{/u);
     expect(storeSource).not.toMatch(/owner:\$\{[^`]+conversation:\$\{/u);
@@ -4862,7 +4863,10 @@ describe('hub pipeline stage residue audit', () => {
       'utf8'
     );
 
-    for (const nativePlan of [
+    expect(storeSource).toContain('executeResponsesConversationStoreOperationJson');
+    expect(storeSource).toContain('executeStoreOperation');
+
+    for (const retiredNativePlan of [
       'buildConversationScopePlan',
       'planPersistedEntry',
       'planStoreTokens',
@@ -4883,7 +4887,7 @@ describe('hub pipeline stage residue audit', () => {
       'planScopeContinuationMatch',
       'planAttachEntryScopes',
     ]) {
-      expect(storeSource).toContain(nativePlan);
+      expect(storeSource).not.toContain(retiredNativePlan);
     }
 
     const forbidden = collectMatches(storeSource, [
@@ -4938,7 +4942,7 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(forbidden).toEqual([]);
-    expect(storeSource).toContain('entry.allowContinuation = continuationPlan.allowContinuation');
+    expect(storeSource).not.toMatch(/\brequestMap\b|\bresponseIndex\b|\bscopeIndex\b/u);
     expect(storeSource).not.toContain('export { store as responsesConversationStore }');
     expect(storeJs).not.toContain('export { store as responsesConversationStore }');
     expect(storeDts).not.toContain('export { store as responsesConversationStore }');
@@ -4959,22 +4963,16 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(retiredNativeStorePath)).toBe(false);
     expect(hostStoreSource).toContain('getRouterHotpathJsonBindingSync');
-    expect(hostStoreSource).toContain('restoreResponsesContinuationPayloadJson');
-    expect(hostStoreSource).toContain('materializeResponsesContinuationPayloadJson');
+    expect(hostStoreSource).toContain('executeResponsesConversationStoreOperationJson');
+    expect(hostStoreSource).not.toContain('restoreResponsesContinuationPayloadJson');
+    expect(hostStoreSource).not.toContain('materializeResponsesContinuationPayloadJson');
     expect(hostStoreSource).not.toContain('conversion/shared/responses-conversation-store-native');
-    const restoreBlock = hostStoreSource.match(
-      /function restoreContinuationPayload\([\s\S]*?function materializeContinuationPayload/u
-    )?.[0] ?? '';
-    const materializeBlock = hostStoreSource.match(
-      /function materializeContinuationPayload\([\s\S]*?function stripStoredContextInputMedia/u
-    )?.[0] ?? '';
-
-    for (const block of [restoreBlock, materializeBlock]) {
-      expect(block).not.toContain('useReleasedPrefixSideChannelOnly');
-      expect(block).not.toContain('const continuationInput');
-      expect(block).not.toMatch(/continuationOwner\s*===\s*['"]direct['"]/u);
-      expect(block).not.toMatch(/Array\.isArray\(entry\.input\)[\s\S]{0,220}releasedInputPrefix/u);
-    }
+    expect(hostStoreSource).not.toContain('function restoreContinuationPayload');
+    expect(hostStoreSource).not.toContain('function materializeContinuationPayload');
+    expect(hostStoreSource).not.toContain('useReleasedPrefixSideChannelOnly');
+    expect(hostStoreSource).not.toContain('const continuationInput');
+    expect(hostStoreSource).not.toMatch(/continuationOwner\s*===\s*['"]direct['"]/u);
+    expect(hostStoreSource).not.toMatch(/Array\.isArray\(entry\.input\)[\s\S]{0,220}releasedInputPrefix/u);
   });
 
   it('responses provider-owned submit context materialization must be native-owned', () => {
