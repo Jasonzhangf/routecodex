@@ -51,7 +51,7 @@ virtualRouter 期望（关键片段）
   - `src/providers/core/runtime/responses-provider.ts`：完整 Responses SSE 透传实现，负责 real-time `/responses` 请求、上游 SSE → Host JSON 的转换，以及快照写入。
   - `src/providers/core/runtime/responses-http-provider.ts`：OpenAI Responses HTTP 直连 Provider（继承 `ChatHttpProvider`，统一通过 provider 层发送请求）。
 - LLMSwitch：`llmswitch-responses-passthrough`
-  - 逻辑位于 `sharedmodule/llmswitch-core`，Host 仅通过 `src/modules/llmswitch/bridge.ts` 间接调用，保持“llmswitch-core owns routing/tools”的约束。
+  - 逻辑位于 `sharedmodule/llmswitch-core` Rust/NAPI 真源，Host 仅通过 `src/modules/llmswitch/bridge/*.ts` 已批准薄壳间接调用，保持“llmswitch-core owns routing/tools”的约束。
 - 模块注册
   - 由 llmswitch-core 的 pipeline registry 统一管理，Host 不再手动注册 Provider/LLMSwitch 组合，避免与 `bootstrapVirtualRouterConfig` 产物冲突。
 - 装配器消费

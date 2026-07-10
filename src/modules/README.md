@@ -14,7 +14,7 @@ RouteCodex Host 模块系统只负责调用共享的 `llmswitch-core` Hub Pipeli
 - 聚焦配置解析、路径解析、运行时元数据注入。
 - 提供调试/快照工具 (`src/debug/*`) 和 CLI 辅助能力。
 - 负责 HTTP server 入口与 Provider runtime 生命周期管理。
-- 通过 `src/modules/llmswitch/bridge.ts` 与 Hub Pipeline 通信。
+- 通过 `src/modules/llmswitch/bridge/*.ts` 的已批准薄壳调用 Rust/NAPI Hub Pipeline 真源。
 
 **Don't**
 - 不实现 Host 自己的工具治理或转换流水线。
@@ -31,20 +31,19 @@ src/modules/
 ```
 
 重点文件：
-- `llmswitch/bridge.ts`：唯一调用 Hub Pipeline 的入口。
+- `llmswitch/bridge/*.ts`：Host IO / native binding / routing / snapshot / continuation 薄壳。
 - `llmswitch/core-loader.ts`：负责加载 `rcc-llmswitch-core`（symlink 或 npm 版本）。
 - `config/pipeline-config-path.ts`：解析 `LLMSWITCH_PIPELINE_CONFIG` 等路径配置。
 
 ## Hub Pipeline 接入示例
 ```ts
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader';
-import { bootstrapVirtualRouterConfig, createHubPipeline } from '../modules/llmswitch/bridge';
+import { bootstrapVirtualRouterConfig, createHubPipelineNative } from '../modules/llmswitch/bridge/routing-integrations';
 
 const config = await loadRouteCodexConfig();
 const { virtualRouter, targetRuntime } = await bootstrapVirtualRouterConfig(config.virtualrouter);
 
-const hubPipeline = await createHubPipeline({ virtualRouter, targetRuntime });
-const response = await hubPipeline.handleChat(request);
+const hubPipelineHandle = createHubPipelineNative({ virtualRouter, targetRuntime });
 ```
 
 ## 调试与快照

@@ -753,3 +753,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/http-server/hub-policy-injection.spec.ts` no longer registers root `src/modules/llmswitch/bridge.ts` or `bridge/index.ts` mocks.
 - The spec keeps only the directly used `routing-integrations`, `runtime-integrations`, and `hub-pipeline-handle` mocks, deleting the unused broad root bridge mock surface.
 - Exact file scan for root bridge paths and legacy loader helpers in the spec returns zero matches.
+
+### 2026-07-11 root bridge documentation references narrowed
+
+- `src/modules/README.md`, `docs/responses-generic-provider.md`, `sharedmodule/llmswitch-core/README.md`, and `sharedmodule/llmswitch-core/docs/server-sse-refactor-plan.md` no longer describe `src/modules/llmswitch/bridge.ts` or `dist/modules/llmswitch/bridge.js` as the active Hub Pipeline entrypoint.
+- The docs now describe the current boundary: Rust/NAPI owns Hub Pipeline semantics, and Host code may only use approved `src/modules/llmswitch/bridge/*.ts` thin IO/native-binding shells.
+- Exact file scan for root bridge paths and legacy loader helpers in the touched docs returns zero matches.
+- Verification passed: `git diff --check`, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, and `npm run build:base`.

@@ -2,8 +2,8 @@
 
 ## Phase 1: Bridge & Server Initialization
 
-1. Extend `src/modules/llmswitch/bridge.ts`
-   - Add helpers (e.g., `registerPipelineConfig`, `registerCompatibilityProfiles`) that call llmswitch-core `PipelineConfigManager` and compatibility registry.
+1. Extend the approved `src/modules/llmswitch/bridge/*.ts` Host thin shells only when a Rust/NAPI-owned entrypoint requires wiring.
+   - Add helpers only as native-binding or IO wrappers; do not restore root bridge compatibility helpers or TS semantic owners.
    - Accept `LLMSWITCH_PIPELINE_CONFIG` env override so the core can reload the assembler document.
 
 2. Update startup sequence (`src/index.ts`, `src/server-v2/core/route-codex-server-v2.ts`)

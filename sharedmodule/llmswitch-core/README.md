@@ -61,7 +61,7 @@
 
 ## Conversion V3 节点架构与工具治理约束
 
-- **唯一入口**：RouteCodex 主包只能通过 `src/modules/llmswitch/bridge.ts` → `dist/bridge/routecodex-adapter.js` 调用 conversion v3；禁止旁路 import。
+- **唯一入口**：RouteCodex 主包只能通过已批准的 `src/modules/llmswitch/bridge/*.ts` Host 薄壳调用 Rust/NAPI 真源；禁止旁路 import 到旧 TS shell、dist conversion facade 或 root bridge 兼容面。
 - **配置驱动管线**：`config/llmswitch/pipeline-config.json`（或通过 `LLMSWITCH_PIPELINE_CONFIG` 指定）声明每条入/出站线路的节点序列：`SSE Input → Provider Input → Chat Process → Provider Output → SSE Output`，Responses/Anthropic 线路结构一致。
 - **节点职责**
   - `nodes/sse/*`：入站 SSE 正规化、出站 SSE 序列化以及纯透传，占位但不改写业务数据。
