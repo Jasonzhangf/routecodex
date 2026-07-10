@@ -53,7 +53,8 @@ async function main() {
 
   const importCore = async (relPath) => import(pathToFileURL(path.join(localBase, relPath)).href);
 
-  const bridgeMod = await importCore(path.join('conversion', 'responses', 'responses-openai-bridge.js'));
+  const nativeExportsPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
+  const { buildResponsesPayloadFromChatNative } = await import(pathToFileURL(nativeExportsPath).href);
   const sseMod = await importCore(path.join('sse', 'index.js'));
 
   const requestId = (() => {
@@ -65,7 +66,7 @@ async function main() {
   // Unwrap snapshot → Chat JSON
   const chatLike = pickChatPayload(raw);
   // Map to Responses JSON (non-stream)
-  const mapped = bridgeMod.buildResponsesPayloadFromChat(chatLike, undefined);
+  const mapped = buildResponsesPayloadFromChatNative(chatLike, undefined);
 
   // Summarize mapping
   const outputText = (mapped && typeof mapped === 'object') ? (mapped.output_text || '') : '';
