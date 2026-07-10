@@ -43,7 +43,7 @@ import {
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
   evaluateResponsesHostPolicyWithNative,
   planResponsesPayloadFromChatCloseoutWithNative,
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+} from './helpers/resp-semantics-direct-native.js';
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,

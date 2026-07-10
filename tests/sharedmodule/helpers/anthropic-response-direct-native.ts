@@ -1,7 +1,7 @@
 import {
   buildAnthropicResponseFromChatFullWithNative,
   buildOpenAIChatFromAnthropicMessageFullWithNative,
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+} from './helpers/resp-semantics-direct-native.js';
 
 type JsonObject = Record<string, unknown>;
 type ToolAliasMap = Record<string, string>;

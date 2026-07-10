@@ -2040,3 +2040,11 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-snapshot-hooks.ts` is physically deleted from production source. Do not restore it as a production snapshot native wrapper.
 - Snapshot native echo tests should use test-only `tests/sharedmodule/helpers/snapshot-hooks-direct-native.ts`; runtime snapshot behavior remains Rust/NAPI truth or host bridge owner, not sharedmodule production TS shell.
 - Current shell audit after this deletion is `prodTsShellCount=16`, `shellsWithProdImporters=13`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.
+
+# 2026-07-10: Hub response semantics production wrappers are retired
+
+- `native-hub-pipeline-resp-semantics-inbound-tools.ts`, `native-hub-pipeline-resp-semantics-outbound-tools.ts`, and `native-hub-pipeline-resp-semantics.ts` are physically deleted from `sharedmodule/llmswitch-core/src/native/router-hotpath/`. Do not restore them as production wrapper shells or dist subpath targets.
+- Tests that need direct response semantics NAPI glue must use `tests/sharedmodule/helpers/resp-semantics-direct-native.ts`. Production callers should use Rust/host native exports, especially `src/modules/llmswitch/bridge/provider-response-converter-host.ts` for provider response materialization and SSE descriptor IO glue.
+- Scripts that need Anthropic response conversion should call direct NAPI helpers in `scripts/helpers/anthropic-codec-direct-native.mjs`; do not depend on `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js`.
+- The retired coverage script `sharedmodule/llmswitch-core/scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs` must stay deleted because it requires the removed dist wrapper. Response semantics coverage now comes from Rust tests, residue gates, focused direct-native helper tests, and host native bridge tests.
+- Current shell audit after this deletion is `prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.

@@ -3,7 +3,7 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { buildResponsesPayloadFromChatWithNative } from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../sharedmodule/helpers/resp-semantics-direct-native.js';
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {

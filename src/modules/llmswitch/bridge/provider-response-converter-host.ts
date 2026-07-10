@@ -205,12 +205,17 @@ function ensureRuntimeMetadata(carrier: Record<string, unknown>): JsonObject {
 function buildProviderSseStreamReadErrorDescriptorWithNative(
   input: Parameters<NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>>[0]
 ): ReturnType<NonNullable<NativeRespSemanticsModule['buildProviderSseStreamReadErrorDescriptorWithNative']>> {
+  // feature_id: hub.response_provider_sse_materialization
+  // canonical_builder: build_provider_sse_stream_read_error_descriptor
   return callNativeJsonObject('buildProviderSseStreamReadErrorDescriptorJson', input);
 }
 
 function materializeProviderResponseSsePayloadWithNative(
   input: Parameters<NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>>[0]
 ): ReturnType<NonNullable<NativeRespSemanticsModule['materializeProviderResponseSsePayloadWithNative']>> {
+  // feature_id: sse.responses_decode_projection
+  // canonical_builder: build_responses_json_from_sse_json
+  // canonical_builder: materialize_provider_response_sse_payload
   return callNativeJsonObject('materializeProviderResponseSsePayloadJson', input);
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import { buildOpenAIChatFromAnthropicMessageDirectNative as buildOpenAIChatFromAnthropicMessage } from '../../../../../../tests/sharedmodule/helpers/anthropic-response-direct-native.js';
-import { buildResponsesPayloadFromChatWithNative } from '../../../../native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../../../../../tests/sharedmodule/helpers/resp-semantics-direct-native.js';
 
 describe('response-runtime anthropic hidden reasoning', () => {
   it('maps redacted_thinking into responses reasoning encrypted_content', () => {

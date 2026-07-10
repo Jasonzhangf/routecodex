@@ -2,8 +2,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { pathToFileURL } from 'node:url';
-import { buildOpenAIChatFromAnthropicFull } from '../helpers/anthropic-codec-direct-native.mjs';
+import {
+  buildAnthropicResponseFromChatResponse,
+  buildOpenAIChatFromAnthropicFull,
+  buildOpenAIChatFromAnthropicMessageResponse
+} from '../helpers/anthropic-codec-direct-native.mjs';
 
 const SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'anthropic-messages');
 const RESPONSE_SUFFIX = '_provider-response.json';
@@ -57,34 +60,9 @@ function shallowHash(value) {
 }
 
 async function loadCoreHelpers() {
-  const distRoot = path.resolve('sharedmodule', 'llmswitch-core', 'dist');
-  const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
-  if (!fs.existsSync(nativeRespPath)) {
-    throw new Error('sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js 不存在，请先运行 npm run build:dev');
-  }
-  const nativeResp = await import(pathToFileURL(nativeRespPath).href);
-  if (
-    typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
-    typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
-  ) {
-    throw new Error('llmswitch-core 缺少 native anthropic response 构造辅助函数');
-  }
   return {
-    buildAnthropicResponseFromChat: (chatResponse, options) => {
-      const output = nativeResp.buildAnthropicResponseFromChatFullWithNative({
-        chat_response: JSON.stringify(chatResponse),
-        alias_map: options?.aliasMap ? JSON.stringify(options.aliasMap) : undefined,
-      });
-      const parsed = JSON.parse(output);
-      return JSON.parse(parsed.result);
-    },
-    buildOpenAIChatFromAnthropicMessage: (payload) => {
-      const output = nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative({
-        payload: JSON.stringify(payload),
-      });
-      const parsed = JSON.parse(output);
-      return JSON.parse(parsed.result);
-    },
+    buildAnthropicResponseFromChat: buildAnthropicResponseFromChatResponse,
+    buildOpenAIChatFromAnthropicMessage: buildOpenAIChatFromAnthropicMessageResponse,
     buildOpenAIChatFromAnthropicFull
   };
 }

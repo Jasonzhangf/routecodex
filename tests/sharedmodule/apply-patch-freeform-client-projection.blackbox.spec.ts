@@ -59,7 +59,7 @@ function runNativeProjection(payload: unknown, toolsRaw: unknown[], metadata: un
     const { projectResponsesClientPayloadForClientWithNative } = await import(
       ${JSON.stringify(
         new URL(
-          '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts',
+          './helpers/resp-semantics-direct-native.ts',
           import.meta.url,
         ).href,
       )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
-import { materializeProviderResponseSsePayloadWithNative } from '../../src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.js';
-import { buildProviderSseStreamReadErrorDescriptorWithNative } from '../../src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { materializeProviderResponseSsePayloadWithNative } from '../../../../tests/sharedmodule/helpers/resp-semantics-direct-native.js';
+import { buildProviderSseStreamReadErrorDescriptorWithNative } from '../../../../tests/sharedmodule/helpers/resp-semantics-direct-native.js';
 
 describe('Response Semantics Native Echo Tests (Layer 2)', () => {
   describe('materializeProviderResponseSsePayloadWithNative', () => {

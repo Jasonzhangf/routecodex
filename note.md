@@ -28509,3 +28509,15 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Deleted production `native-snapshot-hooks.ts`; snapshot native echo tests now use test-only direct native helper `tests/sharedmodule/helpers/snapshot-hooks-direct-native.ts`.
 - Residue audit locks the production wrapper absent; no production source imports the retired path.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; focused snapshot/residue Jest 203/203; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=16`, `shellsWithProdImporters=13`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=16`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `npm run build:base`; old snapshot path scan only residue lock; targeted `git diff --check`.
+
+# 2026-07-10: Hub response semantics production wrappers retired
+
+- Scope: completed `docs/goals/retire-hub-resp-semantics-ts-wrappers-plan.md`.
+- Deleted production response wrapper shells:
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts`
+  - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts`
+- Test-only direct native glue moved to `tests/sharedmodule/helpers/resp-semantics-direct-native.ts`; production response materialization/SSE descriptor anchors now use Rust NAPI through `src/modules/llmswitch/bridge/provider-response-converter-host.ts`.
+- Removed retired `coverage-native-hub-pipeline-resp-semantics.mjs` from llmswitch-core module/matrix gates because it required the deleted dist wrapper.
+- Updated Anthropic replay scripts to call `scripts/helpers/anthropic-codec-direct-native.mjs` direct NAPI helpers instead of `dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js`.
+- Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `coreModuleSubpathRefs=3`); `npm run verify:llmswitch-rustification-audit` (`prodTsFileCount=13`, `nonNativeFileCount=0`); `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-fallback-denylist`; residue Jest 203/203; resp parser focused Jest 2/2; related script/test slice 10/10; `npm run build:base`; active stale path scan only residue locks/test helper names; `git diff --check`.

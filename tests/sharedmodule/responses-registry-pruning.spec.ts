@@ -5,7 +5,7 @@ import {
   consumeResponsesPayloadSnapshotWithNative as consumeResponsesPayloadSnapshot,
   registerResponsesPassthroughWithNative as registerResponsesPassthrough,
   registerResponsesPayloadSnapshotWithNative as registerResponsesPayloadSnapshot
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+} from './helpers/resp-semantics-direct-native.js';
 
 describe('responses registry pruning', () => {
   it('registers and consumes payload snapshots through native registry', () => {

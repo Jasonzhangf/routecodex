@@ -112,3 +112,20 @@ export function convertAnthropicResponse(payload, context = {}) {
     entryEndpoint: context.entryEndpoint ?? context.endpoint,
   });
 }
+
+export function buildOpenAIChatFromAnthropicMessageResponse(payload) {
+  const output = nativeFn('buildOpenaiChatResponseFromAnthropicMessageJson')(
+    JSON.stringify(payload ?? {}),
+    undefined,
+  );
+  return parseNativeRecord(output, 'buildOpenaiChatResponseFromAnthropicMessageJson');
+}
+
+export function buildAnthropicResponseFromChatResponse(chatResponse, options = {}) {
+  const output = nativeFn('buildAnthropicResponseFromChatFullJson')(JSON.stringify({
+    chat_response: JSON.stringify(chatResponse ?? {}),
+    alias_map: options?.aliasMap ? JSON.stringify(options.aliasMap) : undefined,
+  }));
+  const parsed = parseNativeRecord(output, 'buildAnthropicResponseFromChatFullJson');
+  return JSON.parse(parsed.result);
+}

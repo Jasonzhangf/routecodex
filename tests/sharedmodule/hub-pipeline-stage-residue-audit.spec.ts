@@ -902,22 +902,11 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-reasoning-registry.ts',
     );
     expect(fs.existsSync(retiredPath)).toBe(false);
-    const filePath = path.join(
+    const retiredRespWrapperPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'optional-native-call-helper', pattern: /function\s+callNative\s*\(/ },
-      { label: 'native-disabled-silent-undefined', pattern: /isNativeDisabledByEnv\(\)\)\s+return undefined/ },
-      { label: 'missing-native-silent-undefined', pattern: /if\s*\(!fn\)\s+return undefined/ },
-      { label: 'native-throw-silent-undefined', pattern: /catch\s*\{\s*return undefined;\s*\}/ },
-      { label: 'bad-json-silent-undefined', pattern: /catch\s*\{\s*return undefined;\s*\}/ },
-    ]);
-
-    expect(source).toContain('callNativeRequired');
-    expect(source).toContain('failNative');
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(retiredRespWrapperPath)).toBe(false);
   });
 
   it('runtime source outside response-mappers must not import response mapper residue', () => {
@@ -3048,14 +3037,23 @@ describe('hub pipeline stage residue audit', () => {
       repoRoot,
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-parsers.ts'
     );
+    const inboundSplitPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts'
+    );
+    const outboundSplitPath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts'
+    );
+    const aggregatePath = path.join(
+      repoRoot,
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts'
+    );
     const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts'),
+      path.join(repoRoot, 'tests/sharedmodule/helpers/resp-semantics-direct-native.ts'),
       'utf8'
     );
-    const outboundSource = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts'),
-      'utf8'
-    );
+    const outboundSource = source;
     const forbiddenPatterns = [
       { label: 'imports deleted parser facade', pattern: /native-hub-pipeline-resp-semantics-parsers/u },
       { label: 'alias map key/value normalization', pattern: /Object\.entries\([\s\S]{0,240}trimmedKey/u },
@@ -3073,6 +3071,9 @@ describe('hub pipeline stage residue audit', () => {
       .map(({ label }) => label);
 
     expect(fs.existsSync(parserPath)).toBe(false);
+    expect(fs.existsSync(inboundSplitPath)).toBe(false);
+    expect(fs.existsSync(outboundSplitPath)).toBe(false);
+    expect(fs.existsSync(aggregatePath)).toBe(false);
     expect(findings).toEqual([]);
   });
 
@@ -4538,8 +4539,11 @@ describe('hub pipeline stage residue audit', () => {
       const rootPath = path.join(repoRoot, root);
       if (!fs.existsSync(rootPath)) return [];
       return walkFiles(rootPath, ['.ts', '.js', '.mjs']).flatMap((filePath) => {
-        const source = fs.readFileSync(filePath, 'utf8');
         const relativePath = path.relative(repoRoot, filePath);
+        if (relativePath === 'tests/sharedmodule/helpers/resp-semantics-direct-native.ts') {
+          return [];
+        }
+        const source = fs.readFileSync(filePath, 'utf8');
         return forbiddenPatterns
           .filter(({ pattern }) => pattern.test(source))
           .map(({ label }) => `${relativePath}:${label}`);

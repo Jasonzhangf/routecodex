@@ -29,7 +29,7 @@ const mockBridgeWithStoplessStateStubs = async () => {
     injectMcpToolsForResponsesJson: jest.fn(async () => []),
     deriveFinishReasonNative: jest.fn(() => undefined),
     importCoreDist: jest.fn(async (subpath?: string) => {
-      if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+      if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
         return {
           normalizeResponsesToolCallArgumentsForClientWithNative: () => ({})
         };

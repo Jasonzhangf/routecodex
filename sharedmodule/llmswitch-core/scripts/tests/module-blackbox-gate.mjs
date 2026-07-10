@@ -12,8 +12,7 @@ const MODULE_COMMANDS = {
   'hub-pipeline': [
     ['node', ['scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs']],
     ['node', ['scripts/tests/coverage-hub-standardized-to-chat-native.mjs']],
-    ['node', ['scripts/tests/coverage-hub-req-outbound-compat.mjs']],
-    ['node', ['scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs']]
+    ['node', ['scripts/tests/coverage-hub-req-outbound-compat.mjs']]
   ]
 };
 

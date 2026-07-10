@@ -250,7 +250,7 @@ describe('HTTP Responses SSE projection timeout', () => {
     const bridgeMock = () =>
       createBridgeHttpServerMock({
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return new Promise(() => {});
           }
           return {};
@@ -381,7 +381,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_tool_close_guard'),
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -517,7 +517,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_probe_from_frame'),
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -598,7 +598,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -687,7 +687,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -776,7 +776,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -868,7 +868,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -957,7 +957,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -1068,7 +1068,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
           buildStandardToolCallTerminalFrames(probe, 'resp_direct_passthrough_probe'),
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,
@@ -1207,7 +1207,7 @@ describe('HTTP Responses SSE projection timeout', () => {
         ),
         buildResponsesTerminalSseFramesFromProbeNative: () => [],
         importCoreDist: async (subpath?: string) => {
-          if (subpath === 'native/router-hotpath/native-hub-pipeline-resp-semantics') {
+          if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
             return {
               projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
                 emit: true,

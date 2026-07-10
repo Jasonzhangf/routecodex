@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { projectResponsesClientPayloadForClientWithNative } from '../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js';
+import { projectResponsesClientPayloadForClientWithNative } from '../../sharedmodule/helpers/resp-semantics-direct-native.js';
 import { buildSseFramesFromJsonDirectNative } from '../../sharedmodule/helpers/sse-direct-native.js';
 
 describe('Responses client tool SSE contract', () => {

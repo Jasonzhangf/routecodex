@@ -2033,8 +2033,8 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/server/handlers/handler-response-utils.ts
     forbidden_paths:
       - src/providers
@@ -4003,7 +4003,7 @@ owners:
     canonical_builders:
       - build_responses_json_from_sse_json
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
       - src/providers/core/runtime/responses-provider.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
@@ -4236,7 +4236,7 @@ owners:
       - projectSseErrorEventPayload
     allowed_paths:
       - src/server/utils/http-error-mapper.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - src/server/handlers/handler-utils.ts
       - src/error-handling/route-error-hub.ts

@@ -187,12 +187,6 @@ async function main() {
   );
   results.push(
     await run(
-      'matrix:native-hub-pipeline-resp-semantics',
-      'scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs'
-    )
-  );
-  results.push(
-    await run(
       'matrix:coverage-hub-resp-process-stage2-finalize',
       'scripts/tests/coverage-hub-resp-process-stage2-finalize.mjs'
     )

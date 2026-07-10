@@ -179,7 +179,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       normalizeAliasMapWithNative: (candidate: unknown) => Record<string, string> | undefined;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.js',
+      './helpers/resp-semantics-direct-native.js',
       'normalizeAliasMapJson'
     );
 
@@ -195,7 +195,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       evaluateResponsesHostPolicyWithNative: (context: unknown, targetProtocol?: string) => unknown;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.js',
+      './helpers/resp-semantics-direct-native.js',
       'evaluateResponsesHostPolicyJson'
     );
 

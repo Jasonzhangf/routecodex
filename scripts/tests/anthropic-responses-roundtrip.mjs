@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import {
+  buildAnthropicResponseFromChatResponse,
+  buildOpenAIChatFromAnthropicMessageResponse
+} from '../helpers/anthropic-codec-direct-native.mjs';
 
 const CODEX_ROOT = path.join(os.homedir(), '.routecodex', 'codex-samples');
 const SEARCH_PATHS = [
@@ -98,13 +102,11 @@ function loadCodexSample() {
 
 async function loadConverters() {
   const distRoot = path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
-  const nativeRespPath = path.join(distRoot, 'native', 'router-hotpath', 'native-hub-pipeline-resp-semantics.js');
   const nativeSharedPath = path.join(distRoot, 'native', 'router-hotpath', 'native-shared-conversion-semantics.js');
   const hostNativeExportsPath = path.resolve(process.cwd(), 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
-  if (!fs.existsSync(nativeRespPath) || !fs.existsSync(nativeSharedPath) || !fs.existsSync(hostNativeExportsPath)) {
+  if (!fs.existsSync(nativeSharedPath) || !fs.existsSync(hostNativeExportsPath)) {
     throw new Error('llmswitch-core dist missing. 请先在 sharedmodule/llmswitch-core 运行 npm run build');
   }
-  const nativeResp = await import(pathToFileURL(nativeRespPath).href);
   const nativeShared = await import(pathToFileURL(nativeSharedPath).href);
   const hostNativeExports = await import(pathToFileURL(hostNativeExportsPath).href);
   const buildChatResponseFromResponses = (payload) => {
@@ -117,30 +119,15 @@ async function loadConverters() {
   const buildResponsesPayloadFromChat = hostNativeExports.buildResponsesPayloadFromChatNative;
   if (
     typeof buildResponsesPayloadFromChat !== 'function' ||
-    typeof nativeShared.buildChatResponseFromResponsesFullWithNative !== 'function' ||
-    typeof nativeResp.buildAnthropicResponseFromChatFullWithNative !== 'function' ||
-    typeof nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function'
+    typeof nativeShared.buildChatResponseFromResponsesFullWithNative !== 'function'
   ) {
     throw new Error('conversion helpers missing. 请确认 sharedmodule/llmswitch-core 构建完成');
   }
   return {
     buildChatResponseFromResponses,
     buildResponsesPayloadFromChat,
-    buildAnthropicResponseFromChat: (chatResponse, options) => {
-      const output = nativeResp.buildAnthropicResponseFromChatFullWithNative({
-        chat_response: JSON.stringify(chatResponse),
-        alias_map: options?.aliasMap ? JSON.stringify(options.aliasMap) : undefined,
-      });
-      const parsed = JSON.parse(output);
-      return JSON.parse(parsed.result);
-    },
-    buildOpenAIChatFromAnthropicMessage: (payload) => {
-      const output = nativeResp.buildOpenAIChatFromAnthropicMessageFullWithNative({
-        payload: JSON.stringify(payload),
-      });
-      const parsed = JSON.parse(output);
-      return JSON.parse(parsed.result);
-    }
+    buildAnthropicResponseFromChat: buildAnthropicResponseFromChatResponse,
+    buildOpenAIChatFromAnthropicMessage: buildOpenAIChatFromAnthropicMessageResponse
   };
 }
 

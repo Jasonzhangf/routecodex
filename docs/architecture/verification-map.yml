@@ -1172,7 +1172,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-outbound-tools.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
@@ -2390,7 +2390,7 @@ verification:
   - feature_id: sse.responses_decode_projection
     change_risk: high
     unit:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-inbound-tools.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
     contract:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
