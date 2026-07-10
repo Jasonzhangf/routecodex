@@ -473,7 +473,7 @@ flowchart LR
 
 ## vr.hit_log_projection.mainline
 
-Virtual Router hit-log diagnostics: host effects collect the route decision context, TS facade calls Rust hit-log projection, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.
+Virtual Router hit-log diagnostics: host effects collect the route decision context, runtime host calls Rust/NAPI hit-log projection directly, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.
 
 Entry contract: `VrHitLog01RouteDecision` via `docs/architecture/wiki/virtual-router-ownership-map.md`
 
@@ -497,9 +497,9 @@ flowchart LR
 
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
-| vrh-01 | `VrHitLog01RouteDecision -> VrHitLog02NativeProjection` | anchored | `emitVirtualRouterHitLog -> createVirtualRouterHitRecord` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
-| vrh-02 | `VrHitLog02NativeProjection -> VrHitLog03HostEmission` | anchored | `formatVirtualRouterHit -> format_virtual_router_hit_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
-| vrh-03 | `VrHitLog02NativeProjection -> VrHitLog04TelemetryProjection` | anchored | `toVirtualRouterHitEvent -> to_virtual_router_hit_event_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+| vrh-01 | `VrHitLog01RouteDecision -> VrHitLog02NativeProjection` | anchored | `emitVirtualRouterHitLog -> create_virtual_router_hit_record_json_bridge` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+| vrh-02 | `VrHitLog02NativeProjection -> VrHitLog03HostEmission` | anchored | `format_virtual_router_hit_json_bridge -> format_virtual_router_hit_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
+| vrh-03 | `VrHitLog02NativeProjection -> VrHitLog04TelemetryProjection` | anchored | `to_virtual_router_hit_event_json_bridge -> to_virtual_router_hit_event_json` |  | `vr.hit_log_projection`<br/>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned |
 
 ## runtime.lifecycle.mainline
 

@@ -6,7 +6,7 @@ import {
   resolveSessionColor,
   resolveSessionLogColorKey,
   toVirtualRouterHitEvent
-} from '../../sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.js';
+} from './helpers/virtual-router-hit-log-direct-native.js';
 import {
   createVirtualRouterRouteHostEffects
 } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';

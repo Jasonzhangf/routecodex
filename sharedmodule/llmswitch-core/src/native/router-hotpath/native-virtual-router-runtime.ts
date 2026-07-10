@@ -29,13 +29,6 @@ import {
   VIRTUAL_ROUTER_ERROR_PREFIX
 } from './native-router-hotpath-loader.js';
 import { callNativeJson } from './native-router-hotpath.js';
-import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-import {
-  createVirtualRouterHitRecord,
-  formatVirtualRouterHit,
-  resolveSessionLogColorKey,
-  type VirtualRouterHitLogConfig
-} from '../../runtime/virtual-router-hit-log.js';
 
 export type {
   ClassificationResult,
@@ -75,6 +68,20 @@ type RoutingInstruction =
     };
 
 type StopMessageResolvedNativeParseOutput = RoutingInstruction;
+
+export type VirtualRouterHitLogOmitField =
+  | 'requestId'
+  | 'sessionId'
+  | 'model'
+  | 'reason'
+  | 'continuation'
+  | 'requestTokens'
+  | 'selectionPenalty'
+  | 'stopMessage';
+
+export type VirtualRouterHitLogConfig = {
+  omit?: VirtualRouterHitLogOmitField[];
+};
 
 export type VirtualRouterRouteHostEffects = {
   finalize: (
@@ -120,12 +127,11 @@ export interface NativeVirtualRouterEngineProxy {
 type ProxyConstructor = new (engine?: object) => NativeVirtualRouterEngineProxy;
 
 function resolveProxyConstructor(): ProxyConstructor {
-  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
-  const ctor = binding?.VirtualRouterEngineProxy;
+  const ctor = readNativeFunction('VirtualRouterEngineProxy');
   if (typeof ctor !== 'function') {
     return failNativeRequired<ProxyConstructor>('VirtualRouterEngineProxy', 'missing native proxy constructor');
   }
-  return ctor as ProxyConstructor;
+  return ctor as unknown as ProxyConstructor;
 }
 
 export function createVirtualRouterEngineProxy(engine?: object): NativeVirtualRouterEngineProxy {
@@ -653,7 +659,7 @@ export function emitVirtualRouterHitLog(result: {
 }): void {
   const providerKey = result.decision.providerKey || result.target.providerKey;
   const stopState = options?.stopState ?? null;
-  const record = createVirtualRouterHitRecord({
+  const record = createVirtualRouterHitRecordNative({
     requestId: options?.requestId,
     sessionId: options?.sessionId,
     routeName: result.decision.routeName,
@@ -672,7 +678,7 @@ export function emitVirtualRouterHitLog(result: {
         }
       : undefined
   });
-  const line = formatVirtualRouterHit(record, options?.hitLog);
+  const line = formatVirtualRouterHitNative(record, options?.hitLog);
   const forcedStopStatusLabel = options?.forceStopStatusLabel && !stopState
     ? formatStopMessageStatusLabel(null, options?.stopScope, true)
     : '';
@@ -696,7 +702,77 @@ function resolveVirtualRouterLogRequestId(metadata: RouterMetadataInput): string
 }
 
 function resolveVirtualRouterLogSessionId(metadata: RouterMetadataInput): string | undefined {
-  return resolveSessionLogColorKey(metadata as unknown as Record<string, unknown>);
+  return resolveSessionLogColorKeyNative(metadata as unknown as Record<string, unknown>);
+}
+
+function createVirtualRouterHitRecordNative(input: Record<string, unknown>): Record<string, unknown> {
+  const capability = 'createVirtualRouterHitRecordJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<Record<string, unknown>>(capability);
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return failNativeRequired<Record<string, unknown>>(capability, 'json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string') {
+      return failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return failNativeRequired<Record<string, unknown>>(capability, 'invalid payload');
+    }
+    return parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<Record<string, unknown>>(capability, reason);
+  }
+}
+
+function formatVirtualRouterHitNative(record: Record<string, unknown>, config?: VirtualRouterHitLogConfig): string {
+  const capability = 'formatVirtualRouterHitJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<string>(capability);
+  const recordJson = safeStringify(record);
+  const configJson = config ? safeStringify(config) : undefined;
+  if (!recordJson || (config && !configJson)) {
+    return failNativeRequired<string>(capability, 'json stringify failed');
+  }
+  try {
+    const raw = fn(recordJson, configJson);
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return failNativeRequired<string>(capability, 'invalid payload');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string>(capability, reason);
+  }
+}
+
+function resolveSessionLogColorKeyNative(metadata: Record<string, unknown>): string | undefined {
+  const capability = 'resolveSessionLogColorKeyJson';
+  const fn = readNativeFunction(capability);
+  if (!fn) return failNativeRequired<string | undefined>(capability);
+  const metadataJson = safeStringify(metadata ?? null);
+  if (!metadataJson) {
+    return failNativeRequired<string | undefined>(capability, 'json stringify failed');
+  }
+  try {
+    const raw = fn(metadataJson);
+    if (typeof raw !== 'string') {
+      return failNativeRequired<string | undefined>(capability, 'invalid payload');
+    }
+    const parsed = parseJson(raw);
+    if (typeof parsed !== 'string') {
+      return undefined;
+    }
+    const trimmed = parsed.trim();
+    return trimmed || undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return failNativeRequired<string | undefined>(capability, reason);
+  }
 }
 
 function normalizeNativeVirtualRouterError(error: unknown): Error {

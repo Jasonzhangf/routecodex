@@ -216,6 +216,8 @@ type NativeRouterHotpathJsonBinding = {
   planPrimaryExhaustedToDefaultPoolJson?: (
     inputJson: string
   ) => string;
+  resolveSessionColorStr?: (sessionId?: string | null) => string;
+  resolveSessionLogColorKeyJson?: (inputJson: string) => string;
   evaluateResponsesDirectRouteDecisionJson?: (
     payloadJson: string,
     metadataJson: string,

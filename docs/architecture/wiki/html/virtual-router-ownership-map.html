@@ -283,7 +283,7 @@
         </ul>
         <h2>vr.hit_log_projection</h2>
         <p>Summary: Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code> Owner scope: file-scoped Rust owner for Virtual Router hit-log diagnostic projection; TS facade may only marshal JSON/native calls</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code> Owner scope: file-scoped Rust owner for Virtual Router hit-log diagnostic projection; host/runtime TS may only call required NAPI exports and emit returned strings</p>
         <p>Canonical types:</p>
         <ul>
           <li><code>VirtualRouterHitRecord</code></li>
@@ -301,9 +301,10 @@
         <ul>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
-          <li><code>sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts</code></li>
           <li><code>sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts</code></li>
+          <li><code>src/utils/session-log-color.ts</code></li>
+          <li><code>tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts</code></li>
           <li><code>tests/sharedmodule/virtual-router-hit-log.spec.ts</code></li>
           <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
           <li><code>docs</code></li>
@@ -314,6 +315,8 @@
           <li><code>src/providers/core/runtime</code></li>
           <li><code>src/client</code></li>
           <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts</code></li>
+          <li><code>rcc-llmswitch-core/v2/runtime/virtual-router-hit-log</code></li>
         </ul>
         <p>Required tests:</p>
         <ul>
@@ -332,7 +335,7 @@
         <p>Notes:</p>
         <ul>
           <li>Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy.</li>
-          <li>TS <code>runtime/virtual-router-hit-log.ts</code> may keep exported types and fail-fast native facade glue only; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned.</li>
+          <li>Retired TS <code>runtime/virtual-router-hit-log.ts</code> facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports.</li>
         </ul>
         <h2>virtual_router.primary_exhausted_to_default_pool</h2>
         <p>Summary: primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</p>

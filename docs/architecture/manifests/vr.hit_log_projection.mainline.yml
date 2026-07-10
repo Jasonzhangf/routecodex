@@ -1,7 +1,8 @@
 lifecycle_id: vr.hit_log_projection.mainline
 summary: "Virtual Router hit-log diagnostics: host effects collect the route
-  decision context, TS facade calls Rust hit-log projection, and host emits the
-  formatted diagnostic line without owning formatting or telemetry semantics."
+  decision context, runtime host calls Rust/NAPI hit-log projection directly,
+  and host emits the formatted diagnostic line without owning formatting or
+  telemetry semantics."
 owner_feature_id: vr.hit_log_projection
 entrypoint:
   node_id: VrHitLog01RouteDecision

@@ -5,7 +5,6 @@ const root = process.cwd();
 const vrRoot = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine';
 const tsContractFiles = [
   'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts',
-  'sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts',
 ];
 
 const denyChecks = [

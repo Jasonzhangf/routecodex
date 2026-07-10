@@ -2098,3 +2098,11 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts` is physically deleted. Do not restore it as a separate production shell; `REQUIRED_NATIVE_HOTPATH_EXPORTS` is owned by `native-router-hotpath-loader.ts`.
 - `sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` must parse only the `REQUIRED_NATIVE_HOTPATH_EXPORTS` array block from loader. Full-file string scanning is invalid after the required-export list is co-located with loader code because unrelated string literals pollute the export contract.
 - Current strict shell audit after deletion is `prodTsShellCount=5`, `shellsWithProdImporters=4`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=5`, `prodTsLocTotal=2330`, `nonNativeFileCount=0`.
+
+# 2026-07-10: Virtual router hit-log TS facade is retired
+
+- `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts` is physically deleted. Do not restore it as a production facade, package subpath, ambient module, or test import target.
+- Virtual Router hit-log truth remains Rust-owned by `virtual_router_hit_log.rs` and NAPI exports `createVirtualRouterHitRecordJson`, `formatVirtualRouterHitJson`, `toVirtualRouterHitEventJson`, `resolveSessionColorStr`, and `resolveSessionLogColorKeyJson`.
+- Runtime host code must call those exports through existing native loader/host binding surfaces: `native-virtual-router-runtime.ts` for VR hit emission and `src/modules/llmswitch/bridge/native-exports.ts::getRouterHotpathJsonBindingSync` for host session log color helpers.
+- Tests that need the deleted facade API shape use test-only `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`, not production TS shell imports.
+- Current strict shell audit after deletion is `prodTsShellCount=4`, `shellsWithProdImporters=2`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=4`, `prodTsLocTotal=2184`, `nonNativeFileCount=0`.

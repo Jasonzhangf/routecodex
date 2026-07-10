@@ -1,3 +1,11 @@
+# 2026-07-10: Virtual router hit-log facade deletion slice
+
+- Scope: external reference contraction for `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts`.
+- Change: moved production consumers to direct Rust/NAPI calls, removed package export `./v2/runtime/virtual-router-hit-log`, removed ambient declaration, deleted the facade, and moved tests to `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`.
+- Exact ref scan after deletion finds old path only in forbidden/doc/history/gate contexts, not active production imports.
+- Verification PASS: focused hit-log/residue/required-export Jest 230/230; `verify:llmswitch-core-tsc`; strict shell reference audit (`prodTsShellCount=4`, `shellsWithProdImporters=2`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`); minimal TS surface; rustification audit (`prodTsFileCount=4`, `prodTsLocTotal=2184`, `nonNativeFileCount=0`); `verify:vr-no-ts-runtime`; function-map/mainline/deleted-path/thin-wrapper/mainline-manifest/wiki gates; `build:base`.
+- Boundary: source/reference closeout only; no managed live restart/replay claimed. Unrelated provider failure policy and build/version dirty files preserved.
+
 # 2026-07-09: exec_command/tool governance overblocking narrowed
 
 - Scope: response-side Chat Process tool governance only; servertool lifecycle not changed.

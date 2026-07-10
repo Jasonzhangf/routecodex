@@ -560,7 +560,7 @@
         </tbody>
         </table>
         <h2>vr.hit_log_projection.mainline</h2>
-        <p>Virtual Router hit-log diagnostics: host effects collect the route decision context, TS facade calls Rust hit-log projection, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.</p>
+        <p>Virtual Router hit-log diagnostics: host effects collect the route decision context, runtime host calls Rust/NAPI hit-log projection directly, and host emits the formatted diagnostic line without owning formatting or telemetry semantics.</p>
         <p>Entry contract: <code>VrHitLog01RouteDecision</code> via <code>docs/architecture/wiki/virtual-router-ownership-map.md</code></p>
         <pre class="mermaid">flowchart LR
           VrHitLog04TelemetryProjection[&quot;VrHitLog04TelemetryProjection&quot;]
@@ -581,9 +581,9 @@
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>vrh-01</td><td><code>VrHitLog01RouteDecision -&gt; VrHitLog02NativeProjection</code></td><td>anchored</td><td><code>emitVirtualRouterHitLog -&gt; createVirtualRouterHitRecord</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
-        <tr><td>vrh-02</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog03HostEmission</code></td><td>anchored</td><td><code>formatVirtualRouterHit -&gt; format_virtual_router_hit_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
-        <tr><td>vrh-03</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog04TelemetryProjection</code></td><td>anchored</td><td><code>toVirtualRouterHitEvent -&gt; to_virtual_router_hit_event_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
+        <tr><td>vrh-01</td><td><code>VrHitLog01RouteDecision -&gt; VrHitLog02NativeProjection</code></td><td>anchored</td><td><code>emitVirtualRouterHitLog -&gt; create_virtual_router_hit_record_json_bridge</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
+        <tr><td>vrh-02</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog03HostEmission</code></td><td>anchored</td><td><code>format_virtual_router_hit_json_bridge -&gt; format_virtual_router_hit_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
+        <tr><td>vrh-03</td><td><code>VrHitLog02NativeProjection -&gt; VrHitLog04TelemetryProjection</code></td><td>anchored</td><td><code>to_virtual_router_hit_event_json_bridge -&gt; to_virtual_router_hit_event_json</code></td><td></td><td><code>vr.hit_log_projection</code>&lt;br/&gt;Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td></tr>
         </tbody>
         </table>
         <h2>runtime.lifecycle.mainline</h2>

@@ -34,8 +34,3 @@ declare module 'rcc-llmswitch-core/conversion/hub/format-adapters/index' {
     record(stage: string, payload: unknown): void;
   }
 }
-
-declare module 'rcc-llmswitch-core/v2/runtime/virtual-router-hit-log' {
-  export function resolveSessionColor(sessionId?: string): string | undefined;
-  export function resolveSessionLogColorKey(input?: Record<string, unknown> | null): string | undefined;
-}

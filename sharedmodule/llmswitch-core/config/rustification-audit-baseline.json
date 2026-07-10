@@ -1,22 +1,16 @@
 {
-  "generatedAt": "2026-07-10T05:57:31.304Z",
+  "generatedAt": "2026-07-10T06:37:51.300Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 5,
-    "prodTsLocTotal": 2330,
+    "prodTsFileCount": 4,
+    "prodTsLocTotal": 2184,
     "nonNativeFileCount": 0,
     "nonNativeLocTotal": 0
   },
   "byTopDir": {
     "native": {
       "prodTsFiles": 3,
-      "prodTsLoc": 2098,
-      "nonNativeFiles": 0,
-      "nonNativeLoc": 0
-    },
-    "runtime": {
-      "prodTsFiles": 1,
-      "prodTsLoc": 222,
+      "prodTsLoc": 2174,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     },
@@ -48,15 +42,9 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts",
-      "loc": 745,
+      "loc": 821,
       "nativeLinked": true,
       "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts",
-      "loc": 222,
-      "nativeLinked": true,
-      "topDir": "runtime"
     }
   ]
 }

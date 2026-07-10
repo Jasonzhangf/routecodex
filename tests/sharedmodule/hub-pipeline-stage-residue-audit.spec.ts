@@ -3270,12 +3270,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
-  it('virtual router hit-log formatting must be native-owned', () => {
+  it('retired virtual router hit-log TS facade must stay deleted and native-owned', () => {
     const repoRoot = process.cwd();
-    const source = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts'),
-      'utf8'
-    );
+    const retiredPath = 'sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts';
+
+    expect(fs.existsSync(path.join(repoRoot, retiredPath))).toBe(false);
 
     const requiredNativeExports = [
       'createVirtualRouterHitRecordJson',
@@ -3289,8 +3288,18 @@ describe('hub pipeline stage residue audit', () => {
       'resolveSessionLogColorKeyJson',
       'buildHitReasonJson',
     ];
+    const nativeSource = [
+      fs.readFileSync(
+        path.join(repoRoot, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs'),
+        'utf8'
+      ),
+      fs.readFileSync(
+        path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'),
+        'utf8'
+      ),
+    ].join('\n');
     for (const exportName of requiredNativeExports) {
-      expect(source).toContain(exportName);
+      expect(nativeSource).toContain(exportName);
     }
 
     const forbiddenPatterns = [
@@ -3309,9 +3318,24 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local formatted line timestamp', pattern: /padStart\(2,\s*'0'\)|toLocaleTimeString/u },
       { label: 'local stopMessage label formatter', pattern: /stopMessage:\$\{parts\.join/u },
     ];
-    const findings = forbiddenPatterns
-      .filter(({ pattern }) => pattern.test(source))
-      .map(({ label }) => label);
+    const scannedFiles = [
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts',
+      'src/utils/session-log-color.ts',
+      'src/modules/llmswitch/bridge/routing-integrations.ts',
+      'src/types/rcc-llmswitch-core.d.ts',
+      'sharedmodule/llmswitch-core/package.json',
+    ];
+    const findings = scannedFiles.flatMap((relativePath) => {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      return [
+        ...forbiddenPatterns
+          .filter(({ pattern }) => pattern.test(source))
+          .map(({ label }) => `${relativePath}:${label}`),
+        ...(source.includes(retiredPath) || source.includes('rcc-llmswitch-core/v2/runtime/virtual-router-hit-log')
+          ? [`${relativePath}:retired hit-log facade reference`]
+          : []),
+      ];
+    });
 
     expect(findings).toEqual([]);
   });

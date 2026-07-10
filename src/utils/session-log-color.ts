@@ -1,7 +1,4 @@
-import {
-  resolveSessionColor,
-  resolveSessionLogColorKey as resolveNativeSessionLogColorKey
-} from 'rcc-llmswitch-core/v2/runtime/virtual-router-hit-log';
+import { getRouterHotpathJsonBindingSync } from '../modules/llmswitch/bridge/native-exports.js';
 
 function normalizeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -16,31 +13,26 @@ export function resolveSessionAnsiColor(sessionId?: unknown): string | undefined
   if (!normalized) {
     return undefined;
   }
-  return resolveSessionColor(normalized);
+  const fn = getRouterHotpathJsonBindingSync().resolveSessionColorStr;
+  if (typeof fn !== 'function') {
+    throw new Error('[session-log-color] resolveSessionColorStr native export is required');
+  }
+  const parsed = JSON.parse(fn(normalized)) as unknown;
+  return typeof parsed === 'string' && parsed.length > 0 ? parsed : undefined;
 }
 
 export function resolveSessionLogColorKey(context?: Record<string, unknown> | null): string | undefined {
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     return undefined;
   }
-  const candidates = [
-    context.sessionId,
-    context.session_id,
-    context.conversationId,
-    context.conversation_id,
-    context.logSessionColorKey,
-    context.clientTmuxSessionId,
-    context.client_tmux_session_id,
-    context.tmuxSessionId,
-    context.tmux_session_id,
-    context.rccSessionClientTmuxSessionId,
-    context.rcc_session_client_tmux_session_id
-  ];
-  for (const candidate of candidates) {
-    const normalized = normalizeToken(candidate);
-    if (normalized) {
-      return resolveNativeSessionLogColorKey({ logSessionColorKey: normalized });
-    }
+  const fn = getRouterHotpathJsonBindingSync().resolveSessionLogColorKeyJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[session-log-color] resolveSessionLogColorKeyJson native export is required');
   }
-  return undefined;
+  const raw = fn(JSON.stringify(context));
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== 'string') {
+    return undefined;
+  }
+  return normalizeToken(parsed);
 }

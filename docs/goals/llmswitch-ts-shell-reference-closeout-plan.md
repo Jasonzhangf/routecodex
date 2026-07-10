@@ -329,6 +329,16 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Build-core required dist output now keys on `native-router-hotpath-loader.js` instead of the retired shared conversion core shell.
 - Verification passed: sharedmodule `tsc`, focused VR/stopmessage/residue/build-core Jest, strict shell reference audit, minimal TS surface, and rustification audit.
 
+### 2026-07-10 virtual-router hit-log facade retired
+
+- `sharedmodule/llmswitch-core/src/runtime/virtual-router-hit-log.ts` is physically deleted after production/test consumers were moved to Rust/NAPI direct calls.
+- `sharedmodule/llmswitch-core/package.json` no longer exports `./v2/runtime/virtual-router-hit-log`, and `src/types/rcc-llmswitch-core.d.ts` no longer declares that ambient package subpath.
+- `src/utils/session-log-color.ts` now calls `resolveSessionColorStr` / `resolveSessionLogColorKeyJson` through the host native binding instead of importing the deleted package facade; it no longer reimplements session-key candidate priority locally.
+- `native-virtual-router-runtime.ts` now calls `createVirtualRouterHitRecordJson`, `formatVirtualRouterHitJson`, and `resolveSessionLogColorKeyJson` through the existing native loader helpers; the old TS facade is locked as forbidden in maps and residue audit.
+- `tests/sharedmodule/virtual-router-hit-log.spec.ts` uses test-only direct native helper `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`.
+- Strict reference audit now reports `prodTsShellCount=4`, `shellsWithProdImporters=2`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=3`; rustification audit baseline is `prodTsFileCount=4`, `prodTsLocTotal=2184`, `nonNativeFileCount=0`.
+- Verification passed: focused hit-log/residue/required-export Jest 230/230, sharedmodule tsc, `build:base`, strict shell reference audit, minimal TS surface, rustification audit, VR no-TS runtime, function-map/mainline/deleted-path/thin-wrapper/manifest/wiki gates.
+
 ### 2026-07-09 routing-integrations host bridge shell refs direct-native wired
 
 - `src/modules/llmswitch/bridge/routing-integrations.ts/js` no longer imports `importCoreDist` / `requireCoreDist` or loads `native-hub-pipeline-orchestration-semantics`, `native-virtual-router-bootstrap-config`, or `runtime/virtual-router-host-effects`.
