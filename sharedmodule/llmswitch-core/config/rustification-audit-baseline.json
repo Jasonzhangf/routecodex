@@ -1,16 +1,16 @@
 {
-  "generatedAt": "2026-07-10T05:26:31.081Z",
+  "generatedAt": "2026-07-10T05:48:43.614Z",
   "scope": "sharedmodule/llmswitch-core/src",
   "metrics": {
-    "prodTsFileCount": 9,
-    "prodTsLocTotal": 2398,
+    "prodTsFileCount": 7,
+    "prodTsLocTotal": 2340,
     "nonNativeFileCount": 0,
     "nonNativeLocTotal": 0
   },
   "byTopDir": {
     "native": {
-      "prodTsFiles": 6,
-      "prodTsLoc": 1767,
+      "prodTsFiles": 4,
+      "prodTsLoc": 1709,
       "nonNativeFiles": 0,
       "nonNativeLoc": 0
     },
@@ -36,7 +36,7 @@
     },
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts",
-      "loc": 330,
+      "loc": 533,
       "nativeLinked": true,
       "topDir": "native"
     },
@@ -49,18 +49,6 @@
     {
       "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts",
       "loc": 265,
-      "nativeLinked": true,
-      "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts",
-      "loc": 215,
-      "nativeLinked": true,
-      "topDir": "native"
-    },
-    {
-      "path": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-config.ts",
-      "loc": 46,
       "nativeLinked": true,
       "topDir": "native"
     },
