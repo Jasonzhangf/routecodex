@@ -78,7 +78,6 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integ
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
   disposeHubPipelineNative: jest.fn(),
-  resolveBaseDir: jest.fn(() => process.cwd()),
 }));
 
 function installNativeHubPipelineRoute(server: any, routingPolicyGroup: string, route?: NativeRouteMock): void {

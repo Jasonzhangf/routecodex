@@ -696,3 +696,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The provider implementations under test already import the current narrow facades (`runtime-integrations.js`, `native-exports.js`, and provider snapshot writer), so the old root bridge mock was dead test scaffolding rather than an active runtime consumer.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest loads the file but remains skipped because no local codex sample aggregates are present; this is reference-cleanup evidence only, not outbound behavior evidence. Full static/architecture gates are tracked by the slice commit.
+
+### 2026-07-11 direct boundary tests legacy loader field removed
+
+- `tests/server/runtime/http-server/router-direct-protocol-boundary.spec.ts` and `tests/server/runtime/http-server/direct-server-contract.red.spec.ts` no longer expose the retired `resolveBaseDir` helper from their `routing-integrations.js` mocks.
+- Both tests already mock the current routing facade surface and do not need the old module-loader API; this removes two test-only legacy helper consumers without changing direct/router behavior.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 2/2 suites, 16/16 tests. Boundary: `direct-passthrough-route-level.spec.ts` and `http-server-runtime-setup.provider-merge.spec.ts` were checked and restored because their focused runs expose pre-existing behavior/fixture failures unrelated to this reference-only cleanup.
