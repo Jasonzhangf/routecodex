@@ -36,7 +36,7 @@ import {
   sanitizeCapturedResponsesInputWithNative,
   stripResponsesToolControlFieldsWithNative,
   unwrapResponsesDataWithNative
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js';
+} from './native-hub-bridge-action-direct-native.js';
 import {
   buildResponsesPayloadFromChatWithNative,
   consumeResponsesPassthroughByAliasesWithNative as consumeResponsesPassthroughByAliases,
@@ -48,7 +48,7 @@ import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,
   planResponsesBridgePolicyActionsWithNative
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
+} from './native-hub-bridge-policy-direct-native.js';
 export type Unknown = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type JsonValue = unknown;

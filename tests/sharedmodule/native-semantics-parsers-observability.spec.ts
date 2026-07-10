@@ -207,7 +207,7 @@ describe('native semantics parser observability', () => {
     const mod = await importWithNativeParseFailureMock<{
       resolveBridgePolicyWithNative: (options?: { protocol?: string; moduleType?: string }) => unknown;
     }>(
-      '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js',
+      './helpers/native-hub-bridge-policy-direct-native.js',
       'resolveBridgePolicyJson'
     );
 

@@ -1368,11 +1368,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts",
       "textContains": ""
     },

@@ -1,11 +1,11 @@
 import { jest } from '@jest/globals';
 
 const nativeBridgeActions = await import(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js'
+  '../sharedmodule/helpers/native-hub-bridge-action-direct-native.js'
 );
 
 jest.unstable_mockModule(
-  '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js',
+  '../sharedmodule/helpers/native-hub-bridge-action-direct-native.js',
   () => ({
     ...nativeBridgeActions,
     runBridgeActionPipelineWithNative: ({ state }: { state?: { messages?: unknown[] } }) => ({

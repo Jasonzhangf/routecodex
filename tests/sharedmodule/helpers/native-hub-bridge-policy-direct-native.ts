@@ -1,13 +1,13 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from './native-router-hotpath-loader.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 import {
   parseNativeJsonObjectOrFail,
   parseNativeJsonValueOrFail,
   readNativeFunction,
   safeStringify
-} from './native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
 
 export interface NativeBridgeActionDescriptor {
   name: string;

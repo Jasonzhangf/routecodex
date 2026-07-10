@@ -28459,6 +28459,13 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Moved the old bridge file to test-only `tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts`, added Rust/NAPI `buildResponsesRequestFromChatJson`, host `buildResponsesRequestFromChatNative`, and migrated active scripts/tests to Rust/host native exports or the test-only helper.
 - Updated function-map/mainline/wiki/guidance/residue gates so production bridge restoration is forbidden and `stl-06` points to Rust `run_responses_openai_request_codec_json -> convert_bridge_input_to_chat_messages`.
 - Verification PASS: production file absent; old src/dist import scan returns no active hits; shell audit no longer lists `responses-openai-bridge.ts`; rustification/minimal TS gates show `nonNativeFileCount=0`; focused bridge/residue Jest passes 52 + 211 tests; Rust request builder focused test passes; `cargo fmt --check`; `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; `npm run verify:architecture-fallback-denylist`; `npm run build:base`.
+
+# 2026-07-10: bridge action/policy production native wrappers retired
+
+- Scope: continued Rustification after deleting the Responses OpenAI bridge.
+- Moved `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.ts` and `native-hub-bridge-policy-semantics.ts` to test-only helpers under `tests/sharedmodule/helpers/`; production source no longer carries those TS native wrapper shells.
+- Updated test imports, residue gates, and `verify-responses-direct-tool-shape-rust-first.mjs` so host `src/modules/llmswitch/bridge/native-exports.ts` and Rust NAPI exports are the production owner.
+- Verification PASS: `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` now reports `prodTsShellCount=20`; `npm run verify:llmswitch-rustification-audit` reports `prodTsFileCount=20`, `nonNativeFileCount=0`; `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `node scripts/architecture/verify-responses-direct-tool-shape-rust-first.mjs`; focused Jest 4 suites / 223 tests; bridge policy parser focused Jest; `npm run build:base`.
 ## 2026-07-09 21:50 runtime lifecycle silent-stop audit
 
 - Latest live health: `127.0.0.1:5520/health` and `127.0.0.1:5555/health` both return `ready=true`, `pipelineReady=true`, version `0.90.3699`.

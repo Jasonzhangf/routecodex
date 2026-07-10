@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { normalizeMessageReasoningToolsWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.js';
+import { normalizeMessageReasoningToolsWithNative } from './helpers/native-hub-bridge-action-direct-native.js';
 
 describe('reasoning-tool-normalizer', () => {
   test('writes normalized native message back into original record', () => {

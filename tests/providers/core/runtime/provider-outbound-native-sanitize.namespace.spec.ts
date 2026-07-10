@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../sharedmodule/helpers/native-hub-bridge-policy-direct-native.js';
 
 describe('provider outbound native sanitize namespace guard', () => {
   test('preserves OpenAI Responses protocol metadata fields before provider transport', () => {

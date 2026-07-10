@@ -7,19 +7,22 @@ const failures = [];
 const directPath = path.join(root, 'src/server/runtime/http-server/direct-passthrough-payload.ts');
 const providerPath = path.join(root, 'src/providers/core/runtime/responses-provider.ts');
 const bridgePath = path.join(root, 'src/modules/llmswitch/bridge/native-exports.ts');
-const nativeTsPath = path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts');
+const retiredNativeTsPath = path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts');
 const rustPath = path.join(root, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
 
-for (const abs of [directPath, providerPath, bridgePath, nativeTsPath, rustPath]) {
+for (const abs of [directPath, providerPath, bridgePath, rustPath]) {
   if (!fs.existsSync(abs)) {
     failures.push(`missing required file: ${path.relative(root, abs)}`);
   }
+}
+if (fs.existsSync(retiredNativeTsPath)) {
+  failures.push(`retired production native TS bridge must stay deleted: ${path.relative(root, retiredNativeTsPath)}`);
 }
 
 const directSource = fs.readFileSync(directPath, 'utf8');
 const providerSource = fs.readFileSync(providerPath, 'utf8');
 const bridgeSource = fs.readFileSync(bridgePath, 'utf8');
-const nativeTsSource = fs.readFileSync(nativeTsPath, 'utf8');
+const nativeTsSource = '';
 const rustSource = fs.readFileSync(rustPath, 'utf8');
 
 for (const forbidden of [
@@ -50,11 +53,11 @@ for (const expected of [
 if (directSource.includes('evaluateResponsesDirectRouteDecisionNative') || directSource.includes('evaluateDirectRouteDecision')) {
   failures.push('direct passthrough helper must not call native direct decision as provider-wire preflight');
 }
-if (!nativeTsSource.includes('hasDeclaredApplyPatchToolWithNative')) {
-  failures.push('native TS bridge must expose hasDeclaredApplyPatchToolWithNative');
+if (!bridgeSource.includes('hasDeclaredApplyPatchToolNative')) {
+  failures.push('host native exports must expose hasDeclaredApplyPatchToolNative');
 }
-if (!nativeTsSource.includes('evaluateResponsesDirectRouteDecisionWithNative')) {
-  failures.push('native TS bridge must expose evaluateResponsesDirectRouteDecisionWithNative');
+if (!bridgeSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
+  failures.push('host native exports must expose evaluateResponsesDirectRouteDecisionNative');
 }
 if (!rustSource.includes('has_declared_apply_patch_tool_json')) {
   failures.push('Rust NAPI must export has_declared_apply_patch_tool_json');

@@ -1577,17 +1577,7 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts'
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'parses bridge action descriptors in TS', pattern: /function parseActionDescriptor/ },
-      { label: 'parses bridge action arrays in TS', pattern: /function parseActionDescriptors/ },
-      { label: 'parses bridge policy phase in TS', pattern: /function parsePhase/ },
-      { label: 'parses bridge policy in TS', pattern: /function parsePolicy/ },
-      { label: 'keeps local JSON parse failure sentinel', pattern: /JSON_PARSE_FAILED/ },
-      { label: 'keeps local bridge policy parse logger', pattern: /logNativeBridgePolicyNonBlocking/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('servertool followup must not add standalone TS helper files during Rust closeout', () => {

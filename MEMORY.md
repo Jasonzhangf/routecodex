@@ -2001,6 +2001,12 @@
 - Tests that still need old deep bridge assertions must use test-only `tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts`; production source/scripts must use Rust/host native exports.
 - The direction lock remains: `runResponsesOpenaiRequestCodecJson` is Responses -> Chat and must not be used as a Chat -> Responses replacement.
 
+# 2026-07-10: Bridge action/policy production native wrappers are retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.ts` and `native-hub-bridge-policy-semantics.ts` are physically deleted from production source. Do not restore them as production native wrapper shells.
+- Tests that need those direct helper surfaces must use `tests/sharedmodule/helpers/native-hub-bridge-action-direct-native.ts` and `tests/sharedmodule/helpers/native-hub-bridge-policy-direct-native.ts`.
+- Production callers must use Rust NAPI through existing host exports, especially `src/modules/llmswitch/bridge/native-exports.ts::hasDeclaredApplyPatchToolNative`, `evaluateResponsesDirectRouteDecisionNative`, and `sanitizeProviderOutboundPayload`.
+
 # 2026-07-09: Local shutdown requires caller provenance
 
 - `/shutdown` is lifecycle control-plane. Localhost alone is not enough authorization because a single accepted shutdown stops every listener in the managed multi-port process (`5520`, `10000`, `5555`, `4444`).

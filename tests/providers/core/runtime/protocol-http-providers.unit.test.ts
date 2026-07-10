@@ -9,7 +9,7 @@ import type { ModuleDependencies } from '../../../../src/modules/pipeline/interf
 import { __flushProviderSnapshotQueueForTests, __resetProviderSnapshotErrorBufferForTests } from '../../../../src/providers/core/utils/snapshot-writer.js';
 import { allowSnapshotLocalDiskWrite, __resetSnapshotLocalDiskGateForTests } from '../../../../src/utils/snapshot-local-disk-gate.js';
 import { runtimeFlags, setRuntimeFlag } from '../../../../src/runtime/runtime-flags.js';
-import { sanitizeProviderOutboundPayloadWithNative } from '../../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.js';
+import { sanitizeProviderOutboundPayloadWithNative } from '../../../sharedmodule/helpers/native-hub-bridge-policy-direct-native.js';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
@@ -21,6 +21,10 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
     compatibilityProfile?: string;
     payload: Record<string, unknown>;
   }) => sanitizeProviderOutboundPayloadWithNative(input),
+  buildResponsesJsonFromSseStreamWithNative: async () => ({
+    status: 'completed',
+    output: []
+  }),
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
     request: {
       model: payload.model,
