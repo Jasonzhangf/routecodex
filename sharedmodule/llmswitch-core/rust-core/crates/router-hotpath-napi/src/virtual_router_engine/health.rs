@@ -137,6 +137,9 @@ impl ProviderHealthManager {
 
     pub(crate) fn record_success(&mut self, provider_key: &str) {
         let state = self.get_state_mut(provider_key);
+        if state.cooldown_expires_at.is_some() {
+            return;
+        }
         state.failure_count = 0;
         state.state = "healthy".to_string();
         state.cooldown_expires_at = None;
@@ -223,6 +226,15 @@ impl ProviderHealthManager {
             state.last_failure_at = None;
             state.reason = None;
         }
+    }
+
+    pub(crate) fn clear_provider_state(&mut self, provider_key: &str) {
+        let state = self.get_state_mut(provider_key);
+        state.failure_count = 0;
+        state.state = "healthy".to_string();
+        state.cooldown_expires_at = None;
+        state.last_failure_at = None;
+        state.reason = None;
     }
 
     fn get_state_mut(&mut self, provider_key: &str) -> &mut ProviderInternalState {
@@ -319,6 +331,22 @@ mod tests {
         let state = state_for(&manager, "test-provider");
         assert_eq!(state.state, "healthy");
         assert_eq!(state.failure_count, 1);
+    }
+
+    #[test]
+    fn success_does_not_clear_active_cooldown() {
+        let mut manager = ProviderHealthManager::new();
+        manager.register_providers(&["test-provider".to_string()]);
+
+        manager.record_failure("test-provider", None, 1_000);
+        manager.record_failure("test-provider", None, 2_000);
+        manager.record_failure("test-provider", None, 3_000);
+        manager.record_success("test-provider");
+
+        let state = state_for(&manager, "test-provider");
+        assert_eq!(state.state, "tripped");
+        assert_eq!(state.failure_count, 3);
+        assert_eq!(state.cooldown_expires_at, Some(3_000 + DEFAULT_COOLDOWN_MS));
     }
 
     #[test]

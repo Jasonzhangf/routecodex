@@ -87,7 +87,7 @@ impl VirtualRouterEngineCore {
         if provider_key.trim().is_empty() {
             return;
         }
-        self.health_manager.record_success(provider_key);
+        self.health_manager.clear_provider_state(provider_key);
     }
 
     pub(crate) fn mirror_provider_error_in_memory(&mut self, event: &Value) {
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_success_clears_runtime_failure_window() {
+    fn provider_success_does_not_clear_active_cooldown() {
         let provider_key = "sdfv.key1.gpt-5.5";
         let mut core = build_test_core_with_providers(&[
             (provider_key, "gpt-5.5"),
@@ -567,12 +567,9 @@ mod tests {
 
         let healed = provider_state(&core, provider_key);
         assert_eq!(
-            healed.state, "healthy",
-            "first request success should clear cooldown"
+            healed.state, "tripped",
+            "request success must not clear an active provider cooldown"
         );
-        assert_eq!(
-            healed.cooldown_expires_at, None,
-            "cooldown should be cleared"
-        );
+        assert!(healed.cooldown_expires_at.is_some());
     }
 }
