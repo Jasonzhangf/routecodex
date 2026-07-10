@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
 
 function buildConfig(): any {
   return {
     routing: {
       thinking: [
         { id: 'thinking-primary', priority: 100, mode: 'priority', targets: ['sdfv.key1.gpt-5.4'] },
-        { id: 'thinking-backup', priority: 200, mode: 'priority', backup: true, targets: ['mimo.key1.mimo-v2.5-pro'] }
+        { id: 'thinking-backup', priority: 50, mode: 'priority', backup: true, targets: ['mimo.key1.mimo-v2.5-pro'] }
       ],
       default: [
         { id: 'default-primary', priority: 100, mode: 'priority', targets: ['sdfv.key1.gpt-5.4'] }

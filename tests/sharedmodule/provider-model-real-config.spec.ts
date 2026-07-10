@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig, type VirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
 import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 describe('provider.model with real config structure', () => {
@@ -15,16 +15,16 @@ describe('provider.model with real config structure', () => {
             maxContextTokens: 262144,
             compatibilityProfile: 'chat:glm',
             auth: {
-              type: 'glm-oauth',
+              type: 'apikey',
               entries: [
                 {
                   alias: '1-186',
-                  type: 'glm-oauth',
+                  type: 'apikey',
                   tokenFile: '~/.routecodex/auth/glm-oauth-1-186.json'
                 },
                 {
                   alias: '3-138',
-                  type: 'glm-oauth',
+                  type: 'apikey',
                   tokenFile: '~/.routecodex/auth/glm-oauth-3-138.json'
                 }
               ]

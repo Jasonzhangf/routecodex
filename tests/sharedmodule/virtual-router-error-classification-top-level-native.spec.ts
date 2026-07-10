@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
 
 function buildDualProviderConfig(providerA = 'test.key1.gpt-test', providerB = 'test.key2.gpt-test'): any {
   return {

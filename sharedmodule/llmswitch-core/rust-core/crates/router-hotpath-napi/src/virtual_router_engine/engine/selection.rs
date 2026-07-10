@@ -657,7 +657,11 @@ impl VirtualRouterEngineCore {
                 && route_name == "web_search"
                 && has_explicit_web_search_route
             {
-                self.routing.get("web_search")
+                resolve_route_pools_for_selection(
+                    &self.routing,
+                    "web_search",
+                    routing_group_prefix.as_ref(),
+                )
             } else if web_search_route_requested
                 && route_name == DEFAULT_ROUTE
                 && select_default_pool_for_web_search
@@ -943,6 +947,7 @@ impl VirtualRouterEngineCore {
                         }
                         if route_name == DEFAULT_ROUTE
                             && requested_route != DEFAULT_ROUTE
+                            && excluded_keys.is_empty()
                             && default_floor_selection.is_none()
                         {
                             default_floor_selection = Some(
@@ -1720,6 +1725,88 @@ mod tests {
             )
             .expect("selection should succeed");
         assert_eq!(selected.provider_key, "sdfv.key1.gpt-5.4");
+    }
+
+    #[test]
+    fn web_search_tool_intent_selects_web_search_before_tools_backup() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            "demo.search".to_string(),
+            json!({
+                "providerKey": "demo.search",
+                "providerType": "openai",
+                "modelId": "search-1",
+                "enabled": true,
+                "modelCapabilities": {
+                    "search-1": ["web_search"]
+                }
+            }),
+        );
+        providers.insert(
+            "demo.tools".to_string(),
+            json!({
+                "providerKey": "demo.tools",
+                "providerType": "openai",
+                "modelId": "tools-1",
+                "enabled": true
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let routing = Map::from_iter([
+            (
+                "web_search:web_search".to_string(),
+                Value::Array(vec![json!({
+                    "id": "web-search-primary",
+                    "priority": 100,
+                    "mode": "priority",
+                    "routeParams": {
+                        "routePolicyGroup": "web_search"
+                    },
+                    "targets": ["demo.search"]
+                })]),
+            ),
+            (
+                "tools:tools".to_string(),
+                Value::Array(vec![json!({
+                    "id": "tools-backup",
+                    "priority": 200,
+                    "mode": "priority",
+                    "routeParams": {
+                        "routePolicyGroup": "tools"
+                    },
+                    "targets": ["demo.tools"]
+                })]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+        let classification = ClassificationResult {
+            route_name: "web_search".to_string(),
+            confidence: 0.9,
+            reasoning: "web_search:tool-intent".to_string(),
+            candidates: vec!["web_search".to_string(), "tools".to_string()],
+        };
+        let features = RoutingFeatures {
+            has_tool_call_responses: true,
+            last_assistant_tool_category: Some("websearch".to_string()),
+            ..RoutingFeatures::default()
+        };
+        let selected = core
+            .select_provider(
+                "web_search",
+                &json!({}),
+                &classification,
+                &features,
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("web_search intent should select the web_search route");
+
+        assert_eq!(selected.route_used, "web_search");
+        assert_eq!(selected.provider_key, "demo.search");
     }
 
     #[test]
@@ -4687,6 +4774,79 @@ mod tests {
         assert!(
             exhausted.is_err(),
             "forwarder must be unavailable only after every real target is excluded"
+        );
+    }
+
+    #[test]
+    fn round_robin_forwarder_retry_exclusion_exhausts_after_every_real_provider() {
+        let mut core = VirtualRouterEngineCore::new();
+        let config = json!({
+            "providers": {
+                "primary.key1.gpt-test": {
+                    "providerKey": "primary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                },
+                "secondary.key1.gpt-test": {
+                    "providerKey": "secondary.key1.gpt-test",
+                    "providerType": "responses",
+                    "modelId": "gpt-test",
+                    "enabled": true
+                }
+            },
+            "forwarders": {
+                "fwd.gpt.gpt-test": {
+                    "forwarderId": "fwd.gpt.gpt-test",
+                    "protocol": "openai-responses",
+                    "modelId": "gpt-test",
+                    "resolutionMode": "model-first",
+                    "strategy": "round-robin",
+                    "targets": [
+                        { "providerKey": "primary.key1.gpt-test", "disabled": false },
+                        { "providerKey": "secondary.key1.gpt-test", "disabled": false }
+                    ],
+                    "stickyKey": "none"
+                }
+            },
+            "routing": {
+                "default": [{
+                    "id": "default-round-robin-forwarder",
+                    "priority": 100,
+                    "mode": "round-robin",
+                    "targets": ["fwd.gpt.gpt-test"]
+                }]
+            }
+        });
+
+        core.initialize(&config).unwrap();
+        let classification = ClassificationResult {
+            route_name: DEFAULT_ROUTE.to_string(),
+            confidence: 1.0,
+            reasoning: "test".to_string(),
+            candidates: vec![DEFAULT_ROUTE.to_string()],
+        };
+        let features = RoutingFeatures::default();
+        let routing_state = RoutingInstructionState::default();
+
+        let exhausted = core.select_provider(
+            DEFAULT_ROUTE,
+            &json!({
+                "excludedProviderKeys": [
+                    "primary.key1.gpt-test",
+                    "secondary.key1.gpt-test"
+                ]
+            }),
+            &classification,
+            &features,
+            &routing_state,
+            None,
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+        );
+
+        assert!(
+            exhausted.is_err(),
+            "round-robin forwarder must not reselect an excluded real provider"
         );
     }
 }

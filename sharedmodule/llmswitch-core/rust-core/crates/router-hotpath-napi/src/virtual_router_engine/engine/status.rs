@@ -477,6 +477,42 @@ mod tests {
     }
 
     #[test]
+    fn diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets() {
+        let mut core = VirtualRouterEngineCore::new();
+        core.initialize(&build_forwarder_status_test_config())
+            .expect("initialize");
+        let request = json!({
+            "messages": [{ "role": "user", "content": "hello" }]
+        });
+        let metadata = json!({
+            "requestId": "req-dry-run-excluded",
+            "metadataCenterSnapshot": {
+                "requestId": "req-dry-run-excluded",
+                "excludedProviderKeys": [
+                    "sdfv.key1.gpt-test",
+                    "1token.key1.gpt-test"
+                ],
+                "runtimeControl": {}
+            }
+        });
+        let dry_run = core.diagnose_route(
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+            &request,
+            &metadata,
+        );
+
+        assert_eq!(dry_run["ok"].as_bool(), Some(false));
+        assert_eq!(
+            dry_run["error"]["code"].as_str(),
+            Some("PROVIDER_NOT_AVAILABLE")
+        );
+        assert!(
+            dry_run["error"]["details"]["unavailableRoutePools"].is_array(),
+            "diagnostics should expose route pool availability blockers"
+        );
+    }
+
+    #[test]
     fn forwarder_status_reports_runtime_concurrency_blocker() {
         let mut core = VirtualRouterEngineCore::new();
         core.initialize(&build_forwarder_status_test_config())

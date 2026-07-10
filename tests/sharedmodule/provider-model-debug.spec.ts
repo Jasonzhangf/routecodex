@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig, type VirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
 
 describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
   it('should show provider registry state when glm.kimi-k2.5 fails', async () => {

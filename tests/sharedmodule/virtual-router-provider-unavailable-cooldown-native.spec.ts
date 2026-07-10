@@ -1,4 +1,4 @@
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-native.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 function buildRouteMetadata(requestId: string): any {

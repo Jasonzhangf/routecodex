@@ -1,5 +1,5 @@
 import { bootstrapVirtualRouterConfig, type ProviderProfile, type RouterMetadataInput, type VirtualRouterBootstrapInput } from '../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../sharedmodule/helpers/virtual-router-engine-direct-native.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';

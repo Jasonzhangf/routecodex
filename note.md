@@ -28587,3 +28587,24 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Moved remaining loader/binding helper access to `native-router-hotpath-loader.ts`; tests that need old helper-shaped calls use test-only `tests/sharedmodule/helpers/native-router-hotpath-direct-native.ts`.
 - Updated legacy script probes to call the loader/native binding directly instead of importing the deleted dist shell.
 - Verification PASS: `verify:llmswitch-core-tsc`; focused Jest 4 suites / 261 tests; strict shell audit `prodTsShellCount=3`, `shellsWithProdImporters=1`; rustification audit `prodTsFileCount=3`, `nonNativeFileCount=0`; minimal TS surface; function-map gate; mainline-call-map; fallback denylist; deleted-path; thin-wrapper-only; `build:base`; updated script probes; `git diff --check`.
+
+# 2026-07-10: native-router-hotpath direct-native migration correction
+
+- Current broad affected Jest is not closed. After migrating more VR tests to `tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts`, 25-suite affected run still failed in `virtual-router-routing-instructions.spec.ts`, `virtual-router-web-search-route-selection.spec.ts`, and `virtual-router-cross-session-health-pollution.red.spec.ts`.
+- Confirmed and fixed one real Rust bug: `diagnose_route`/fallback default floor was able to reselect an excluded default forwarder target when the request first classified to non-default and fell back to default. Added Rust tests in `selection.rs` / `status.rs`; focused Rust tests pass and focused diagnostics Jest passes after native rebuild.
+- Helper correction: test-only direct-native helper now builds the minimal `metadataCenterSnapshot` envelope for routeHint/serverToolRequired/session/runtime fields and treats cross-realm native Error-like return values as explicit failures; forwarder init fail-fast Jest now passes.
+- Current green evidence: `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` PASS with `prodTsShellCount=3`; `npm run verify:llmswitch-rustification-audit -- --json` PASS with `prodTsFileCount=3`, `nonNativeFileCount=0`; focused Rust tests for forwarder retry exclusion and diagnostics provider-not-available PASS; focused diagnostics/servertool subset partially PASS.
+- Do not commit as closed yet. Remaining failures must be resolved by Rust truth or test fixture adjustment, not by restoring `native-router-hotpath.ts` or adding production TS compatibility behavior.
+
+# 2026-07-10: native virtual router runtime TS shell retired
+
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts`; production llmswitch-core TS shells are now only `src/index.ts` and `native-router-hotpath-loader.ts`, with `shellsWithProdImporters=0`.
+- Tests/scripts that still need direct VR runtime access now use test/script-only direct native helpers; maps/gates/wiki point VR diagnostics and hit-log ownership to Rust NAPI plus host `src/modules/llmswitch/bridge/routing-integrations.ts`.
+- Verification PASS: `verify:llmswitch-core-tsc`; root focused Jest 4 suites / 234 tests; `verify:llmswitch-ts-shell-reference-audit` (`prodTsShellCount=2`, `shellsWithProdImporters=0`); `verify:llmswitch-rustification-audit` baseline updated to `prodTsFileCount=2`; `verify:llmswitch-minimal-ts-surface`; `verify:vr-no-ts-runtime`; function-map/mainline/fallback/deleted-path/thin-wrapper gates; script syntax checks; `build:base`; `git diff --check`.
+- Known non-closed gap: explicitly running sharedmodule router tests through root Jest with custom roots still exposes the parallel VR direct-native migration failures already recorded above; do not treat that broad VR slice as closed in this commit.
+
+# 2026-07-10: native virtual router runtime broad affected gates revalidated
+
+- Supersedes the earlier same-day non-closed VR direct-native warning: after Rust web_search route-prefix resolution, excluded forwarder/default-floor handling, provider.model alias-filter normalization, and fixture priority/auth corrections, the broad affected Jest set now passes.
+- Current verification PASS: Rust `web_search_tool_intent_selects_web_search_before_tools_backup`, `round_robin_forwarder_retry_exclusion_exhausts_after_every_real_provider`, and `diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets`; `npm run build:native-hotpath`; focused Jest 4 suites / 24 tests; broader affected Jest 25 suites / 329 tests; strict shell audit `prodTsShellCount=2`, `shellsWithProdImporters=0`; rustification audit `prodTsFileCount=2`, `nonNativeFileCount=0`; `verify:llmswitch-core-tsc`; function-map, mainline, manifest, mermaid, deleted-path, thin-wrapper, and vr-no-ts-runtime gates; `build:base`; `git diff --check`.
+- Remaining caveat: this is source/gate closeout only. No global install, managed restart, `/health.version`, or live sample replay was run in this turn, so do not claim installed runtime closeout from this note alone.

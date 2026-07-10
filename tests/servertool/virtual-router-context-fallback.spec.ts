@@ -1,5 +1,5 @@
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
-import { computeRequestTokens } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../sharedmodule/helpers/virtual-router-engine-direct-native.js';
+import { computeRequestTokens } from '../sharedmodule/helpers/virtual-router-engine-direct-native.js';
 
 function withMetadataCenterSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
   const requestId = typeof metadata.requestId === 'string' ? metadata.requestId : undefined;

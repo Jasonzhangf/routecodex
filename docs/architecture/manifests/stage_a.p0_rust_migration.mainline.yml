@@ -16,6 +16,7 @@ node_ids:
   - HubRespInbound02Parsed
   - OpenAiChatCanonical
   - ResponsesContinuationStore
+  - ResponsesRequestInbound
   - ServertoolOutcome
 edges:
   - step_id: stage-a-p0-01
@@ -51,6 +52,13 @@ edges:
     to_node: HubRespChatProcess03Governed
     status: anchored
     owner_feature_id: hub.resp_chatprocess.tool_governance
+    binding_pending: null
+    split_binding_id: null
+  - step_id: stage-a-p0-06
+    from_node: ResponsesRequestInbound
+    to_node: OpenAiChatCanonical
+    status: anchored
+    owner_feature_id: conversion.shared.responses_openai
     binding_pending: null
     split_binding_id: null
 verification:

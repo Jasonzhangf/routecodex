@@ -21,16 +21,14 @@ use crate::virtual_router_engine::instructions::{
 };
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
-    direct_model_media_requirement_error, extract_excluded_provider_keys, extract_key_alias,
-    filter_candidates_by_state, is_continuation_request, is_server_tool_followup_request,
-    parse_direct_provider_model, resolve_instruction_process_mode_for_selection,
-    resolve_instruction_target, resolve_routing_state_key, resolve_session_scope,
-    resolve_stop_message_scope,
+    direct_model_media_requirement_error, extract_excluded_provider_keys,
+    filter_candidates_by_state, is_continuation_request, parse_direct_provider_model,
+    resolve_instruction_process_mode_for_selection, resolve_routing_state_key,
+    resolve_session_scope, resolve_stop_message_scope,
 };
 use crate::virtual_router_engine::routing_state_store::{
     is_state_empty, load_routing_instruction_state, persist_routing_instruction_state,
 };
-use crate::virtual_router_engine::time_utils::now_ms;
 
 fn read_target_outbound_profile(target: &Value) -> Option<String> {
     target
@@ -82,25 +80,6 @@ fn normalize_instruction_target_against_registry(
     let Some(canonical_model) = registry.resolve_canonical_model_id(&provider, &model) else {
         return target.clone();
     };
-    for provider_key in registry.list_provider_keys(&provider) {
-        let Some(alias) = extract_key_alias(&provider_key) else {
-            continue;
-        };
-        let Some(profile) = registry.get(&provider_key) else {
-            continue;
-        };
-        let Some(model_id) = profile.model_id.clone() else {
-            continue;
-        };
-        let canonical_composite = format!("{}.{}", alias, model_id);
-        if canonical_composite == model || model_id == canonical_model {
-            let mut normalized = target.clone();
-            normalized.key_alias = Some(alias);
-            normalized.model = Some(canonical_model);
-            normalized.path_length = Some(3);
-            return normalized;
-        }
-    }
     let mut normalized = target.clone();
     normalized.model = Some(canonical_model);
     normalized

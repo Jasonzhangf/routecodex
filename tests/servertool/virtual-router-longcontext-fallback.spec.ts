@@ -1,4 +1,4 @@
-import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.js';
+import { VirtualRouterEngine } from '../sharedmodule/helpers/virtual-router-engine-direct-native.js';
 
 describe('virtual-router longcontext fallback', () => {
   it('keeps longcontext route when longcontext pool is still available after non-fatal 429', () => {
