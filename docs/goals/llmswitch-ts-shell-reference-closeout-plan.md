@@ -238,6 +238,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The timeout blackbox now uses a local minimal bridge mock for the timeout and fast-path branches it exercises, reducing `createBridgeHttpServerMock(...)` source consumers from 18 to 17.
 - Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
 
+### 2026-07-10 responses request-start-log spec shared mock consumer removed
+
+- `tests/server/handlers/responses-handler.request-start-log.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The request-start logging spec now uses a local minimal bridge mock for handler log/session-color coverage, reducing `createBridgeHttpServerMock(...)` source consumers from 17 to 16.
+- Exact file scan for `bridge-http-server-mock` / `createBridgeHttpServerMock` in that spec now returns zero matches.
+
 ### 2026-07-09 req-process wrapper deleted
 
 - Physically deleted zero-production-import `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-process-semantics.ts`.

@@ -1,5 +1,4 @@
 import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { createBridgeHttpServerMock } from '../../helpers/bridge-http-server-mock.js';
 
 function readSessionToken(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
   for (const key of keys) {
@@ -12,12 +11,19 @@ function readSessionToken(record: Record<string, unknown> | undefined, keys: str
 }
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  ...createBridgeHttpServerMock({
-    extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => ({
-      ...(readSessionToken(meta, ['sessionId', 'session_id']) ? { sessionId: readSessionToken(meta, ['sessionId', 'session_id']) } : {}),
-      ...(readSessionToken(meta, ['conversationId', 'conversation_id']) ? { conversationId: readSessionToken(meta, ['conversationId', 'conversation_id']) } : {})
-    })
+  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+  convertProviderResponse: jest.fn(async (value) => value),
+  createSnapshotRecorder: jest.fn(async () => ({ record: jest.fn() })),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => ({
+    ...(readSessionToken(meta, ['sessionId', 'session_id']) ? { sessionId: readSessionToken(meta, ['sessionId', 'session_id']) } : {}),
+    ...(readSessionToken(meta, ['conversationId', 'conversation_id']) ? { conversationId: readSessionToken(meta, ['conversationId', 'conversation_id']) } : {})
   }),
+  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+  isToolCallContinuationResponseNative: jest.fn(() => false),
+  recordResponsesResponseForRequest: jest.fn(async () => undefined),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
 }));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', () => ({
