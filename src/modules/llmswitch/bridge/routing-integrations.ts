@@ -54,8 +54,8 @@ function requireNativeHubPipelineFn<T extends Function>(
 
 function parseNativeJsonResult(raw: unknown): unknown {
   const text = String(raw);
-  if (text.startsWith('Error: ')) {
-    throw new Error(text.slice('Error: '.length));
+  if (text.startsWith('Error:')) {
+    throw new Error(text.slice('Error:'.length).trimStart());
   }
   return JSON.parse(text) as unknown;
 }
@@ -99,8 +99,8 @@ function resolveRccUserDirForNativeRouting(): string | undefined {
 
 function parseHubPipelineNativeJsonResult(raw: unknown, label: string): AnyRecord {
   const text = String(raw);
-  if (text.startsWith('Error: ')) {
-    throw new Error(text.slice('Error: '.length));
+  if (text.startsWith('Error:')) {
+    throw new Error(text.slice('Error:'.length).trimStart());
   }
   let parsed: unknown;
   try {
@@ -998,20 +998,16 @@ export function routeHubPipelineVirtualRouterNative(handle: string, request: Any
   const routeHostEffectsPlan = planVirtualRouterRouteHostEffectsNative(request, metadata);
   const nativeMetadata = injectVirtualRouterRuntimeMetadataLocal(metadata);
   const raw = hubPipelineVirtualRouterRouteJson(handle, JSON.stringify(request), JSON.stringify(nativeMetadata));
-  try {
-    const parsed = JSON.parse(raw) as AnyRecord;
-    finalizeVirtualRouterRouteHostEffectsNative(parsed, routeHostEffectsPlan);
-    const cleanedRequest = routeHostEffectsPlan.cleanedRequest;
-    if (cleanedRequest && typeof cleanedRequest === 'object' && !Array.isArray(cleanedRequest)) {
-      for (const key of Object.keys(request)) {
-        delete request[key];
-      }
-      Object.assign(request, cleanedRequest as AnyRecord);
+  const parsed = parseHubPipelineNativeJsonResult(raw, 'routeHubPipelineVirtualRouterNative');
+  finalizeVirtualRouterRouteHostEffectsNative(parsed, routeHostEffectsPlan);
+  const cleanedRequest = routeHostEffectsPlan.cleanedRequest;
+  if (cleanedRequest && typeof cleanedRequest === 'object' && !Array.isArray(cleanedRequest)) {
+    for (const key of Object.keys(request)) {
+      delete request[key];
     }
-    return parsed;
-  } catch (error) {
-    throw new Error(`[llmswitch-bridge] routeHubPipelineVirtualRouterNative returned invalid payload: ${String(error)}`);
+    Object.assign(request, cleanedRequest as AnyRecord);
   }
+  return parsed;
 }
 
 function injectVirtualRouterRuntimeMetadataLocal(metadata: AnyRecord): AnyRecord {

@@ -23,4 +23,27 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
       /returned invalid payload/,
     );
   });
+
+  it('throws native virtual-router Error payload directly instead of wrapping it as invalid JSON', async () => {
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+      getRouterHotpathJsonBindingSync: () => ({
+        resolveRccUserDirJson: jest.fn(() => 'null'),
+        planVirtualRouterRouteHostEffectsJson: jest.fn(() => '{}'),
+        finalizeVirtualRouterRouteHostEffectsJson: jest.fn(() => 'null'),
+        buildVirtualRouterRuntimeMetadataJson: jest.fn(() => '{}'),
+        hubPipelineVirtualRouterRouteJson: jest.fn(() => (
+          'Error: hub_pipeline_virtual_router_route failed: PROVIDER_NOT_AVAILABLE'
+        )),
+      }),
+    }));
+
+    const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.ts');
+
+    expect(() => routing.routeHubPipelineVirtualRouterNative('hp_no_provider', { model: 'gpt-5.5' }, {})).toThrow(
+      'hub_pipeline_virtual_router_route failed: PROVIDER_NOT_AVAILABLE',
+    );
+    expect(() => routing.routeHubPipelineVirtualRouterNative('hp_no_provider', { model: 'gpt-5.5' }, {})).not.toThrow(
+      /returned invalid payload/,
+    );
+  });
 });
