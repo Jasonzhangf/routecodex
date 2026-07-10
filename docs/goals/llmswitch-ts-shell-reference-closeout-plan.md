@@ -552,3 +552,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Config/routing symbols now import from `src/modules/llmswitch/bridge/routing-integrations.js`; snapshot recorder tests import from `snapshot-recorder.js`; the mimoweb native text harvest test imports from `native-exports.js`.
 - `tests/unified-hub/policy-observe-shadow.spec.ts` now uses the real helper path `../helpers/native-hub-pipeline-test-wrapper.js` and supplies top-level `metadataCenterSnapshot.runtimeControl` required by the current Rust HubPipeline/VR metadata contract.
 - Exact file scan across the touched test files returns zero root `src/modules/llmswitch/bridge.js` references, with focused Jest passing 15/15 suites and 80/80 tests.
+
+### 2026-07-11 attachment history store facade import narrowed
+
+- `tests/server/handlers/responses-handler.attachment-history-placeholder.blackbox.spec.ts` now imports Responses conversation store helpers from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- The test captures the current handler handoff payload from `input.hubBody ?? input.body`, matching the request bridge contract where prepared Hub payload is separate from raw HTTP body.
+- Exact file scan for root bridge and legacy loader helper references in the touched test returns zero matches; focused Jest passes 1/1.

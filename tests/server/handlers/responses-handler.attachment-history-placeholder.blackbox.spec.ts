@@ -8,7 +8,7 @@ import {
   captureResponsesRequestContextForRequest,
   clearAllResponsesConversationState,
   recordResponsesResponseForRequest,
-} from '../../../src/modules/llmswitch/bridge.js';
+} from '../../../src/modules/llmswitch/bridge/runtime-integrations.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -101,7 +101,7 @@ describe('responses handler attachment history placeholder blackbox', () => {
         res as any,
         {
           executePipeline: async (input) => {
-            capturedPipelineBody = input.body;
+            capturedPipelineBody = input.hubBody ?? input.body;
             return {
               status: 200,
               headers: {},
