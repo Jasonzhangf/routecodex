@@ -658,3 +658,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - This keeps snapshot hook observation on the current runtime integration facade and removes one test-only root bridge consumer without changing snapshot writer behavior.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 3/3 with 2 skipped existing tests, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+
+### 2026-07-11 provider SSE snapshot mock narrowed
+
+- `tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts` now mocks `writeSnapshotViaHooks` through `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- This follows the existing provider snapshot test pattern and removes one more test-only root bridge consumer while preserving the SSE error/close propagation assertions.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.

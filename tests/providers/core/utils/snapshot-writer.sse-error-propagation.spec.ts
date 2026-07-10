@@ -11,7 +11,7 @@ import {
   allowSnapshotLocalDiskWrite
 } from '../../../../src/utils/snapshot-local-disk-gate.js';
 
-jest.mock('../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.mock('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   writeSnapshotViaHooks: async () => undefined
 }));
 
