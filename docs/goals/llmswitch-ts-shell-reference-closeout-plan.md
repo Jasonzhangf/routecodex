@@ -703,3 +703,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Both tests already mock the current routing facade surface and do not need the old module-loader API; this removes two test-only legacy helper consumers without changing direct/router behavior.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 2/2 suites, 16/16 tests. Boundary: `direct-passthrough-route-level.spec.ts` and `http-server-runtime-setup.provider-merge.spec.ts` were checked and restored because their focused runs expose pre-existing behavior/fixture failures unrelated to this reference-only cleanup.
+
+### 2026-07-11 responses store cleanup loader field removed
+
+- `tests/server/runtime/http-server/request-executor.responses-store-cleanup.spec.ts` no longer exposes the retired `resolveBaseDir` helper from its `routing-integrations.js` mock.
+- The test already imports the current Responses conversation store host and routing facade directly, so the old module-loader field was dead mock surface.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 5/5 tests. The run still emits the existing non-blocking provider snapshot `entryPort required` warning, which is unrelated to this reference-only cleanup.

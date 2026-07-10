@@ -77,7 +77,6 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integ
   resolveRccPathNativeSync: jest.fn((...parts: string[]) => parts.join('/')),
   resolveRccSnapshotsDirNativeSync: jest.fn(() => ''),
   resolveRccUserDirNativeSync: jest.fn(() => ''),
-  resolveBaseDir: jest.fn(() => process.cwd()),
   createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
   executeHubPipelineNative: mockExecuteHubPipelineNative,
   updateHubPipelineVirtualRouterConfigNative: jest.fn(),
