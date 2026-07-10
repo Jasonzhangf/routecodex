@@ -133,6 +133,7 @@ jest.unstable_mockModule('../../../src/server/utils/request-log-color.js', () =>
   colorizeRequestLog: jest.fn((line: string) => line),
   formatHighlightedFinishReasonLabel: jest.fn((label?: string) => label),
   registerRequestLogContext: jest.fn(),
+  resolveRequestLogColorToken: jest.fn(() => undefined),
 }));
 
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
