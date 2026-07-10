@@ -21,7 +21,7 @@ import {
   rebindResponsesConversationRequestId,
   captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId
-} from '../../../modules/llmswitch/bridge.js';
+} from '../../../modules/llmswitch/bridge/runtime-integrations.js';
 import {
   convertProviderResponseIfNeeded as convertProviderResponseWithBridge
 } from './executor/provider-response-converter.js';

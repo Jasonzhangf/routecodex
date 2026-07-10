@@ -601,3 +601,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Production root bridge scan now reports only `src/providers/core/runtime/responses-provider.ts`, `src/server/runtime/http-server/index.ts`, and `src/server/runtime/http-server/request-executor.ts` as remaining root bridge importers.
 - Verification passed: focused Jest 3 suites / 8 tests, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
 - Boundary: some provider response converter focused tests still carry root bridge mocks for adjacent not-yet-narrowed symbols; those are test debt for the next cleanup wave, not production import evidence for this slice.
+
+### 2026-07-11 request executor continuation helper import narrowed
+
+- `src/server/runtime/http-server/request-executor.ts` now imports Responses continuation request helpers from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- Exact file scan for root bridge and legacy loader helper references in `request-executor.ts` returns zero matches, and production root bridge scan is reduced to `src/providers/core/runtime/responses-provider.ts` plus `src/server/runtime/http-server/index.ts`.
+- Verification passed: provider-owned continuation reroute blackbox Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), and touched-file `git diff --check`.
+- Boundary: `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` still has a broad native-exports mock surface and failed link-time when run as a broader batch; it is not used as passing evidence for this one-line production import slice.
