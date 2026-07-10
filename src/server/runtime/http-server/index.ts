@@ -88,9 +88,11 @@ import {
   captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId,
   finalizeResponsesConversationRequestRetention,
-  isToolCallContinuationResponseNative,
   recordResponsesResponseForRequest,
-} from '../../../modules/llmswitch/bridge.js';
+} from '../../../modules/llmswitch/bridge/runtime-integrations.js';
+import {
+  isToolCallContinuationResponseNative,
+} from '../../../modules/llmswitch/bridge/native-exports.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   readRuntimeControlProjection,

@@ -608,3 +608,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for root bridge and legacy loader helper references in `request-executor.ts` returns zero matches, and production root bridge scan is reduced to `src/providers/core/runtime/responses-provider.ts` plus `src/server/runtime/http-server/index.ts`.
 - Verification passed: provider-owned continuation reroute blackbox Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), and touched-file `git diff --check`.
 - Boundary: `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` still has a broad native-exports mock surface and failed link-time when run as a broader batch; it is not used as passing evidence for this one-line production import slice.
+
+### 2026-07-11 production root bridge imports reduced to zero
+
+- `src/server/runtime/http-server/index.ts` now imports Responses continuation store helpers from `src/modules/llmswitch/bridge/runtime-integrations.js` and `isToolCallContinuationResponseNative` from `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
+- `src/providers/core/runtime/responses-provider.ts` now imports `buildResponsesJsonFromSseStreamWithNative` from `runtime-integrations.js`, and direct request normalization / outbound sanitization from `native-exports.js` instead of the root bridge barrel.
+- `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts` now mocks the same narrow facades directly, using provider-test-only fake facade helpers for link-time surface completeness without importing the broad root bridge.
+- Exact production scan across `src/providers src/debug src/client src/server src/modules` now returns zero root `src/modules/llmswitch/bridge.js` or `.ts` importers.
+- Verification passed: focused Jest 2 suites / 22 tests (`responses-provider.direct-passthrough`, `hub-policy-injection`), `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).
+- Boundary: `responses-provider-direct-stream-incomplete` and broad `protocol-http-providers` still expose older provider test assumptions when migrated to narrow facades; they were restored and are not used as passing evidence for this production root-import closeout slice.

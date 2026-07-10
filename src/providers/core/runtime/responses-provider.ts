@@ -20,9 +20,11 @@ import {
 } from '../utils/snapshot-writer.js';
 import {
   buildResponsesJsonFromSseStreamWithNative,
+} from '../../../modules/llmswitch/bridge/runtime-integrations.js';
+import {
   normalizeResponsesDirectCurrentRequestPayload,
   sanitizeProviderOutboundPayload
-} from '../../../modules/llmswitch/bridge.js';
+} from '../../../modules/llmswitch/bridge/native-exports.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';

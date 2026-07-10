@@ -2,6 +2,8 @@ import { once } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, jest, test } from '@jest/globals';
+import { buildLlmswitchNativeExportsFake } from '../helpers/llmswitch-native-exports-fake.js';
+import { buildLlmswitchRuntimeIntegrationsFake } from '../helpers/llmswitch-runtime-integrations-fake.js';
 
 const normalizeResponsesDirectCurrentRequestPayloadMock = jest.fn((payload: Record<string, unknown>) => ({
   changed: false,
@@ -11,25 +13,32 @@ const sanitizeProviderOutboundPayloadMock = jest.fn(async (input: { payload: Rec
   JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>
 );
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  ...buildLlmswitchNativeExportsFake({
+    convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+      messages: payload.messages ?? [],
+      tools: payload.tools
+    }),
+    normalizeResponsesDirectCurrentRequestPayload: normalizeResponsesDirectCurrentRequestPayloadMock,
+    sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
+  }),
+}), { virtual: true });
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
+  ...buildLlmswitchRuntimeIntegrationsFake({
+  buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
   reportProviderErrorToRouterPolicy: async () => {},
   reportProviderSuccessToRouterPolicy: async () => {},
-  writeSnapshotViaHooks: async () => {},
-  convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
-    messages: payload.messages ?? [],
-    tools: payload.tools
   }),
-  normalizeResponsesDirectCurrentRequestPayload: normalizeResponsesDirectCurrentRequestPayloadMock,
-  sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
-  buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
-  createResponsesSseToJsonConverter: async () => ({
-    convertSseToJson: async () => ({ status: 'completed', output: [] })
-  })
 }), { virtual: true });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} })
+  extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
+  extractSessionIdentifiersFromMetadata: () => ({}),
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  loadRoutingInstructionStateSync: () => null,
+  saveRoutingInstructionStateAsync: async () => undefined,
+  saveRoutingInstructionStateSync: () => undefined,
 }), { virtual: true });
 
 import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provider-config.js';
