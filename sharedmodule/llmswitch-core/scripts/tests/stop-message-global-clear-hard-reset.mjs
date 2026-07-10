@@ -5,7 +5,21 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { VirtualRouterEngine } from '../../dist/native/router-hotpath/native-virtual-router-runtime.js';
-import { parseRoutingInstructions } from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+import { readNativeFunction } from '../../dist/native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||
+  new URL('../../dist/native/router_hotpath_napi.node', import.meta.url).pathname;
+process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativeModulePath;
+
+function parseRoutingInstructions(messages) {
+  const parseRoutingInstructionsJson = readNativeFunction('parseRoutingInstructionsJson');
+  assert.equal(typeof parseRoutingInstructionsJson, 'function');
+  const rawJson = parseRoutingInstructionsJson(
+    JSON.stringify(messages),
+    JSON.stringify({})
+  );
+  return JSON.parse(rawJson);
+}
 
 function createEngine() {
   const engine = new VirtualRouterEngine();
@@ -45,7 +59,14 @@ function route(engine, sessionId, requestId, content) {
       entryEndpoint: '/v1/chat/completions',
       processMode: 'chat',
       stream: false,
-      direction: 'request'
+      direction: 'request',
+      metadataCenterSnapshot: {
+        runtimeControl: { providerProtocol: 'openai-chat' },
+        requestId,
+        sessionId,
+        tmuxSessionId,
+        entryEndpoint: '/v1/chat/completions'
+      }
     }
   );
 }
@@ -90,7 +111,7 @@ async function main() {
     const engine = createEngine();
     const sessionId = `clear-hard-reset-${Date.now()}`;
     const tmuxSessionId = `tmux-${sessionId}`;
-    const sessionStateFile = path.join(sessionDir, `tmux-${tmuxSessionId}.json`);
+    const sessionStateFile = path.join(userDir, 'state', 'routing', `session-${sessionId}.json`);
 
     route(engine, sessionId, 'req-set', '<**stopMessage:"继续执行",3**> 设置 stopMessage');
     const stopBeforeClear = engine.getStopMessageState({

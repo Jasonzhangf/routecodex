@@ -452,8 +452,7 @@ pub fn build_request_stage_hub_pipeline_result_json(input_json: String) -> napi:
 mod tests {
     use super::{
         build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
-        normalize_provider_response_effect_plan,
-        project_metadata_write_plan_to_runtime_control,
+        normalize_provider_response_effect_plan, project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
     };
     use serde_json::{json, Value};

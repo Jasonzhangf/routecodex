@@ -239,7 +239,7 @@ describe('buildChatRequestFromResponses (responses bridge)', () => {
   it('injects stopless schema contract from responses instructions into chat system message', () => {
     const stoplessInstruction = [
       '当你准备结束当前轮时，必须同时给出两部分：',
-      '1. 简洁 summary，说明这轮完成了什么或为什么现在必须停。',
+      '1. 简洁 summary，说明这轮完成了什么或为什么现在需要停止。',
       '2. 回复末尾附一段 JSON，字段必须按真实情况填写。',
       'stopreason 取值：0=finished，1=blocked，2=continue_needed。'
     ].join('\n');

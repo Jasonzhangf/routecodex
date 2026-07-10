@@ -44,7 +44,7 @@ type ProviderHandle = {
   providerKey: string;
   providerType: 'anthropic' | 'openai';
   providerFamily: 'anthropic' | 'openai';
-  providerProtocol: 'anthropic-messages' | 'openai-chat';
+  providerProtocol: 'anthropic-messages' | 'openai-chat' | 'openai-responses';
   runtime: {
     runtimeKey: string;
     providerId: string;
@@ -52,7 +52,7 @@ type ProviderHandle = {
     providerType: 'anthropic' | 'openai';
     endpoint: string;
     auth: { type: string; value: string };
-    outboundProfile: 'anthropic-messages' | 'openai-chat';
+    outboundProfile: 'anthropic-messages' | 'openai-chat' | 'openai-responses';
   };
   instance: {
     initialize: () => Promise<void>;
@@ -77,6 +77,25 @@ function buildExecCommandTool(): Record<string, unknown> {
   };
 }
 
+function buildOpenaiResponsesText(text: string, idSuffix: string): Record<string, unknown> {
+  return {
+    id: `resp_${idSuffix}`,
+    object: 'response',
+    status: 'completed',
+    model: 'gpt-test',
+    output: [{
+      id: `msg_${idSuffix}`,
+      type: 'message',
+      status: 'completed',
+      role: 'assistant',
+      content: [{ type: 'output_text', text }]
+    }],
+    output_text: text,
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+    finish_reason: 'stop'
+  };
+}
+
 function isolateSessionDir(label: string): void {
   const dir = path.join(
     process.cwd(),
@@ -92,7 +111,7 @@ function createProviderHandle(args: {
   runtimeKey: string;
   providerKey: string;
   providerType: 'anthropic' | 'openai';
-  providerProtocol: 'anthropic-messages' | 'openai-chat';
+  providerProtocol: 'anthropic-messages' | 'openai-chat' | 'openai-responses';
   processIncoming: (payload: Record<string, unknown>) => Promise<unknown>;
 }): ProviderHandle {
   return {
@@ -172,9 +191,10 @@ async function runStoplessDualPortScenario(args: {
       primary: {
         id: 'primary',
         enabled: true,
-        type: 'openai',
+        type: 'responses',
         baseURL: 'mock://primary',
         auth: { type: 'apikey', apiKey: 'mock' },
+        responses: { streaming: 'always' },
         models: { 'gpt-test': {} }
       }
     },
@@ -187,6 +207,10 @@ async function runStoplessDualPortScenario(args: {
     virtualRouter: artifacts.config,
     policy: { mode: 'off' }
   });
+  const pipelineHandle = (pipeline as unknown as { handle?: string }).handle;
+  if (!pipelineHandle) {
+    throw new Error('native hub pipeline test wrapper did not expose handle');
+  }
   const logStages: Array<{ stage: string; requestId: string; details?: Record<string, unknown> }> = [];
 
   let capturedProviderPayload: Record<string, unknown> | undefined;
@@ -205,7 +229,7 @@ async function runStoplessDualPortScenario(args: {
 
   const executor = createRequestExecutor({
     runtimeManager: createSingleHandleRuntimeManager(handle),
-    getHubPipeline: () => pipeline as any,
+    getHubPipeline: () => pipelineHandle as any,
     getModuleDependencies: () => ({
       errorHandlingCenter: {
         handleError: jest.fn(async () => ({ success: true }))
@@ -314,64 +338,59 @@ async function runStoplessDualPortScenario(args: {
 }
 
 describe('responses HTTP servertool stopless dual-port e2e', () => {
-  it('injects reasoning.stop into provider outbound and projects reasoning_stop exec_command on no-schema stop', async () => {
+  it('injects reasoningStop into provider outbound and projects reasoningStop exec_command on no-schema stop', async () => {
     const { result, capturedProviderPayload, logStages } = await runStoplessDualPortScenario({
       sessionId: 'sess-stopless-dual-port-no-schema',
       processIncoming: async () => ({
         status: 200,
-        data: {
-          id: 'msg_stopless_dual_port_no_schema_1',
-          type: 'message',
-          role: 'assistant',
-          model: 'gpt-test',
-          content: [{ type: 'text', text: '阶段完成：审计已结束。' }],
-          stop_reason: 'end_turn'
-        }
+        data: buildOpenaiResponsesText('阶段完成：审计已结束。', 'stopless_dual_port_no_schema_1')
       })
     });
 
     expect(result.status).toBe(200);
     expect(capturedProviderPayload).toBeDefined();
     const providerPayloadJson = JSON.stringify(capturedProviderPayload);
-    expect(providerPayloadJson).toContain('reasoning.stop');
+    expect(providerPayloadJson).toContain('reasoningStop');
     expect(providerPayloadJson).toContain('stopreason');
     expect(providerPayloadJson).not.toContain('"runtime_control"');
     expect(providerPayloadJson).not.toContain('"__rt"');
     expect(logStages.some((entry) => entry.stage === 'provider.send.start')).toBe(true);
 
-    expect(String(providerPayloadJson)).toContain('Use this tool every time you want to stop.');
-    expect(String(providerPayloadJson)).toContain('Schema means the structured JSON contract for the stop result');
+    expect(String(providerPayloadJson)).toContain('Use this tool when you stop, pause, or need another turn.');
+    expect(String(providerPayloadJson)).toContain('Provide stop schema as JSON arguments');
     expect(String(providerPayloadJson)).toContain('stopreason values: 0=finished, 1=blocked, 2=continue_needed');
     expect(String(result.payload?.output_text || '')).toContain('阶段完成：审计已结束。');
   });
 
-  it('projects wrong-schema stop into reasoning_stop exec_command with invalid_schema guidance', async () => {
+  it('projects wrong-schema stop into reasoningStop exec_command with invalid_schema guidance', async () => {
     const { result, capturedProviderPayload } = await runStoplessDualPortScenario({
       sessionId: 'sess-stopless-dual-port-wrong-schema',
       processIncoming: async () => ({
         status: 200,
-        data: {
-          id: 'msg_stopless_dual_port_wrong_schema_1',
-          type: 'message',
-          role: 'assistant',
-          model: 'gpt-test',
-          content: [{ type: 'text', text: '{"stopreason":"oops","reason":"想停","has_evidence":1,"evidence":"log"}' }],
-          stop_reason: 'end_turn'
-        }
+        data: buildOpenaiResponsesText(
+          [
+            '<rcc_stop_schema>',
+            '{"stopreason":"oops","reason":"想停","has_evidence":1,"evidence":"log"}',
+            '</rcc_stop_schema>'
+          ].join('\n'),
+          'stopless_dual_port_wrong_schema_1'
+        )
       })
     });
 
     expect(result.status).toBe(200);
     expect(capturedProviderPayload).toBeDefined();
     const providerPayloadJson = JSON.stringify(capturedProviderPayload);
-    expect(providerPayloadJson).toContain('reasoning.stop');
+    expect(providerPayloadJson).toContain('reasoningStop');
     expect(providerPayloadJson).toContain('stopreason');
 
-    expect(String(providerPayloadJson)).toContain('Use this tool every time you want to stop.');
-    expect(String(providerPayloadJson)).toContain('Schema means the structured JSON contract for the stop result');
+    expect(String(providerPayloadJson)).toContain('Use this tool when you stop, pause, or need another turn.');
+    expect(String(providerPayloadJson)).toContain('Provide stop schema as JSON arguments');
     expect(String(providerPayloadJson)).toContain('stopreason values: 0=finished, 1=blocked, 2=continue_needed');
-    expect(String(result.payload?.output_text || '')).toContain('{"stopreason":"oops"');
-    expect(String(result.payload?.output_text || '')).toContain('"reason":"想停"');
+    const resultText = JSON.stringify(result.payload);
+    expect(resultText).toContain('exec_command');
+    expect(resultText).toContain('routecodex hook run reasoningStop');
+    expect(resultText).toContain('invalid_schema');
   });
 
   it('allows terminal stop when provider returns a valid terminal stop schema', async () => {
@@ -379,35 +398,30 @@ describe('responses HTTP servertool stopless dual-port e2e', () => {
       sessionId: 'sess-stopless-dual-port-valid-terminal',
       processIncoming: async () => ({
         status: 200,
-        data: {
-          id: 'msg_stopless_dual_port_valid_terminal_1',
-          type: 'message',
-          role: 'assistant',
-          model: 'gpt-test',
-          content: [{
-            type: 'text',
-            text: [
-              '已完成在线验证。',
-              '{"stopreason":0,"reason":"已完成双端口 stopless 验证","has_evidence":1,"evidence":"dual-port e2e passed","issue_cause":"none","excluded_factors":"none","diagnostic_order":"request->provider->client","done_steps":"validated provider outbound and client outbound","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"terminal stop schema can close directly"}'
-            ].join('\n')
-          }],
-          stop_reason: 'end_turn'
-        }
+        data: buildOpenaiResponsesText(
+          [
+            '已完成在线验证。',
+            '<rcc_stop_schema>',
+            '{"stopreason":0,"reason":"已完成双端口 stopless 验证","has_evidence":1,"evidence":"dual-port e2e passed","issue_cause":"none","excluded_factors":"none","diagnostic_order":"request->provider->client","done_steps":"validated provider outbound and client outbound","next_step":"","next_suggested_path":"","needs_user_input":false,"learned":"terminal stop schema can close directly"}',
+            '</rcc_stop_schema>'
+          ].join('\n'),
+          'stopless_dual_port_valid_terminal_1'
+        )
       })
     });
 
     expect(result.status).toBe(200);
     expect(capturedProviderPayload).toBeDefined();
     const providerPayloadJson = JSON.stringify(capturedProviderPayload);
-    expect(providerPayloadJson).toContain('reasoning.stop');
-    expect(providerPayloadJson).toContain('Use this tool every time you want to stop.');
-    expect(providerPayloadJson).toContain('Schema means the structured JSON contract for the stop result');
+    expect(providerPayloadJson).toContain('reasoningStop');
+    expect(providerPayloadJson).toContain('Use this tool when you stop, pause, or need another turn.');
+    expect(providerPayloadJson).toContain('Provide stop schema as JSON arguments');
     expect(providerPayloadJson).toContain('stopreason values: 0=finished, 1=blocked, 2=continue_needed');
 
     const functionCall = result.payload?.output?.find((item: any) => item?.type === 'function_call');
     expect(functionCall).toBeUndefined();
     expect(String(result.payload?.output_text || '')).toContain('已完成在线验证');
-    expect(String(result.payload?.output_text || '')).toContain('已完成双端口 stopless 验证');
-    expect(JSON.stringify(result.payload)).not.toContain('reasoning.stop');
+    expect(String(result.payload?.output_text || '')).not.toContain('<rcc_stop_schema>');
+    expect(JSON.stringify(result.payload)).not.toContain('reasoningStop');
   });
 });

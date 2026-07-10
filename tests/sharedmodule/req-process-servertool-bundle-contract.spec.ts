@@ -167,7 +167,7 @@ describe('req_process servertool bundle contract', () => {
           call_id: 'call_servertool_cli_stop_1',
           name: 'exec_command',
           arguments: JSON.stringify({
-            cmd: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+            cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"next_step\"],\"reasonCode\":\"stop_schema_next_step_missing\"},\"triggerHint\":\"invalid_schema\"}' --repeat-count '1' --max-repeats '3'"
           })
         },
         {
@@ -179,19 +179,19 @@ describe('req_process servertool bundle contract', () => {
             flowId: 'stop_message_flow',
             repeatCount: 2,
             maxRepeats: 3,
-            continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+            continuationPrompt: '继续；按上一轮反馈修正。',
             schemaFeedback: {
-              reasonCode: 'stop_schema_missing',
-              missingFields: ['stopreason', 'reason']
+              reasonCode: 'stop_schema_next_step_missing',
+              missingFields: ['next_step']
             },
             schemaGuidance: {
-              requiredFields: ['stopreason', 'reason', 'next_step'],
+              requiredFields: ['stopreason', 'current_goal', 'next_step'],
               stopreasonValues: {
                 finished: 0,
                 blocked: 1,
                 continueNeeded: 2
               },
-              triggerHint: 'no_schema'
+              triggerHint: 'invalid_schema'
             }
           })
         }
@@ -216,11 +216,13 @@ describe('req_process servertool bundle contract', () => {
     const serialized = JSON.stringify(payload);
     expect(serialized).toContain('上一轮执行结果');
     expect(serialized).toContain('repeatCount=2/3');
-    expect(serialized).toContain('reasonCode=stop_schema_missing');
-    expect(serialized).toContain('missingFields=stopreason, reason');
-    expect(serialized).toContain('继续做下一步');
+    expect(serialized).toContain('reasonCode=stop_schema_next_step_missing');
+    expect(serialized).toContain('missingFields=next_step');
+    expect(serialized).toContain('继续；按上一轮反馈修正。');
+    expect(serialized).toContain('继续；按上一轮反馈补齐 next_step');
     expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
-    expect(serialized).toContain('如果任务已经完成');
+    expect(serialized).not.toContain('如果任务已经完成');
+    expect(serialized).toContain('按上一轮反馈补齐这些字段');
   });
 
   it('keeps standalone req-process governance from owning relay stopless instruction injection', () => {

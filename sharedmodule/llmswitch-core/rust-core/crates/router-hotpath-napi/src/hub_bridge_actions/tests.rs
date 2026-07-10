@@ -1648,7 +1648,7 @@ fn build_bridge_history_drops_stopless_cli_transcript_user_history() {
             }),
             json!({
               "role":"user",
-              "content":"Chunk ID: 89d244\nWall time: 0.1646 seconds\nProcess exited with code 0\nOriginal token count: 172\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"has_evidence\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
+              "content":"Chunk ID: 89d244\nWall time: 0.1646 seconds\nProcess exited with code 0\nOriginal token count: 172\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"has_evidence\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
             }),
             json!({
               "role":"user",
@@ -1701,7 +1701,7 @@ fn convert_bridge_input_drops_stopless_cli_transcript_user_message() {
             json!({
               "type":"message",
               "role":"user",
-              "content":[{ "type":"input_text", "text":"Chunk ID: 61a259\nWall time: 0.1539 seconds\nProcess exited with code 0\nOriginal token count: 499\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\"}" }]
+              "content":[{ "type":"input_text", "text":"Chunk ID: 61a259\nWall time: 0.1539 seconds\nProcess exited with code 0\nOriginal token count: 499\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\"}" }]
             }),
             json!({
               "type":"message",

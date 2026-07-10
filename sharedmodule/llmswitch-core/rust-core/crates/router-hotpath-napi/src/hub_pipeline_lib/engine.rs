@@ -1389,16 +1389,14 @@ fn has_stop_message_response_runtime_enabled_value(value: &Value) -> bool {
         || value
             .get("__rt")
             .is_some_and(has_stop_message_response_runtime_enabled_value)
-        || value
-            .get("runtimeControl")
-            .is_some_and(|runtime| {
-                runtime
-                    .get("stopMessageEnabled")
-                    .or_else(|| runtime.get("routecodexPortStopMessageEnabled"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                    || has_active_stopless_runtime_control(value)
-            })
+        || value.get("runtimeControl").is_some_and(|runtime| {
+            runtime
+                .get("stopMessageEnabled")
+                .or_else(|| runtime.get("routecodexPortStopMessageEnabled"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || has_active_stopless_runtime_control(value)
+        })
         || value
             .get("requestTruth")
             .is_some_and(has_stop_message_response_runtime_enabled_value)

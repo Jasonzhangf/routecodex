@@ -1,11 +1,52 @@
 import assert from 'node:assert';
-import {
-  applyRoutingInstructionsToStateWithNative,
-  parseRoutingInstructions
-} from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+import { readNativeFunction } from '../../dist/native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||
+  new URL('../../dist/native/router_hotpath_napi.node', import.meta.url).pathname;
+process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativeModulePath;
 
 function parseFrom(text) {
   return parseRoutingInstructions([{ role: 'user', content: text }]);
+}
+
+function parseRoutingInstructions(messages) {
+  const parseRoutingInstructionsJson = readNativeFunction('parseRoutingInstructionsJson');
+  assert.equal(typeof parseRoutingInstructionsJson, 'function');
+  const rawJson = parseRoutingInstructionsJson(
+    JSON.stringify(messages),
+    JSON.stringify({})
+  );
+  return JSON.parse(rawJson);
+}
+
+function applyRoutingInstructionsToStateWithNative(input) {
+  const applyRoutingInstructionsJson = readNativeFunction('applyRoutingInstructionsJson');
+  assert.equal(typeof applyRoutingInstructionsJson, 'function');
+  const rawJson = applyRoutingInstructionsJson(JSON.stringify({
+    instructions: input.instructions,
+    state: serializeStateForNative(input.state)
+  }));
+  return JSON.parse(rawJson);
+}
+
+function serializeStateForNative(state) {
+  return {
+    ...state,
+    allowedProviders: Array.isArray(state.allowedProviders)
+      ? state.allowedProviders
+      : Array.from(state.allowedProviders ?? []),
+    disabledProviders: Array.isArray(state.disabledProviders)
+      ? state.disabledProviders
+      : Array.from(state.disabledProviders ?? []),
+    disabledKeys: Array.isArray(state.disabledKeys) ? state.disabledKeys : Array.from(state.disabledKeys ?? new Map()).map(([provider, keys]) => ({
+      provider,
+      keys: Array.from(keys)
+    })),
+    disabledModels: Array.isArray(state.disabledModels) ? state.disabledModels : Array.from(state.disabledModels ?? new Map()).map(([provider, models]) => ({
+      provider,
+      models: Array.from(models)
+    }))
+  };
 }
 
 function createStateSnapshot() {

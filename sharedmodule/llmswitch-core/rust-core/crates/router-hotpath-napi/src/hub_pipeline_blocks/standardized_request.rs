@@ -791,7 +791,7 @@ mod tests {
             "toolName": "stop_message_auto",
             "flowId": "stop_message_flow",
             "summary": "stopless continuation ready",
-            "continuationPrompt": "继续推进当前任务。",
+            "continuationPrompt": "继续。",
             "repeatCount": 1,
             "maxRepeats": 3,
             "schemaFeedback": {
@@ -811,7 +811,7 @@ mod tests {
                 "model": "glm-5.2",
                 "input": [
                     { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "original task" }] },
-                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续执行，完成既定目标。" }] }
+                    { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续。" }] }
                 ]
             },
             "normalized": {

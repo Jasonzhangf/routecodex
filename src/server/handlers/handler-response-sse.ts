@@ -735,10 +735,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
         result.usageLogInfo.finishReason = usageFrame.finishReason;
       }
     }
-    if (
-      isResponsesSseEndpoint(entryEndpoint)
-      && !isDirectPassthrough
-    ) {
+    if (isResponsesSseEndpoint(entryEndpoint)) {
       const terminalState = updateResponsesSseTransportTerminalStateForHttp({
         chunk: frame,
         state: sseTransportTerminalState,
@@ -866,7 +863,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       try {
         if (
           isResponsesSseEndpoint(entryEndpoint)
-          && !isDirectPassthrough
           && sseSemanticTerminalObserved
           && !sseDoneSentinelObserved
         ) {

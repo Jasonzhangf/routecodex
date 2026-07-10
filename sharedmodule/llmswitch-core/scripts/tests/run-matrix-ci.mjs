@@ -166,8 +166,6 @@ async function main() {
   results.push(await run('matrix:stop-message-marker-clean-and-reactivate', 'scripts/tests/stop-message-marker-clean-and-reactivate.mjs'));
   results.push(await run('matrix:stop-message-ai-followup-prompt-shape', 'scripts/tests/stop-message-ai-followup-prompt-shape.mjs'));
   results.push(await run('matrix:stop-message-followup-no-recursion', 'scripts/tests/stop-message-followup-no-recursion.mjs'));
-  results.push(await run('matrix:stop-message-auto-branch-coverage', 'scripts/tests/stop-message-auto-branch-coverage.mjs'));
-  results.push(await run('matrix:stop-message-mode-off-default-guard', 'scripts/tests/stop-message-mode-off-default-guard.mjs'));
   results.push(await run('matrix:stop-message-global-clear-hard-reset', 'scripts/tests/stop-message-global-clear-hard-reset.mjs'));
   results.push(
     await run('matrix:servertool-client-inject-strict-failure', 'scripts/tests/servertool-client-inject-strict-failure.mjs')

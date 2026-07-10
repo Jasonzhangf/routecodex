@@ -284,7 +284,7 @@ describe('hub pipeline Rust responses provider payload regression', () => {
               call_id: 'call_servertool_cli_stop_1',
               name: 'exec_command',
               arguments: JSON.stringify({
-                cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+                cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"next_step\"],\"reasonCode\":\"stop_schema_next_step_missing\"},\"triggerHint\":\"invalid_schema\"}' --repeat-count '1' --max-repeats '3'"
               })
             },
             {
@@ -296,19 +296,19 @@ describe('hub pipeline Rust responses provider payload regression', () => {
                 flowId: 'stop_message_flow',
                 repeatCount: 2,
                 maxRepeats: 3,
-                continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+                continuationPrompt: '继续；按上一轮反馈修正。',
                 schemaFeedback: {
-                  reasonCode: 'stop_schema_missing',
-                  missingFields: ['stopreason', 'reason']
+                  reasonCode: 'stop_schema_next_step_missing',
+                  missingFields: ['next_step']
                 },
                 schemaGuidance: {
-                  requiredFields: ['stopreason', 'reason', 'next_step'],
+                  requiredFields: ['stopreason', 'current_goal', 'next_step'],
                   stopreasonValues: {
                     finished: 0,
                     blocked: 1,
                     continueNeeded: 2
                   },
-                  triggerHint: 'no_schema'
+                  triggerHint: 'invalid_schema'
                 }
               })
             }
@@ -348,9 +348,11 @@ describe('hub pipeline Rust responses provider payload regression', () => {
     expect(payloadText).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
     expect(payloadText).toContain('上一轮执行结果');
     expect(payloadText).toContain('repeatCount=2/3');
-    expect(payloadText).toContain('reasonCode=stop_schema_missing');
-    expect(payloadText).toContain('missingFields=stopreason, reason');
-    expect(payloadText).toContain('如果任务已经完成');
+    expect(payloadText).toContain('reasonCode=stop_schema_next_step_missing');
+    expect(payloadText).toContain('missingFields=next_step');
+    expect(payloadText).not.toContain('如果任务已经完成');
+    expect(payloadText).toContain('继续；按上一轮反馈补齐 next_step');
+    expect(payloadText).toContain('按上一轮反馈补齐这些字段');
   });
 
   it('materializes stopless instructions into final provider payload from real request metadata entrypoint', async () => {

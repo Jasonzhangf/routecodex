@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
 {"stopreason":2,"simple_question":false,"reason":"当前状态原因","current_goal":"当前要完成的目标","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
-字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 表示任务完成，必须 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 表示阻塞/无法继续，必须 reason 非空，提供 reason 即可停止；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 表示任务未完成但需要继续，必须 current_goal 和 next_step 非空，下一轮会先围绕 current_goal 判断是否完成，再执行 next_step；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
+字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 需要 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 需要 reason 非空；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 需要 current_goal 和 next_step 非空，下一轮提示直接使用 next_step，current_goal 只记录当前目标；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -388,7 +388,7 @@ fn evaluate_stop_schema_gate_from_parsed(
                 "stop_schema_forcestop_reason_missing",
                 used,
                 provided_cap,
-                "forcestop=1 只能在不得已必须强制停止时使用，而且必须填写非空 reason 说明为什么现在必须停；reason 不校验格式，但不能为空。",
+                "forcestop=1 只能在不得已强制结束时使用，而且必须填写非空 reason 说明为什么需要强制结束；reason 不校验格式，但不能为空。",
                 parsed,
                 missing,
                 no_change_count,
@@ -471,7 +471,7 @@ fn evaluate_stop_schema_gate_from_parsed(
                 "stop_schema_needs_user_input_missing_next_step",
                 used,
                 provided_cap,
-                "你声明需要向用户提问（needs_user_input=true），但没有给出问题内容。请只补 next_step 中的问题，然后允许停止等待用户回答。",
+                "你声明需要向用户提问（needs_user_input=true），但没有给出问题内容。请只补 next_step 中的问题。",
                 parsed,
                 missing,
                 no_change_count,
@@ -691,7 +691,7 @@ fn evaluate_stop_schema_gate_from_parsed(
             "stop_schema_continue_next_step",
             used,
             provided_cap,
-            &build_continue_goal_next_step_prompt(current_goal, next_step.as_str()),
+            &build_continue_next_step_prompt(next_step.as_str()),
             Some(parsed),
             false,
             missing_fields,
@@ -1079,12 +1079,8 @@ fn schema_followup(
     }
 }
 
-fn build_continue_goal_next_step_prompt(current_goal: &str, next_step: &str) -> String {
-    format!(
-        "你当前的目标是：{}。你要确定你完成了吗？建议的下一步是：{}。",
-        current_goal.trim(),
-        next_step.trim()
-    )
+fn build_continue_next_step_prompt(next_step: &str) -> String {
+    next_step.trim().to_string()
 }
 
 fn build_stop_message_followup_text(
@@ -2162,10 +2158,7 @@ mod tests {
         assert_eq!(decision.action, StopSchemaGateAction::Followup);
         assert_eq!(decision.reason_code, "stop_schema_continue_next_step");
         let text = decision.followup_text.unwrap();
-        assert_eq!(
-            text,
-            "你当前的目标是：完成 stop schema gate 验证。你要确定你完成了吗？建议的下一步是：运行 targeted tests。"
-        );
+        assert_eq!(text, "运行 targeted tests");
         assert!(
             !decision.count_budget,
             "valid stopreason=2 + next_step is progress control and must not consume loop budget"
@@ -2511,7 +2504,7 @@ mod tests {
     }
 
     #[test]
-    fn continue_with_goal_and_next_step_builds_goal_prompt() {
+    fn continue_with_goal_and_next_step_uses_next_step_prompt() {
         let decision = evaluate_stop_schema_gate(
             tagged_stop_schema(
                 r#"{"stopreason":2,"reason":"还没完成","current_goal":"完成 stopless schema 目标回填","next_step":"运行 stopless 黑盒验证","needs_user_input":false}"#,
@@ -2527,9 +2520,7 @@ mod tests {
         assert!(!decision.count_budget);
         assert!(decision.missing_fields.is_empty());
         let followup = decision.followup_text.as_ref().expect("followup");
-        assert!(followup.contains("你当前的目标是：完成 stopless schema 目标回填。"));
-        assert!(followup.contains("你要确定你完成了吗？"));
-        assert!(followup.contains("建议的下一步是：运行 stopless 黑盒验证。"));
+        assert_eq!(followup, "运行 stopless 黑盒验证");
     }
 
     #[test]
@@ -2551,7 +2542,7 @@ mod tests {
         let followup = decision.followup_text.as_ref().expect("followup");
         assert!(followup.contains("你还没有写 current_goal"));
         assert!(followup.contains("你现在的任务目标是什么"));
-        assert!(!followup.contains("建议的下一步是：运行 stopless 黑盒验证"));
+        assert!(!followup.contains("运行 stopless 黑盒验证"));
     }
 
     #[test]

@@ -64,13 +64,13 @@ describe('responses-to-chat native normalization', () => {
           call_id: 'call_servertool_cli_stopless_1',
           name: 'exec_command',
           arguments:
-            '{"cmd":"routecodex hook run reasoning_stop --input-json \'{\\"flowId\\":\\"stop_message_flow\\",\\"repeatCount\\":1,\\"maxRepeats\\":3}\'"}'
+            '{"cmd":"routecodex hook run reasoningStop --input-json \'{\\"flowId\\":\\"stop_message_flow\\",\\"repeatCount\\":1,\\"maxRepeats\\":3}\'"}'
         },
         {
           type: 'function_call_output',
           call_id: 'call_servertool_cli_stopless_1',
           output:
-            '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。","repeatCount":2,"maxRepeats":3}'
+            '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续。","repeatCount":2,"maxRepeats":3,"input":{"flowId":"stop_message_flow","maxRepeats":3,"repeatCount":2,"triggerHint":"no_schema"}}'
         }
       ],
       tools: [
@@ -90,7 +90,7 @@ describe('responses-to-chat native normalization', () => {
     expect(messages[0]?.role).toBe('user');
     expect(messages[1]?.role).toBe('user');
     expect(String(messages[1]?.content ?? '')).toContain('上一轮执行结果：repeatCount=2/3');
-    expect(String(messages[1]?.content ?? '')).toContain('继续往下做');
+    expect(String(messages[1]?.content ?? '')).toContain('继续。');
   });
 
   test('RED: responses-to-chat provider body must materialize stopless guidance text and repeat counter into final messages', () => {
@@ -107,7 +107,7 @@ describe('responses-to-chat native normalization', () => {
           call_id: 'call_servertool_cli_stop_1',
           name: 'exec_command',
           arguments: JSON.stringify({
-            cmd: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+            cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"next_step\"],\"reasonCode\":\"stop_schema_next_step_missing\"},\"triggerHint\":\"invalid_schema\"}' --repeat-count '1' --max-repeats '3'"
           })
         },
         {
@@ -119,19 +119,19 @@ describe('responses-to-chat native normalization', () => {
             flowId: 'stop_message_flow',
             repeatCount: 2,
             maxRepeats: 3,
-            continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+            continuationPrompt: '继续；按上一轮反馈修正。',
             schemaFeedback: {
-              reasonCode: 'stop_schema_missing',
-              missingFields: ['stopreason', 'reason']
+              reasonCode: 'stop_schema_next_step_missing',
+              missingFields: ['next_step']
             },
             schemaGuidance: {
-              requiredFields: ['stopreason', 'reason', 'next_step'],
+              requiredFields: ['stopreason', 'current_goal', 'next_step'],
               stopreasonValues: {
                 finished: 0,
                 blocked: 1,
                 continueNeeded: 2
               },
-              triggerHint: 'no_schema'
+              triggerHint: 'invalid_schema'
             }
           })
         }
@@ -150,11 +150,13 @@ describe('responses-to-chat native normalization', () => {
 
     const messages = body.messages as Array<Record<string, unknown>>;
     const serialized = JSON.stringify(messages);
-    expect(serialized).toContain('继续做下一步');
+    expect(serialized).toContain('继续；按上一轮反馈修正。');
     expect(serialized).toContain('repeatCount=2/3');
-    expect(serialized).toContain('reasonCode=stop_schema_missing');
-    expect(serialized).toContain('missingFields=stopreason, reason');
-    expect(serialized).toContain('如果任务已经完成');
+    expect(serialized).toContain('reasonCode=stop_schema_next_step_missing');
+    expect(serialized).toContain('missingFields=next_step');
+    expect(serialized).not.toContain('如果任务已经完成');
+    expect(serialized).toContain('继续；按上一轮反馈补齐 next_step');
+    expect(serialized).toContain('按上一轮反馈补齐这些字段');
     expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
   });
 
@@ -172,7 +174,7 @@ describe('responses-to-chat native normalization', () => {
           call_id: 'call_servertool_cli_stop_2',
           name: 'exec_command',
           arguments: JSON.stringify({
-            cmd: "routecodex hook run reasoning_stop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"stopreason\",\"reason\"],\"reasonCode\":\"stop_schema_missing\"},\"triggerHint\":\"no_schema\"}' --repeat-count '1' --max-repeats '3'"
+            cmd: "routecodex hook run reasoningStop --input-json '{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"schemaFeedback\":{\"missingFields\":[\"next_step\"],\"reasonCode\":\"stop_schema_next_step_missing\"},\"triggerHint\":\"invalid_schema\"}' --repeat-count '1' --max-repeats '3'"
           })
         },
         {
@@ -184,19 +186,19 @@ describe('responses-to-chat native normalization', () => {
             flowId: 'stop_message_flow',
             repeatCount: 2,
             maxRepeats: 3,
-            continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+            continuationPrompt: '继续；按上一轮反馈修正。',
             schemaFeedback: {
-              reasonCode: 'stop_schema_missing',
-              missingFields: ['stopreason', 'reason']
+              reasonCode: 'stop_schema_next_step_missing',
+              missingFields: ['next_step']
             },
             schemaGuidance: {
-              requiredFields: ['stopreason', 'reason', 'next_step'],
+              requiredFields: ['stopreason', 'current_goal', 'next_step'],
               stopreasonValues: {
                 finished: 0,
                 blocked: 1,
                 continueNeeded: 2
               },
-              triggerHint: 'no_schema'
+              triggerHint: 'invalid_schema'
             }
           })
         }
@@ -217,15 +219,16 @@ describe('responses-to-chat native normalization', () => {
     const matched = messages.find((message) => {
       const text = String(message.content ?? '');
       return text.includes('repeatCount=2/3')
-        && text.includes('reasonCode=stop_schema_missing')
-        && text.includes('missingFields=stopreason, reason')
-        && text.includes('如果任务已经完成')
+        && text.includes('reasonCode=stop_schema_next_step_missing')
+        && text.includes('missingFields=next_step')
+        && text.includes('继续；按上一轮反馈补齐 next_step')
+        && text.includes('按上一轮反馈补齐这些字段')
         && text.includes('stopreason 取值：0=finished，1=blocked，2=continue_needed');
     });
     expect(matched).toBeDefined();
   });
 
-  test('materializes MetadataCenter stopless control through responses instructions into final provider messages', () => {
+  test('does not synthesize stopless instructions from MetadataCenter inside responses request bridge', () => {
     const body: Record<string, unknown> = {
       model: 'gpt-5.5',
       input: [
@@ -247,7 +250,7 @@ describe('responses-to-chat native normalization', () => {
         flowId: 'stop_message_flow',
         repeatCount: 2,
         maxRepeats: 3,
-        continuationPrompt: '继续做下一步；先把手头能确认的结果拿回来。',
+        continuationPrompt: '继续。',
         schemaFeedback: {
           reasonCode: 'stop_schema_missing',
           missingFields: ['stopreason', 'reason']
@@ -267,12 +270,11 @@ describe('responses-to-chat native normalization', () => {
 
     const messages = prepared.pipelineBody.messages as Array<Record<string, unknown>>;
     const serialized = JSON.stringify(messages);
-    expect(serialized).toContain('继续做下一步');
-    expect(serialized).toContain('repeatCount=2/3');
-    expect(serialized).toContain('reasonCode=stop_schema_missing');
-    expect(serialized).toContain('missingFields=stopreason, reason');
-    expect(serialized).toContain('如果任务已经完成');
-    expect(serialized).toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
+    expect(serialized).toContain('继续执行原任务');
+    expect(serialized).not.toContain('repeatCount=2/3');
+    expect(serialized).not.toContain('reasonCode=stop_schema_missing');
+    expect(serialized).not.toContain('missingFields=stopreason, reason');
+    expect(serialized).not.toContain('stopreason 取值：0=finished，1=blocked，2=continue_needed');
   });
 
   test('keeps existing chat messages when provider body already materialized messages and only instructions remain', () => {

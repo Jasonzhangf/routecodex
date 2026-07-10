@@ -1,12 +1,65 @@
 import assert from 'node:assert';
-import {
-  parseRoutingInstructions,
-} from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
-import {
-  deserializeRoutingInstructionState,
-  serializeRoutingInstructionState
-} from '../../dist/native/router-hotpath/native-virtual-router-routing-state.js';
-import { applyRoutingInstructionsToStateWithNative } from '../../dist/native/router-hotpath/native-virtual-router-routing-instructions-semantics.js';
+import { readNativeFunction } from '../../dist/native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||
+  new URL('../../dist/native/router_hotpath_napi.node', import.meta.url).pathname;
+process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = nativeModulePath;
+
+function readNativeJson(name, args) {
+  const fn = readNativeFunction(name);
+  assert.equal(typeof fn, 'function');
+  const raw = fn(...args);
+  assert.equal(typeof raw, 'string');
+  return JSON.parse(raw);
+}
+
+function serializeStateForNative(state) {
+  return {
+    ...state,
+    allowedProviders: Array.isArray(state.allowedProviders)
+      ? state.allowedProviders
+      : Array.from(state.allowedProviders ?? []),
+    disabledProviders: Array.isArray(state.disabledProviders)
+      ? state.disabledProviders
+      : Array.from(state.disabledProviders ?? []),
+    disabledKeys: Array.isArray(state.disabledKeys) ? state.disabledKeys : Array.from(state.disabledKeys ?? new Map()).map(([provider, keys]) => ({
+      provider,
+      keys: Array.from(keys)
+    })),
+    disabledModels: Array.isArray(state.disabledModels) ? state.disabledModels : Array.from(state.disabledModels ?? new Map()).map(([provider, models]) => ({
+      provider,
+      models: Array.from(models)
+    }))
+  };
+}
+
+function parseRoutingInstructions(messages) {
+  return readNativeJson('parseRoutingInstructionsJson', [
+    JSON.stringify(messages),
+    JSON.stringify({})
+  ]);
+}
+
+function applyRoutingInstructionsToStateWithNative(input) {
+  return readNativeJson('applyRoutingInstructionsJson', [
+    JSON.stringify({
+      instructions: input.instructions,
+      state: serializeStateForNative(input.state)
+    })
+  ]);
+}
+
+function serializeRoutingInstructionState(state) {
+  return readNativeJson('serializeRoutingInstructionStateJson', [
+    JSON.stringify(serializeStateForNative(state))
+  ]);
+}
+
+function deserializeRoutingInstructionState(state) {
+  return readNativeJson('deserializeRoutingInstructionStateJson', [
+    JSON.stringify(serializeStateForNative(state))
+  ]);
+}
 
 function emptyState() {
   return {

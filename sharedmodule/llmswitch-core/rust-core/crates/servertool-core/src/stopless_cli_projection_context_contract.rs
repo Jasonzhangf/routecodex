@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::cli_contract::normalize_stopless_trigger_hint_for_metadata;
 
-const DEFAULT_REASONING_TEXT: &str = "继续推进当前任务。";
+const DEFAULT_REASONING_TEXT: &str = "继续。";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

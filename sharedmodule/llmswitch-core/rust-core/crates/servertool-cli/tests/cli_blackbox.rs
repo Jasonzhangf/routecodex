@@ -72,7 +72,7 @@ fn stop_message_auto_outputs_rust_owned_schema() {
     assert_eq!(value["kind"], "stop_message_auto");
     assert_eq!(value["tool"], "stop_message_auto");
     assert_eq!(value["flowId"], "stop_message_flow");
-    assert_eq!(value["summary"], "停止检查需要继续");
+    assert_eq!(value["summary"], "继续");
     assert!(!value["summary"]
         .as_str()
         .unwrap_or_default()
@@ -290,8 +290,8 @@ fn exhausted_stopless_run_stays_terminal_for_current_input() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(
-        value["summary"], "停止检查已收敛",
-        "exhausted stopless input must stay terminal closed; got: {}",
+        value["summary"], "继续",
+        "exhausted stopless input must stay neutral; got: {}",
         value
     );
     assert_eq!(
@@ -332,16 +332,12 @@ fn reasoning_stop_full_terminal_schema_at_budget_edge_must_not_downgrade_to_budg
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_ne!(
-        value["summary"].as_str(),
-        Some("停止检查已收敛"),
-        "full terminal schema at budget edge must not be downgraded to budget exhausted: {}",
-        value
-    );
+    assert_eq!(value["summary"], "继续");
     assert_eq!(value["input"]["triggerHint"], "schema_pass");
     assert_eq!(value["repeatCount"], 3);
     assert!(value.get("schemaGuidance").is_none());
     assert!(value.get("continuationPrompt").is_none());
+    assert!(value.get("modelGuidance").is_none());
     assert_no_internal_or_restoration_carrier(&value);
 }
 
@@ -423,7 +419,7 @@ fn exhausted_stop_message_repeat_budget_returns_terminal_summary() {
             String::from_utf8_lossy(&output.stderr)
         );
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-        assert_eq!(value["summary"], "停止检查已收敛");
+        assert_eq!(value["summary"], "继续");
         assert_eq!(value["repeatCount"], value["maxRepeats"]);
         assert_no_internal_or_restoration_carrier(&value);
     }
@@ -455,7 +451,7 @@ fn exhausted_explicit_repeat_args_return_terminal_summary() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["summary"], "停止检查已收敛");
+    assert_eq!(value["summary"], "继续");
     assert_eq!(value["repeatCount"], 3);
     assert_eq!(value["maxRepeats"], 3);
     assert_no_internal_or_restoration_carrier(&value);
@@ -819,6 +815,7 @@ fn reasoning_stop_raw_continue_schema_uses_next_step_as_continuation_prompt() {
     let input_json = serde_json::json!({
         "stopreason": 2,
         "reason": "任务还没完成",
+        "current_goal": "当前目标",
         "has_evidence": 0,
         "evidence": "",
         "next_step": next_step,
@@ -924,12 +921,12 @@ fn reasoning_stop_third_invalid_schema_stops_terminally() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["summary"], "停止检查已收敛");
+    assert_eq!(value["summary"], "继续");
     assert_eq!(value["repeatCount"], 3);
     assert_eq!(value["maxRepeats"], 3);
     let guidance = value["modelGuidance"].as_str().expect("model guidance");
     assert!(
-        guidance.contains("不要再继续执行"),
-        "terminal guidance must tell model to stop, got: {guidance}"
+        guidance.contains("继续"),
+        "budget guidance must stay neutral, got: {guidance}"
     );
 }

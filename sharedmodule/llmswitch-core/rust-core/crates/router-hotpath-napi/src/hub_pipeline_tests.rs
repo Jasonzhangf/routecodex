@@ -648,7 +648,7 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
                         "type": "function_call_output",
                         "id": "fc_stopless_1",
                         "call_id": "call_stopless_1",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"}}"
                     }
                 ]
             },
@@ -696,7 +696,7 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
         output["payload"]
     );
     assert!(
-        guidance.contains("继续往下做；如果能收尾就直接说做完。"),
+        guidance.contains("继续。"),
         "provider payload must carry the continuation guidance back to the model: {}",
         output["payload"]
     );
@@ -706,8 +706,8 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
         output["payload"]
     );
     assert!(
-        guidance.contains("如果任务已经完成，就按下面 schema 补齐"),
-        "provider payload must include the natural-language repair contract: {}",
+        !guidance.contains("如果任务已经完成"),
+        "provider payload must not judge completion for the model: {}",
         output["payload"]
     );
     assert!(output["payload"].get("system").is_none());

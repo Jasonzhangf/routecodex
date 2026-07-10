@@ -47,10 +47,7 @@ fn t1_continue_with_next_step_follows_up() {
     assert_eq!(d.action, StopSchemaGateAction::Followup);
     assert_eq!(d.reason_code, "stop_schema_continue_next_step");
     assert_eq!(d.missing_fields, Vec::<String>::new());
-    assert_eq!(
-        d.followup_text.as_deref(),
-        Some("你当前的目标是：完成 stop schema gate 验证。你要确定你完成了吗？建议的下一步是：运行 cargo test 验证修复。")
-    );
+    assert_eq!(d.followup_text.as_deref(), Some("运行 cargo test 验证修复"));
     assert!(!d.count_budget);
 }
 

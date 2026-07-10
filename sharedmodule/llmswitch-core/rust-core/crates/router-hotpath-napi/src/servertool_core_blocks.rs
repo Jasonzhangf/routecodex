@@ -3577,7 +3577,6 @@ fn plans_servertool_execution_loop_effect_via_servertool_core_bridge() {
         handler_error_value["handlerErrorMessage"],
         serde_json::json!("boom")
     );
-
 }
 
 #[test]

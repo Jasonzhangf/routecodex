@@ -259,7 +259,7 @@ function assertStoplessSystemInstructionContract(text, label) {
   const value = String(text || '');
   assert.ok(value.includes('<rcc_stop_schema>'), `${label} missing rcc_stop_schema tag: ${value}`);
   assert.ok(
-    value.includes('字段不是全局必填，而是关系必填'),
+    value.includes('字段是条件必填'),
     `${label} missing conditional-field system guidance: ${value}`
   );
   assert.ok(
@@ -267,7 +267,7 @@ function assertStoplessSystemInstructionContract(text, label) {
     `${label} missing has_evidence/evidence relation: ${value}`
   );
   assert.ok(
-    value.includes('stopreason=1') && value.includes('reason') && value.includes('提供 reason 即可停止'),
+    value.includes('stopreason=1') && value.includes('reason 非空'),
     `${label} missing blocked/reason relation: ${value}`
   );
   assert.ok(
@@ -286,16 +286,15 @@ function assertReasoningStopToolContract(tool, label) {
   const fn = tool.function ?? tool;
   const description = String(fn.description || '');
   assert.ok(
-    description.includes('Fields are conditionally required, not globally required'),
+    description.includes('Fields are conditionally required'),
     `${label} missing conditional-field tool description: ${description}`
   );
   assert.ok(
-    description.includes('stopreason=1 blocked requires non-empty reason')
-      && description.includes('may stop with reason only'),
+    description.includes('stopreason=1 requires non-empty reason'),
     `${label} missing blocked/reason tool description: ${description}`
   );
   assert.ok(
-    description.includes('stopreason=2 continue_needed requires current_goal and next_step'),
+    description.includes('stopreason=2 requires current_goal and next_step'),
     `${label} missing continue/next_step tool description: ${description}`
   );
   assert.ok(
@@ -328,8 +327,8 @@ function hasStopSchemaContractText(text) {
       || value.includes('stopreason values: 0=finished, 1=blocked, 2=continue_needed')
     )
     && (
-      value.includes('字段不是全局必填，而是关系必填')
-      || value.includes('Fields are conditionally required, not globally required')
+      value.includes('字段是条件必填')
+      || value.includes('Fields are conditionally required')
     )
     && value.includes('next_step');
 }
@@ -439,8 +438,8 @@ const CASES = [
     expectedReasonCode: 'stop_schema_continue_next_step',
     expectedTriggerHint: 'non_terminal_schema',
     expectCliSchemaFeedback: true,
-    expectedProviderText: '你当前的目标是：完成 stopless continuation prompt 验证。你要确定你完成了吗？建议的下一步是：rerun failing command。',
-    forbiddenProviderText: '继续执行你给出的 next_step',
+    expectedProviderText: 'rerun failing command',
+    forbiddenProviderText: '你当前的目标是',
     expectCurrentTurnGuidance: false
   }
 ];

@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::shared_json_utils::read_trimmed_string;
+use crate::shared_responses_conversation_utils::normalize_responses_request_input_for_chat_codec;
 
 // feature_id: conversion.shared.responses_openai
 // canonical_builder: stage_a_conversion_shared_responses_openai_owner_boundary
@@ -104,16 +105,19 @@ fn build_request_from_responses_payload(
         .and_then(|v| v.as_array())
         .filter(|messages| !messages.is_empty())
         .cloned();
-    let input = context_row
+    let raw_input = context_row
         .get("input")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    let has_tool_continuation_signals =
+        input_contains_tool_continuation_signals(raw_input.as_slice());
+    let input = normalize_responses_request_input_for_chat_codec(raw_input);
     let tools = context_row
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
         .cloned();
-    let prefer_chat_messages_shortcut = !input_contains_tool_continuation_signals(input.as_slice());
+    let prefer_chat_messages_shortcut = !has_tool_continuation_signals;
     let messages = if prefer_chat_messages_shortcut {
         if let Some(messages) = chat_messages {
             messages
@@ -596,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn request_codec_restores_stopless_cli_result_as_reasoning_stop_pair_and_guidance() {
+    fn request_codec_collapses_stopless_cli_result_to_latest_guidance() {
         let raw = run_responses_openai_request_codec_json(
             json!({
                 "model": "gpt-5.5",
@@ -628,7 +632,7 @@ mod tests {
                         "type": "function_call_output",
                         "id": "fc_stopless_1",
                         "call_id": "call_stopless_1",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
                     },
                 ],
                 "tools": [
@@ -649,61 +653,24 @@ mod tests {
             .as_array()
             .expect("request messages");
 
-        assert_eq!(messages.len(), 4);
         assert_eq!(messages[0]["role"], json!("user"));
-        assert_eq!(messages[1]["role"], json!("assistant"));
-        assert_eq!(messages[1]["tool_calls"][0]["id"], json!("call_stopless_1"));
-        assert_eq!(
-            messages[1]["tool_calls"][0]["function"]["name"],
-            json!("reasoningStop")
-        );
-        assert_eq!(messages[2]["role"], json!("tool"));
-        assert_eq!(messages[2]["tool_call_id"], json!("call_stopless_1"));
-        let restored_output: Value = serde_json::from_str(
-            messages[2]["content"]
-                .as_str()
-                .expect("reasoningStop tool result content"),
-        )
-        .expect("reasoningStop tool result json");
-        assert_eq!(restored_output["flowId"], json!("stop_message_flow"));
-        assert_eq!(
-            restored_output["summary"],
-            json!("stopless continuation ready")
-        );
-        assert_eq!(restored_output["repeatCount"], json!(2));
-        assert_eq!(restored_output["maxRepeats"], json!(3));
-        assert_eq!(
-            restored_output["continuationPrompt"],
-            json!("继续往下做；如果能收尾就直接说做完。")
-        );
-        assert_eq!(
-            restored_output["schemaFeedback"]["reasonCode"],
-            json!("stop_schema_missing")
-        );
-        assert_eq!(
-            restored_output["schemaFeedback"]["missingFields"],
-            json!(["stopreason", "reason", "next_step"])
-        );
-        assert_eq!(
-            restored_output["schemaGuidance"]["requiredFields"],
-            json!(["stopreason", "reason", "next_step"])
-        );
-        assert_eq!(
-            restored_output["schemaGuidance"]["stopreasonValues"],
-            json!({
-                "finished": 0,
-                "blocked": 1,
-                "continueNeeded": 2
+        let serialized = serde_json::to_string(messages).expect("messages json");
+        assert!(!serialized.contains("reasoningStop"));
+        assert!(!serialized.contains("tool_calls"));
+        assert!(!serialized.contains("\"role\":\"tool\""));
+        let guidance_message = messages
+            .iter()
+            .filter(|message| message["role"] == json!("user"))
+            .find(|message| {
+                message["content"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("上一轮执行结果：repeatCount=2/3"))
             })
-        );
-        assert_eq!(
-            restored_output["schemaGuidance"]["triggerHint"],
-            json!("no_schema")
-        );
-        assert_eq!(messages[3]["role"], json!("user"));
-        let guidance = messages[3]["content"].as_str().expect("guidance text");
+            .expect("latest stopless guidance message");
+        let guidance = guidance_message["content"].as_str().expect("guidance text");
         assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
-        assert!(guidance.contains("继续往下做；如果能收尾就直接说做完。"));
+        assert!(guidance.contains("继续。"));
+        assert!(!guidance.contains("如果能收尾就直接说做完"));
         assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
         assert!(!guidance.contains("stop_message_auto"));
     }
@@ -727,7 +694,7 @@ mod tests {
                 "type": "message"
             },
             {
-                "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}",
+                "content": "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"stopless continuation ready\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"invalid_schema\"}}",
                 "name": "reasoningStop",
                 "role": "tool",
                 "tool_call_id": "call_servertool_cli_live_verify_1"
@@ -775,7 +742,7 @@ mod tests {
                                 "type": "function_call_output",
                                 "id": "fc_stopless_live_1",
                                 "call_id": "call_servertool_cli_live_verify_1",
-                                "output": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
+                                "output": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
                             },
                             {
                                 "type": "message",
@@ -805,11 +772,11 @@ mod tests {
                             {
                                 "role": "tool",
                                 "tool_call_id": "call_servertool_cli_live_verify_1",
-                                "content": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
+                                "content": "{\"ok\":true,\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"invalid_schema\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]}}"
                             },
                             {
                                 "role": "user",
-                                "content": "上一轮执行结果：repeatCount=1/3。刚才那段我没看明白；按你现在看到的真实情况重说一遍，直接说结果和下一步。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。继续修正 stop schema 并继续执行"
+                                "content": "上一轮执行结果：repeatCount=1/3。\n继续。\nstopreason 取值：0=finished，1=blocked，2=continue_needed。继续修正 stop schema 并继续执行"
                             }
                         ],
                         "toolsNormalized": [
@@ -845,21 +812,18 @@ mod tests {
 
         let value: Value = serde_json::from_str(&raw).unwrap();
         let messages = value["request"]["messages"].as_array().expect("messages");
-        assert_eq!(messages[0]["role"], json!("assistant"));
-        assert_eq!(
-            messages[0]["tool_calls"][0]["function"]["name"],
-            json!("reasoningStop")
-        );
-        assert_eq!(messages[1]["role"], json!("tool"));
-        assert_eq!(
-            messages[1]["tool_call_id"],
-            json!("call_servertool_cli_live_verify_1")
-        );
-        let tool_output = messages[1]["content"].as_str().expect("tool content");
-        assert!(!tool_output.contains("stop_message_auto"));
-        assert_eq!(messages[2]["role"], json!("user"));
-        let guidance = messages[2]["content"].as_str().expect("guidance");
-        assert!(guidance.contains("继续修正 stop schema 并继续执行"));
+        let serialized = serde_json::to_string(messages).expect("messages json");
+        assert!(!serialized.contains("tool_calls"));
+        assert!(!serialized.contains("\"role\":\"tool\""));
+        assert!(!serialized.contains("stop_message_auto"));
+        let guidance = messages
+            .iter()
+            .filter(|message| message["role"] == json!("user"))
+            .filter_map(|message| message["content"].as_str())
+            .find(|content| content.contains("上一轮执行结果：repeatCount=1/3"))
+            .expect("stopless guidance");
+        assert!(guidance.contains("继续。"));
+        assert!(serialized.contains("继续修正 stop schema 并继续执行"));
         assert_eq!(value["request"]["tools"][1]["name"], json!("reasoningStop"));
     }
 
@@ -1213,7 +1177,7 @@ mod tests {
             "<p>gateway.iproyal.com:19123</p>",
             "</body></html>"
         );
-        let stopless_output = "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续做下一步；先把手头能确认的结果拿回来。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}";
+        let stopless_output = "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}";
         let stopless_chunk_user_text = concat!(
             "Chunk ID: 8dc4a6\n",
             "Wall time: 0.1388 seconds\n",

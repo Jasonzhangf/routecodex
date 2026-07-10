@@ -9,9 +9,7 @@ import {
   type MetadataCenterRustSnapshot
 } from './metadata-center/dualwrite-api.js';
 import {
-  buildRequestStageRuntimeControlWritePlanWithNative,
-} from '../../../../sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-orchestration-semantics-protocol.js';
-import {
+  buildRequestStageRuntimeControlWritePlanNative,
   resolveEntryProtocolFromEndpointNative
 } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { executeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
@@ -100,7 +98,7 @@ function syncRequestStageRuntimeControlToMetadataCenter(args: {
   sourceMetadata: Record<string, unknown>;
   outputMetadata: Record<string, unknown>;
 }): Record<string, unknown> {
-  const writePlan = buildRequestStageRuntimeControlWritePlanWithNative({
+  const writePlan = buildRequestStageRuntimeControlWritePlanNative({
     outputMetadata: args.outputMetadata,
   });
   const runtimeControl = asRecord(writePlan.runtimeControl);

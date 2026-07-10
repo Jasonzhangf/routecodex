@@ -3122,29 +3122,29 @@ mod tests {
     #[test]
     fn test_plan_servertool_tool_call_dispatch_filters_and_selects_registered_handlers() {
         let raw = serde_json::json!({
-        "toolCalls": [
-            { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
-            { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
-            { "id": "call_3", "name": "unknown_tool", "arguments": "{}" }
-        ],
-            "disableToolCallHandlers": false,
-            "includeToolCallHandlerNames": ["sample_client_tool", "exec_command", "unknown_tool"],
-            "excludeToolCallHandlerNames": ["exec_command"],
-            "registeredToolCallHandlers": [
+            "toolCalls": [
+                { "id": "call_1", "name": "sample_client_tool", "arguments": "{}" },
+                { "id": "call_2", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" },
+                { "id": "call_3", "name": "unknown_tool", "arguments": "{}" }
+            ],
+                "disableToolCallHandlers": false,
+                "includeToolCallHandlerNames": ["sample_client_tool", "exec_command", "unknown_tool"],
+                "excludeToolCallHandlerNames": ["exec_command"],
+                "registeredToolCallHandlers": [
+                    {
+                        "name": "sample_client_tool",
+                        "trigger": "tool_call",
+                        "executionMode": "client_inject_only",
+                        "stripAfterExecute": true
+                    },
                 {
-                    "name": "sample_client_tool",
+                    "name": "sample_disabled_tool",
                     "trigger": "tool_call",
-                    "executionMode": "client_inject_only",
+                    "executionMode": "guarded",
                     "stripAfterExecute": true
-                },
-            {
-                "name": "sample_disabled_tool",
-                "trigger": "tool_call",
-                "executionMode": "guarded",
-                "stripAfterExecute": true
-            }
-        ]
-    });
+                }
+            ]
+        });
         let output = plan_servertool_tool_call_dispatch_json(raw.to_string()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(output.as_str()).unwrap();
         let executable = parsed

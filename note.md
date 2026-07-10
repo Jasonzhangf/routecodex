@@ -28425,12 +28425,33 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Moved `sharedmodule/llmswitch-core/src/test/responses-bridge-closed-loop.ts` to `tests/sharedmodule/responses-bridge-closed-loop.ts` because it is integration/test evidence, not production source.
 - Updated function-map/verification-map integration references. This removes the false production importer from `responses-openai-bridge.ts` without changing bridge semantics.
 - Verification PASS: `npm run verify:llmswitch-core-tsc`; `npm run verify:function-map-compile-gate`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` shows `responses-openai-bridge.ts prodImportRefs=0` and total `shellsWithProdImporters=23`; `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; active stale path scan only hits architecture backups; `git diff --check` PASS.
+
+# 2026-07-09: exec-command-loop script no longer imports llmswitch-core Responses bridge subpath
+
+- Scope: continued similar TS shell reference contraction after moving the Responses bridge closed-loop runner to tests.
+- Changed `scripts/tests/exec-command-loop.mjs` from the old core-loader Responses bridge subpath import to host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative`.
+- This keeps the verification on Rust native projection and removes the last active script `coreModuleSubpathRefs` dependency on the production `responses-openai-bridge` TS shell.
+- Verification PASS: `node scripts/tests/exec-command-loop.mjs`; `node --check scripts/tests/exec-command-loop.mjs`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` shows `coreModuleSubpathRefs=3` and remaining refs are docs/note only; `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; `git diff --check scripts/tests/exec-command-loop.mjs`.
+
+# 2026-07-10: response projection scripts use native response mapper
+
+- Scope: continued Responses bridge TS shell reference contraction after `exec-command-loop` native export move.
+- Changed `scripts/batch-toolcall-report.mjs` and `scripts/responses-sse-replay-golden.mjs` from `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js::buildChatResponseFromResponses` to `dist/native/router-hotpath/native-shared-conversion-semantics.js::buildChatResponseFromResponsesWithNative`.
+- This keeps response->chat projection verification on Rust native truth and reduces `responses-openai-bridge.ts` script text refs from 4 to 2; the remaining script refs are request-bridge users that still need `buildResponsesRequestFromChat`.
+- Verification PASS: `node --check scripts/batch-toolcall-report.mjs`; `node --check scripts/responses-sse-replay-golden.mjs`; `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` (`responses-openai-bridge.ts prodImportRefs=0`, script refs 2); `npm run verify:llmswitch-rustification-audit`; `npm run verify:llmswitch-minimal-ts-surface`; targeted `git diff --check`.
 ## 2026-07-09 21:50 runtime lifecycle silent-stop audit
 
 - Latest live health: `127.0.0.1:5520/health` and `127.0.0.1:5555/health` both return `ready=true`, `pipelineReady=true`, version `0.90.3699`.
 - Process lifecycle evidence shows prior full-port stops were not OOM/crash: `/shutdown` was accepted from localhost, including a bad sample with empty `callerPid/callerCmd`, then `SIGINT/SIGTERM` stopped the single multi-port process (`5520/10000/5555/4444`).
 - Owner locked via `runtime.lifecycle.mainline`: HTTP shutdown route is local admin control surface; CLI start/stop/port-utils are allowed callers only when they attach caller audit headers. Plain start remains non-disruptive by memory rule.
 - Fix direction: reject anonymous local `/shutdown` requests, keep CLI stop/restart/start supervisor requests working with provenance headers, and update tests/scripts that own child runtimes.
+
+## 2026-07-09 22:45 runtime lifecycle follow-up
+
+- Jason reported another apparent "silent stop" with a 22:42 log snippet. Live checks showed `5520/5555/4444/10000` all `ready=true`, version `0.90.3701`.
+- `server-5520.log` had no new `shutdown_route` / `signal_received` / `process_exit` after the earlier installed build. The 22:42 request `openai-responses-router-gpt-5.4-20260709T224223259-487269-4178` completed with usage and later requests continued.
+- `process-lifecycle.jsonl` did show a real 22:32 lifecycle stop, but it was an intentional CLI takeover from `/Volumes/extension/code/finger`: `routecodex start --snap` attached caller provenance and `/shutdown` accepted it, then a new 0.90.3701 daemon started.
+- Distinction to preserve: 22:32 was expected start takeover/restart; 22:42 was not a server stop. If a Codex UI session returned to prompt at 22:42, investigate client/model/loop outcome, not RouteCodex process death.
 
 ## 2026-07-10 stopless guidance neutralization
 

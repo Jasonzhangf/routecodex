@@ -934,7 +934,7 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         "summary": "stopless continuation ready",
         "repeatCount": 1,
         "maxRepeats": 3,
-        "continuationPrompt": "继续推进当前任务。",
+        "continuationPrompt": "继续。",
         "schemaFeedback": {
             "reasonCode": "stop_schema_missing",
             "missingFields": ["stopreason", "reason", "next_step"]
@@ -1032,7 +1032,7 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
                         "repeatCount": 1,
                         "maxRepeats": 3,
                         "triggerHint": "no_schema",
-                        "continuationPrompt": "继续推进当前任务。",
+                        "continuationPrompt": "继续。",
                         "schemaFeedback": {
                             "reasonCode": "stop_schema_missing",
                             "missingFields": ["stopreason", "reason", "next_step"]
@@ -1103,9 +1103,14 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         output["metadata"]
     );
     assert!(
-        serialized.contains("如果任务已经完成，就按下面 schema 补齐")
+        serialized.contains("按上一轮反馈补齐字段")
             && serialized.contains("stopreason, reason, next_step"),
         "provider payload must explain missing fields naturally, got: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains("如果任务已经完成"),
+        "provider payload must not judge completion for the model: {}",
         serialized
     );
     let messages = output["payload"]["messages"]
@@ -2445,7 +2450,7 @@ fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
                         "repeatCount": 1,
                         "maxRepeats": 3,
                         "triggerHint": "non_terminal_schema",
-                        "continuationPrompt": "继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。",
+                        "continuationPrompt": "继续。",
                         "schemaFeedback": {
                             "reasonCode": "non_terminal_schema",
                             "missingFields": []

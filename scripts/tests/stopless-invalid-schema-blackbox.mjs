@@ -368,23 +368,23 @@ function assertProviderGuidance(body, reasonCode, missingFields, label) {
     `${label}: provider request must render exact missingFields order for the model: ${text}`
   );
   assert.ok(
-    (text.includes('任务还没完成，但当前没有明确 next_step')
-      && text.includes('把下一步写成这轮立刻执行的最小动作'))
-      || text.includes('任务还没完成，但当前没有明确 current_goal'),
-    `${label}: provider request must include current_goal/next_step repair guidance: ${text}`
+    text.includes('继续；按上一轮反馈补齐 next_step')
+      || text.includes('继续；按上一轮反馈补齐 current_goal')
+      || text.includes('继续；按上一轮反馈补齐字段'),
+    `${label}: provider request must include neutral current_goal/next_step repair guidance: ${text}`
   );
   assert.ok(
-    text.includes('按条件补齐这些字段') || text.includes('按字段之间的逻辑关系填写'),
+    text.includes('按上一轮反馈补齐这些字段'),
     `${label}: provider request must explain conditional schema fields: ${text}`
   );
   assert.ok(
     text.includes('has_evidence=1 时 evidence 必须写证据')
-      || text.includes('stopreason=0 表示完成，必须 has_evidence=1 且 evidence 非空'),
+      || text.includes('stopreason=0 需要 has_evidence=1 且 evidence 非空'),
     `${label}: provider request must include has_evidence/evidence relation: ${text}`
   );
   assert.ok(
     text.includes('stopreason=2 必须写 current_goal 和 next_step')
-      || text.includes('stopreason=2 表示继续，必须写 current_goal 和 next_step'),
+      || text.includes('stopreason=2 需要 current_goal 和 next_step'),
     `${label}: provider request must include stopreason=2 relation: ${text}`
   );
   assert.ok(

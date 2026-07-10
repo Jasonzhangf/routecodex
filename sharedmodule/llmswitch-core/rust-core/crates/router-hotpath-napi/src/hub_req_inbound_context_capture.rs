@@ -2064,7 +2064,7 @@ mod tests {
                     {
                         "type": "function_call_output",
                         "call_id": "call_stopless_cli_1",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续往下做；如果能收尾就直接说做完。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"summary\":\"stopless continuation ready\",\"repeatCount\":2,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\",\"reason\",\"next_step\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2},\"triggerHint\":\"no_schema\"},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
                     }
                 ],
                 "tools": [
@@ -2096,6 +2096,7 @@ mod tests {
             .expect("guidance text");
         assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
         assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
-        assert!(guidance.contains("继续往下做；如果能收尾就直接说做完。"));
+        assert!(guidance.contains("继续。"));
+        assert!(!guidance.contains("如果能收尾就直接说做完"));
     }
 }

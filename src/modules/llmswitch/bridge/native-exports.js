@@ -427,6 +427,23 @@ export function buildResponsesPayloadFromChatNative(payload, context) {
     ]);
     return assertNativeObject('buildResponsesPayloadFromChatJson', parsed);
 }
+export function buildRequestStageRuntimeControlWritePlanNative(input) {
+    const parsed = invokeRouterHotpathJsonCapability('buildRequestStageRuntimeControlWritePlanJson', [
+        {
+            outputMetadata: input.outputMetadata ?? {},
+        },
+    ]);
+    const row = assertNativeObject('buildRequestStageRuntimeControlWritePlanJson', parsed);
+    const runtimeControl = row.runtimeControl;
+    if (runtimeControl !== undefined
+        && runtimeControl !== null
+        && (typeof runtimeControl !== 'object' || Array.isArray(runtimeControl))) {
+        throw new Error('[llmswitch-bridge] buildRequestStageRuntimeControlWritePlanJson returned invalid runtimeControl');
+    }
+    return {
+        runtimeControl,
+    };
+}
 export function projectResponsesClientPayloadForClientNative(args) {
     const parsed = invokeRouterHotpathJsonCapability('projectResponsesClientPayloadForClientJson', [
         args.payload ?? null,

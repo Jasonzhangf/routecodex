@@ -6,7 +6,7 @@
 //    拿到 clientCallId 真正 spawn 'routecodex hook run reasoning_stop ...' CLI,
 //    解析 stdout, 断言 output.sessionId 与 output.requestId 与 --input-json 都不带 continuationPrompt
 //    2) 三次 submit_tool_outputs 推进 used: 1 -> 2 -> 3, 第三次触发后必须 output.repeatCount == 3 且
-//    output.summary 命中公共收敛状态 '停止检查已收敛'，不得泄露内部 stopless 文案;
+//    output.summary 保持中性继续提示，不得泄露内部 stopless 文案;
 //    3) 5520 /v1/responses (provider-direct) 不能返回 servertool 工具调用或 :stop_followup;
 //       断言 execCommand 字段缺失 + finish_reason=stop 一次通过.
 
@@ -140,7 +140,7 @@ try {
     record('step3.round3.cli_exit_ok', false, { error: thirdCli.error });
     throw new Error(thirdCli.error);
   }
-  record('step3.round3.terminal_after_three_hits', thirdCli.stdout?.summary === '停止检查已收敛' && thirdCli.stdout?.repeatCount === 3, {
+  record('step3.round3.neutral_after_three_hits', thirdCli.stdout?.summary === '继续' && thirdCli.stdout?.repeatCount === 3, {
     repeatCount: thirdCli.stdout?.repeatCount,
     summary: thirdCli.stdout?.summary
   });

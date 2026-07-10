@@ -1971,6 +1971,18 @@
 - `responses-openai-bridge.ts` has `prodImportRefs=0` after this move. Keep future Responses bridge evidence in root tests/scripts/docs unless there is a real runtime consumer.
 - Current shell audit after this move is `prodTsShellCount=25`, `shellsWithProdImporters=23`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=4`, with `nonNativeFileCount=0`.
 
+# 2026-07-09: exec-command-loop uses native exports, not Responses bridge subpath
+
+- `scripts/tests/exec-command-loop.mjs` must call `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative` for Responses projection verification.
+- Do not restore the old core-loader Responses bridge subpath import in this script; that recreates an active script dependency on the production TS shell.
+- Current shell audit after this move is `prodTsShellCount=25`, `shellsWithProdImporters=23`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`; remaining subpath refs are docs/note only, not active scripts.
+
+# 2026-07-10: response projection scripts use native response mapper
+
+- `scripts/batch-toolcall-report.mjs` and `scripts/responses-sse-replay-golden.mjs` must import `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js::buildChatResponseFromResponsesWithNative` for response->chat projection.
+- Do not restore their dependency on the production `responses-openai-bridge` dist file; these scripts only need Rust native response mapping, not request bridge glue.
+- After this move, `responses-openai-bridge.ts` remains `prodImportRefs=0`; script text refs are down to 2 and both remaining refs need request-side bridge handling before deletion.
+
 # 2026-07-09: Local shutdown requires caller provenance
 
 - `/shutdown` is lifecycle control-plane. Localhost alone is not enough authorization because a single accepted shutdown stops every listener in the managed multi-port process (`5520`, `10000`, `5555`, `4444`).

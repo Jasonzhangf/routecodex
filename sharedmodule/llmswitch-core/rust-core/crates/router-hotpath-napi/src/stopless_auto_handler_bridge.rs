@@ -44,7 +44,10 @@ fn build_stopless_exec_command(
         "maxRepeats": max_repeats,
         "triggerHint": trigger,
     });
-    if let (Some(record), Some(feedback)) = (input_json.as_object_mut(), schema_feedback) {
+    if let (Some(record), Some(feedback)) = (
+        input_json.as_object_mut(),
+        schema_feedback.filter(|_| should_include_schema_feedback_in_cli_input(trigger)),
+    ) {
         record.insert("schemaFeedback".to_string(), feedback.clone());
     }
     let input_str = input_json.to_string();
@@ -56,6 +59,10 @@ fn build_stopless_exec_command(
     cmd.push_str(&format!(" --repeat-count '{}'", repeat_count));
     cmd.push_str(&format!(" --max-repeats '{}'", max_repeats));
     cmd
+}
+
+fn should_include_schema_feedback_in_cli_input(trigger: &str) -> bool {
+    !matches!(trigger, "no_schema")
 }
 
 // ── NAPI: plan stopless auto handler (plan only) ─────────────────────────────
@@ -338,16 +345,27 @@ pub fn build_stopless_auto_cli_projection_json(input_json: String) -> NapiResult
     // both (the TS-layer stop_message shell expects them in the projection's
     // execCommand, not just in the output JSON).
     let exec_output_value: Value = {
+        let trigger = cli_contract::normalize_stopless_trigger_hint_for_metadata(
+            ctx.public_trigger_hint.as_deref(),
+        );
+        let schema_feedback_for_cli = ctx
+            .schema_feedback
+            .as_ref()
+            .filter(|_| should_include_schema_feedback_in_cli_input(trigger));
+        let mut cli_input = serde_json::json!({
+            "flowId": "stop_message_flow",
+            "repeatCount": ctx.repeat_count,
+            "maxRepeats": ctx.max_repeats,
+            "triggerHint": trigger,
+        });
+        if let (Some(record), Some(feedback)) = (cli_input.as_object_mut(), schema_feedback_for_cli)
+        {
+            record.insert("schemaFeedback".to_string(), feedback.clone());
+        }
         let raw = cli_contract::build_client_exec_cli_projection_output(
             "stop_message_auto",
             "stop_message_flow",
-            serde_json::json!({
-                "flowId": "stop_message_flow",
-                "repeatCount": ctx.repeat_count,
-                "maxRepeats": ctx.max_repeats,
-                "triggerHint": ctx.public_trigger_hint,
-                "schemaFeedback": ctx.schema_feedback,
-            }),
+            cli_input,
             ctx.repeat_count,
             ctx.max_repeats,
         )
@@ -865,9 +883,17 @@ mod tests {
     fn build_stopless_auto_cli_projection_basic_happy_path() {
         let input = json!({
             "metadataWritePlan": {
-                "stopless": { "repeatCount": 1, "maxRepeats": 3, "triggerHint": "stop_schema_missing" }
+                "stopless": {
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "triggerHint": "stop_schema_missing",
+                    "schemaFeedback": {
+                        "reasonCode": "stop_schema_missing",
+                        "missingFields": ["stopreason"]
+                    }
+                }
             },
-            "chatStopText": "继续推进当前任务",
+            "chatStopText": "继续。",
             "sessionId": "sess-proj",
             "requestId": "req-proj-1"
         });
@@ -880,8 +906,38 @@ mod tests {
         assert!(output.get("projectionContext").is_some());
         let command = output["command"].as_str().expect("command");
         assert!(command.contains("routecodex hook run reasoningStop"));
+        assert!(
+            !command.contains("schemaFeedback"),
+            "no_schema command must not carry schemaFeedback: {command}"
+        );
         assert!(!command.contains("--session-id"));
         assert!(!command.contains("--request-id"));
+    }
+
+    #[test]
+    fn build_stopless_auto_cli_projection_invalid_schema_keeps_feedback() {
+        let input = json!({
+            "metadataWritePlan": {
+                "stopless": {
+                    "repeatCount": 1,
+                    "maxRepeats": 3,
+                    "triggerHint": "invalid_schema",
+                    "schemaFeedback": {
+                        "reasonCode": "stop_schema_next_step_missing",
+                        "missingFields": ["next_step"]
+                    }
+                }
+            },
+            "chatStopText": "继续；按上一轮反馈修正。",
+            "sessionId": "sess-proj-invalid",
+            "requestId": "req-proj-invalid-1"
+        });
+        let result =
+            build_stopless_auto_cli_projection_json(input.to_string()).expect("projection");
+        let output: Value = serde_json::from_str(&result).expect("json parse");
+        let command = output["command"].as_str().expect("command");
+        assert!(command.contains("schemaFeedback"));
+        assert!(command.contains("stop_schema_next_step_missing"));
     }
 
     #[test]

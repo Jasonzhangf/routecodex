@@ -707,7 +707,7 @@ describe('responses conversation store plain continuation restore', () => {
     rebindResponsesConversationRequestId('req-provider-switch-router-alias-1', providerAttempt);
 
     recordResponsesResponse({
-      requestId: 'req-provider-switch-router-alias-1',
+      requestId: providerAttempt,
       providerKey: 'crs.key1.gpt-5.4',
       response: {
         id: 'resp-provider-switch-alias-success-1',
@@ -3466,7 +3466,7 @@ describe('responses conversation store plain continuation restore', () => {
       {
         tool_outputs: [{
           tool_call_id: 'call_third_round_2',
-          output: '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续往下做；要是能收尾就直接告诉我做完了，不然就继续推进。","repeatCount":3,"maxRepeats":3,"schemaGuidance":{"requiredFields":["stopreason","reason","next_step"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}'
+          output: '{"ok":true,"toolName":"stop_message_auto","flowId":"stop_message_flow","continuationPrompt":"继续。","repeatCount":3,"maxRepeats":3,"schemaGuidance":{"requiredFields":["stopreason","reason","next_step"],"stopreasonValues":{"finished":0,"blocked":1,"continueNeeded":2}}}'
         }],
         stream: false
       },

@@ -454,13 +454,7 @@ impl VirtualRouterEngineCore {
             if !stop_instructions.is_empty() {
                 let session_state = self.load_routing_state_for_scope(scope);
                 let mut next_state = session_state;
-                let has_global_clear = stop_instructions.iter().any(|inst| inst.kind == "clear");
                 apply_routing_instructions(&stop_instructions, &mut next_state)?;
-                if has_global_clear {
-                    let timestamp = now_ms();
-                    next_state.stop_message_state.stop_message_updated_at = Some(timestamp);
-                    next_state.stop_message_state.stop_message_last_used_at = Some(timestamp);
-                }
                 self.routing_instruction_state
                     .insert(scope.clone(), next_state.clone());
                 if let Some(state) = self.routing_instruction_state.get(scope) {

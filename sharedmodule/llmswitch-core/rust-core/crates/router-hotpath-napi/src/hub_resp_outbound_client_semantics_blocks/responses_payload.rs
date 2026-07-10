@@ -399,7 +399,10 @@ fn is_client_visible_servertool_cli_shell(
 
 type PendingToolCall = (usize, String, String, String);
 
-fn restore_generated_function_call_statuses(payload: &mut Value, pending_call_ids: &HashSet<String>) {
+fn restore_generated_function_call_statuses(
+    payload: &mut Value,
+    pending_call_ids: &HashSet<String>,
+) {
     let Some(output) = payload
         .as_object_mut()
         .and_then(|record| record.get_mut("output"))
@@ -1108,11 +1111,8 @@ pub(crate) fn build_responses_payload_from_chat_core(
         );
     }
 
-    let mut finalized = finalize_client_responses_payload(
-        Value::Object(out),
-        response_row,
-        context,
-    );
+    let mut finalized =
+        finalize_client_responses_payload(Value::Object(out), response_row, context);
     restore_generated_function_call_statuses(&mut finalized, &pending_call_ids);
     Ok(finalized)
 }
@@ -1134,11 +1134,11 @@ mod tests {
                 "finish_reason": "tool_calls",
                 "message": {
                     "role": "assistant",
-                    "content": "继续推进当前任务。",
+                    "content": "继续。",
                     "reasoning": {
                         "summary": [{
                             "type": "summary_text",
-                            "text": "**Thinking** 继续推进当前任务。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                            "text": "**Thinking** 继续。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
                         }]
                     },
                     "tool_calls": [{
@@ -1163,7 +1163,7 @@ mod tests {
         assert!(!result.to_string().contains("<rcc_stop_schema>"));
         assert_eq!(
             result["output"][0]["summary"][0]["text"],
-            "**Thinking** 继续推进当前任务。"
+            "**Thinking** 继续。"
         );
     }
 
@@ -1266,7 +1266,7 @@ mod tests {
                 "status": "completed",
                 "summary": [{
                     "type": "summary_text",
-                    "text": "**Thinking** 继续推进当前任务。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
+                    "text": "**Thinking** 继续。\n<rcc_stop_schema>\n{\"stopreason\":2,\"reason\":\"continue\"}\n</rcc_stop_schema>"
                 }]
             }]
         });
@@ -1281,7 +1281,7 @@ mod tests {
         assert!(!result.to_string().contains("<rcc_stop_schema>"));
         assert_eq!(
             result["output"][0]["summary"][0]["text"],
-            "**Thinking** 继续推进当前任务。"
+            "**Thinking** 继续。"
         );
     }
 }

@@ -299,7 +299,7 @@ mod tests {
             decision: json!({ "used": 0, "max_repeats": 3 }),
             state_update: Some(json!({
                 "used": 1,
-                "text": "继续做下一步；先把手头能确认的结果拿回来。"
+                "text": "继续。"
             })),
             default_text: Some("继续执行".to_string()),
             schema_used_before_count: Some(json!(0)),

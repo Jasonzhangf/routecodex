@@ -38,7 +38,7 @@ servertool / stopless / followup / schema gate 改动前，先查：
 6. `stopreason=0` 是完成停止条件；必须 `has_evidence=1` 且 `evidence` 非空，证据内容只检查存在性，不判断真假。诊断字段按真实情况填写，不是全局必填。
 7. `stopreason=1` 是阻塞停止条件；必须 `reason` 非空，提供 reason 即可停止。`blocked + needs_user_input=true` 必须把 summary 和要用户决策的问题返回给用户，并以 `finish_reason=stop` 停止等待。
 8. `stopreason=2` 是继续条件；必须填写 `next_step`，followup 给模型的续跑文本就是 `next_step` 本身。缺 `next_step` 时按 invalid schema 返回缺失字段反馈。
-9. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 no schema / invalid schema 连续 3 次收敛；`stopreason=2 + next_step` 是有效进展控制，不计入连续错误预算。非 stop 响应、工具调用或正常进展必须 reset budget。
+9. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 no schema / invalid schema 连续 3 次后停止继续改写；`stopreason=2 + next_step` 是有效进展控制，不计入连续错误预算。非 stop 响应、工具调用或正常进展必须 reset budget。
 9. stopless 不得走 `reenterPipeline` 普通 user 注入。非 terminal stop_message_flow 只能投影 CLI，并由 CLI stdout 提供 continuation prompt + schema guidance 闭环。
 10. stopless 的前置注入和拦截补打一律是同一个停止 hook 语义：模型若要停止，必须主动调用该 hook 并附 stop schema；若模型直接 stop 未调用，系统只能补打一轮同一 hook，并在结果中再次要求模型下一轮自己调用。
 11. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
