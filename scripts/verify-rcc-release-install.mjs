@@ -118,22 +118,14 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       for (const relativePath of candidates) {
         await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
       }
-      const activeServertoolWrapperExports = [
-        'formatStopMessageCompareContextWithNative',
-        'planEngineSelectionStartWithNative',
-        'resolveEngineSelectionAfterRunWithNative',
-        'resolveServertoolExecutionLoopInitialDecisionWithNative',
-        'resolveServertoolExecutionLoopResultDecisionWithNative',
-      ];
       for (const relativePath of [
         'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
         'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
       ]) {
         const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
-        for (const exportName of activeServertoolWrapperExports) {
-          if (typeof mod[exportName] !== 'function') {
-            throw new Error(relativePath + ' missing function export ' + exportName);
-          }
+        const leakedWrapperExports = Object.keys(mod).filter((name) => name.endsWith('WithNative'));
+        if (leakedWrapperExports.length > 0) {
+          throw new Error(relativePath + ' must not export per-capability servertool wrappers: ' + leakedWrapperExports.join(', '));
         }
       }
       const routing = await import(new URL('dist/modules/llmswitch/bridge/routing-integrations.js', 'file://' + packageDir.replace(/\\/$/, '') + '/').href);

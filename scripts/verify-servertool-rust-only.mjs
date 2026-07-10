@@ -217,6 +217,7 @@ function checkNativeExportSurface() {
   const requiredExportsPath = repoPath('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
   const libPath = repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
   const protocolPath = repoPath('tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts');
+  const nativeExportsPath = repoPath('src/modules/llmswitch/bridge/native-exports.ts');
   for (const [path, source] of [
     [requiredExportsPath, readRequired(requiredExportsPath)],
     [libPath, readRequired(libPath)],
@@ -228,6 +229,18 @@ function checkNativeExportSurface() {
   const protocol = readRequired(protocolPath);
   assertContains('native-servertool-runtime-effects-carrier', protocolPath, protocol, 'servertoolRuntimeActions: Array<Record<string, unknown>>');
   assertContains('native-servertool-runtime-effects-carrier', protocolPath, protocol, 'Array.isArray(row.servertoolRuntimeActions)');
+  const nativeExports = readRequired(nativeExportsPath);
+  for (const marker of [
+    'SERVERTOOL ORCHESTRATION WRAPPERS',
+    'SERVERTOOL CORE BRIDGE WRAPPERS',
+    'servertool-core bridge:',
+    'export function inspectStopGatewaySignalWithNative',
+    'export function planServertoolEnginePreflightWithNative',
+    'export function resolveServertoolExecutionLoopInitialDecisionWithNative',
+    'export function finalizeServertoolResponseStageWithNative',
+  ]) {
+    assertNotContains('native-servertool-wrapper-fanout-deleted', nativeExportsPath, nativeExports, marker);
+  }
   pass('native-servertool-runtime-action-export-deleted', 'runtime action planner exports are absent');
 }
 

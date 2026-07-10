@@ -2179,3 +2179,11 @@
 - All tracked `src/modules/llmswitch/**/*.js` and `src/modules/llmswitch*.js` source-side emit mirrors are physically deleted. Do not restore them as compatibility surfaces, Jest helpers, or runtime truth.
 - Canonical host bridge authoring remains in `src/modules/llmswitch/**/*.ts`; runtime JS belongs in `dist` after build. Jest relative `.js` specifiers resolve to TS through `moduleNameMapper`, so source imports may keep ESM `.js` specifiers without requiring checked-in mirror files.
 - Residue coverage now fails if a tracked-and-existing host bridge `.js` source artifact returns under `src/modules/llmswitch`.
+
+# 2026-07-11: Native exports servertool-core wrapper fan-out is retired
+
+- `src/modules/llmswitch/bridge/native-exports.ts` must not restore the `SERVERTOOL CORE BRIDGE WRAPPERS` production block or per-capability servertool/stopless/followup `*WithNative` export fan-out.
+- `sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js`, `dist/native/servertool-wrapper.d.ts`, and `types/servertool-wrapper.d.ts` are release-marker surfaces only; they must not export or declare capability wrappers ending in `WithNative`.
+- Tests that still need old wrapper-shaped names use `tests/sharedmodule/helpers/servertool-native-wrapper-test-helper.ts`, which directly invokes Rust/NAPI JSON capabilities and is not a production import target.
+- Servertool function/verification maps no longer list `native-exports.ts` as the servertool wrapper owner; the owner remains Rust/NAPI (`servertool-core` and `router-hotpath-napi`) plus required export manifests and tests.
+- Verification evidence for this closeout: focused servertool Jest 50/50, hub-pipeline residue audit 211/211, `verify:servertool-rust-only`, strict llmswitch shell audit, rustification/minimal TS audits, function-map/mainline/deleted-path/thin-wrapper/fallback gates, `verify:llmswitch-core-tsc`, root `tsc`, `build:base`, servertool-wrapper import exportCount=0, residue `rg` zero matches, and `git diff --check` pass.

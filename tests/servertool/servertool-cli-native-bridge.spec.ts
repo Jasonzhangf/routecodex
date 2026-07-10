@@ -28,7 +28,7 @@ import {
   planServertoolRegistryAutoHookDescriptorsWithNative,
   planServertoolRegistryLookupActionWithNative,
   planServertoolRegistryProjectionWithNative
-} from '../../sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js';
+} from '../sharedmodule/helpers/servertool-native-wrapper-test-helper.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from '../sharedmodule/helpers/native-router-hotpath-loader.js';
 
 function planStoplessCliProjectionContextNative(input: unknown): unknown {

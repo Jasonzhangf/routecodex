@@ -3,7 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
   inspectStopGatewaySignalWithNative
-} from '../../src/modules/llmswitch/bridge/native-exports.js';
+} from '../sharedmodule/helpers/servertool-native-wrapper-test-helper.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const TEST_WRITER = {
@@ -17,10 +17,10 @@ describe('servertool stop-gateway context', () => {
     expect(fs.existsSync('sharedmodule/llmswitch-core/src/servertool/metadata-center-carrier.ts')).toBe(false);
   });
 
-  test('native exports keep stop-gateway inspection as the only public bridge', () => {
+  test('production native exports do not keep stop-gateway wrapper fan-out', () => {
     const source = fs.readFileSync('src/modules/llmswitch/bridge/native-exports.ts', 'utf8');
 
-    expect(source).toContain('export function inspectStopGatewaySignalWithNative');
+    expect(source).not.toContain('export function inspectStopGatewaySignalWithNative');
     expect(source).not.toContain('resolveStopGatewayContext');
     expect(source).not.toContain('isStopEligibleForServerTool');
     expect(source).not.toContain('readStopGatewayContext');

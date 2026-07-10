@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import {
   formatStopMessageCompareContextWithNative,
   normalizeStopMessageCompareContextWithNative
-} from '../../src/modules/llmswitch/bridge/native-exports.js';
+} from '../sharedmodule/helpers/servertool-native-wrapper-test-helper.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.ts';
 
 type StopMessageCompareContext = Record<string, unknown>;

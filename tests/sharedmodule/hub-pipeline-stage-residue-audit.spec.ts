@@ -816,6 +816,12 @@ describe('hub pipeline stage residue audit', () => {
     );
     const forbidden = [
       'SERVERTOOL ORCHESTRATION WRAPPERS',
+      'SERVERTOOL CORE BRIDGE WRAPPERS',
+      'servertool-core bridge:',
+      'export function inspectStopGatewaySignalWithNative',
+      'export function resolveRuntimeStopMessageStateWithNative',
+      'export function planServertoolEnginePreflightWithNative',
+      'export function resolveServertoolExecutionLoopInitialDecisionWithNative',
       'planStoplessCliProjectionContextWithNative',
       'runServertoolResponseStageWithNative',
       'buildServertoolDispatchPlanInputWithNative',
@@ -5583,11 +5589,6 @@ describe('hub pipeline stage residue audit', () => {
     expect(rustRuntimeStateStart).toBeGreaterThanOrEqual(0);
     expect(rustRuntimeStateEnd).toBeGreaterThan(rustRuntimeStateStart);
     const rustRuntimeStateBlock = rustLookupSource.slice(rustRuntimeStateStart, rustRuntimeStateEnd);
-    const runtimeStateBlock = extractFunctionBlock(nativeWrapperSource, 'resolveRuntimeStopMessageStateWithNative');
-    const runtimeStageBlock = extractFunctionBlock(nativeWrapperSource, 'readRuntimeStopMessageStageModeWithNative');
-    const metadataCenterStateBlock = nativeWrapperSource.includes('resolveRuntimeStopMessageStateFromMetadataCenterWithNative')
-      ? 'resolveRuntimeStopMessageStateFromMetadataCenterWithNative'
-      : '';
 
     expect(rustLookupSource).toContain('pub fn resolve_runtime_stop_message_state');
     expect(rustLookupSource).not.toContain('pub fn read_servertool_followup_flow_id');
@@ -5597,16 +5598,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(rustRuntimeStateBlock).not.toContain('runtime.get("serverToolLoopState")');
     expect(rustRuntimeStateBlock).not.toContain('runtime.get("stopMessageState")');
     expect(rustRuntimeStateBlock).not.toContain('loop_state.get("repeatCount")');
-    expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateWithNative');
+    expect(nativeWrapperSource).not.toContain('resolveRuntimeStopMessageStateWithNative');
+    expect(nativeWrapperSource).not.toContain('readRuntimeStopMessageStageModeWithNative');
     expect(nativeWrapperSource).not.toContain('readServertoolFollowupFlowIdWithNative');
-    expect(nativeWrapperSource).toContain('resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
+    expect(nativeWrapperSource).not.toContain('resolveRuntimeStopMessageStateFromMetadataCenterWithNative');
     expect(fs.existsSync(stopMessageNativePath)).toBe(false);
-
-    const runtimeFindings = collectMatches(`${runtimeStateBlock}\n${runtimeStageBlock}\n${metadataCenterStateBlock}`, [
-      { label: 'runtime stop state TS reads loop state', pattern: /serverToolLoopState|loopState\.maxRepeats|stopMessageState|stopMessageUsed|stopMessageText/ },
-      { label: 'runtime stop stage TS normalizes state locally', pattern: /toLowerCase\(\)|normalizeStopMessageStageMode/i },
-      { label: 'metadata-center stop state TS rebuilds snapshot locally', pattern: /serverToolLoopState|stopMessageState|stopMessageText|repeatCount|maxRepeats/ },
-    ]);
-    expect(runtimeFindings).toEqual([]);
   });
 });
