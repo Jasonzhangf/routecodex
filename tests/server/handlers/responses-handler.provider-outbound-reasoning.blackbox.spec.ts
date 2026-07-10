@@ -2,10 +2,11 @@ import { describe, expect, it } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
+import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -57,6 +58,13 @@ describe('responses HTTP provider outbound reasoning filter blackbox', () => {
             id: 'req_http_reasoning_filter',
             endpoint: '/v1/responses',
             payload: input.body,
+            metadataCenterSnapshot: {
+              runtimeControl: {
+                entryEndpoint: '/v1/responses',
+                providerProtocol: 'openai-responses',
+                routeHint: 'responses'
+              }
+            },
             metadata: {
               ...input.metadata,
               entryEndpoint: '/v1/responses',
@@ -85,13 +93,13 @@ describe('responses HTTP provider outbound reasoning filter blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              id: 'resp_http_reasoning_filter',
-              object: 'response',
-              status: 'completed',
-              model: 'gpt-5.5',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-            }
+            metadata: { outboundStream: true, stream: true },
+            sseStream: Readable.from([
+              'event: response.completed\n',
+              'data: {"type":"response.completed","response":{"id":"resp_http_reasoning_filter","object":"response","status":"completed","model":"gpt-5.5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}\n\n',
+              'event: response.done\n',
+              'data: {"type":"response.done","response":{"id":"resp_http_reasoning_filter","object":"response","status":"completed"}}\n\n'
+            ])
           };
         },
         errorHandling: null,

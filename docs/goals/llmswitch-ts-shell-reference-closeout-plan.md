@@ -774,3 +774,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec was a stale clock/heartbeat bootstrap test left after `refactor: remove clock heartbeat features`; its only exercised symbol, `tickSessionDaemonInjectLoop`, no longer exists, and it carried an empty root `src/modules/llmswitch/bridge.js` / `.ts` mock solely as dead scaffolding.
 - Exact repo scan for `http-server-session-daemon.bootstrap` / `tickSessionDaemonInjectLoop` now has no active source references after deletion.
 - The still-live `tests/server/http-server/http-server-session-daemon.spec.ts` covers the remaining exported `extractWorkdirHintFromReservationTasks` helper and passes 3/3.
+
+### 2026-07-11 responses provider outbound reasoning root bridge import removed
+
+- `tests/server/handlers/responses-handler.provider-outbound-reasoning.blackbox.spec.ts` no longer imports the root `src/modules/llmswitch/bridge.js` barrel and no longer uses the stale out-of-tree helper path.
+- The spec now imports `bootstrapVirtualRouterConfig` from `src/modules/llmswitch/bridge/routing-integrations.js` and the real `tests/helpers/native-hub-pipeline-test-wrapper.js` helper path.
+- `tests/helpers/native-hub-pipeline-test-wrapper.ts` exposes the native pipeline handle for request-executor style tests without adding MetadataCenter writeback or TS runtime semantics.
+- The streamed `/v1/responses` test input now supplies top-level `metadataCenterSnapshot.runtimeControl` required by the Rust HubPipeline/VR metadata contract and returns a real `sseStream` for a streaming client request.
+- Exact file scan for root bridge paths, stale helper path, and legacy loader helpers in the touched files returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 1/1 test; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only).

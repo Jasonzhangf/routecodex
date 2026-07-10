@@ -19,6 +19,10 @@ export class NativeHubPipelineTestWrapper {
     this.handle = createHubPipelineNative(config);
   }
 
+  getNativeHandle(): string {
+    return this.handle;
+  }
+
   async execute(request: AnyRecord): Promise<AnyRecord> {
     return executeHubPipelineNative(this.handle, request);
   }
