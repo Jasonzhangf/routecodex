@@ -445,6 +445,18 @@ fn is_provider_native_resume_continuation_value(request_semantics: &Value) -> bo
     };
     let continuation_owner = read_string(continuation.get("continuationOwner"))
         .or_else(|| read_string(continuation.get("continuation_owner")))
+        .or_else(|| {
+            request_semantics
+                .as_object()
+                .and_then(|row| row.get("responses"))
+                .and_then(Value::as_object)
+                .and_then(|responses| responses.get("resume"))
+                .and_then(Value::as_object)
+                .and_then(|resume| {
+                    read_string(resume.get("continuationOwner"))
+                        .or_else(|| read_string(resume.get("continuation_owner")))
+                })
+        })
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     if continuation_owner == "relay" {
@@ -452,6 +464,16 @@ fn is_provider_native_resume_continuation_value(request_semantics: &Value) -> bo
     }
     if read_string(continuation.get("previousResponseId")).is_some()
         || read_string(continuation.get("previous_response_id")).is_some()
+        || continuation
+            .get("resumeFrom")
+            .or_else(|| continuation.get("resume_from"))
+            .and_then(Value::as_object)
+            .is_some_and(|resume_from| {
+                read_string(resume_from.get("previousResponseId")).is_some()
+                    || read_string(resume_from.get("previous_response_id")).is_some()
+                    || read_string(resume_from.get("responseId")).is_some()
+                    || read_string(resume_from.get("response_id")).is_some()
+            })
     {
         return true;
     }
@@ -943,6 +965,37 @@ mod request_semantics_tests {
     }
 
     #[test]
+    fn classifies_provider_native_resume_from_previous_response_in_rust() {
+        let semantics = json!({
+            "continuation": {
+                "continuationOwner": "direct",
+                "resumeFrom": {
+                    "previousResponseId": "resp_1"
+                }
+            }
+        });
+        assert!(is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn classifies_provider_native_resume_from_with_owner_in_responses_resume() {
+        let semantics = json!({
+            "continuation": {
+                "resumeFrom": {
+                    "previousResponseId": "resp_1"
+                }
+            },
+            "responses": {
+                "resume": {
+                    "continuationOwner": "direct",
+                    "responseId": "resp_1"
+                }
+            }
+        });
+        assert!(is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
     fn classifies_provider_native_submit_tool_outputs_resume_in_rust() {
         let semantics = json!({
             "continuation": {
@@ -960,6 +1013,24 @@ mod request_semantics_tests {
             "continuation": {
                 "continuationOwner": "relay",
                 "previousResponseId": "resp_relay_1"
+            }
+        });
+        assert!(!is_provider_native_resume_continuation_value(&semantics));
+    }
+
+    #[test]
+    fn does_not_classify_relay_owner_from_responses_resume_as_provider_native() {
+        let semantics = json!({
+            "continuation": {
+                "resumeFrom": {
+                    "previousResponseId": "resp_relay_1"
+                }
+            },
+            "responses": {
+                "resume": {
+                    "continuationOwner": "relay",
+                    "responseId": "resp_relay_1"
+                }
             }
         });
         assert!(!is_provider_native_resume_continuation_value(&semantics));

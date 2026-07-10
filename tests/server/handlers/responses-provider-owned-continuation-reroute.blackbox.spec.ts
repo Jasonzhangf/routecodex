@@ -1,65 +1,48 @@
 import { jest } from '@jest/globals';
 
-const mockBridgeWithStoplessStateStubs = async () => {
-  const routing = await import('../../../src/modules/llmswitch/bridge/routing-integrations.ts');
-  return {
-    loadRoutingInstructionStateSync: () => null,
-    saveRoutingInstructionStateAsync: () => {},
-    saveRoutingInstructionStateSync: () => {},
-    extractSessionIdentifiersFromMetadata: () => ({}),
-    extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
-    rebindResponsesConversationRequestId: jest.fn(async () => undefined),
-    captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
-    clearResponsesConversationByRequestId: jest.fn(async () => undefined),
-    sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : ''),
-    createSnapshotRecorder: jest.fn(async () => ({ record: () => {} })),
-    convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
-    writeSnapshotViaHooks: jest.fn(async () => {}),
-    preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
-    lookupResponsesContinuationByResponseId: jest.fn(async (...args: unknown[]) =>
-      mockLookupResponsesContinuationByResponseId(...args)
-    ),
-    resumeResponsesConversation: jest.fn(async (...args: unknown[]) =>
-      mockResumeResponsesConversation(...args)
-    ),
-    resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
-    createResponsesSseToJsonConverter: jest.fn(async () => ({ convertSseToJson: async () => ({}) })),
-    resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
-    reprojectDirectChatToolCallStreamForHttp: jest.fn(async () => undefined),
-    reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
-    reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
-    mapChatToolsToBridgeJson: jest.fn(async () => []),
-    buildAnthropicResponseFromChatJson: jest.fn(async () => ({})),
-    injectMcpToolsForChatJson: jest.fn(async () => []),
-    injectMcpToolsForResponsesJson: jest.fn(async () => []),
-    deriveFinishReasonNative: jest.fn(() => undefined),
-    importCoreDist: jest.fn(async (subpath?: string) => {
-      if (!subpath) {
-        return {
-          normalizeResponsesToolCallArgumentsForClientWithNative: () => ({})
-        };
-      }
-      return {};
-    }),
-    bootstrapVirtualRouterConfig: routing.bootstrapVirtualRouterConfig,
-    createHubPipelineNative: routing.createHubPipelineNative,
-    executeHubPipelineNative: routing.executeHubPipelineNative,
-    disposeHubPipelineNative: routing.disposeHubPipelineNative,
-    updateHubPipelineVirtualRouterConfigNative: routing.updateHubPipelineVirtualRouterConfigNative,
-    updateHubPipelineEngineDepsNative: routing.updateHubPipelineEngineDepsNative,
-    routeHubPipelineVirtualRouterNative: routing.routeHubPipelineVirtualRouterNative,
-    diagnoseHubPipelineVirtualRouterNative: routing.diagnoseHubPipelineVirtualRouterNative,
-    getHubPipelineVirtualRouterStatusNative: routing.getHubPipelineVirtualRouterStatusNative,
-    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: routing.markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
-    resolveBaseDir: () => process.cwd(),
-  };
-};
-
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeWithStoplessStateStubs);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeWithStoplessStateStubs);
-
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
+  extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
+  extractSessionIdentifiersFromMetadata: () => ({}),
+  loadRoutingInstructionStateSync: () => null,
+  saveRoutingInstructionStateAsync: () => {},
+  saveRoutingInstructionStateSync: () => {},
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
+  createSnapshotRecorder: jest.fn(async () => ({ record: () => {} })),
+  resetSnapshotRecorderErrorsampleStateForTests: jest.fn(),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+  convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
+  buildResponsesJsonFromSseStreamWithNative: jest.fn(async () => ({})),
+  captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
+  clearAllResponsesConversationState: jest.fn(async () => undefined),
+  clearResponsesConversationByRequestId: jest.fn(async () => undefined),
+  clearUnresolvedResponsesConversationRequests: jest.fn(async () => undefined),
+  finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
+  lookupResponsesContinuationByResponseId: jest.fn(async (...args: unknown[]) =>
+    mockLookupResponsesContinuationByResponseId(...args)
+  ),
+  materializeLatestResponsesContinuationByScope: jest.fn(async () => null),
+  preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
+  rebindResponsesConversationRequestId: jest.fn(async () => undefined),
+  recordResponsesResponseForRequest: jest.fn(async () => undefined),
+  reportProviderErrorToRouterPolicy: jest.fn(async (event: unknown) => event),
+  reportProviderSuccessToRouterPolicy: jest.fn(async (event: unknown) => event),
+  resetResponsesConversationStateForRestartSimulation: jest.fn(async () => undefined),
+  resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
+  resumeResponsesConversation: jest.fn(async (...args: unknown[]) =>
+    mockResumeResponsesConversation(...args)
+  ),
+  writeSnapshotViaHooks: jest.fn(async () => {}),
+}));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js', () => ({
   lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
@@ -80,7 +63,7 @@ const express = (await import('express')).default;
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 const { HubRequestExecutor } = await import('../../../src/server/runtime/http-server/request-executor.js');
 const { StatsManager } = await import('../../../src/server/runtime/http-server/stats-manager.js');
-const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge.js');
+const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge/routing-integrations.js');
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../../../tests/helpers/native-hub-pipeline-test-wrapper.js');
 
 type AddressInfo = import('node:net').AddressInfo;
@@ -96,13 +79,29 @@ async function withServer<T>(app: ReturnType<typeof express>, run: (baseUrl: str
   }
 }
 
+async function executePreparedPipelineInput(executor: InstanceType<typeof HubRequestExecutor>, input: any) {
+  if (input.hubBody === undefined) {
+    return executor.execute(input);
+  }
+  const { hubBody, ...withoutHubBody } = input;
+  const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+    ? input.metadata
+    : {};
+  metadata.__raw_request_body = input.body;
+  return executor.execute({
+    ...withoutHubBody,
+    body: hubBody,
+    metadata,
+  });
+}
+
 function buildVirtualRouterConfig() {
   return {
     providers: {
       primary: {
         id: 'primary',
         enabled: true,
-        type: 'openai',
+        type: 'responses',
         baseURL: 'mock://primary',
         auth: { type: 'apikey', apiKey: 'primary-key' },
         responses: { streaming: 'always' },
@@ -111,7 +110,7 @@ function buildVirtualRouterConfig() {
       secondary: {
         id: 'secondary',
         enabled: true,
-        type: 'openai',
+        type: 'responses',
         baseURL: 'mock://secondary',
         auth: { type: 'apikey', apiKey: 'secondary-key' },
         responses: { streaming: 'always' },
@@ -206,7 +205,7 @@ describe('responses provider-owned continuation reroute blackbox', () => {
     };
     const executor = new HubRequestExecutor({
       runtimeManager,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => (pipeline as unknown as { handle: string }).handle,
       getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }),
       logStage: () => undefined,
       stats: new StatsManager()
@@ -214,26 +213,11 @@ describe('responses provider-owned continuation reroute blackbox', () => {
     const app = express();
     app.use(express.json());
     app.post('/v1/responses', (req, res) => handleResponses(req, res, {
-      executePipeline: async (input) => executor.execute(input),
+      executePipeline: async (input) => executePreparedPipelineInput(executor, input),
       errorHandling: null
     }));
     app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
-      executePipeline: async (input) => {
-        try {
-          return await executor.execute(input);
-        } catch (error) {
-          console.error('debug submit_tool_outputs executor error', JSON.stringify({
-            message: error instanceof Error ? error.message : String(error),
-            code: (error as { code?: unknown } | undefined)?.code,
-            status: (error as { status?: unknown } | undefined)?.status,
-            statusCode: (error as { statusCode?: unknown } | undefined)?.statusCode,
-            providerKey: (error as { providerKey?: unknown } | undefined)?.providerKey,
-            routeName: (error as { routeName?: unknown } | undefined)?.routeName,
-            details: (error as { details?: unknown } | undefined)?.details,
-          }));
-          throw error;
-        }
-      },
+      executePipeline: async (input) => executePreparedPipelineInput(executor, input),
       errorHandling: null
     }, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
@@ -262,7 +246,13 @@ describe('responses provider-owned continuation reroute blackbox', () => {
         });
         const text = await response.text();
         expect(response.status).toBe(502);
-        expect(text).toContain('Upstream provider error');
+        expect(JSON.parse(text)).toMatchObject({
+          error: {
+            message: 'SSE_TO_JSON_ERROR',
+            code: 'upstream_error',
+            upstream_status: 502,
+          },
+        });
         expect(providerCalls).toEqual(['primary']);
       });
     } finally {
@@ -348,7 +338,7 @@ describe('responses provider-owned continuation reroute blackbox', () => {
     };
     const executor = new HubRequestExecutor({
       runtimeManager,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => (pipeline as unknown as { handle: string }).handle,
       getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }),
       logStage: () => undefined,
       stats: new StatsManager()
@@ -356,26 +346,11 @@ describe('responses provider-owned continuation reroute blackbox', () => {
     const app = express();
     app.use(express.json());
     app.post('/v1/responses', (req, res) => handleResponses(req, res, {
-      executePipeline: async (input) => executor.execute(input),
+      executePipeline: async (input) => executePreparedPipelineInput(executor, input),
       errorHandling: null
     }));
     app.post('/v1/responses/:id/submit_tool_outputs', (req, res) => handleResponses(req, res, {
-      executePipeline: async (input) => {
-        try {
-          return await executor.execute(input);
-        } catch (error) {
-          console.error('debug submit_tool_outputs executor error', JSON.stringify({
-            message: error instanceof Error ? error.message : String(error),
-            code: (error as { code?: unknown } | undefined)?.code,
-            status: (error as { status?: unknown } | undefined)?.status,
-            statusCode: (error as { statusCode?: unknown } | undefined)?.statusCode,
-            providerKey: (error as { providerKey?: unknown } | undefined)?.providerKey,
-            routeName: (error as { routeName?: unknown } | undefined)?.routeName,
-            details: (error as { details?: unknown } | undefined)?.details,
-          }));
-          throw error;
-        }
-      },
+      executePipeline: async (input) => executePreparedPipelineInput(executor, input),
       errorHandling: null
     }, {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
@@ -388,7 +363,29 @@ describe('responses provider-owned continuation reroute blackbox', () => {
       responseId: 'resp_prev_1',
       providerKey: 'primary.key1.gpt-test',
       continuationOwner: 'relay',
-      entryKind: 'responses'
+      entryKind: 'responses',
+      fullInput: [
+        {
+          type: 'message',
+          role: 'user',
+          content: 'continue relay submit_tool_outputs reroute'
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'exec_command',
+          arguments: '{"cmd":"pwd"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: '{"ok":true}'
+        }
+      ],
+      restoredTools: [
+        { type: 'function', name: 'exec_command' }
+      ],
+      fullInputItems: 3,
     });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {

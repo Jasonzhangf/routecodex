@@ -18,6 +18,7 @@ use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_control_text,
     is_synthetic_routecodex_tool_call_id,
 };
+use crate::hub_pipeline_blocks::responses_resume::synthesize_continuation_from_responses_resume;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
@@ -463,6 +464,26 @@ fn read_provider_response_request_semantics<'a>(
         })
 }
 
+fn read_provider_response_metadata_center_responses_resume(
+    request_metadata: Option<&Map<String, Value>>,
+) -> Option<Value> {
+    let metadata = request_metadata?;
+    metadata
+        .get("responsesResume")
+        .filter(|value| value.is_object())
+        .cloned()
+        .or_else(|| {
+            metadata
+                .get("metadataCenterSnapshot")
+                .and_then(Value::as_object)
+                .and_then(|snapshot| snapshot.get("continuationContext"))
+                .and_then(Value::as_object)
+                .and_then(|continuation_context| continuation_context.get("responsesResume"))
+                .filter(|value| value.is_object())
+                .cloned()
+        })
+}
+
 fn read_provider_response_base_semantics<'a>(
     processed: Option<&'a Value>,
     standardized: Option<&'a Value>,
@@ -635,6 +656,8 @@ fn resolve_provider_response_request_semantics_value(
         standardized_metadata,
         request_metadata_record,
     );
+    let metadata_center_responses_resume =
+        read_provider_response_metadata_center_responses_resume(request_metadata_record);
     let fallback_tools = read_provider_response_root_tools(processed_ref)
         .or_else(|| read_provider_response_root_tools(standardized_ref));
     let fallback_input = read_provider_response_input(processed_ref)
@@ -675,6 +698,53 @@ fn resolve_provider_response_request_semantics_value(
             Value::Array(fallback_tools.clone().unwrap_or_default()),
         );
         normalized_base.insert("tools".to_string(), Value::Object(tools));
+    }
+    if !normalized_base.contains_key("continuation") {
+        if let Some(continuation) =
+            synthesize_continuation_from_responses_resume(metadata_center_responses_resume.as_ref())
+        {
+            normalized_base.insert("continuation".to_string(), continuation);
+        }
+    } else if let Some(synthesized) =
+        synthesize_continuation_from_responses_resume(metadata_center_responses_resume.as_ref())
+    {
+        if let (Some(existing), Some(synthesized_obj)) = (
+            normalized_base
+                .get_mut("continuation")
+                .and_then(Value::as_object_mut),
+            synthesized.as_object(),
+        ) {
+            for key in [
+                "continuationOwner",
+                "responseId",
+                "previousResponseId",
+                "mode",
+                "resumeFrom",
+            ] {
+                if !existing.contains_key(key) {
+                    if let Some(value) = synthesized_obj.get(key) {
+                        existing.insert(key.to_string(), value.clone());
+                    }
+                }
+            }
+        }
+    }
+    if metadata_center_responses_resume.is_some() {
+        let responses = normalized_base
+            .entry("responses".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !responses.is_object() {
+            *responses = Value::Object(Map::new());
+        }
+        if let Some(responses_obj) = responses.as_object_mut() {
+            responses_obj
+                .entry("resume".to_string())
+                .or_insert_with(|| {
+                    metadata_center_responses_resume
+                        .clone()
+                        .unwrap_or(Value::Null)
+                });
+        }
     }
     if !normalized_base.contains_key("messages") {
         if let Some(messages) = read_provider_response_messages(processed_ref)
@@ -2444,6 +2514,111 @@ mod tests {
         assert_eq!(tools[0]["function"]["name"], "exec_command");
         assert_eq!(tools[1]["function"]["name"], "apply_patch");
         assert_eq!(tools[2]["function"]["name"], "reasoning.stop");
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_reads_direct_resume_snapshot() {
+        let processed = json!({
+            "input": [
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let request_metadata = json!({
+            "metadataCenterSnapshot": {
+                "continuationContext": {
+                    "responsesResume": {
+                        "continuationOwner": "direct",
+                        "responseId": "resp_direct_snapshot_1",
+                        "providerKey": "primary.key1.gpt-test"
+                    }
+                }
+            }
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+
+        assert_eq!(output["continuation"]["continuationOwner"], json!("direct"));
+        assert_eq!(
+            output["continuation"]["previousResponseId"],
+            json!("resp_direct_snapshot_1")
+        );
+        assert_eq!(output["continuation"]["mode"], json!("submit_tool_outputs"));
+        assert_eq!(
+            output["responses"]["resume"]["providerKey"],
+            json!("primary.key1.gpt-test")
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_reads_flat_direct_resume() {
+        let processed = json!({
+            "input": [
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let request_metadata = json!({
+            "responsesResume": {
+                "continuationOwner": "direct",
+                "responseId": "resp_direct_flat_1",
+                "providerKey": "primary.key1.gpt-test"
+            }
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+
+        assert_eq!(output["continuation"]["continuationOwner"], json!("direct"));
+        assert_eq!(
+            output["continuation"]["previousResponseId"],
+            json!("resp_direct_flat_1")
+        );
+        assert_eq!(output["continuation"]["mode"], json!("submit_tool_outputs"));
+    }
+
+    #[test]
+    fn test_resolve_provider_response_request_semantics_completes_existing_direct_continuation() {
+        let processed = json!({
+            "semantics": {
+                "continuation": {
+                    "resumeFrom": {
+                        "previousResponseId": "resp_direct_existing_1"
+                    }
+                }
+            },
+            "input": [
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let request_metadata = json!({
+            "metadataCenterSnapshot": {
+                "continuationContext": {
+                    "responsesResume": {
+                        "continuationOwner": "direct",
+                        "responseId": "resp_direct_existing_1"
+                    }
+                }
+            }
+        });
+
+        let output = resolve_provider_response_request_semantics_value(
+            processed,
+            Value::Null,
+            request_metadata,
+        );
+
+        assert_eq!(output["continuation"]["continuationOwner"], json!("direct"));
+        assert_eq!(
+            output["continuation"]["previousResponseId"],
+            json!("resp_direct_existing_1")
+        );
+        assert_eq!(output["continuation"]["mode"], json!("submit_tool_outputs"));
     }
 
     #[test]

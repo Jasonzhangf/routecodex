@@ -49,12 +49,22 @@ pub(crate) fn synthesize_continuation_from_responses_resume(
     let resume_obj = resume?.as_object()?;
     let previous_request_id = read_trimmed_string(resume_obj.get("previousRequestId"));
     let restored_from_response_id = read_trimmed_string(resume_obj.get("restoredFromResponseId"));
+    let response_id = read_trimmed_string(resume_obj.get("responseId"));
+    let continuation_owner = read_trimmed_string(resume_obj.get("continuationOwner"));
     let route_hint = read_trimmed_string(resume_obj.get("routeHint"));
 
     let mut continuation = Map::<String, Value>::new();
+    if let Some(owner) = continuation_owner {
+        continuation.insert("continuationOwner".to_string(), Value::String(owner));
+    }
+    if let Some(id) = response_id.clone() {
+        continuation.insert("responseId".to_string(), Value::String(id.clone()));
+        continuation.insert("previousResponseId".to_string(), Value::String(id));
+    }
     if let Some(chain_id) = previous_request_id
         .clone()
         .or_else(|| restored_from_response_id.clone())
+        .or_else(|| response_id.clone())
     {
         continuation.insert("chainId".to_string(), Value::String(chain_id));
     }
@@ -68,6 +78,8 @@ pub(crate) fn synthesize_continuation_from_responses_resume(
         resume_from.insert("requestId".to_string(), Value::String(request_id));
     }
     if let Some(response_id) = restored_from_response_id {
+        resume_from.insert("responseId".to_string(), Value::String(response_id));
+    } else if let Some(response_id) = response_id.clone() {
         resume_from.insert("responseId".to_string(), Value::String(response_id));
     }
     if !resume_from.is_empty() {
@@ -102,6 +114,11 @@ pub(crate) fn synthesize_continuation_from_responses_resume(
         continuation.insert(
             "toolContinuation".to_string(),
             Value::Object(tool_continuation),
+        );
+    } else if response_id.is_some() {
+        continuation.insert(
+            "mode".to_string(),
+            Value::String("submit_tool_outputs".to_string()),
         );
     }
 
@@ -211,4 +228,32 @@ fn read_resume_tool_outputs_detailed(resume_obj: &Map<String, Value>) -> Vec<(St
     }
 
     mapped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn direct_responses_resume_synthesizes_provider_owned_continuation() {
+        let continuation = synthesize_continuation_from_responses_resume(Some(&json!({
+            "continuationOwner": "direct",
+            "responseId": "resp_direct_submit_1",
+            "providerKey": "primary.key1.gpt-test"
+        })))
+        .expect("continuation");
+
+        assert_eq!(continuation["continuationOwner"], json!("direct"));
+        assert_eq!(continuation["responseId"], json!("resp_direct_submit_1"));
+        assert_eq!(
+            continuation["previousResponseId"],
+            json!("resp_direct_submit_1")
+        );
+        assert_eq!(continuation["mode"], json!("submit_tool_outputs"));
+        assert_eq!(
+            continuation["resumeFrom"]["responseId"],
+            json!("resp_direct_submit_1")
+        );
+    }
 }
