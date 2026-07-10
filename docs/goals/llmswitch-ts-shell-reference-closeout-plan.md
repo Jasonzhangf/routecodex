@@ -455,3 +455,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` now fails if any tracked-and-existing host bridge `.js` source artifact returns under `src/modules/llmswitch`.
 - Gate updates stopped reading deleted mirrors in `verify-responses-handler-single-bridge-surface`, `llmswitch-ts-shell-reference-audit`, `hub-policy-injection`, and residue tests; checks now target `.ts` canonical sources or absent mirrors.
 - Verification passed: focused residue Jest 211/211, focused hub-policy/snapshot Jest 4/4, `verify:responses-handler-single-bridge-surface`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=3`), `verify:responses-sse-business-module`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, root `tsc`, and `build:base`.
+
+### 2026-07-11 request executor shared bridge mock consumer removed
+
+- `tests/server/runtime/http-server/request-executor.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
+- The single request-executor bridge mock site now uses a file-local minimal mock exposing only `evaluateResponsesDirectRouteDecisionNative`, which is the only symbol required by the tested direct-payload contract branch.
+- This removes one external consumer of the legacy helper APIs `importCoreDist`, `requireCoreDist`, `resolveImplForSubpath`, and `resolveBaseDir` without adding a new TS semantic owner.
+- Remaining `createBridgeHttpServerMock(...)` consumers are the submit-tool-outputs responses-provider regression and the SSE projection-timeout blackbox suite; both require dedicated contract review before migration.

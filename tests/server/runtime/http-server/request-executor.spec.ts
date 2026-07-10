@@ -65,11 +65,56 @@ jest.unstable_mockModule(
   })
 );
 
+function createRequestExecutorLocalBridgeMock() {
+  return {
+    captureResponsesRequestContextForRequest: async () => undefined,
+    clearResponsesConversationByRequestId: async () => undefined,
+    convertProviderResponse: async (value: unknown) => value,
+    createSnapshotRecorder: async () => ({
+      record: async () => undefined,
+      flush: async () => undefined,
+    }),
+    deriveFinishReasonNative: () => undefined,
+    evaluateResponsesDirectRouteDecisionNative: () => ({
+      providerWireValid: true,
+      requiresHubRelay: false,
+      reason: undefined,
+      hasDeclaredApplyPatchTool: false,
+    }),
+    extractSessionIdentifiersFromMetadata: () => ({}),
+    reportProviderErrorToRouterPolicy: async () => undefined,
+    reportProviderSuccessToRouterPolicy: async () => undefined,
+    rebindResponsesConversationRequestId: async () => undefined,
+  };
+}
+
+let requestExecutorLocalHubPipelineExecute: ((input: unknown) => unknown) | undefined;
+
+function createRequestExecutorLocalRoutingIntegrationsMock() {
+  const resolveRccUserDirNativeSync = () => process.cwd();
+  const resolveRccPathNativeSync = (segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.filter((part): part is string => typeof part === 'string') : [];
+    return [process.cwd(), ...parts].join('/');
+  };
+  return {
+    executeHubPipelineNative: (_handle: string, input: unknown) => {
+      if (!requestExecutorLocalHubPipelineExecute) {
+        throw new Error('request-executor local Hub pipeline fixture is not installed');
+      }
+      return requestExecutorLocalHubPipelineExecute(input);
+    },
+    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: () => undefined,
+    markHubPipelineVirtualRouterConcurrencyScopeIdleNative: () => undefined,
+    resolveRccPathNativeSync,
+    resolveRccSnapshotsDirNativeSync: () => resolveRccPathNativeSync(['codex-samples']),
+    resolveRccUserDirNativeSync,
+  };
+}
+
 const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
 const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
 const { getServerToolRuntimeState, setServerToolEnabled } = await import('../../../../src/server/runtime/http-server/servertool-admin-state');
 const { StatsManager } = await import('../../../../src/server/runtime/http-server/stats-manager');
-const { createBridgeHttpServerMock } = await import('../../../helpers/bridge-http-server-mock');
 const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
 
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
@@ -3306,15 +3351,11 @@ describe('HubRequestExecutor failover', () => {
 
   test('responses standard pipeline does not apply direct payload contract before provider.send', async () => {
     jest.resetModules();
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => createBridgeHttpServerMock({
-      evaluateResponsesDirectRouteDecisionNative: () => ({
-        providerWireValid: true,
-        requiresHubRelay: false,
-        reason: undefined,
-        hasDeclaredApplyPatchTool: false,
-      }),
-    }));
-    const { createRequestExecutor: createRequestExecutorLocal } = await import('../../../../src/server/runtime/http-server/request-executor');
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', createRequestExecutorLocalBridgeMock);
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/routing-integrations.js',
+      createRequestExecutorLocalRoutingIntegrationsMock
+    );
     const providerA = 'asxs.crsa.gpt-5.5';
     const providerB = 'cc.key1.gpt-5.5';
     const processA = jest.fn(async () => ({ status: 200, data: { id: 'should_not_send_a' } }));
@@ -3359,7 +3400,7 @@ describe('HubRequestExecutor failover', () => {
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
         );
@@ -3387,10 +3428,12 @@ describe('HubRequestExecutor failover', () => {
       }),
       updateVirtualRouterConfig: jest.fn()
     };
+    requestExecutorLocalHubPipelineExecute = (input: unknown) => pipeline.execute(input);
+    const { createRequestExecutor: createRequestExecutorLocal } = await import('../../../../src/server/runtime/http-server/request-executor');
 
     const executor = createRequestExecutorLocal({
       runtimeManager,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => 'request-executor-local-native-handle' as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => undefined)
