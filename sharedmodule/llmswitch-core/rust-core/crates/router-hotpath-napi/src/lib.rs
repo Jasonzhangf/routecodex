@@ -3754,6 +3754,13 @@ pub fn sanitize_provider_outbound_payload_export_json(input_json: String) -> Nap
     hub_protocol_spec_semantics::sanitize_provider_outbound_payload_json(input_json)
 }
 
+#[napi(js_name = "normalizeResponsesDirectCurrentRequestPayloadJson")]
+pub fn normalize_responses_direct_current_request_payload_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_protocol_spec_semantics::normalize_responses_direct_current_request_payload_json(input_json)
+}
+
 // ---------------------------------------------------------------------------
 // traffic-governor-core NAPI exports
 // ---------------------------------------------------------------------------

@@ -3,6 +3,10 @@ import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, jest, test } from '@jest/globals';
 
+const normalizeResponsesDirectCurrentRequestPayloadMock = jest.fn((payload: Record<string, unknown>) => ({
+  changed: false,
+  payload
+}));
 const sanitizeProviderOutboundPayloadMock = jest.fn(async (input: { payload: Record<string, unknown> }) =>
   JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>
 );
@@ -16,6 +20,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
     messages: payload.messages ?? [],
     tools: payload.tools
   }),
+  normalizeResponsesDirectCurrentRequestPayload: normalizeResponsesDirectCurrentRequestPayloadMock,
   sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
   buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
   createResponsesSseToJsonConverter: async () => ({
@@ -56,6 +61,11 @@ describe('ResponsesProvider direct passthrough', () => {
   beforeEach(() => {
     writeProviderSnapshot.mockClear();
     attachProviderSseSnapshotStream.mockClear();
+    normalizeResponsesDirectCurrentRequestPayloadMock.mockClear();
+    normalizeResponsesDirectCurrentRequestPayloadMock.mockImplementation((payload: Record<string, unknown>) => ({
+      changed: false,
+      payload
+    }));
     sanitizeProviderOutboundPayloadMock.mockClear();
     captureProviderSseSnapshots = false;
   });
@@ -159,6 +169,64 @@ describe('ResponsesProvider direct passthrough', () => {
     ]);
     expect(capturedBody.input[1].encrypted_content).toBeNull();
     expect(capturedBody.input[1].summary).toEqual([{ type: 'summary_text', text: 'summary stays' }]);
+  });
+
+  test('sends Rust-normalized current direct request when tool output precedes matching call', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-current-request-normalization',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'cc',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+
+    let capturedBody: any;
+    provider.httpClient = {
+      post: async (_url: string, body: any) => {
+        capturedBody = body;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'gpt-5.4',
+      stream: false,
+      input: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] },
+        { type: 'function_call_output', id: 'out_late', call_id: 'call_late_order', output: 'stderr: permission denied' },
+        { type: 'function_call', id: 'call_late_order', call_id: 'call_late_order', name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+      ]
+    } as any;
+    const normalized = {
+      ...inbound,
+      input: [inbound.input[0], inbound.input[2], inbound.input[1]]
+    };
+    normalizeResponsesDirectCurrentRequestPayloadMock.mockReturnValueOnce({
+      changed: true,
+      payload: normalized
+    });
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+    expect(normalizeResponsesDirectCurrentRequestPayloadMock).toHaveBeenCalledWith(inbound);
+    expect(capturedBody).toBe(normalized);
+    expect(capturedBody.input.map((item: any) => item.type)).toEqual([
+      'message',
+      'function_call',
+      'function_call_output'
+    ]);
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
   });
 
   test('preserves inbound responses payload without rebuilding input/history/model', async () => {

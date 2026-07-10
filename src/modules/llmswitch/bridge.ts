@@ -129,6 +129,7 @@ export {
   buildAnthropicResponseFromChatJson,
   injectMcpToolsForChatJson,
   injectMcpToolsForResponsesJson,
+  normalizeResponsesDirectCurrentRequestPayload,
   sanitizeProviderOutboundPayload,
   convertResponsesRequestToChatNative,
   evaluateResponsesDirectRouteDecisionNative,

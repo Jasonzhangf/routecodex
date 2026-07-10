@@ -20,6 +20,7 @@ import {
 } from '../utils/snapshot-writer.js';
 import {
   buildResponsesJsonFromSseStreamWithNative,
+  normalizeResponsesDirectCurrentRequestPayload,
   sanitizeProviderOutboundPayload
 } from '../../../modules/llmswitch/bridge.js';
 import type { HttpClient } from '../utils/http-client.js';
@@ -592,9 +593,11 @@ export class ResponsesProvider extends HttpTransportProvider {
     if (model) {
       builtBody.model = model;
     }
+    const normalizedDirectBodyResult = normalizeResponsesDirectCurrentRequestPayload(builtBody);
+    const directBody = normalizedDirectBodyResult.changed ? normalizedDirectBodyResult.payload : builtBody;
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
-        ? extractSubmitToolOutputsPayload(builtBody)
+        ? extractSubmitToolOutputsPayload(directBody)
         : null;
     if (submitPayload) {
       const submitEndpoint = buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
@@ -630,12 +633,12 @@ export class ResponsesProvider extends HttpTransportProvider {
         throw normalizedError;
       }
     }
-    const explicitStream = extractStreamFlagFromBody(builtBody);
+    const explicitStream = extractStreamFlagFromBody(directBody);
 
     try {
       if (explicitStream === true) {
         return await this.sendDirectSsePassthroughRequest({
-          body: builtBody,
+          body: directBody,
           headers,
           context,
           targetUrl,
@@ -646,7 +649,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
       return await this.sendJsonRequest({
         endpoint,
-        body: builtBody,
+        body: directBody,
         headers,
         context,
         targetUrl,

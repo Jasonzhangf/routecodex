@@ -133,6 +133,7 @@ type NativeRouterHotpathJsonBinding = {
     aliasMapJson: string
   ) => string;
   sanitizeProviderOutboundPayloadJson?: (inputJson: string) => string;
+  normalizeResponsesDirectCurrentRequestPayloadJson?: (inputJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -674,6 +675,23 @@ export async function sanitizeProviderOutboundPayload(input: {
     },
   ]);
   return assertNativeObject('sanitizeProviderOutboundPayloadJson', parsed);
+}
+
+export function normalizeResponsesDirectCurrentRequestPayload(input: Record<string, unknown>): {
+  changed: boolean;
+  payload: Record<string, unknown>;
+} {
+  const parsed = invokeRouterHotpathJsonCapability('normalizeResponsesDirectCurrentRequestPayloadJson', [
+    input ?? {},
+  ]);
+  const row = assertNativeObject('normalizeResponsesDirectCurrentRequestPayloadJson', parsed);
+  return {
+    changed: row.changed === true,
+    payload:
+      row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {},
+  };
 }
 
 export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {

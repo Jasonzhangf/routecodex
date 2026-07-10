@@ -188,6 +188,94 @@ fn filter_orphan_responses_tool_outputs(items: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
+fn responses_history_item_type(row: &Map<String, Value>) -> String {
+    read_trimmed_string(row.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+fn responses_history_item_call_id(row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))
+}
+
+fn is_responses_tool_call_type(ty: &str) -> bool {
+    matches!(ty, "function_call" | "custom_tool_call" | "tool_call")
+}
+
+fn is_responses_tool_output_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
+    )
+}
+
+fn reorder_responses_tool_outputs_after_calls(items: Vec<Value>) -> Vec<Value> {
+    let mut call_ids = std::collections::HashSet::<String>::new();
+    for entry in &items {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let ty = responses_history_item_type(row);
+        if !is_responses_tool_call_type(ty.as_str()) {
+            continue;
+        }
+        if let Some(call_id) = responses_history_item_call_id(row) {
+            call_ids.insert(call_id);
+        }
+    }
+    if call_ids.is_empty() {
+        return items;
+    }
+
+    let mut out = Vec::<Value>::with_capacity(items.len());
+    let mut emitted_calls = std::collections::HashSet::<String>::new();
+    let mut pending_outputs = std::collections::HashMap::<String, Vec<Value>>::new();
+
+    for entry in items {
+        let Some(row) = entry.as_object() else {
+            out.push(entry);
+            continue;
+        };
+        let ty = responses_history_item_type(row);
+        let call_id = responses_history_item_call_id(row);
+
+        if is_responses_tool_output_type(ty.as_str()) {
+            if let Some(call_id) = call_id.as_deref() {
+                if call_ids.contains(call_id) && !emitted_calls.contains(call_id) {
+                    pending_outputs
+                        .entry(call_id.to_string())
+                        .or_default()
+                        .push(entry);
+                    continue;
+                }
+            }
+            out.push(entry);
+            continue;
+        }
+
+        if is_responses_tool_call_type(ty.as_str()) {
+            if let Some(call_id) = call_id.as_deref() {
+                emitted_calls.insert(call_id.to_string());
+                out.push(entry);
+                if let Some(pending) = pending_outputs.remove(call_id) {
+                    out.extend(pending);
+                }
+                continue;
+            }
+        }
+
+        out.push(entry);
+    }
+
+    for pending in pending_outputs.into_values() {
+        out.extend(pending);
+    }
+    out
+}
+
 fn normalize_message_shape_responses_items(items: &[Value]) -> Vec<Value> {
     let mut normalized: Vec<Value> = Vec::new();
     for entry in items {
@@ -953,7 +1041,9 @@ pub(crate) fn normalize_responses_input_items(
                 });
             }
 
-            Some(filter_orphan_responses_tool_outputs(normalized))
+            Some(reorder_responses_tool_outputs_after_calls(
+                filter_orphan_responses_tool_outputs(normalized),
+            ))
         }
         Value::String(text) => {
             if text.trim().is_empty() {
@@ -1479,7 +1569,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_responses_input_items_keeps_outputs_when_call_appears_later_in_batch() {
+    fn normalize_responses_input_items_keeps_late_call_output_pair() {
         let raw_request = json!({
           "tools": [
             {
@@ -1510,9 +1600,54 @@ mod tests {
         let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
             .expect("normalized input");
         assert_eq!(normalized.len(), 2);
-        assert_eq!(normalized[0]["type"], "function_call_output");
+        assert_eq!(normalized[0]["type"], "function_call");
         assert_eq!(normalized[0]["call_id"], "fc_late");
-        assert_eq!(normalized[1]["type"], "function_call");
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[1]["call_id"], "fc_late");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_reorders_output_after_later_call_with_same_call_id() {
+        let raw_request = json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+              }
+            }
+          ],
+          "input": [
+            {
+              "type": "function_call_output",
+              "id": "out_1",
+              "call_id": "fc_late",
+              "output": "stderr: permission denied"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_late",
+              "call_id": "fc_late",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"pwd\"}"
+            },
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{ "type": "input_text", "text": "continue" }]
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 3);
+        assert_eq!(normalized[0]["type"], "function_call");
+        assert_eq!(normalized[0]["call_id"], "fc_late");
+        assert_eq!(normalized[1]["type"], "function_call_output");
+        assert_eq!(normalized[1]["call_id"], "fc_late");
+        assert_eq!(normalized[2]["type"], "message");
     }
 
     #[test]

@@ -637,6 +637,116 @@ fn normalize_openai_responses_input_items(payload: &mut Map<String, Value>) {
     }
 }
 
+fn responses_input_item_type(item: &Value) -> String {
+    item.as_object()
+        .and_then(|row| row.get("type"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn responses_input_item_call_id(item: &Value) -> Option<String> {
+    let row = item.as_object()?;
+    for key in ["call_id", "tool_call_id", "tool_use_id", "id"] {
+        if let Some(value) = row.get(key).and_then(Value::as_str).map(str::trim) {
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_responses_tool_call_item(ty: &str) -> bool {
+    matches!(ty, "function_call" | "custom_tool_call" | "tool_call")
+}
+
+fn is_responses_tool_output_item(ty: &str) -> bool {
+    matches!(
+        ty,
+        "function_call_output" | "custom_tool_call_output" | "tool_result" | "tool_message"
+    )
+}
+
+fn reorder_responses_input_tool_outputs_after_calls(input_items: &mut Vec<Value>) -> bool {
+    let mut call_ids = std::collections::HashSet::<String>::new();
+    for item in input_items.iter() {
+        let ty = responses_input_item_type(item);
+        if !is_responses_tool_call_item(ty.as_str()) {
+            continue;
+        }
+        if let Some(call_id) = responses_input_item_call_id(item) {
+            call_ids.insert(call_id);
+        }
+    }
+    if call_ids.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    let mut out = Vec::<Value>::with_capacity(input_items.len());
+    let mut emitted_calls = std::collections::HashSet::<String>::new();
+    let mut pending_outputs = std::collections::HashMap::<String, Vec<Value>>::new();
+
+    for item in std::mem::take(input_items) {
+        let ty = responses_input_item_type(&item);
+        let call_id = responses_input_item_call_id(&item);
+
+        if is_responses_tool_output_item(ty.as_str()) {
+            if let Some(call_id) = call_id.as_deref() {
+                if call_ids.contains(call_id) && !emitted_calls.contains(call_id) {
+                    pending_outputs
+                        .entry(call_id.to_string())
+                        .or_default()
+                        .push(item);
+                    changed = true;
+                    continue;
+                }
+            }
+            out.push(item);
+            continue;
+        }
+
+        if is_responses_tool_call_item(ty.as_str()) {
+            if let Some(call_id) = call_id.as_deref() {
+                emitted_calls.insert(call_id.to_string());
+                out.push(item);
+                if let Some(pending) = pending_outputs.remove(call_id) {
+                    out.extend(pending);
+                }
+                continue;
+            }
+        }
+
+        out.push(item);
+    }
+
+    for pending in pending_outputs.into_values() {
+        out.extend(pending);
+    }
+    *input_items = out;
+    changed
+}
+
+pub fn normalize_responses_direct_current_request_payload_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let mut payload: Map<String, Value> =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let changed = match payload.get_mut("input") {
+        Some(Value::Array(input_items)) => {
+            reorder_responses_input_tool_outputs_after_calls(input_items)
+        }
+        _ => false,
+    };
+    serde_json::to_string(&serde_json::json!({
+        "changed": changed,
+        "payload": Value::Object(payload),
+    }))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 fn strip_openai_responses_client_tool_search_items(payload: &mut Map<String, Value>) {
     let Some(Value::Array(input_items)) = payload.get_mut("input") else {
         return;
@@ -1068,6 +1178,43 @@ mod tests {
         assert!(!reasoning.contains_key("content"));
         assert!(!reasoning.contains_key("encrypted_content"));
         assert!(reasoning.contains_key("summary"));
+    }
+
+    #[test]
+    fn normalize_responses_direct_current_request_payload_reorders_late_tool_output() {
+        let payload = serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "continue" }]
+                },
+                {
+                    "type": "function_call_output",
+                    "id": "out_late",
+                    "call_id": "call_late_order",
+                    "output": "stderr: permission denied"
+                },
+                {
+                    "type": "function_call",
+                    "id": "call_late_order",
+                    "call_id": "call_late_order",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }
+            ]
+        });
+        let output: Value = serde_json::from_str(
+            &normalize_responses_direct_current_request_payload_json(payload.to_string()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(output["changed"], true);
+        let input = output["payload"]["input"].as_array().unwrap();
+        assert_eq!(input[1]["type"], "function_call");
+        assert_eq!(input[1]["call_id"], "call_late_order");
+        assert_eq!(input[2]["type"], "function_call_output");
+        assert_eq!(input[2]["call_id"], "call_late_order");
     }
 
     #[test]
