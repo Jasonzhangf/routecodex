@@ -118,10 +118,6 @@
       "textContains": "artifacts.targetRuntime ?? {}"
     },
     {
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts",
-      "textContains": "executedFlowIds: stringArray(parsed.executedFlowIds) ?? []"
-    },
-    {
       "pathContains": "src/providers/core/strategies/ecodev-oauth-flow.ts",
       "textContains": "continue;"
     },
@@ -669,11 +665,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts",
       "textContains": ""
     },
     {
@@ -1589,11 +1580,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts",
       "textContains": ""
     },
     {

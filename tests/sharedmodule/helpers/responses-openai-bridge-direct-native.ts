@@ -12,7 +12,7 @@ import {
   normalizeFunctionCallOutputIdWithNative,
   normalizeResponsesCallIdWithNative,
   stripInternalToolingMetadataWithNative
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js';
+} from './native-shared-conversion-direct-native.js';
 import {
   captureReqInboundResponsesContextSnapshotWithNative,
   mapReqInboundBridgeToolsToChatWithNative
@@ -43,7 +43,7 @@ import {
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
   evaluateResponsesHostPolicyWithNative,
   planResponsesPayloadFromChatCloseoutWithNative,
-} from './helpers/resp-semantics-direct-native.js';
+} from './resp-semantics-direct-native.js';
 import {
   resolveBridgePolicyActionsWithNative,
   resolveBridgePolicyWithNative,

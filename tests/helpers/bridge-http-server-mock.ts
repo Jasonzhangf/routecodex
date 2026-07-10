@@ -41,7 +41,7 @@ function deriveFinishReasonFromMockBody(body: unknown): string | undefined {
 export function createBridgeHttpServerMock(overrides: BridgeMock = {}): BridgeMock {
   return {
     importCoreDist: async (subpath?: string) => {
-      if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
+      if (!subpath) {
         return {
           projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
             emit: true,

@@ -35,21 +35,18 @@ describe('native required exports for sse stream helpers', () => {
     expect(missing).toEqual([]);
   });
 
-  test('packaged shared responses semantics barrel exports req_inbound context snapshot helper', async () => {
-    const mod = (await import(
-      path.resolve(
-        process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
-      )
-    )) as Record<string, unknown>;
-    expect(typeof mod.captureReqInboundResponsesContextSnapshotWithNative).toBe('function');
+  test('packaged native binding exports req_inbound context snapshot helper directly', () => {
+    const binding = nodeRequire(
+      path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
+    ) as Record<string, unknown>;
+    expect(typeof binding.captureReqInboundResponsesContextSnapshotJson).toBe('function');
   });
 
   test('native req_inbound capture collapses latest output when an identical tool-call batch repeats', async () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {
@@ -106,7 +103,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {
@@ -165,7 +162,7 @@ describe('native required exports for sse stream helpers', () => {
     const mod = (await import(
       path.resolve(
         process.cwd(),
-        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js'
+        'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js'
       )
     )) as {
       captureReqInboundResponsesContextSnapshotWithNative: (input: {

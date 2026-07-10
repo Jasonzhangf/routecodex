@@ -107,16 +107,8 @@ async function main() {
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
   const nativeExportsPath = pathToFileURL(path.join(BASEDIR, 'dist/modules/llmswitch/bridge/native-exports.js')).href;
-  const nativeResponsePath = pathToFileURL(path.join(BASEDIR, 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js')).href;
-  const { buildResponsesRequestFromChatNative } = await import(nativeExportsPath);
-  const { buildChatResponseFromResponsesFullWithNative } = await import(nativeResponsePath);
-  const buildChatResponseFromResponses = (payload) => {
-    const output = buildChatResponseFromResponsesFullWithNative({
-      payload: JSON.stringify(payload)
-    });
-    const parsed = JSON.parse(output);
-    return JSON.parse(parsed.result);
-  };
+  const { buildResponsesRequestFromChatNative, buildChatResponseFromResponsesNative } = await import(nativeExportsPath);
+  const buildChatResponseFromResponses = buildChatResponseFromResponsesNative;
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };

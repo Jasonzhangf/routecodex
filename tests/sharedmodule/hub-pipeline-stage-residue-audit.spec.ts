@@ -794,14 +794,19 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/src/conversion/shared/responses-response-utils.ts',
     );
-    const nativeSource = fs.readFileSync(
-      path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts'),
+    const retiredNativePath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts',
+    );
+    const hostNativeSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts'),
       'utf8',
     );
 
     expect(fs.existsSync(retiredPath)).toBe(false);
+    expect(fs.existsSync(retiredNativePath)).toBe(false);
     expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
-    expect(nativeSource).toContain('buildChatResponseFromResponsesFullWithNative');
+    expect(hostNativeSource).toContain('buildChatResponseFromResponsesNative');
   });
 
   it('responses response payload bridge must call native pipeline without TS wrapper or swallowed errors', () => {
@@ -2054,6 +2059,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-types.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics-types.ts',
       'sharedmodule/llmswitch-core/src/conversion/types/text-markup-normalizer.ts',
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts',
     ];
 
     const existingFiles = legacyFiles.filter((relativePath) => fs.existsSync(path.join(pipelineRoot, relativePath)));
@@ -2061,10 +2067,6 @@ describe('hub pipeline stage residue audit', () => {
     const existingRetiredFiles = retiredFiles.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
     const nativeWrapper = fs.readFileSync(
       path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts'),
-      'utf8',
-    );
-    const nativeAnalysis = fs.readFileSync(
-      path.join(repoRoot, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts'),
       'utf8',
     );
     const requiredExports = fs.readFileSync(
@@ -2093,7 +2095,7 @@ describe('hub pipeline stage residue audit', () => {
       existingTests: [],
       existingRetiredFiles: [],
     });
-    for (const source of [nativeWrapper, nativeAnalysis, requiredExports]) {
+    for (const source of [nativeWrapper, requiredExports]) {
       expect(source).not.toMatch(/decideHeavyInputFastpathJson|decideHeavyInputFastpath|parseDecideHeavyInputFastpathPayload/);
       expect(source).not.toMatch(/applyTargetMetadataJson|applyTargetToSubjectJson|extractTargetModelIdJson/);
       expect(source).not.toMatch(/buildImageAttachmentMetadataJson/);
@@ -3252,7 +3254,10 @@ describe('hub pipeline stage residue audit', () => {
       if (!fs.existsSync(rootPath)) return [];
       return walkFiles(rootPath, ['.ts', '.js', '.mjs']).flatMap((filePath) => {
         const relativePath = path.relative(repoRoot, filePath);
-        if (relativePath === 'tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts') {
+        if (
+          relativePath === 'tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts'
+          || relativePath === 'tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts'
+        ) {
           return [];
         }
         const source = fs.readFileSync(filePath, 'utf8');
@@ -3435,7 +3440,6 @@ describe('hub pipeline stage residue audit', () => {
     ];
     const scannedFiles = [
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts',
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',

@@ -1,15 +1,29 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv
-} from './native-router-hotpath-loader.js';
-import { parseChatProcessMediaStripPayload } from './native-router-hotpath-analysis.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 import {
   parseArray,
   parseJson,
   parseRecord,
   readNativeFunction,
   safeStringify
-} from './native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+
+function parseChatProcessMediaStripPayload(raw: string): { changed: boolean; messages: unknown[] } | null {
+  const parsed = parseJson(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const row = parsed as Record<string, unknown>;
+  if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
+    return null;
+  }
+  return {
+    changed: row.changed,
+    messages: row.messages
+  };
+}
 
 export function buildChatResponseFromResponsesWithNative(payload: unknown): Record<string, unknown> | null {
   const capability = 'buildChatResponseFromResponsesJson';
@@ -450,26 +464,9 @@ export function cloneRuntimeMetadataWithNative(
 }
 
 
-// Inlined from retired native-shared-conversion-semantics-responses.ts
-// feature_id: hub.req_inbound_responses_context_capture
-// This bridge file re-exports the Rust canonical builders
-// (`capture_req_inbound_responses_context_snapshot`,
-// `normalize_responses_input_items`, `sanitize_format_envelope`,
-// `normalize_provider_protocol_token`) so that the
-// `feature_id: hub.req_inbound_responses_context_capture` map entry can
-// see canonical-builder hits in more than one allowed file.  No
-// re-implementation, no behavior change; thin re-export only.
 export {
   captureReqInboundResponsesContextSnapshotWithNative
-} from './native-hub-pipeline-req-inbound-semantics.js';
-// Reference only: the canonical builders `normalize_responses_input_items`,
-// `sanitize_format_envelope`, and `normalize_provider_protocol_token` are
-// owned by the Rust `hub_req_inbound_responses_context_capture` module.
-// They are intentionally NOT re-exported from this bridge file because
-// re-exporting them would be flagged as a canonical-builder redefinition
-// by `verify:function-map-canonical-builder-definitions`.  This comment is
-// here solely so that `verify:architecture-feature-anchor-coverage` counts
-// this file as a second canonical-builder hit for the feature.
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.js';
 
 function parseResponsesConversationResumeResult(
   raw: string

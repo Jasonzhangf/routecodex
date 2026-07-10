@@ -10,13 +10,11 @@ function read(relativePath: string): string {
 
 describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   it('keeps zero-consumer output content wrapper file deleted', () => {
-    const native = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts');
     const rust = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_output_content_normalizer.rs');
     const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts')).toThrow();
-    expect(native).not.toMatch(/\bextractOutputSegmentsWithNative\b/);
-    expect(native).not.toMatch(/\bnormalizeContentPartWithNative\b/);
+    expect(() => read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts')).toThrow();
     expect(rust).not.toMatch(/\bextract_output_segments_json\b/);
     expect(rust).not.toMatch(/\bnormalize_output_content_part_json\b/);
     expect(requiredExports).not.toContain('extractOutputSegmentsJson');
@@ -28,15 +26,13 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   });
 
   it('keeps zero-consumer single-tool mapping wrappers deleted', () => {
-    const nativeBarrel = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts');
     const rustLib = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
     const rustMapping = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs');
     const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts')).toThrow();
+    expect(() => read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts')).toThrow();
     expect(() => read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tool-definitions.ts')).toThrow();
-    expect(nativeBarrel).not.toContain('bridgeToolToChatDefinitionWithNative');
-    expect(nativeBarrel).not.toContain('chatToolToBridgeDefinitionWithNative');
     expect(rustLib).not.toMatch(/\bbridge_tool_to_chat_definition_json\b/);
     expect(rustLib).not.toMatch(/\bchat_tool_to_bridge_definition_json\b/);
     expect(rustMapping).not.toMatch(/\bbridge_tool_to_chat_definition_json\b/);

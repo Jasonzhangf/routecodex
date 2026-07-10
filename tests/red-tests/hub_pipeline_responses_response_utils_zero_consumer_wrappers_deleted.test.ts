@@ -22,6 +22,10 @@ const nativeBarrelPath = join(
   process.cwd(),
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts'
 );
+const hostNativeExportsPath = join(
+  process.cwd(),
+  'src/modules/llmswitch/bridge/native-exports.ts'
+);
 const requiredExportsPath = join(
   process.cwd(),
   'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'
@@ -33,21 +37,20 @@ const bridgePath = join(
 
 describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   it('does not keep zero-consumer tool-call and finish-reason TS wrappers', () => {
-    const source = readFileSync(nativeBarrelPath, 'utf8');
+    const hostNativeExports = readFileSync(hostNativeExportsPath, 'utf8');
 
     expect(existsSync(sourcePath)).toBe(false);
     expect(existsSync(bridgePath)).toBe(false);
-    expect(source).toContain('buildChatResponseFromResponsesFullWithNative');
-    expect(source).not.toContain('collectToolCallsFromResponsesWithNative');
-    expect(source).not.toContain('resolveFinishReasonWithNative');
+    expect(existsSync(nativeBarrelPath)).toBe(false);
+    expect(hostNativeExports).toContain('buildChatResponseFromResponsesNative');
+    expect(hostNativeExports).not.toContain('collectToolCallsFromResponsesWithNative');
+    expect(hostNativeExports).not.toContain('resolveFinishReasonWithNative');
   });
 
   it('does not keep public native wrapper exports for deleted response helpers', () => {
-    const barrel = readFileSync(nativeBarrelPath, 'utf8');
     const requiredExports = readFileSync(requiredExportsPath, 'utf8');
 
-    expect(barrel).not.toContain('collectToolCallsFromResponsesWithNative');
-    expect(barrel).not.toContain('resolveFinishReasonWithNative');
+    expect(existsSync(nativeBarrelPath)).toBe(false);
     expect(requiredExports).not.toContain('collectToolCallsFromResponsesJson');
     expect(requiredExports).not.toContain('resolveFinishReasonJson');
   });
@@ -67,11 +70,9 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
   });
 
   it('does not keep public native wrapper exports for deleted responses tool id helpers', () => {
-    const barrel = readFileSync(nativeBarrelPath, 'utf8');
     const requiredExports = readFileSync(requiredExportsPath, 'utf8');
 
-    expect(barrel).not.toContain('normalizeResponsesToolCallIdsWithNative');
-    expect(barrel).not.toContain('resolveToolCallIdStyleWithNative');
+    expect(existsSync(nativeBarrelPath)).toBe(false);
     expect(requiredExports).not.toContain('normalizeResponsesToolCallIdsJson');
     expect(requiredExports).not.toContain('resolveToolCallIdStyleJson');
   });

@@ -2131,7 +2131,7 @@ owners:
     status: active
     summary: "Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
     owner_kind: rust_ssot
-    owner_scope: "Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
+    owner_scope: "file-scoped Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
     canonical_types:
       - HubReqInbound02Standardized
@@ -2146,7 +2146,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_output_snapshot.rs
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - docs/architecture
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts

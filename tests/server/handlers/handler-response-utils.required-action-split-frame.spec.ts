@@ -96,7 +96,7 @@ const mockBridgeModule = async () => ({
       : args.fallback;
   }),
   importCoreDist: jest.fn(async (subpath?: string) => {
-    if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
+    if (!subpath) {
       return {
         projectResponsesSseFrameForClientWithNative: (input: { frame: string; state: unknown }) => ({
           emit: true,

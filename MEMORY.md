@@ -2048,3 +2048,10 @@
 - Scripts that need Anthropic response conversion should call direct NAPI helpers in `scripts/helpers/anthropic-codec-direct-native.mjs`; do not depend on `sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-resp-semantics.js`.
 - The retired coverage script `sharedmodule/llmswitch-core/scripts/tests/coverage-native-hub-pipeline-resp-semantics.mjs` must stay deleted because it requires the removed dist wrapper. Response semantics coverage now comes from Rust tests, residue gates, focused direct-native helper tests, and host native bridge tests.
 - Current shell audit after this deletion is `prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`, with `nonNativeFileCount=0`.
+
+# 2026-07-10: Native shared conversion aggregate wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts` is physically deleted from production source. Do not restore it as a production aggregate wrapper, compatibility shim, required dist output, or Jest mock subpath.
+- Tests that still need the old direct native helper surface must use `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`. Production scripts/runtime must use direct Rust/NAPI or host native exports such as `src/modules/llmswitch/bridge/native-exports.ts::buildChatResponseFromResponsesNative` and `buildResponsesRequestFromChatNative`.
+- Required-export checks for req inbound context capture should assert the packaged `.node` export or existing `native-hub-pipeline-req-inbound-semantics` aggregate, not `dist/native/router-hotpath/native-shared-conversion-semantics.js`.
+- Current shell audit after this deletion is `prodTsShellCount=12`, `shellsWithProdImporters=10`, `coreModuleSubpathRefs=3`; rustification baseline is `prodTsFileCount=12`, `prodTsLocTotal=3833`, `nonNativeFileCount=0`.

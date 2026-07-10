@@ -101,25 +101,16 @@ function loadCodexSample() {
 }
 
 async function loadConverters() {
-  const distRoot = path.resolve(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist');
-  const nativeSharedPath = path.join(distRoot, 'native', 'router-hotpath', 'native-shared-conversion-semantics.js');
   const hostNativeExportsPath = path.resolve(process.cwd(), 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
-  if (!fs.existsSync(nativeSharedPath) || !fs.existsSync(hostNativeExportsPath)) {
+  if (!fs.existsSync(hostNativeExportsPath)) {
     throw new Error('llmswitch-core dist missing. 请先在 sharedmodule/llmswitch-core 运行 npm run build');
   }
-  const nativeShared = await import(pathToFileURL(nativeSharedPath).href);
   const hostNativeExports = await import(pathToFileURL(hostNativeExportsPath).href);
-  const buildChatResponseFromResponses = (payload) => {
-    const output = nativeShared.buildChatResponseFromResponsesFullWithNative({
-      payload: JSON.stringify(payload)
-    });
-    const parsed = JSON.parse(output);
-    return JSON.parse(parsed.result);
-  };
+  const buildChatResponseFromResponses = hostNativeExports.buildChatResponseFromResponsesNative;
   const buildResponsesPayloadFromChat = hostNativeExports.buildResponsesPayloadFromChatNative;
   if (
     typeof buildResponsesPayloadFromChat !== 'function' ||
-    typeof nativeShared.buildChatResponseFromResponsesFullWithNative !== 'function'
+    typeof buildChatResponseFromResponses !== 'function'
   ) {
     throw new Error('conversion helpers missing. 请确认 sharedmodule/llmswitch-core 构建完成');
   }

@@ -1,4 +1,4 @@
-import { normalizeOpenaiChatRequestWithNative } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.js';
+import { normalizeOpenaiChatRequestWithNative } from './helpers/native-shared-conversion-direct-native.js';
 
 function normalizeChatRequest(payload: unknown): unknown {
   return normalizeOpenaiChatRequestWithNative(payload, false);

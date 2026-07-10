@@ -159,8 +159,8 @@ async function readSseFrames(stream) {
 
 async function convertSseFramesToJson(frames, requestId, model) {
   try {
-    const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js')).href;
-    const { buildChatResponseFromResponsesWithNative } = await import(bridgePath);
+    const bridgePath = pathToFileURL(path.join(process.cwd(), 'dist/modules/llmswitch/bridge/native-exports.js')).href;
+    const { buildChatResponseFromResponsesNative } = await import(bridgePath);
     const bodyText = frames.map((frame) => `${frame}\n\n`).join('');
     const json = buildJsonFromSseWithNative({
       protocol: 'openai-responses',
@@ -168,7 +168,7 @@ async function convertSseFramesToJson(frames, requestId, model) {
       requestId,
       model: typeof model === 'string' && model.length ? model : 'unknown'
     });
-    const chat = buildChatResponseFromResponsesWithNative(json);
+    const chat = buildChatResponseFromResponsesNative(json);
     return { json, chat };
   } catch {
     return { json: null, chat: null };

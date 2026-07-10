@@ -87,8 +87,8 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js')).href;
-  const { buildChatResponseFromResponsesWithNative } = await import(bridgePath);
+  const nativeExportsPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/llmswitch/bridge/native-exports.js')).href;
+  const { buildChatResponseFromResponsesNative } = await import(nativeExportsPath);
 
   ensureDir(RESP_OUT_DIR);
   const base = path.join(RESP_OUT_DIR, `${providerId}_batch_${nowStamp()}`);
@@ -108,7 +108,7 @@ async function runResponses(providerId) {
     model: String(body.model||'unknown'),
   });
   fs.writeFileSync(jsonOut, JSON.stringify(json, null, 2));
-  const chat = buildChatResponseFromResponsesWithNative(json);
+  const chat = buildChatResponseFromResponsesNative(json);
   fs.writeFileSync(chatOut, JSON.stringify(chat, null, 2));
   const tc = chat?.choices?.[0]?.message?.tool_calls || [];
   const ok = Array.isArray(tc) && tc.length>0;

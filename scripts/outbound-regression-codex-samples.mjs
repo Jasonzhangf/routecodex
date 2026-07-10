@@ -28,28 +28,20 @@ const TARGET_PROTOCOLS = new Set(
 
 const baseDir = process.cwd();
 const nativeExportsPath = pathToFileURL(path.resolve(baseDir, 'dist/modules/llmswitch/bridge/native-exports.js')).href;
-const nativeResponsePath = pathToFileURL(path.resolve(baseDir, 'sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js')).href;
 
 let conversionsLoaded = null;
 let responsesInstructionsCache = null;
 async function getConversions() {
   if (conversionsLoaded) return conversionsLoaded;
   const nativeExports = await import(nativeExportsPath).catch(() => null);
-  const nativeResponse = await import(nativeResponsePath).catch(() => null);
-  if (!nativeExports || !nativeResponse) {
+  if (!nativeExports) {
     throw new Error('Conversion module missing. 请先构建 sharedmodule/llmswitch-core');
   }
   conversionsLoaded = {
     buildAnthropicRequestFromOpenAIChat,
     buildOpenAIChatFromAnthropic,
     buildResponsesRequestFromChat: nativeExports.buildResponsesRequestFromChatNative,
-    buildChatResponseFromResponses: (payload) => {
-      const output = nativeResponse.buildChatResponseFromResponsesFullWithNative({
-        payload: JSON.stringify(payload)
-      });
-      const parsed = JSON.parse(output);
-      return JSON.parse(parsed.result);
-    }
+    buildChatResponseFromResponses: nativeExports.buildChatResponseFromResponsesNative
   };
   return conversionsLoaded;
 }

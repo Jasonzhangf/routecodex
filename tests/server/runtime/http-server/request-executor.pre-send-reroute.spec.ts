@@ -51,7 +51,7 @@ const mockBridgeModule = () => ({
   getNetworkErrorCodes: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn(() => undefined),
   importCoreDist: jest.fn(async (subpath?: string) => {
-    if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
+    if (!subpath) {
       return {
         normalizeResponsesToolCallArgumentsForClientWithNative: () => ({})
       };

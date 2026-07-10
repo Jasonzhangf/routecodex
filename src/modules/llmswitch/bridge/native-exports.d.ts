@@ -102,6 +102,11 @@ export declare function evaluateResponsesDirectRouteDecisionNative(input: {
     hasDeclaredApplyPatchTool?: boolean;
 };
 export declare function buildResponsesPayloadFromChatNative(payload: unknown, context?: Record<string, unknown>): Record<string, unknown>;
+export declare function buildResponsesRequestFromChatNative(payload: Record<string, unknown>, context?: Record<string, unknown>, extras?: Record<string, unknown>): {
+    request: Record<string, unknown>;
+    originalSystemMessages?: string[];
+};
+export declare function buildChatResponseFromResponsesNative(payload: unknown): Record<string, unknown>;
 export declare function projectResponsesClientPayloadForClientNative(args: {
     payload: unknown;
     toolsRaw: unknown[];

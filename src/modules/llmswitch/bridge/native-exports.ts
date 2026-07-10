@@ -186,6 +186,9 @@ type NativeRouterHotpathJsonBinding = {
   buildResponsesRequestFromChatJson?: (
     inputJson: string
   ) => string;
+  buildChatResponseFromResponsesJson?: (
+    payloadJson: string
+  ) => string;
   buildRequestStageRuntimeControlWritePlanJson?: (
     inputJson: string
   ) => string;
@@ -867,6 +870,15 @@ export function buildResponsesRequestFromChatNative(
     request: request as Record<string, unknown>,
     ...(originalSystemMessages ? { originalSystemMessages } : {}),
   };
+}
+
+export function buildChatResponseFromResponsesNative(
+  payload: unknown
+): Record<string, unknown> {
+  const parsed = invokeRouterHotpathJsonCapability('buildChatResponseFromResponsesJson', [
+    payload ?? null,
+  ]);
+  return assertNativeObject('buildChatResponseFromResponsesJson', parsed);
 }
 
 export function buildRequestStageRuntimeControlWritePlanNative(input: {
@@ -1854,7 +1866,7 @@ export function readFollowupClientInjectSourceWithNative(adapterContext: Record<
   }
 }
 
-// Types re-exported from native-router-hotpath-analysis
+// Native router hotpath parser types are owned by the Rust/native entry wrappers.
 
 // === SERVERTOOL CORE BRIDGE WRAPPERS (Phase 4) ===
 

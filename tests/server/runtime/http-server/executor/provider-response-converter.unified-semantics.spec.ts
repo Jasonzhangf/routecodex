@@ -283,7 +283,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
   }),
   importCoreDist: async (subpath: string) => {
-    if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
+    if (!subpath) {
       return {
         normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
       };
@@ -297,7 +297,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/module-loa
     normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
   }),
   importCoreDist: async (subpath: string) => {
-    if (!subpath || subpath === 'native/router-hotpath/native-shared-conversion-semantics') {
+    if (!subpath) {
       return {
         normalizeResponsesToolCallArgumentsForClientWithNative: (payload: unknown) => payload
       };
