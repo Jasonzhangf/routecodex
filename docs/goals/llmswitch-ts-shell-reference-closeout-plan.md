@@ -644,3 +644,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - This keeps the test focused on the app stop retention contract while removing one test-only root bridge consumer; `RouteCodexApp.stop()` behavior and Responses store semantics are unchanged.
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+
+### 2026-07-11 HTTP error mapper native projection mock narrowed
+
+- `tests/server/utils/http-error-mapper-native-projection.spec.ts` now mocks `projectSseErrorEventPayloadNative` through `src/modules/llmswitch/bridge/native-exports.js` instead of the root bridge barrel.
+- This keeps ErrorErr06 client projection owned by `src/server/utils/http-error-mapper.ts` while removing one test-only root bridge consumer.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 1/1, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:error-pipeline-contract`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.

@@ -20,7 +20,7 @@ const projectSseErrorEventPayloadNativeMock = jest.fn((input: {
 }));
 
 jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge.js',
+  '../../../src/modules/llmswitch/bridge/native-exports.js',
   () => ({
     projectSseErrorEventPayloadNative: projectSseErrorEventPayloadNativeMock,
   })
