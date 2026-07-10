@@ -28466,6 +28466,14 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Moved `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-action-semantics.ts` and `native-hub-bridge-policy-semantics.ts` to test-only helpers under `tests/sharedmodule/helpers/`; production source no longer carries those TS native wrapper shells.
 - Updated test imports, residue gates, and `verify-responses-direct-tool-shape-rust-first.mjs` so host `src/modules/llmswitch/bridge/native-exports.ts` and Rust NAPI exports are the production owner.
 - Verification PASS: `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` now reports `prodTsShellCount=20`; `npm run verify:llmswitch-rustification-audit` reports `prodTsFileCount=20`, `nonNativeFileCount=0`; `npm run verify:llmswitch-minimal-ts-surface`; `npm run verify:architecture-fallback-denylist`; `node scripts/architecture/verify-responses-direct-tool-shape-rust-first.mjs`; focused Jest 4 suites / 223 tests; bridge policy parser focused Jest; `npm run build:base`.
+
+# 2026-07-10: required exports and VR host-effects shell deletion
+
+- Scope: continued external-reference closeout for `/Users/fanzhang/.codex/attachments/ccb0687a-efe5-4731-97d5-3a5e106dcd77/pasted-text-1.txt`.
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`; moved `REQUIRED_NATIVE_HOTPATH_EXPORTS` into existing `native-router-hotpath-loader.ts`; updated active tests/scripts/maps/wiki references to the loader path.
+- Deleted `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts`; current residue gate and rustification baseline expect it absent. The remaining native-call/host-effect glue lives in `native-virtual-router-runtime.ts`; Rust/NAPI still owns stop-message parsing, marker cleanup, status label, and hit-log projection semantics.
+- Verification PASS: `verify:llmswitch-core-tsc`; strict shell reference audit `prodTsShellCount=5`, `shellsWithProdImporters=4`, `coreModuleSubpathRefs=3`; `verify:llmswitch-rustification-audit` `prodTsFileCount=5`, `nonNativeFileCount=0`; `verify:llmswitch-minimal-ts-surface`; focused Jest 4 suites / 223 tests; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; mainline manifest/mermaid sync; `npm run build:base`; `git diff --check`.
+- Boundary: no live/global install claimed; this slice changes source/package build surface, not verified live runtime behavior. Build changed `package.json`, `package-lock.json`, and `src/build-info.ts` version/buildTime as a side effect and these should stay out of this slice unless release install is explicitly in scope.
 ## 2026-07-09 21:50 runtime lifecycle silent-stop audit
 
 - Latest live health: `127.0.0.1:5520/health` and `127.0.0.1:5555/health` both return `ready=true`, `pipelineReady=true`, version `0.90.3699`.

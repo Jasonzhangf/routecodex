@@ -50,7 +50,7 @@ describe('Server module help contract (Phase Server-A)', () => {
   });
 
   it('required-exports allowlist includes new NAPI function names', () => {
-    const ex = readSrc('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+    const ex = readSrc('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
     expect(ex).toContain('describeServerContractsJson');
     expect(ex).toContain('describeServerModuleHelpJson');
   });

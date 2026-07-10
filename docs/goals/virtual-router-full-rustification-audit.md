@@ -110,7 +110,7 @@
 | 文件 | 行数 | 说明 |
 |---|---|---|
 | native-router-hotpath-policy.ts | 23 | isNativeDisabledByEnv / failNativeRequired |
-| native-router-hotpath-required-exports.ts | 367 | REQUIRED_NATIVE_HOTPATH_EXPORTS 常量列表 |
+| native-router-hotpath-loader.ts | 367 | REQUIRED_NATIVE_HOTPATH_EXPORTS 常量列表 |
 
 ---
 

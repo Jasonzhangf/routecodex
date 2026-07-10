@@ -28,7 +28,7 @@ const hostNativeExportsPath = join(
 );
 const requiredExportsPath = join(
   process.cwd(),
-  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts'
+  'sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts'
 );
 const bridgePath = join(
   process.cwd(),

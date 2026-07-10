@@ -54,7 +54,7 @@ Out of scope:
 
 Concurrency boundary:
 
-- While other workers are editing VR / Hub Pipeline, the first servertool slice should avoid `router-hotpath-napi/src/lib.rs`, `src/native/router-hotpath/native-router-hotpath-required-exports.ts`, and VR paths unless explicitly coordinated.
+- While other workers are editing VR / Hub Pipeline, the first servertool slice should avoid `router-hotpath-napi/src/lib.rs`, `src/native/router-hotpath/native-router-hotpath-loader.ts`, and VR paths unless explicitly coordinated.
 - Low-conflict first slices should stay in `servertool-core`, `servertool-cli`, docs, and servertool-specific tests.
 
 ## 4. Current Picture

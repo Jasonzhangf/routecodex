@@ -53,7 +53,7 @@ describe('install-release-snapshot', () => {
       'dist',
       'native',
       'router-hotpath',
-      'native-router-hotpath-required-exports.js'
+      'native-router-hotpath-loader.js'
     );
 
     expect(fs.existsSync(requiredFile)).toBe(true);

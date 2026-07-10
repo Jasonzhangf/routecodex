@@ -11,7 +11,7 @@ function read(relativePath: string): string {
 describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   it('keeps zero-consumer output content wrapper file deleted', () => {
     const rust = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_output_content_normalizer.rs');
-    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/output-content-normalizer.ts')).toThrow();
     expect(() => read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts')).toThrow();
@@ -28,7 +28,7 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   it('keeps zero-consumer single-tool mapping wrappers deleted', () => {
     const rustLib = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
     const rustMapping = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_mapping.rs');
-    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/tool-mapping.ts')).toThrow();
     expect(() => read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts')).toThrow();
@@ -42,7 +42,7 @@ describe('Hub Pipeline shared response wrapper deletion boundary', () => {
   });
 
   it('keeps zero-consumer responses tool utility wrappers deleted', () => {
-    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+    const requiredExports = read('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
 
     expect(() => read('sharedmodule/llmswitch-core/src/conversion/shared/responses-tool-utils.ts')).toThrow();
     expect(() => read('sharedmodule/llmswitch-core/scripts/tests/coverage-responses-tool-utils.mjs')).toThrow();

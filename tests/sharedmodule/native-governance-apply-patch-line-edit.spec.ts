@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.js';
+import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 describe('apply_patch native governance ownership', () => {
   it('keeps normalizeApplyPatchArgumentsJson as a required native export', () => {

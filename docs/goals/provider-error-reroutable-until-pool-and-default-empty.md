@@ -34,7 +34,7 @@
 ### 2.3 导出层
 - `ErrorErr05ExecutionDecision` 只能由
   `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/decision.rs`
-  + TS bridge `native-router-hotpath-required-exports.ts` 构造。
+  + TS bridge `native-router-hotpath-loader.ts` 构造。
 - `mayProject` / `callerMayProject` 不允许其他模块 export；red-gate 扫描 export 表。
 
 ### 2.4 红测层（必须先红后绿）

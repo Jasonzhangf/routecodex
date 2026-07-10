@@ -511,7 +511,7 @@ live 证据：
 | S3 `...231359101-341020-806` | `5555` / `search` / provider send 前本地失败 | local fail-fast，无 provider terminal，无 client `finish_reason` | relay req_inbound capture | `hub_req_inbound_context_capture.rs` | `orphan_tool_result` 本地 fail-fast，工具历史无法进入上游 | 缺 live search continuation 级 fixture |
 | S4 `...180749445-347851-1128` | `5555` / relay 前段 + final send=`router-direct.send` | upstream HTTP 400，本地 pre-terminal fail，无 client `finish_reason` | response outbound / replayed history preserve | `client_tool_args.rs` + `shared_responses_conversation_utils.rs` | internal stopless CLI / `status` 进入下一轮 `/v1/responses` history，upstream 400 | 之前缺 replay-safe response outbound gate；本轮已补 Rust owner 清理与 gate，但 relay store 闭环总 gate 仍有缺口 |
 | S5 `...173500530-347752-1029` / `...202830407-348488-1765` | `5555` / relay 前段 + final send may be `router-direct.send` | upstream HTTP 400，本地 pre-terminal fail，无 client `finish_reason` | old polluted response history re-emitted later | `responses_payload.rs` + `responses-conversation-store.ts` + `shared_responses_conversation_utils.rs` | 非法 `reasoning.content` 进入历史，下轮 direct/send 原样发上游 | 缺统一 `/v1/responses` response outbound 协议审计 gate；本轮已补 Rust replay-safe sanitize owner |
-| S6 `...191340854-348000-1277` 等 | `5555` / relay request-side / provider send 前失败 | local fail-fast，无 provider terminal，无 client `finish_reason` | native binding/runtime availability | `native-shared-conversion-semantics-responses.ts` + `native-router-hotpath-required-exports.ts` + `responses-request-bridge.ts` | `captureReqInboundResponsesContextSnapshotJson` unavailable 导致 relay 完全不可用 | 当前已证实源码/安装包都含 export；缺实例态失效 red test，不是当前必现功能缺陷 |
+| S6 `...191340854-348000-1277` 等 | `5555` / relay request-side / provider send 前失败 | local fail-fast，无 provider terminal，无 client `finish_reason` | native binding/runtime availability | `native-shared-conversion-semantics-responses.ts` + `native-router-hotpath-loader.ts` + `responses-request-bridge.ts` | `captureReqInboundResponsesContextSnapshotJson` unavailable 导致 relay 完全不可用 | 当前已证实源码/安装包都含 export；缺实例态失效 red test，不是当前必现功能缺陷 |
 | direct carryover fixture `2026-06-07-apply-patch-error-carryover-curated` | `5520 direct` historical sample | historical replay fixture；非 live terminal | request-side tool output storage canonicalization | `hub_req_inbound_context_capture.rs` | raw `apply_patch verification failed` 文本污染后续历史 | real-sample 断言还锁旧行为，缺 canonical guidance gate |
 | SSE blackbox tool continuation / incomplete close | handler-level blackbox；覆盖 direct+relay client SSE contract | non-terminal closeout 合同坏 | response/SSE stream-end repair | `responses-response-bridge.ts` + `handler-response-sse.ts` | tool continuation 不补 terminal；非 continuation 提前关流不投 `event:error` | 当前总 gate 红；窄 bridge allowlist gate 不能替代 |
 
@@ -1068,7 +1068,7 @@ live 证据：
 - 唯一 owner：
   - relay request-side native binding / shared semantics barrel：
     - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-responses.ts`
-    - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+    - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
   - bridge loading/assert facade：
     - `src/modules/llmswitch/bridge/native-exports.ts`
   - request handler facade consumer：
@@ -1083,7 +1083,7 @@ live 证据：
   - 它证明 `5555` relay request-side 仍依赖 `captureReqInboundResponsesContextSnapshotJson` 这条 native export；一旦安装/打包/require 失配，请求会在 bridge facade 前失败。
   - 这不是第二套协议 owner，而是 runtime 交付/required-export 契约问题。
   - 2026-06-15 进一步核实：
-    - 仓库源码 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts` 包含 `captureReqInboundResponsesContextSnapshotJson`。
+    - 仓库源码 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts` 包含 `captureReqInboundResponsesContextSnapshotJson`。
     - 仓库 `dist` 与全局安装包 `/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-shared-conversion-semantics.js` 都 re-export 了 `captureReqInboundResponsesContextSnapshotWithNative`。
     - 直接 `require('/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')` 时，该 binding 也确实暴露 `captureReqInboundResponsesContextSnapshotJson` 函数。
     - 直接 `import('/opt/homebrew/lib/node_modules/routecodex/sharedmodule/llmswitch-core/dist/native/router-hotpath/native-router-hotpath-loader.js')` 后执行 `loadNativeRouterHotpathBinding()`，返回 binding 同样含该 export。

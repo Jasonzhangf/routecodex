@@ -2091,3 +2091,10 @@
 - Its remaining binding/stringify/parse/error glue moved into the existing `native-router-hotpath-loader.ts` native loader surface; this is loader plumbing only, not a new TS semantics owner.
 - Tests/scripts that need direct NAPI helper access should import those loader helper exports, while runtime semantics remain Rust/NAPI truth.
 - Current strict shell audit after deletion is `prodTsShellCount=7`, `shellsWithProdImporters=6`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=7`, `nonNativeFileCount=0`.
+
+# 2026-07-10: Virtual router host-effects and required-export shells are retired
+
+- `sharedmodule/llmswitch-core/src/runtime/virtual-router-host-effects.ts` is physically deleted. Do not restore it as a production runtime shell; stop-message marker/status-label/hit-log host glue now lives in `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-runtime.ts` beside `VirtualRouterEngine`.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts` is physically deleted. Do not restore it as a separate production shell; `REQUIRED_NATIVE_HOTPATH_EXPORTS` is owned by `native-router-hotpath-loader.ts`.
+- `sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs` must parse only the `REQUIRED_NATIVE_HOTPATH_EXPORTS` array block from loader. Full-file string scanning is invalid after the required-export list is co-located with loader code because unrelated string literals pollute the export contract.
+- Current strict shell audit after deletion is `prodTsShellCount=5`, `shellsWithProdImporters=4`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=5`, `prodTsLocTotal=2330`, `nonNativeFileCount=0`.

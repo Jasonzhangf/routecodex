@@ -1580,7 +1580,7 @@ resolveStopMessageSessionScope
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 2. TS bridge：
-   - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts`
+   - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
    - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
 3. stop-message runtime 壳层：
    - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`

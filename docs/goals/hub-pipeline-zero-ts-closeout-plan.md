@@ -253,7 +253,7 @@ Out of scope:
 1. Rust export gap closure:
    - Implement or expose `buildResponsesRequestFromChatJson` in the Rust owner that already owns Responses/OpenAI codec semantics.
    - Implement or expose `captureResponsesContextJson` only if the remaining callers cannot be rewritten to an existing Rust context snapshot/export.
-   - Add required NAPI export names to `native-router-hotpath-required-exports.ts` gates.
+   - Add required NAPI export names to `native-router-hotpath-loader.ts` gates.
 
 2. Host native export:
    - Add `buildResponsesRequestFromChatNative` and, if needed, `captureResponsesContextNative` to `src/modules/llmswitch/bridge/native-exports.ts`.

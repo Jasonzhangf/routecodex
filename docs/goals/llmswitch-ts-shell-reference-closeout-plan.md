@@ -381,7 +381,7 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 - Physically deleted `sharedmodule/llmswitch-core/src/tools/exec-command/validator.ts`.
 - `tests/sharedmodule/helpers/tool-validation-direct-native.ts` and `scripts/helpers/tool-validation-direct-native.mjs` no longer import the deleted source/dist validator shell; they call direct Rust/NAPI `normalizeExecCommandArgsJson`, `validateCanonicalClientToolCallJson`, and `validateExecCommandGuardJson`.
-- Added `validateCanonicalClientToolCallJson` to `native-router-hotpath-required-exports.ts` so the native binding contract locks the direct validation path.
+- Added `validateCanonicalClientToolCallJson` to `native-router-hotpath-loader.ts` so the native binding contract locks the direct validation path.
 - Removed the deleted validator path from `docs/architecture/no-fallback-diff-rules.json`.
 - Residue audit now locks the validator shell as physically absent and scans helper surfaces for old TS hardcoded guard/policy logic.
 - Strict audit now reports `prodTsShellCount=64`, `shellsWithProdImporters=59`, `shellsWithHostTextRefs=1`, and `coreModuleSubpathRefs=4`.

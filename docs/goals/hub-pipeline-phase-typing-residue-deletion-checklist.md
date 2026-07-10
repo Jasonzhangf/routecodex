@@ -85,7 +85,7 @@ Deletion condition for remaining stage wrapper/export: do not delete `runHubPipe
 
 Phase 8C-1 required-export review proof: `runHubPipelineStageJson` is still consumed by the native hotpath required-export loader as part of `REQUIRED_NATIVE_HOTPATH_EXPORTS`; this is a load-time availability gate, not a live business mainline caller. The only source-level business wrapper that names it remains `runHubPipelineStageWithNative` in `native-hub-pipeline-orchestration-semantics-protocol.ts`, and the only test caller is the API contract test.
 
-- Do not delete `runHubPipelineStageJson` from `native-router-hotpath-required-exports.ts` while `runHubPipelineStageWithNative` and `hub-pipeline-rust-lib-api-contract.spec.ts` still assert the legacy stage wrapper contract.
+- Do not delete `runHubPipelineStageJson` from `native-router-hotpath-loader.ts` while `runHubPipelineStageWithNative` and `hub-pipeline-rust-lib-api-contract.spec.ts` still assert the legacy stage wrapper contract.
 - New runtime consumers of `runHubPipelineStageJson` are forbidden; red tests now allow the string only in the native protocol wrapper and required-export declaration/generated files.
 - Required-export tests now document that `runHubPipelineStageJson` is retained only alongside `runHubPipelineLibJson` / `executeHubPipelineJson` until the wrapper contract is retired.
 
@@ -161,7 +161,7 @@ Phase 8F-5 virtual router engine helper deletion proof: two TS engine helper fil
 - Deleted former TS routing-state `metadata.ts` helper.
 - Red test now fails if either legacy engine helper residue reappears.
 
-Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had no live source/test import and no dynamic bridge importer. The native capabilities they referenced remain locked by `native-router-hotpath-required-exports.ts`; the live request filter wrapper is `native-chat-request-filter-semantics.ts`, not the deleted governed-filter residue.
+Phase 8F-6 unused native wrapper deletion proof: six TS native wrapper files had no live source/test import and no dynamic bridge importer. The native capabilities they referenced remain locked by `native-router-hotpath-loader.ts`; the live request filter wrapper is `native-chat-request-filter-semantics.ts`, not the deleted governed-filter residue.
 
 - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governed-filter-semantics.ts`.
 - Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-post-governed-normalization-semantics.ts`.

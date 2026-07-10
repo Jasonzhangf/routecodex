@@ -214,7 +214,7 @@ function checkProviderResponseFailFastShell() {
 }
 
 function checkNativeExportSurface() {
-  const requiredExportsPath = repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-required-exports.ts');
+  const requiredExportsPath = repoPath('sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts');
   const libPath = repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
   const protocolPath = repoPath('tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts');
   for (const [path, source] of [
