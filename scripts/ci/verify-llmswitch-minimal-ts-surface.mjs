@@ -110,38 +110,6 @@ const SEMANTIC_TOKEN_PATTERNS = {
   'hit reason build': [/\bhit\s+reason\s+build\b/iu],
   'client response policy': [/\bclient\s+response\s+policy\b/iu],
 };
-const PUBLIC_BARREL_FORBIDDEN_EXPORTS = [
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\{\s*convertProviderResponse\s*\}\s+from\s+['"]\.\/conversion\/hub\/response\/provider-response\.js['"]/u,
-    message: 'root llmswitch-core index must not publicly export provider-response TS IO shell',
-  },
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\*\s+from\s+['"]\.\/telemetry\/stats-center\.js['"]/u,
-    message: 'root llmswitch-core index must not publicly export stats-center TS IO shell',
-  },
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/virtual-router-contracts\.js['"]/u,
-    message: 'root llmswitch-core index may only export virtual-router-contracts as type-only surface',
-  },
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-virtual-router-bootstrap-config\.js['"]/u,
-    message: 'root llmswitch-core index must not publicly export native virtual-router bootstrap TS shell',
-  },
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-provider-runtime-ingress\.js['"]/u,
-    message: 'root llmswitch-core index must not publicly export native provider runtime ingress TS shell',
-  },
-  {
-    path: CORE_INDEX_PATH,
-    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-router-hotpath-loader\.js['"]/u,
-    message: 'root llmswitch-core index must not publicly export native router hotpath loader TS shell',
-  },
-];
 const REQUIRED_CORE_OUTPUT_FORBIDDEN_SUFFIXES = [
   'conversion/hub/response/provider-response.js',
   'conversion/shared/responses-conversation-store.js',
@@ -187,19 +155,6 @@ function isNativeLinked(content) {
   ].some((pattern) => pattern.test(content));
 }
 
-function isMetadataTypeOnlyRootEntry(rel, content) {
-  if (rel !== 'sharedmodule/llmswitch-core/src/index.ts') return false;
-  const executableLines = content
-    .replace(/\/\*[\s\S]*?\*\//gu, '')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/u, '').trim())
-    .filter(Boolean);
-  return executableLines.every((line) => (
-    /^export\s+type\s+\*\s+from\s+['"][^'"]+['"];?$/u.test(line)
-    || /^export\s+const\s+VERSION\s*=\s*['"][^'"]+['"];?$/u.test(line)
-  ));
-}
-
 function listCurrentNonNativeProdTsFiles() {
   return readGitTrackedFiles()
     .filter((rel) => rel.startsWith(SRC_PREFIX))
@@ -209,7 +164,7 @@ function listCurrentNonNativeProdTsFiles() {
     .filter((rel) => fs.existsSync(path.join(ROOT, rel)))
     .filter((rel) => {
       const content = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-      return !isNativeLinked(content) && !isMetadataTypeOnlyRootEntry(rel, content);
+      return !isNativeLinked(content);
     });
 }
 
@@ -225,7 +180,7 @@ function isCurrentTrackedProdTsFile(rel) {
 function isCurrentNativeLinkedProdTsFile(rel) {
   if (!isCurrentTrackedProdTsFile(rel)) return false;
   const content = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  return isNativeLinked(content) || isMetadataTypeOnlyRootEntry(rel, content);
+  return isNativeLinked(content);
 }
 
 function readManifest() {
@@ -292,15 +247,8 @@ function findForbiddenSemanticHits(source, forbiddenSemantics) {
 }
 
 function checkPublicBarrelShrink(errors) {
-  for (const rule of PUBLIC_BARREL_FORBIDDEN_EXPORTS) {
-    const full = path.join(ROOT, rule.path);
-    if (!fs.existsSync(full)) {
-      errors.push(`missing public barrel shrink source: ${rule.path}`);
-      continue;
-    }
-    if (rule.pattern.test(fs.readFileSync(full, 'utf8'))) {
-      errors.push(rule.message);
-    }
+  if (fs.existsSync(path.join(ROOT, CORE_INDEX_PATH))) {
+    errors.push(`root llmswitch-core public barrel must stay deleted: ${CORE_INDEX_PATH}`);
   }
 }
 

@@ -2,21 +2,10 @@
   "name": "@jsonstudio/llms",
   "version": "0.2.11",
   "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./conversion/switch-orchestrator": {
-      "import": "./dist/conversion/switch-orchestrator.js",
-      "types": "./dist/conversion/switch-orchestrator.d.ts"
-    },
     "./native/servertool-wrapper": {
       "import": "./dist/native/servertool-wrapper.js",
       "types": "./dist/native/servertool-wrapper.d.ts"

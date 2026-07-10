@@ -42,6 +42,14 @@ const MODULE_LOADER_FORBIDDEN_PATTERNS = [
 
 const PACKAGE_EXPORT_FORBIDDEN = [
   {
+    key: '.',
+    message: 'llmswitch-core package exports must not expose root TypeScript barrel',
+  },
+  {
+    key: './conversion/switch-orchestrator',
+    message: 'llmswitch-core package exports must not expose deleted switch-orchestrator shell',
+  },
+  {
     key: './v2/*',
     message: 'llmswitch-core package exports must not expose broad ./v2/* wildcard',
   },

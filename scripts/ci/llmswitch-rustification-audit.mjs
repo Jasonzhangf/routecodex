@@ -105,19 +105,6 @@ function isNativeLinked(content) {
   return patterns.some((p) => p.test(content));
 }
 
-function isMetadataTypeOnlyRootEntry(rel, content) {
-  if (rel !== 'sharedmodule/llmswitch-core/src/index.ts') return false;
-  const executableLines = content
-    .replace(/\/\*[\s\S]*?\*\//gu, '')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/u, '').trim())
-    .filter(Boolean);
-  return executableLines.every((line) => (
-    /^export\s+type\s+\*\s+from\s+['"][^'"]+['"];?$/u.test(line)
-    || /^export\s+const\s+VERSION\s*=\s*['"][^'"]+['"];?$/u.test(line)
-  ));
-}
-
 function buildSnapshot() {
   const srcRoot = path.join(ROOT, SRC_PREFIX);
   if (!fs.existsSync(srcRoot)) {
@@ -135,7 +122,7 @@ function buildSnapshot() {
   for (const file of files) {
     const content = fs.readFileSync(file.abs, 'utf8');
     const loc = readLineCount(content);
-    const nativeLinked = isNativeLinked(content) || isMetadataTypeOnlyRootEntry(file.rel, content);
+    const nativeLinked = isNativeLinked(content);
     const relFromSrc = file.rel.replace('sharedmodule/llmswitch-core/src/', '');
     const topDir = relFromSrc.split('/')[0] || '.';
 
