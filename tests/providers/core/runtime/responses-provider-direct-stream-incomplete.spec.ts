@@ -5,14 +5,14 @@ import { describe, expect, it, jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => undefined }),
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   reportProviderErrorToRouterPolicy: async () => undefined,
   reportProviderSuccessToRouterPolicy: async () => undefined,
-  createResponsesSseToJsonConverter: async () => ({
-    convertSseToJson: async () => ({ id: 'unused' }),
-  }),
   buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
+}));
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  getRouterHotpathJsonBindingSync: () => ({}),
   convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
     request: {
       model: payload.model,
@@ -20,8 +20,8 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
       tools: payload.tools,
     },
   }),
+  normalizeResponsesDirectCurrentRequestPayload: (input: { payload?: Record<string, unknown> }) => input.payload ?? {},
   sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
-  writeSnapshotViaHooks: async () => undefined,
 }));
 
 const { ResponsesProvider } = await import('../../../../src/providers/core/runtime/responses-provider.js');

@@ -842,3 +842,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now mocks only the active provider runtime leaf surfaces: `native-exports.js` for provider wire sanitization / direct payload normalization / request conversion and `runtime-integrations.js` for provider runtime reporting and SSE materialization.
 - Exact file scan for legacy loader helpers and root bridge references in the touched spec returns zero matches.
 - Focused Jest loads successfully after the leaf mock migration and remains at the pre-existing provider snapshot/header baseline (13/16 pass, 3 fail), so this slice does not claim provider runtime behavior closure.
+
+### 2026-07-11 responses direct stream incomplete root bridge mock removed
+
+- `tests/providers/core/runtime/responses-provider-direct-stream-incomplete.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel.
+- The spec now mocks only the active provider runtime leaf surfaces: `runtime-integrations.js` for provider runtime reporting / SSE materialization and `native-exports.js` for direct payload normalization / provider wire sanitization / request conversion.
+- Exact file scan for legacy loader helpers and root bridge references in the touched spec returns zero matches.
+- Focused Jest loads successfully after the leaf mock migration and remains at the pre-existing direct SSE terminal baseline (0/3 pass, 3 fail), so this slice does not claim direct SSE behavior closure.
