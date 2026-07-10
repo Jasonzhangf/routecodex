@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   decodeRouteCodexProviderConfigTextSync,
   decodeRouteCodexUserConfigTextSync,
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 import { parseTomlRecord } from '../../src/config/toml-basic.js';
 
 async function mkTmp(prefix: string): Promise<string> {

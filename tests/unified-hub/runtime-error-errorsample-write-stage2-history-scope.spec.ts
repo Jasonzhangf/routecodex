@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   createSnapshotRecorder,
   resetSnapshotRecorderErrorsampleStateForTests
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/snapshot-recorder.js';
 
 describe('runtime errorsample stage2 current-tail scope', () => {
   let snapshotDir: string;

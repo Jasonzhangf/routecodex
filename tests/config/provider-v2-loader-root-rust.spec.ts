@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { planProviderConfigRootNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import { planProviderConfigRootNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 function legacyPlan(rootDir?: string): { rootDir?: string } {
   if (rootDir && rootDir.trim().length) {

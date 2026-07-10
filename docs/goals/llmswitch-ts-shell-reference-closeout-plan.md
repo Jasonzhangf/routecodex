@@ -545,3 +545,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `src/debug/snapshot/writer.ts` now loads `writeSnapshotViaHooks` from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root `src/modules/llmswitch/bridge.js` barrel.
 - `tests/snapshot/entry-endpoint-bucket.spec.ts` now mocks the same narrow runtime integration facade and no longer mocks broad `bridge.js` / `bridge.ts`.
 - The change preserves snapshot hook failure behavior while removing one production root-bridge dynamic import and one test root-bridge mock consumer.
+
+### 2026-07-11 config/unified leaf root bridge imports removed
+
+- Fifteen config, unified-hub, and sharedmodule leaf tests no longer import the root `src/modules/llmswitch/bridge.js` barrel for already-factored symbols.
+- Config/routing symbols now import from `src/modules/llmswitch/bridge/routing-integrations.js`; snapshot recorder tests import from `snapshot-recorder.js`; the mimoweb native text harvest test imports from `native-exports.js`.
+- `tests/unified-hub/policy-observe-shadow.spec.ts` now uses the real helper path `../helpers/native-hub-pipeline-test-wrapper.js` and supplies top-level `metadataCenterSnapshot.runtimeControl` required by the current Rust HubPipeline/VR metadata contract.
+- Exact file scan across the touched test files returns zero root `src/modules/llmswitch/bridge.js` references, with focused Jest passing 15/15 suites and 80/80 tests.

@@ -3,7 +3,7 @@ import path from 'node:path';
 import {
   detectRouteCodexProviderConfigFormatSync,
   detectRouteCodexUserConfigFormatSync,
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 function legacyDetectUserConfigFormat(configPath: string): 'toml' {
   const ext = path.extname(configPath).trim().toLowerCase();

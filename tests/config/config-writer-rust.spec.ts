@@ -6,7 +6,7 @@ import {
   updateRouteCodexUserConfigStringScalarNativeSync,
   writeRouteCodexProviderConfigFileNativeSync,
   writeRouteCodexUserConfigFileNativeSync,
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 import { decodeProviderConfigFile } from '../../src/config/provider-config-codec.js';
 import { decodeUserConfigFile } from '../../src/config/user-config-codec.js';
 import { updateUserConfigStringScalar, writeUserConfigFile } from '../../src/config/user-config-writer.js';

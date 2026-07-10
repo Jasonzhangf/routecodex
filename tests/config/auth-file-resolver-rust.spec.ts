@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { planAuthFileResolutionNativeSync, resolveAuthFileKeyNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import {
+  planAuthFileResolutionNativeSync,
+  resolveAuthFileKeyNativeSync,
+} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 import { AuthFileResolver } from '../../src/config/auth-file-resolver.js';
 
 async function mkTmp(prefix: string): Promise<string> {

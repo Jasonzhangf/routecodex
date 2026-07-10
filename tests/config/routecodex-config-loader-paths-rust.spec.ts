@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { planRouteCodexConfigLoaderPathsNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import { planRouteCodexConfigLoaderPathsNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 function legacyPlan(input: {
   explicitPath?: string;

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { loadRouteCodexConfig } from '../../src/config/routecodex-config-loader.js';
 import { serializeTomlRecord } from '../../src/config/toml-basic.js';
-import { loadRouteCodexConfigNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import { loadRouteCodexConfigNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 type EnvSnapshot = Record<
   | 'RCC_HOME'

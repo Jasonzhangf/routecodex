@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   createSnapshotRecorder,
   resetSnapshotRecorderErrorsampleStateForTests
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/snapshot-recorder.js';
 
 async function waitForFile(dir: string, prefix: string, timeoutMs = 1500): Promise<string> {
   const started = Date.now();

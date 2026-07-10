@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveRccSnapshotsDirNativeSync } from '../../src/modules/llmswitch/bridge.js';
+import { resolveRccSnapshotsDirNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
 
 type EnvSnapshot = Record<
   'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME' | 'RCC_SNAPSHOT_DIR' | 'ROUTECODEX_SNAPSHOT_DIR',

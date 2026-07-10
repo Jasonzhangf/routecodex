@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeAssistantTextToToolCallsJson } from '../../src/modules/llmswitch/bridge.js';
+import { normalizeAssistantTextToToolCallsJson } from '../../src/modules/llmswitch/bridge/native-exports.js';
 
 describe('mimoweb text harvest uses shared native normalizer', () => {
   it('harvests mimoweb tool_call json wrapper through native ssot', async () => {

@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 import {
   createSnapshotRecorder,
   resetSnapshotRecorderErrorsampleStateForTests
-} from '../../src/modules/llmswitch/bridge.js';
+} from '../../src/modules/llmswitch/bridge/snapshot-recorder.js';
 import {
   __flushErrorsampleQueueForTests,
   __resetErrorsampleQueueForTests

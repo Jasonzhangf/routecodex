@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createSnapshotRecorder } from '../../src/modules/llmswitch/bridge.js';
+import { createSnapshotRecorder } from '../../src/modules/llmswitch/bridge/snapshot-recorder.js';
 
 async function waitForFile(dir: string, predicate: (name: string) => boolean, timeoutMs = 1500): Promise<string> {
   const started = Date.now();
@@ -67,4 +67,3 @@ describe('hub policy observation errorsamples', () => {
     expect(Array.isArray(json.observation?.violations)).toBe(true);
   });
 });
-
