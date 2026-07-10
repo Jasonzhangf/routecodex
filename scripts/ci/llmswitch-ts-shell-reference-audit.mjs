@@ -243,7 +243,6 @@ function collectModuleLoaderErrors(files) {
   for (const rel of [
     'src/modules/llmswitch/bridge/module-loader.ts',
     'src/modules/llmswitch/bridge/module-loader.js',
-    'src/modules/llmswitch/bridge/module-loader.d.ts',
   ]) {
     if (!files.includes(rel)) continue;
     const source = readText(rel);

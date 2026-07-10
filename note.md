@@ -28685,6 +28685,7 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 # 2026-07-10: zero-ref bridge d.ts leaf mirrors deleted
 
 - Exact source-tracked scan found no active runtime/test importers for:
+  - `module-loader.d.ts`
   - `native-exports.d.ts`
   - `provider-response-converter-host.d.ts`
   - `response-converter.d.ts`
