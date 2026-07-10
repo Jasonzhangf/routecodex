@@ -2,30 +2,34 @@
 
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const projectRoot = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   '..',
   '..',
 );
 
 async function main() {
   const mod = await import(
-    path.join(projectRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')
+    pathToFileURL(path.resolve(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href
   );
 
-  const context = mod.captureResponsesContext({
-    model: 'gpt-5.4',
-    input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
-    tool_choice: 'required',
-    parallel_tool_calls: true,
-    include: ['reasoning.encrypted_content'],
-    store: true,
-    stream: true,
-    response_format: { type: 'json_schema', json_schema: { name: 'x', schema: { type: 'object' } } },
-    service_tier: 'flex',
-    truncation: 'auto',
-    metadata: { foo: 'bar', extraFields: { should_drop: true } }
+  const context = mod.captureReqInboundResponsesContextSnapshotJson({
+    rawRequest: {
+      model: 'gpt-5.4',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      tool_choice: 'required',
+      parallel_tool_calls: true,
+      include: ['reasoning.encrypted_content'],
+      store: true,
+      stream: true,
+      response_format: { type: 'json_schema', json_schema: { name: 'x', schema: { type: 'object' } } },
+      service_tier: 'flex',
+      truncation: 'auto',
+      metadata: { foo: 'bar', extraFields: { should_drop: true } }
+    },
+    requestId: 'responses_context_snapshot_no_tool_control'
   });
 
   assert.equal(

@@ -8,13 +8,17 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function loadBridge() {
-  const responsesBridge = await import(
-    pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')).href
-  );
+  const responsesBridge = await import(pathToFileURL(path.join(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
   return {
-    buildResponsesRequestFromChat: responsesBridge.buildResponsesRequestFromChat,
-    captureResponsesContext: responsesBridge.captureResponsesContext,
-    buildChatRequestFromResponses: responsesBridge.buildChatRequestFromResponses
+    buildResponsesRequestFromChat: responsesBridge.buildResponsesRequestFromChatNative,
+    captureResponsesContext: (payload, dto) => responsesBridge.captureReqInboundResponsesContextSnapshotJson({
+      rawRequest: payload,
+      requestId: dto?.route?.requestId,
+      toolCallIdStyle: payload?.toolCallIdStyle ?? payload?.metadata?.toolCallIdStyle
+    }),
+    buildChatRequestFromResponses: (payload, context) => responsesBridge.convertResponsesRequestToChatNative(payload, {
+      requestId: context?.requestId
+    })
   };
 }
 

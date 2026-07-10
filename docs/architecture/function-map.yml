@@ -4155,7 +4155,8 @@ owners:
     allowed_paths:
       - src/providers/core/utils/provider-error-reporter.ts
       - src/providers/core/runtime/provider-failure-policy-impl.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/utils/http-error-mapper.ts
       - src/server/runtime/http-server/provider-direct-pipeline.ts

@@ -5,12 +5,14 @@ import path from 'node:path';
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
-async function importModule(relativePath) {
-  return import(path.resolve(repoRoot, 'dist', relativePath));
+async function importRootDistModule(relativePath) {
+  return import(path.resolve(repoRoot, '..', '..', relativePath));
 }
 
 async function main() {
-  const { buildResponsesRequestFromChat } = await importModule('conversion/responses/responses-openai-bridge.js');
+  const {
+    buildResponsesRequestFromChatNative: buildResponsesRequestFromChat
+  } = await importRootDistModule('dist/modules/llmswitch/bridge/native-exports.js');
 
   // Route-selected style must override captured context to prevent cross-provider leakage:
   // LM Studio "preserve" must not contaminate OpenAI `/v1/responses` which requires `fc_*` ids.

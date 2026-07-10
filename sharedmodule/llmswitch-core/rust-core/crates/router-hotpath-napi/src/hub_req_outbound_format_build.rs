@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::req_outbound_stage3_compat::responses::apply_responses_instructions_to_input;
 
@@ -136,6 +138,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
             "type".to_string(),
             Value::String("function_call".to_string()),
         ),
+        ("id".to_string(), Value::String(call_id.to_string())),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
@@ -164,9 +167,242 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
             "type".to_string(),
             Value::String("function_call_output".to_string()),
         ),
+        ("id".to_string(), Value::String(call_id.to_string())),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("output".to_string(), Value::String(output)),
     ])))
+}
+
+fn read_tool_call_id_style(payload: &Value, context: Option<&Value>) -> Option<String> {
+    let metadata_style = payload
+        .get("metadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get("toolCallIdStyle"))
+        .and_then(Value::as_str);
+    let root_style = payload.get("toolCallIdStyle").and_then(Value::as_str);
+    let context_style = context
+        .and_then(Value::as_object)
+        .and_then(|row| {
+            row.get("toolCallIdStyle")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    row.get("metadata")
+                        .and_then(Value::as_object)
+                        .and_then(|metadata| metadata.get("toolCallIdStyle"))
+                        .and_then(Value::as_str)
+                })
+        });
+    root_style
+        .or(metadata_style)
+        .or(context_style)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn compact_tool_id(prefix: &str, raw: &str) -> String {
+    let trimmed = raw.trim();
+    let stripped = trimmed
+        .strip_prefix("functions.")
+        .unwrap_or(trimmed)
+        .strip_prefix("call_")
+        .unwrap_or_else(|| trimmed.strip_prefix("fc_").unwrap_or(trimmed));
+    let safe: String = stripped
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+        .take(48)
+        .collect();
+    let mut id = if safe.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}{safe}")
+    };
+    if id.len() > 64 {
+        let mut hasher = DefaultHasher::new();
+        raw.hash(&mut hasher);
+        let hash = format!("{:x}", hasher.finish());
+        let keep = 64usize.saturating_sub(prefix.len() + 1 + hash.len());
+        let body: String = safe.chars().take(keep).collect();
+        id = format!("{prefix}{body}_{hash}");
+    }
+    id
+}
+
+fn normalize_response_tool_ids(value: &mut Value, style: Option<&str>) {
+    let Some(style) = style else {
+        return;
+    };
+    let Some(items) = value.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        let item_type = row.get("type").and_then(Value::as_str).unwrap_or("");
+        if item_type != "function_call" && item_type != "function_call_output" {
+            continue;
+        }
+        let raw_call_id = row
+            .get("call_id")
+            .or_else(|| row.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if raw_call_id.is_empty() {
+            continue;
+        }
+        match style {
+            "fc" => {
+                let call_id = if raw_call_id.starts_with("call_") && raw_call_id.len() <= 64 {
+                    raw_call_id.clone()
+                } else {
+                    compact_tool_id("call_", &raw_call_id)
+                };
+                let fc_id = if call_id.starts_with("call_") {
+                    compact_tool_id("fc_", call_id.trim_start_matches("call_"))
+                } else {
+                    compact_tool_id("fc_", &call_id)
+                };
+                row.insert("call_id".to_string(), Value::String(call_id));
+                row.insert("id".to_string(), Value::String(fc_id));
+            }
+            "preserve" => {
+                let preserved = if raw_call_id.len() <= 64 {
+                    raw_call_id
+                } else {
+                    compact_tool_id("call_", &raw_call_id)
+                };
+                row.insert("call_id".to_string(), Value::String(preserved.clone()));
+                row.insert("id".to_string(), Value::String(preserved));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn compact_oversized_response_input_ids(value: &mut Value) {
+    let Some(items) = value.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(id) = row
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| id.len() > 64)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let prefix = if id.starts_with("msg_") { "msg_" } else { "item_" };
+        row.insert("id".to_string(), Value::String(compact_tool_id(prefix, &id)));
+    }
+}
+
+fn merge_response_request_parameters(request: &mut Value, payload: &Value, context: Option<&Value>) {
+    const ALLOWED_KEYS: &[&str] = &[
+        "temperature",
+        "top_p",
+        "max_output_tokens",
+        "seed",
+        "logit_bias",
+        "user",
+        "parallel_tool_calls",
+        "tool_choice",
+        "response_format",
+        "service_tier",
+        "truncation",
+        "include",
+        "store",
+        "prompt_cache_key",
+        "reasoning",
+        "stream",
+    ];
+    let Some(request_obj) = request.as_object_mut() else {
+        return;
+    };
+    let mut source = Map::new();
+    for candidate in [
+        context.and_then(Value::as_object).and_then(|row| row.get("parameters")),
+        payload.get("parameters"),
+    ] {
+        if let Some(parameters) = candidate.and_then(Value::as_object) {
+            for (key, value) in parameters {
+                source.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if !source.contains_key("max_output_tokens") {
+        if let Some(value) = source.get("max_tokens").cloned() {
+            source.insert("max_output_tokens".to_string(), value);
+        }
+    }
+    for key in ALLOWED_KEYS {
+        if request_obj.contains_key(*key) {
+            continue;
+        }
+        if let Some(value) = source.get(*key).cloned() {
+            request_obj.insert((*key).to_string(), value);
+        }
+    }
+    request_obj.remove("parameters");
+}
+
+fn merge_context_system_instruction(request: &mut Value, payload: &Value, context: Option<&Value>) {
+    let Some(request_obj) = request.as_object_mut() else {
+        return;
+    };
+    if request_obj.contains_key("instructions") {
+        return;
+    }
+    let Some(instructions) = payload
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            context
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("systemInstruction"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        })
+    else {
+        return;
+    };
+    request_obj.insert(
+        "instructions".to_string(),
+        Value::String(instructions.to_string()),
+    );
+}
+
+fn merge_bridge_history_input(request: &mut Value, extras: Option<&Value>) {
+    let Some(history_input) = extras
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("bridgeHistory"))
+        .and_then(Value::as_object)
+        .and_then(|history| history.get("input"))
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+    else {
+        return;
+    };
+    let Some(request_obj) = request.as_object_mut() else {
+        return;
+    };
+    let current_input = request_obj
+        .remove("input")
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let mut merged = history_input.clone();
+    merged.extend(current_input);
+    request_obj.insert("input".to_string(), Value::Array(merged));
 }
 
 fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
@@ -474,6 +710,8 @@ pub fn build_responses_request_from_chat_json(input_json: String) -> napi::Resul
         .and_then(|row| row.get("payload"))
         .cloned()
         .ok_or_else(|| napi::Error::from_reason("Missing payload".to_string()))?;
+    let context = input.as_object().and_then(|row| row.get("context")).cloned();
+    let extras = input.as_object().and_then(|row| row.get("extras")).cloned();
     let output = build_format_request(FormatBuildInput {
         format_envelope: serde_json::json!({
             "format": "openai-chat",
@@ -483,8 +721,15 @@ pub fn build_responses_request_from_chat_json(input_json: String) -> napi::Resul
         protocol: "openai-responses".to_string(),
     })
     .map_err(napi::Error::from_reason)?;
+    let mut request = output.payload;
+    merge_bridge_history_input(&mut request, extras.as_ref());
+    merge_context_system_instruction(&mut request, &payload, context.as_ref());
+    merge_response_request_parameters(&mut request, &payload, context.as_ref());
+    let tool_call_id_style = read_tool_call_id_style(&payload, context.as_ref());
+    normalize_response_tool_ids(&mut request, tool_call_id_style.as_deref());
+    compact_oversized_response_input_ids(&mut request);
     serde_json::to_string(&serde_json::json!({
-        "request": output.payload,
+        "request": request,
         "originalSystemMessages": []
     }))
     .map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -662,6 +907,212 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_flattens_chat_parameters() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{ "role": "user", "content": "hi" }],
+                    "parameters": {
+                        "temperature": 0.2,
+                        "max_tokens": 123
+                    }
+                },
+                "context": { "stream": false }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["request"]["temperature"], 0.2);
+        assert_eq!(parsed["request"]["max_output_tokens"], 123);
+        assert!(parsed["request"].get("parameters").is_none());
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_restores_context_system_instruction() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{ "role": "user", "content": "hi" }]
+                },
+                "context": {
+                    "systemInstruction": "You are a helpful assistant that responds in Chinese."
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["request"]["instructions"],
+            "You are a helpful assistant that responds in Chinese."
+        );
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_preserves_payload_instructions() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "instructions": "Use Chinese.",
+                    "messages": [{ "role": "user", "content": "hi" }]
+                },
+                "context": {
+                    "systemInstruction": "Use English."
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["request"]["instructions"], "Use Chinese.");
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_prefers_chat_tool_parameters() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{ "role": "user", "content": "hi" }],
+                    "tools": [{
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "parameters": { "type": "object" }
+                        }
+                    }],
+                    "parameters": {
+                        "tool_choice": "required",
+                        "parallel_tool_calls": true
+                    }
+                },
+                "context": {
+                    "parameters": {
+                        "tool_choice": "none",
+                        "parallel_tool_calls": false
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["request"]["tool_choice"], "required");
+        assert_eq!(parsed["request"]["parallel_tool_calls"], true);
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_applies_fc_tool_id_style() {
+        let long_raw_id = format!("functions.call_{}:40", "a".repeat(240));
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": long_raw_id,
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"cmd\":\"pwd\"}"
+                                }
+                            }]
+                        },
+                        {
+                            "role": "tool",
+                            "tool_call_id": long_raw_id,
+                            "content": "ok"
+                        }
+                    ],
+                    "metadata": { "toolCallIdStyle": "fc" }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        let items = parsed["request"]["input"].as_array().unwrap();
+        assert_eq!(items[0]["type"], "function_call");
+        assert!(items[0]["call_id"].as_str().unwrap().starts_with("call_"));
+        assert!(items[0]["id"].as_str().unwrap().starts_with("fc_"));
+        assert!(items[0]["call_id"].as_str().unwrap().len() <= 64);
+        assert!(items[0]["id"].as_str().unwrap().len() <= 64);
+        assert_eq!(items[1]["call_id"], items[0]["call_id"]);
+        assert_eq!(items[1]["id"], items[0]["id"]);
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_preserves_tool_id_style() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_keep_me",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{}"
+                            }
+                        }]
+                    }],
+                    "metadata": { "toolCallIdStyle": "preserve" }
+                },
+                "context": {
+                    "toolCallIdStyle": "fc"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        let item = &parsed["request"]["input"][0];
+        assert_eq!(item["id"], "call_keep_me");
+        assert_eq!(item["call_id"], "call_keep_me");
+    }
+
+    #[test]
+    fn test_build_responses_request_from_chat_json_merges_bridge_history_input() {
+        let result = build_responses_request_from_chat_json(
+            serde_json::json!({
+                "payload": {
+                    "model": "gpt-test",
+                    "messages": [{ "role": "user", "content": "continue" }]
+                },
+                "extras": {
+                    "bridgeHistory": {
+                        "input": [{
+                            "type": "message",
+                            "id": format!("msg_{}", "x".repeat(240)),
+                            "role": "assistant",
+                            "content": [{ "type": "output_text", "text": "previous step" }]
+                        }],
+                        "originalSystemMessages": []
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        let items = parsed["request"]["input"].as_array().unwrap();
+        assert!(items[0]["id"].as_str().unwrap().starts_with("msg_"));
+        assert!(items[0]["id"].as_str().unwrap().len() <= 64);
+        assert_eq!(items[0]["content"][0]["text"], "previous step");
+        assert_eq!(items[1]["role"], "user");
     }
 
     #[test]

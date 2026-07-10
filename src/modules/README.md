@@ -37,7 +37,7 @@ src/modules/
 
 ## Hub Pipeline 接入示例
 ```ts
-import { bootstrapVirtualRouterConfig } from 'rcc-llmswitch-core';
+import { bootstrapVirtualRouterConfig } from 'rcc-llmswitch-core/native/router-hotpath/native-virtual-router-bootstrap-config';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader';
 import { createHubPipeline } from '../modules/llmswitch/bridge';
 

@@ -126,6 +126,21 @@ const PUBLIC_BARREL_FORBIDDEN_EXPORTS = [
     pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/virtual-router-contracts\.js['"]/u,
     message: 'root llmswitch-core index may only export virtual-router-contracts as type-only surface',
   },
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-virtual-router-bootstrap-config\.js['"]/u,
+    message: 'root llmswitch-core index must not publicly export native virtual-router bootstrap TS shell',
+  },
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-provider-runtime-ingress\.js['"]/u,
+    message: 'root llmswitch-core index must not publicly export native provider runtime ingress TS shell',
+  },
+  {
+    path: CORE_INDEX_PATH,
+    pattern: /export\s+\*\s+from\s+['"]\.\/native\/router-hotpath\/native-router-hotpath-loader\.js['"]/u,
+    message: 'root llmswitch-core index must not publicly export native router hotpath loader TS shell',
+  },
 ];
 const REQUIRED_CORE_OUTPUT_FORBIDDEN_SUFFIXES = [
   'conversion/hub/response/provider-response.js',
@@ -172,6 +187,19 @@ function isNativeLinked(content) {
   ].some((pattern) => pattern.test(content));
 }
 
+function isMetadataTypeOnlyRootEntry(rel, content) {
+  if (rel !== 'sharedmodule/llmswitch-core/src/index.ts') return false;
+  const executableLines = content
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/u, '').trim())
+    .filter(Boolean);
+  return executableLines.every((line) => (
+    /^export\s+type\s+\*\s+from\s+['"][^'"]+['"];?$/u.test(line)
+    || /^export\s+const\s+VERSION\s*=\s*['"][^'"]+['"];?$/u.test(line)
+  ));
+}
+
 function listCurrentNonNativeProdTsFiles() {
   return readGitTrackedFiles()
     .filter((rel) => rel.startsWith(SRC_PREFIX))
@@ -179,7 +207,10 @@ function listCurrentNonNativeProdTsFiles() {
     .filter((rel) => rel.endsWith('.ts'))
     .filter((rel) => isProdTs(rel))
     .filter((rel) => fs.existsSync(path.join(ROOT, rel)))
-    .filter((rel) => !isNativeLinked(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
+    .filter((rel) => {
+      const content = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      return !isNativeLinked(content) && !isMetadataTypeOnlyRootEntry(rel, content);
+    });
 }
 
 function isCurrentTrackedProdTsFile(rel) {
@@ -193,7 +224,8 @@ function isCurrentTrackedProdTsFile(rel) {
 
 function isCurrentNativeLinkedProdTsFile(rel) {
   if (!isCurrentTrackedProdTsFile(rel)) return false;
-  return isNativeLinked(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+  const content = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  return isNativeLinked(content) || isMetadataTypeOnlyRootEntry(rel, content);
 }
 
 function readManifest() {

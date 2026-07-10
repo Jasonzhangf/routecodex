@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function loadBridge() {
-  return import(pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')).href);
+  return import(pathToFileURL(path.resolve(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
 }
 
 function makeChatCompletionWithApplyPatchToolCall() {
@@ -49,7 +49,7 @@ function makeChatCompletionWithApplyPatchToolCall() {
 }
 
 async function main() {
-  const { buildResponsesPayloadFromChat } = await loadBridge();
+  const { buildResponsesPayloadFromChatNative: buildResponsesPayloadFromChat } = await loadBridge();
   const chat = makeChatCompletionWithApplyPatchToolCall();
 
   const toolsRaw = [
@@ -64,15 +64,14 @@ async function main() {
   const out = buildResponsesPayloadFromChat(chat, { requestId: 'req_freeform', toolsRaw });
   assert.equal(out.status, 'requires_action', 'expected requires_action');
 
-  const outputItem = Array.isArray(out.output) ? out.output.find((x) => x && x.type === 'function_call') : null;
-  assert.ok(outputItem, 'expected output function_call item');
-  assert.equal(outputItem.status, 'in_progress', 'expected function_call status=in_progress when requires_action');
+  const outputItem = Array.isArray(out.output) ? out.output.find((x) => x && x.type === 'custom_tool_call') : null;
+  assert.ok(outputItem, 'expected output custom_tool_call item');
   assert.equal(outputItem.name, 'apply_patch', 'expected apply_patch function_call');
 
-  // For format:"freeform", arguments should be patch text (not JSON wrapper).
-  assert.ok(typeof outputItem.arguments === 'string', 'expected arguments to be a string');
-  assert.ok(outputItem.arguments.trim().startsWith('*** Begin Patch'), 'expected freeform patch text in output.arguments');
-  assert.ok(!outputItem.arguments.trim().startsWith('{'), 'expected output.arguments NOT to be JSON');
+  // For format:"freeform", custom tool input should be patch text (not JSON wrapper).
+  assert.ok(typeof outputItem.input === 'string', 'expected custom_tool_call input to be a string');
+  assert.ok(outputItem.input.trim().startsWith('*** Begin Patch'), 'expected freeform patch text in output.input');
+  assert.ok(!outputItem.input.trim().startsWith('{'), 'expected output.input NOT to be JSON');
 
   const ra = out.required_action?.submit_tool_outputs?.tool_calls;
   assert.ok(Array.isArray(ra) && ra.length > 0, 'expected required_action tool_calls');

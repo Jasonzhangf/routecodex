@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), '..', '..');
 const fixturesDir = path.join(projectRoot, 'test', 'fixtures', 'responses');
-const distBridge = path.join(projectRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js');
+const nativeBridge = path.resolve(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
 
 async function loadFixtures() {
   const entries = await fs.readdir(fixturesDir);
@@ -34,19 +34,19 @@ async function loadFixtures() {
 }
 
 async function runRoundtripTests() {
-  const bridge = await import(pathToFileURL(distBridge).href);
+  const bridge = await import(pathToFileURL(nativeBridge).href);
   const {
-    buildResponsesRequestFromChat,
-    captureResponsesContext,
-    buildChatRequestFromResponses
+    buildResponsesRequestFromChatNative,
+    convertResponsesRequestToChatNative
   } = bridge;
 
   const fixtures = await loadFixtures();
   let passed = 0;
 
   for (const fixture of fixtures) {
-    const ctx = captureResponsesContext(fixture.payload, { route: { requestId: `responses_roundtrip_${fixture.name}` } });
-    const { request: chatRequest } = buildChatRequestFromResponses(fixture.payload, ctx);
+    const { request: chatRequest, context } = convertResponsesRequestToChatNative(fixture.payload, {
+      requestId: `responses_roundtrip_${fixture.name}`
+    });
 
     assert.ok(
       Array.isArray(chatRequest?.messages) && chatRequest.messages.length > 0,
@@ -55,7 +55,7 @@ async function runRoundtripTests() {
     const hasUserMessage = chatRequest.messages.some((msg) => String(msg?.role).toLowerCase() === 'user');
     assert.ok(hasUserMessage, `Fixture ${fixture.name}: chat messages missing user role`);
 
-    const { request: responsesPayload } = buildResponsesRequestFromChat(chatRequest);
+    const { request: responsesPayload } = buildResponsesRequestFromChatNative(chatRequest, context);
     assert.ok(
       Array.isArray(responsesPayload?.input) && responsesPayload.input.length > 0,
       `Fixture ${fixture.name}: roundtrip responses payload missing input`

@@ -1,7 +1,7 @@
 import {
   buildAnthropicResponseFromChatFullWithNative,
   buildOpenAIChatFromAnthropicMessageFullWithNative,
-} from './helpers/resp-semantics-direct-native.js';
+} from './resp-semantics-direct-native.js';
 
 type JsonObject = Record<string, unknown>;
 type ToolAliasMap = Record<string, string>;

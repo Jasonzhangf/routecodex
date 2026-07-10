@@ -132,8 +132,9 @@ const JSON_PARSE_FAILED = Symbol('native-hub-pipeline-orchestration-semantics-pr
 
 
 function logNativeProtocolNonBlocking(stage: string, error: unknown): void {
-  void stage;
-  void error;
+  console.warn(
+    `[native-hub-pipeline-orchestration-test-helper] ${stage} failed (non-blocking): ${stringifyNativePayloadForError(error)}`
+  );
 }
 
 function parseJson(stage: string, raw: string): unknown | typeof JSON_PARSE_FAILED {

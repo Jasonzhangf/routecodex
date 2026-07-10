@@ -11,7 +11,7 @@ const projectRoot = path.resolve(
 
 async function main() {
   const mod = await import(
-    path.join(projectRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')
+    path.join(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')
   );
 
   const chat = {
@@ -50,7 +50,7 @@ async function main() {
     }
   };
 
-  const result = mod.buildResponsesRequestFromChat(chat, context);
+  const result = mod.buildResponsesRequestFromChatNative(chat, context);
   assert.equal(result.request.tool_choice, 'required');
   assert.equal(result.request.parallel_tool_calls, true);
 

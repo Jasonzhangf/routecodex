@@ -18,8 +18,6 @@ const SAMPLE_BASE =
   process.env.CODEX_SAMPLES_DIR ||
   path.join(os.homedir(), '.routecodex', 'codex-samples');
 
-let cachedDistRoot;
-
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
@@ -224,17 +222,20 @@ console.log('🧪 Cross-protocol samples:', { chatRequest: chatRequest.file });
 const responsesBridge = await import(
   pathToFileURL(
     path.join(
-      distRoot(),
-      'conversion',
-      'responses',
-      'responses-openai-bridge.js'
+      REPO_ROOT,
+      '..',
+      '..',
+      'dist',
+      'modules',
+      'llmswitch',
+      'bridge',
+      'native-exports.js'
     )
   ).href
 );
 const {
-  buildResponsesRequestFromChat,
-  buildChatRequestFromResponses,
-  captureResponsesContext
+  buildResponsesRequestFromChatNative,
+  convertResponsesRequestToChatNative
 } = responsesBridge;
 
 const {
@@ -265,23 +266,6 @@ const { buildOpenAIChatFromGeminiRequest } = await import(
     )
   ).href
 );
-
-function distRoot() {
-  if (cachedDistRoot) return cachedDistRoot;
-  const modern = path.join(REPO_ROOT, 'dist');
-  const modernProbe = path.join(
-    modern,
-    'conversion',
-    'responses',
-    'responses-openai-bridge.js'
-  );
-  if (fs.existsSync(modernProbe)) {
-    cachedDistRoot = modern;
-    return cachedDistRoot;
-  }
-  cachedDistRoot = path.join(REPO_ROOT, 'dist');
-  return cachedDistRoot;
-}
 
 function buildGeminiRequestFromChat(chat) {
   const messages = Array.isArray(chat?.messages) ? chat.messages : [];
@@ -423,14 +407,10 @@ function runRequestChain() {
     current = canonicalizeChat(next);
   }
 
-  const { request: responsesReq, originalSystemMessages } = buildResponsesRequestFromChat(current);
-  const ctx = captureResponsesContext(responsesReq, {
-    route: { requestId: 'cross-protocol' }
-  });
-  if (originalSystemMessages?.length) {
-    ctx.originalSystemMessages = originalSystemMessages;
-  }
-  const chatFromResponses = buildChatRequestFromResponses(responsesReq, ctx).request;
+  const { request: responsesReq } = buildResponsesRequestFromChatNative(current);
+  const chatFromResponses = convertResponsesRequestToChatNative(responsesReq, {
+    requestId: 'cross-protocol'
+  }).request;
   updateCurrent(withOuterFields(chatFromResponses), 'responses');
 
   const anthReq = buildAnthropicRequestFromOpenAIChat(current);

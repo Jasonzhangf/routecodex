@@ -300,3 +300,111 @@ Additional gates if touched paths require them:
 - Do not preserve the TS bridge as a hidden test helper under production source.
 - Test-only direct native helpers must live under `tests/`, not `sharedmodule/llmswitch-core/src`.
 - Do not stage unrelated dirty worktree files.
+
+### 2026-07-10 Progress: Chat -> Responses script refs moved to Rust/native
+
+- `buildResponsesRequestFromChatJson` is now the Rust/native owner for the remaining Chat -> Responses request-builder script surface needed by the first deletion wave.
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs` now covers the legacy bridge parity required by external scripts: `parameters` flattening, chat-parameter precedence for `tool_choice` / `parallel_tool_calls`, `toolCallIdStyle=fc|preserve`, bridge-history input merge, and oversized Responses input id compaction.
+- These scripts now import root host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesRequestFromChatNative` instead of `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js`:
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-request-no-parameters-wrapper.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-create-parameters-single-source.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-choice-single-source.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-call-id-style-route-wins.mjs`
+- Verification passed: focused Rust `hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_*` 6/6, `npm run build:native-hotpath`, all four migrated scripts, strict shell reference audit (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), exact source-tracked ref scan, and `git diff --check`.
+- Remaining active script blockers for deleting the bridge are Responses -> Chat / context-capture users:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`
+
+### 2026-07-10 Progress: stale sharedmodule Responses bridge suite removed
+
+- `sharedmodule/llmswitch-core/tests/responses/responses-openai-bridge.spec.ts` was a stale duplicate suite outside the root active Jest gate. After production `responses-openai-bridge.ts` and `openai-message-normalize.ts` were physically deleted, the suite either failed to load old deleted TS owners or asserted old TS compatibility/fallback contracts that contradict current Rust fail-fast behavior.
+- The active coverage remains root `tests/responses/responses-openai-bridge.spec.ts`, `tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts`, and residue/deleted-path gates. These use `tests/sharedmodule/helpers/responses-openai-bridge-direct-native.ts` and Rust/NAPI helpers instead of production TS bridge shells.
+- Test-only helper imports were corrected to point at test-only direct native helpers: `responses-openai-bridge-direct-native.ts` now imports `native-shared-conversion-direct-native.ts` and same-directory `resp-semantics-direct-native.ts`; `anthropic-response-direct-native.ts` now imports same-directory `resp-semantics-direct-native.ts`.
+- `hub.req_inbound_responses_context_capture` is now marked as a file-scoped Rust owner in `function-map.yml`, so map coverage does not rely on a second helper comment pretending to define canonical builders.
+- Verification passed: focused root Responses bridge + metadata + residue Jest 214/214, strict TS shell reference audit (`prodTsShellCount=12`, `shellsWithProdImporters=10`, `coreModuleSubpathRefs=3`), `npm run verify:llmswitch-minimal-ts-surface -- --json`, `npm run verify:llmswitch-rustification-audit -- --json` (`prodTsFileCount=12`, `nonNativeFileCount=0`), `npm run verify:function-map-compile-gate`, `npm run verify:architecture-deleted-path`, and `npm run verify:architecture-thin-wrapper-only`.
+
+### 2026-07-10 Progress: context snapshot script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::captureReqInboundResponsesContextSnapshotJson` instead of the old `responses-openai-bridge.js` dist path.
+- Rust request-inbound context capture now strips host-only `metadata.extraFields` in `hub_req_inbound_context_capture.rs`, closing the previous TS bridge post-processing gap in the Rust owner.
+- Verification passed: `cargo test -p router-hotpath-napi capture_responses_context_strips_host_only_metadata_extra_fields -- --nocapture` 1/1, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, `npm run build:native-hotpath`, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`, strict shell reference audit (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), exact source-tracked ref scan, and scoped `git diff --check`.
+- Remaining active script blockers for deleting the bridge are Responses -> Chat users:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`
+
+### 2026-07-10 Progress: overlong function-name script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and composes Rust/native `captureReqInboundResponsesContextSnapshotJson`, `convertResponsesRequestToChatNative`, and `buildResponsesRequestFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- The script still proves overlong Responses function calls are removed from captured context, Responses -> Chat messages, and Chat -> Responses roundtrip payload while valid `exec_command` calls survive.
+- Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 6/6.
+- Remaining active script blockers for deleting the bridge are:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+
+### 2026-07-10 Progress: local-image autoload script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::convertResponsesRequestToChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- Existing Rust/native local image path autoload handles readable local images as `image_url` data URLs and unreadable path notices without script-side semantic repair.
+- Verification passed: direct native local-image probe, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`, and `cargo test -p router-hotpath-napi local_image -- --nocapture` 1/1.
+- Remaining active script blocker for deleting the bridge:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+
+### 2026-07-10 Progress: cross-protocol matrix script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and uses Rust/native `buildResponsesRequestFromChatNative` plus `convertResponsesRequestToChatNative` for the Chat -> Responses -> Chat leg instead of the old `responses-openai-bridge.js` dist path.
+- Source-tracked exact scan now shows no active script references to `responses-openai-bridge.js`; remaining references are goal/history docs and residue/deleted-path tests.
+- Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`; script execution preserved its existing no-sample behavior and skipped because `~/.routecodex/codex-samples/openai-chat` had no qualifying tool-call sample in this environment.
+- Remaining deletion blockers are no longer script imports; next step is to audit active test/runtime/source imports for `responses-openai-bridge.ts` itself, then delete only after exact source/test/package scans prove no active consumer remains.
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`
+
+### 2026-07-10 Progress: roundtrip script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and uses Rust/native `convertResponsesRequestToChatNative` plus `buildResponsesRequestFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- `buildResponsesRequestFromChatJson` now restores `instructions` from explicit Chat payload instructions first and `context.systemInstruction` second, closing the roundtrip parity gap in the Rust Chat -> Responses owner instead of script-side patching.
+- Verification passed: direct native fixture probe 1/1, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 8/8, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `npm run build:native-hotpath`.
+- Remaining active script blockers for deleting the bridge are:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+
+### 2026-07-10 Progress: response-payload freeform script ref moved to Rust/native
+
+- `sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- Rust freeform tool format recognition now treats `format: "freeform"` the same as grammar/text freeform declarations in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; the client-facing contract remains Rust-owned `custom_tool_call.input` plus raw patch in `required_action`.
+- Verification passed: `cargo test -p router-hotpath-napi freeform_apply_patch -- --nocapture` 3/3, `npm run build:native-hotpath`, `node sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs`, strict shell reference audit (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), exact source-tracked ref scan, and `git diff --check`.
+- Remaining active script blockers for deleting the bridge are Responses -> Chat / context-capture users:
+  - `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`
+
+### 2026-07-10 Progress: router hotpath analysis wrapper retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts` is physically deleted after exact source scan showed no active production consumer beyond `native-router-hotpath.ts`.
+- The remaining native-call/JSON parse/fail-fast glue for pending tool sync, continue execution injection, chat media analysis/strip, and web-search intent is now local to `native-router-hotpath.ts`; this removes one production TS shell without adding a JS/TS semantic fallback.
+- `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts` now owns its test-only media strip parser locally, and parser observability now verifies invalid native JSON is logged before fail-fast through public native wrapper calls instead of importing the deleted parser directly.
+- The residue gate now locks `native-router-hotpath-analysis.ts` absent and distinguishes generic parser observability warnings from forbidden tool-args repair fallback warnings.
+- Verification passed: focused Jest `native-semantics-parsers-observability.spec.ts` + `hub-pipeline-stage-residue-audit.spec.ts` 219/219, exact source scan for the retired path, strict shell reference audit (`prodTsShellCount=11`, `shellsWithProdImporters=9`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), `npm run verify:llmswitch-core-tsc`, `npm run verify:llmswitch-minimal-ts-surface -- --json`, `npm run verify:llmswitch-rustification-audit -- --json` (`prodTsFileCount=11`, `nonNativeFileCount=0`), `npm run verify:function-map-compile-gate`, `npm run verify:architecture-deleted-path`, `npm run verify:architecture-thin-wrapper-only`, `npm run build:base`, and `git diff --check`.
+- Remaining work: continue from the strict audit graph. Do not delete `native-hub-pipeline-req-inbound-semantics.ts` solely because it has `prodImportRefs=0`; it still participates in function-map/mainline/test ownership until those references are explicitly moved.
+
+### 2026-07-10 Progress: root public barrel runtime shell exports removed
+
+- `sharedmodule/llmswitch-core/src/index.ts` no longer runtime re-exports `native-virtual-router-bootstrap-config.ts`, `native-provider-runtime-ingress.ts`, or `native-router-hotpath-loader.ts`; the root package entry is now metadata/type-only (`VERSION` plus `export type *` for VR contracts).
+- Source scan found no active runtime source consumer importing `bootstrapVirtualRouterConfig` or other native facade runtime values from root `rcc-llmswitch-core`; the only root example in `src/modules/README.md` was updated to the explicit native subpath.
+- `verify-llmswitch-minimal-ts-surface.mjs` now forbids those root runtime shell exports from being restored. `llmswitch-rustification-audit.mjs` and the minimal surface gate classify the root entry as non-semantic only when it contains type-only exports plus `VERSION`, avoiding fake native markers while preventing non-native debt growth.
+- Verification passed: `npm run verify:llmswitch-minimal-ts-surface -- --json`, `npm run verify:llmswitch-rustification-audit -- --json` (`prodTsFileCount=11`, `nonNativeFileCount=0`), strict shell reference audit (`prodTsShellCount=11`, `shellsWithProdImporters=7`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), focused residue Jest 203/203, `npm run verify:llmswitch-core-tsc`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-deleted-path`, `npm run verify:architecture-thin-wrapper-only`, `npm run build:base`, and `git diff --check`.
+- Remaining work: `native-provider-runtime-ingress.ts` and `native-virtual-router-bootstrap-config.ts` now have `prodImportRefs=0` but still have active root tests/docs and owner roles. Deletion requires exact test/owner migration first, not immediate file removal.
+
+### 2026-07-10 Progress: provider runtime ingress TS wrapper retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` is physically deleted after strict shell audit and exact source scan showed no production importer.
+- Tests now call Rust/NAPI provider runtime ingress through host `src/modules/llmswitch/bridge/native-exports.js::getRouterHotpathJsonBindingSync`; `tests/sharedmodule/routing-state-store-observability.spec.ts` imports only the local host type declaration.
+- `error.mainline` edge `err-03` and `error.err_04_router_policy_applied` now point at Rust owner symbols `report_provider_error_to_router_policy_json_bridge -> report_provider_error`; no-fallback allowlist no longer allows the retired TS shell.
+- Residue audit locks the deleted wrapper absent, and root public barrel gate already prevents re-exporting it from `sharedmodule/llmswitch-core/src/index.ts`.
+- Verification passed so far: focused Jest `provider-runtime-ingress.spec.ts`, `routing-state-store-observability.spec.ts`, `error-pipeline-contract.spec.ts`, and `hub-pipeline-stage-residue-audit.spec.ts` 219/219; exact source scan shows only docs/history/residue references; strict shell reference audit reports `prodTsShellCount=10`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; scoped `git diff --check`.
+- Remaining work: continue the strict audit graph. `native-virtual-router-bootstrap-config.ts` has no production importer but still has root tests/docs and owner roles, so it requires the same exact test/owner migration before deletion.

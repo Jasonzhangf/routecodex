@@ -16,11 +16,11 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function loadBridge() {
-  return import(pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')).href);
+  return import(pathToFileURL(path.resolve(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
 }
 
 async function main() {
-  const { buildResponsesRequestFromChat } = await loadBridge();
+  const { buildResponsesRequestFromChatNative: buildResponsesRequestFromChat } = await loadBridge();
 
   const chatPayload = {
     model: 'gpt-test',
@@ -47,4 +47,3 @@ main().catch((err) => {
   console.error('❌ responses request parameters wrapper regression failed:', err);
   process.exit(1);
 });
-

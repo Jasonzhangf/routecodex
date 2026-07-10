@@ -1,12 +1,9 @@
 /**
  * RouteCodex hub entry exports.
  *
- * Expose hub pipeline + conversion helpers + router bootstrap so consumers no longer
- * have to depend on the removed LLMSwitch V2 engine.
+ * Keep the root package entry metadata-only. Runtime native facades must be
+ * imported by their owning subpath so public barrels do not keep TS shells alive.
  */
 
-export * from './native/router-hotpath/native-virtual-router-bootstrap-config.js';
-export * from './native/router-hotpath/native-provider-runtime-ingress.js';
-export * from './native/router-hotpath/native-router-hotpath-loader.js';
 export type * from './native/router-hotpath/virtual-router-contracts.js';
 export const VERSION = '0.4.0';

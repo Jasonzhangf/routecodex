@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 async function loadBridge() {
-  return import(pathToFileURL(path.join(repoRoot, 'dist', 'conversion', 'responses', 'responses-openai-bridge.js')).href);
+  return import(pathToFileURL(path.resolve(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
 }
 
 function createTempPng() {
@@ -51,7 +51,7 @@ function hasImagePart(message) {
 }
 
 async function main() {
-  const { captureResponsesContext, buildChatRequestFromResponses } = await loadBridge();
+  const { convertResponsesRequestToChatNative } = await loadBridge();
   const imagePath = createTempPng();
 
   const payload = {
@@ -70,8 +70,9 @@ async function main() {
     ]
   };
 
-  const context = captureResponsesContext(payload, { route: { requestId: 'req_local_image_autoload' } });
-  const { request } = buildChatRequestFromResponses(payload, context);
+  const { request } = convertResponsesRequestToChatNative(payload, {
+    requestId: 'req_local_image_autoload'
+  });
   const userMessage = findLatestUserMessage(request?.messages);
   assert.ok(userMessage, 'expected latest user message');
   assert.ok(Array.isArray(userMessage.content), 'expected multimodal user content array');
@@ -113,10 +114,9 @@ async function main() {
     ]
   };
 
-  const contextWithMissingPath = captureResponsesContext(payloadWithMissingPath, {
-    route: { requestId: 'req_local_image_autoload_missing_path' }
+  const { request: requestWithMissingPath } = convertResponsesRequestToChatNative(payloadWithMissingPath, {
+    requestId: 'req_local_image_autoload_missing_path'
   });
-  const { request: requestWithMissingPath } = buildChatRequestFromResponses(payloadWithMissingPath, contextWithMissingPath);
   const userMessageWithMissingPath = findLatestUserMessage(requestWithMissingPath?.messages);
   assert.ok(userMessageWithMissingPath, 'expected latest user message for missing path case');
   assert.equal(

@@ -666,10 +666,10 @@ chains:
       - step_id: err-03
         from_node: ErrorErr03RuntimeClassified
         to_node: ErrorErr04RouterPolicyApplied
-        caller_symbol: apply_error_err_04_router_policy_from_error_err_03_runtime
-        caller_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
-        callee_symbol: report_internal_error_err_02_host_to_router_policy
-        callee_file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+        caller_symbol: report_provider_error_to_router_policy_json_bridge
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+        callee_symbol: report_provider_error
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
         owner_feature_id: error.pipeline_contract
         semantic_input: "classified provider/server failure"
         semantic_output: "router-policy-applied error event with runtime scope and availability policy input"
@@ -1382,13 +1382,13 @@ shared_multi_reference_functions:
     note: "Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces."
 
   - function_id: error.err_04_router_policy_applied
-    symbol: ErrorErr04RouterPolicyApplied
-    file: sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts
+    symbol: report_provider_error
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
     owner_feature_id: error.pipeline_contract
     binding_status: confirmed
     reused_by_chains:
       - error.mainline
-    note: "Router policy applied between ErrorErr03 and ErrorErr05; type is registered in topology doc table."
+    note: "Router policy applied between ErrorErr03 and ErrorErr05; Rust provider runtime ingress normalizes provider error events into ErrorErr04 policy truth."
   - function_id: error.err_04_executor_envelope
     symbol: RequestExecutorErrorErr04RouterPolicyEnvelope
     file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts

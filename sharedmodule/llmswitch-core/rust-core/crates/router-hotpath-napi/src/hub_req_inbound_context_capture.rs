@@ -1071,7 +1071,9 @@ pub fn capture_req_inbound_responses_context_snapshot(
         }
     }
     if let Some(metadata) = raw_request_row.get("metadata").and_then(|v| v.as_object()) {
-        context.insert("metadata".to_string(), Value::Object(metadata.clone()));
+        let mut metadata_row = metadata.clone();
+        metadata_row.remove("extraFields");
+        context.insert("metadata".to_string(), Value::Object(metadata_row));
     }
     let is_chat_payload = raw_request_row
         .get("messages")
@@ -2039,6 +2041,36 @@ mod tests {
         );
         assert_eq!(row.get("isResponsesPayload"), Some(&Value::Bool(false)));
         assert_eq!(row.get("isChatPayload"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn capture_responses_context_strips_host_only_metadata_extra_fields() {
+        let input = ResponsesContextCaptureInput {
+            raw_request: json!({
+                "model": "gpt-5.4",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "hello" }
+                        ]
+                    }
+                ],
+                "metadata": {
+                    "foo": "bar",
+                    "extraFields": { "should_drop": true }
+                }
+            }),
+            request_id: Some("req_metadata_extra_fields".to_string()),
+            tool_call_id_style: None,
+        };
+
+        let captured = capture_req_inbound_responses_context_snapshot(input)
+            .expect("metadata extraFields capture");
+        let metadata = captured["metadata"].as_object().expect("metadata object");
+        assert_eq!(metadata.get("foo"), Some(&json!("bar")));
+        assert!(!metadata.contains_key("extraFields"));
     }
 
     #[test]

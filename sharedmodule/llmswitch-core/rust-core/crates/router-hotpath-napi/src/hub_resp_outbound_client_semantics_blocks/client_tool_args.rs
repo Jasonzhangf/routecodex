@@ -473,7 +473,7 @@ fn is_freeform_tool(spec: Option<&ClientToolDefinition>) -> bool {
     matches!(
         spec.and_then(|entry| entry.format.as_deref())
             .map(|value| value.to_ascii_lowercase()),
-        Some(value) if matches!(value.as_str(), "grammar" | "text")
+        Some(value) if matches!(value.as_str(), "freeform" | "grammar" | "text")
     )
 }
 

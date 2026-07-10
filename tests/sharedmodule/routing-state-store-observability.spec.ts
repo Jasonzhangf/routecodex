@@ -1,4 +1,4 @@
-import type { ProviderErrorEvent } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
+import type { ProviderErrorEvent } from '../../src/types/llmswitch-local-types.js';
 import {
   getRoutingInstructionState,
   setRoutingInstructionStateErrorReporter,

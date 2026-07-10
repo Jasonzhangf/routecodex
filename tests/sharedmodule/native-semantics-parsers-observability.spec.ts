@@ -1,7 +1,10 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import fs from 'node:fs';
 
-import { parsePendingToolSyncPayload } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.js';
+afterEach(() => {
+  jest.restoreAllMocks();
+  jest.resetModules();
+});
 
 async function importWithNativeParseFailureMock<TModule>(
   modulePath: string,
@@ -32,16 +35,42 @@ async function importWithNativeParseFailureMock<TModule>(
   return import(modulePath) as Promise<TModule>;
 }
 
+async function importRouterHotpathWithNativeParseFailureMock<TModule>(
+  bindingExport: string,
+  invalidRaw = '{not-json'
+): Promise<TModule> {
+  jest.resetModules();
+
+  jest.unstable_mockModule(
+    '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js',
+    () => ({
+      isNativeDisabledByEnv: () => false,
+      makeNativeRequiredError: (capability: string, reason?: string) =>
+        new Error(`[virtual-router-native-hotpath] native ${capability} is required but unavailable${reason ? `: ${reason}` : ''}`),
+      loadNativeRouterHotpathBinding: () => ({
+        [bindingExport]: () => invalidRaw
+      }),
+      parseVirtualRouterNativeError: () => null
+    })
+  );
+
+  return import('../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.js') as Promise<TModule>;
+}
+
 function warnCallsContain(warnSpy: jest.SpiedFunction<typeof console.warn>, expected: string): boolean {
   return warnSpy.mock.calls.some((call) => String(call[0] ?? '').includes(expected));
 }
 
 describe('native semantics parser observability', () => {
-  it('logs router hotpath analysis parser JSON failures and still returns null', () => {
+  it('logs router hotpath parser JSON failures before fail-fasting native capability', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(parsePendingToolSyncPayload('{not-json')).toBeNull();
-    expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('parsePendingToolSyncPayload parse failed (non-blocking)');
+    const mod = await importRouterHotpathWithNativeParseFailureMock<{
+      analyzePendingToolSync: (messages: unknown[], afterToolCallIds: string[]) => unknown;
+    }>('analyzePendingToolSyncJson');
+
+    expect(() => mod.analyzePendingToolSync([], [])).toThrow(/native analyzePendingToolSyncJson is required but unavailable: invalid payload/);
+    expect(warnCallsContain(warnSpy, 'parsePendingToolSyncPayload parse failed (non-blocking)')).toBe(true);
 
     warnSpy.mockRestore();
   });

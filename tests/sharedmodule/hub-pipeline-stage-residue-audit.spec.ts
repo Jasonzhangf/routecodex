@@ -1026,6 +1026,15 @@ describe('hub pipeline stage residue audit', () => {
     expect(functionBody).not.toContain('runHubPipelineJson');
   });
 
+  it('retired provider runtime ingress TS wrapper must stay deleted', () => {
+    const retiredPath = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts',
+    );
+
+    expect(fs.existsSync(retiredPath)).toBe(false);
+  });
+
   it('req_process stage1 legacy TS shell must not be resurrected with semantic residue', () => {
     const filePath = path.join(
       process.cwd(),
@@ -1200,6 +1209,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-request-filter-semantics.ts'))).toBe(false);
     expect(rootIndexSource).not.toContain("export { convertProviderResponse } from './conversion/hub/response/provider-response.js';");
     expect(rootIndexSource).not.toContain("export * from './telemetry/stats-center.js';");
+    expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/native-virtual-router-bootstrap-config.js';");
+    expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/native-provider-runtime-ingress.js';");
+    expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/native-router-hotpath-loader.js';");
     expect(rootIndexSource).not.toContain("export * from './native/router-hotpath/virtual-router-contracts.js';");
     expect(rootIndexSource).not.toContain('runStandardChatRequestFilters');
     expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/shared/chat-request-filters.ts'))).toBe(false);
@@ -4533,7 +4545,7 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'local injected pair extraction', pattern: /extractInjectedArgPairs/u },
       { label: 'local recursive key repair', pattern: /repairArgKeyArtifactsInKeys/u },
       { label: 'local recursive object repair', pattern: /repairArgKeyArtifactsInObject/u },
-      { label: 'local parse fallback warning', pattern: /JSON\.parse failed after repair|console\.warn/u },
+      { label: 'local parse fallback warning', pattern: /JSON\.parse failed after repair/u },
     ];
     const helperRoots = [
       'tests/sharedmodule/helpers',

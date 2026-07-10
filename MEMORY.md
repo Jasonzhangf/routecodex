@@ -2055,3 +2055,26 @@
 - Tests that still need the old direct native helper surface must use `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`. Production scripts/runtime must use direct Rust/NAPI or host native exports such as `src/modules/llmswitch/bridge/native-exports.ts::buildChatResponseFromResponsesNative` and `buildResponsesRequestFromChatNative`.
 - Required-export checks for req inbound context capture should assert the packaged `.node` export or existing `native-hub-pipeline-req-inbound-semantics` aggregate, not `dist/native/router-hotpath/native-shared-conversion-semantics.js`.
 - Current shell audit after this deletion is `prodTsShellCount=12`, `shellsWithProdImporters=10`, `coreModuleSubpathRefs=3`; rustification baseline is `prodTsFileCount=12`, `prodTsLocTotal=3833`, `nonNativeFileCount=0`.
+
+# 2026-07-10: Native router hotpath analysis wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-analysis.ts` is physically deleted from production source. Do not restore it as a parser wrapper or compatibility shim.
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts` owns the remaining native-call/JSON parse/fail-fast glue for pending tool sync, continue execution injection, chat media analysis/strip, and web-search intent; deeper semantics remain Rust/NAPI truth.
+- Tests that need media strip direct-native behavior should keep it in `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`; production source must not import or recreate the retired analysis wrapper.
+- Current shell audit after this deletion is `prodTsShellCount=11`, `shellsWithProdImporters=9`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=11`, `nonNativeFileCount=0`.
+- `native-hub-pipeline-req-inbound-semantics.ts` must not be deleted solely because strict shell audit reports `prodImportRefs=0`; it still acts as an owner/test surface until function-map/mainline/test references are explicitly moved.
+
+# 2026-07-10: Root llmswitch-core public entry is metadata/type-only
+
+- `sharedmodule/llmswitch-core/src/index.ts` must not runtime re-export `native-virtual-router-bootstrap-config.ts`, `native-provider-runtime-ingress.ts`, or `native-router-hotpath-loader.ts`; use explicit native subpaths for runtime facade imports.
+- The root entry may expose only `VERSION` and type-only VR contracts until generated declarations replace the remaining handwritten type surface.
+- Audit scripts classify this root entry as non-semantic only when it contains type-only exports plus `VERSION`; do not add fake native keywords to satisfy rustification gates.
+- Current strict shell reference audit after this public-barrel shrink is `prodTsShellCount=11`, `shellsWithProdImporters=7`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`.
+- `native-provider-runtime-ingress.ts` and `native-virtual-router-bootstrap-config.ts` having `prodImportRefs=0` is not deletion proof by itself; they still require exact test/owner migration before physical deletion.
+
+# 2026-07-10: Provider runtime ingress TS wrapper is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts` is physically deleted. Do not restore it as a production wrapper, type source, root export, or no-fallback allowlisted shell.
+- Provider error/success ingress truth is Rust-owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs::report_provider_error_to_router_policy_json_bridge` and `virtual_router_engine/provider_runtime_ingress.rs::report_provider_error` / `report_provider_success`.
+- Tests that need direct ingress calls should use host/native binding (`src/modules/llmswitch/bridge/native-exports.js::getRouterHotpathJsonBindingSync`) or local host boundary types, not the retired llmswitch-core TS wrapper.
+- Current strict shell audit after deletion is `prodTsShellCount=10`, `shellsWithProdImporters=7`, `coreModuleSubpathRefs=3`; focused provider ingress/error-pipeline/residue tests pass.

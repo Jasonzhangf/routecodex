@@ -1,8 +1,29 @@
-import {
-  reportProviderErrorToRouterPolicy,
-  reportProviderSuccessToRouterPolicy,
-  resetProviderRuntimeIngressForTests,
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.js';
+import { getRouterHotpathJsonBindingSync } from '../../src/modules/llmswitch/bridge/native-exports.js';
+
+function callProviderRuntimeIngress<TEvent>(name: string, event?: TEvent): TEvent {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`missing native provider runtime ingress export: ${name}`);
+  }
+  const raw = event === undefined ? (fn as () => unknown)() : (fn as (inputJson: string) => unknown)(JSON.stringify(event));
+  if (typeof raw !== 'string' || !raw) {
+    throw new Error(`empty native provider runtime ingress result: ${name}`);
+  }
+  return JSON.parse(raw) as TEvent;
+}
+
+function reportProviderErrorToRouterPolicy<TEvent>(event: TEvent): TEvent {
+  return callProviderRuntimeIngress('reportProviderErrorToRouterPolicyJson', event);
+}
+
+function reportProviderSuccessToRouterPolicy<TEvent>(event: TEvent): TEvent {
+  return callProviderRuntimeIngress('reportProviderSuccessToRouterPolicyJson', event);
+}
+
+function resetProviderRuntimeIngressForTests(): void {
+  callProviderRuntimeIngress('resetProviderRuntimeIngressForTestsJson');
+}
 
 describe('provider runtime ingress', () => {
   beforeEach(() => {
