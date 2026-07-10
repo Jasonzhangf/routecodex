@@ -22,7 +22,7 @@ let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
 
 async function loadSnapshotHookWriter(): Promise<SnapshotHookWriter | null> {
   if (!snapshotHookWriterPromise) {
-    snapshotHookWriterPromise = import('../../modules/llmswitch/bridge.js')
+    snapshotHookWriterPromise = import('../../modules/llmswitch/bridge/runtime-integrations.js')
       .then((module) => (typeof module.writeSnapshotViaHooks === 'function' ? (module.writeSnapshotViaHooks as SnapshotHookWriter) : null))
       .catch(() => null);
   }

@@ -13,7 +13,7 @@ import { readRuntimeControlProjection, readRuntimeRequestTruthIdentifiers } from
 let snapshotHookWriterPromise = null;
 async function loadSnapshotHookWriter() {
     if (!snapshotHookWriterPromise) {
-        snapshotHookWriterPromise = import('../../modules/llmswitch/bridge.js')
+        snapshotHookWriterPromise = import('../../modules/llmswitch/bridge/runtime-integrations.js')
             .then((module) => (typeof module.writeSnapshotViaHooks === 'function' ? module.writeSnapshotViaHooks : null))
             .catch(() => null);
     }

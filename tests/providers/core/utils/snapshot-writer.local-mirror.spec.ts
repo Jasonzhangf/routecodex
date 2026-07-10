@@ -11,7 +11,7 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 
 const writeSnapshotViaHooksMock = jest.fn(async () => undefined);
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   writeSnapshotViaHooks: writeSnapshotViaHooksMock
 }));
 

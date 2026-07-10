@@ -38,8 +38,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
         throw new Error('[llmswitch-bridge] writeSnapshotViaHooks not available');
       })
     });
-    jest.unstable_mockModule('../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-    jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+    jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.js', mockBridgeModule);
 
     const runtimeFlagsModule = await import('../../src/runtime/runtime-flags.ts');
     runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
@@ -58,14 +57,15 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/messages',
+      entryPort: 5555,
       url: 'https://api.glm.com/v1/chat/completions',
       providerKey,
       data: { test: true }
     });
     await __flushProviderSnapshotQueueForTests();
 
-    const messagesDir = path.join(tempDir, 'anthropic-messages', providerKey, groupRequestId);
-    const chatDir = path.join(tempDir, 'openai-chat', providerKey, groupRequestId);
+    const messagesDir = path.join(tempDir, 'anthropic-messages', 'ports', '5555', groupRequestId);
+    const chatDir = path.join(tempDir, 'openai-chat', 'ports', '5555', groupRequestId);
 
     expect(fs.existsSync(messagesDir)).toBe(true);
     expect(fs.existsSync(chatDir)).toBe(false);
@@ -83,6 +83,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
       requestId: groupRequestId,
       clientRequestId: groupRequestId,
       entryEndpoint: '/v1/messages',
+      entryPort: 5555,
       providerKey,
       data: {
         endpoint: 'https://api.glm.com/v1/chat/completions',
@@ -95,8 +96,8 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     });
     await __flushProviderSnapshotQueueForTests();
 
-    const messagesDir = path.join(tempDir, 'anthropic-messages', providerKey, groupRequestId);
-    const chatDir = path.join(tempDir, 'openai-chat', providerKey, groupRequestId);
+    const messagesDir = path.join(tempDir, 'anthropic-messages', 'ports', '5555', groupRequestId);
+    const chatDir = path.join(tempDir, 'openai-chat', 'ports', '5555', groupRequestId);
 
     expect(fs.existsSync(messagesDir)).toBe(true);
     expect(fs.existsSync(chatDir)).toBe(false);

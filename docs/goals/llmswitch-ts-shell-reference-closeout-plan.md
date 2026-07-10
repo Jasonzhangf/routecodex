@@ -539,3 +539,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The regression keeps only current handler-facing `responses-request-bridge.js`, `responses-response-bridge.js`, `responses-sse-bridge.js`, `runtime-integrations.js`, and `native-exports.js` facade mocks needed for the SSE error path.
 - The fixture mock covers the full `runtime-integrations.js` re-export surface required by `bridge.ts` link-time validation and uses only the current `native-exports.js` facade mock without restoring `importCoreDist`, `requireCoreDist`, `resolveImplForSubpath`, or `resolveBaseDir`.
 - Exact file scan for legacy loader helpers, broad root bridge mock references, and root `bridge.ts` mock references returns zero matches.
+
+### 2026-07-11 snapshot entry bucket root bridge import removed
+
+- `src/debug/snapshot/writer.ts` now loads `writeSnapshotViaHooks` from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root `src/modules/llmswitch/bridge.js` barrel.
+- `tests/snapshot/entry-endpoint-bucket.spec.ts` now mocks the same narrow runtime integration facade and no longer mocks broad `bridge.js` / `bridge.ts`.
+- The change preserves snapshot hook failure behavior while removing one production root-bridge dynamic import and one test root-bridge mock consumer.
