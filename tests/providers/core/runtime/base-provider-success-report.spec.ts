@@ -14,10 +14,6 @@ jest.unstable_mockModule('../../../../src/providers/core/utils/provider-error-re
   buildRuntimeFromProviderContext: mockBuildRuntimeFromProviderContext
 }));
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => undefined })
-}));
-
 const { BaseProvider } = await import('../../../../src/providers/core/runtime/base-provider.js');
 
 class TestProvider extends BaseProvider {

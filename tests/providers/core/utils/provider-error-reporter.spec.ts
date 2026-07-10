@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 const mockReportProviderErrorToRouterPolicy = jest.fn(async () => undefined);
 const mockReportProviderSuccessToRouterPolicy = jest.fn(async () => undefined);
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   reportProviderErrorToRouterPolicy: mockReportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy: mockReportProviderSuccessToRouterPolicy
 }));

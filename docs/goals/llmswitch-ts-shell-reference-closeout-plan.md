@@ -558,3 +558,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - `tests/server/handlers/responses-handler.attachment-history-placeholder.blackbox.spec.ts` now imports Responses conversation store helpers from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
 - The test captures the current handler handoff payload from `input.hubBody ?? input.body`, matching the request bridge contract where prepared Hub payload is separate from raw HTTP body.
 - Exact file scan for root bridge and legacy loader helper references in the touched test returns zero matches; focused Jest passes 1/1.
+
+### 2026-07-11 provider policy ingress root bridge import removed
+
+- `src/providers/core/utils/provider-error-reporter.ts` now imports provider policy ingress functions from `src/modules/llmswitch/bridge/runtime-integrations.js` instead of the root bridge barrel.
+- Provider policy event types now come from the local llmswitch type contract, so this production error-chain caller no longer depends on the root bridge barrel for either runtime functions or types.
+- `tests/providers/core/utils/provider-error-reporter.spec.ts` mocks the same narrow runtime integration facade, and `tests/providers/core/runtime/base-provider-success-report.spec.ts` no longer carries an obsolete root bridge mock.
+- Exact file scan for root bridge and legacy loader helper references in the touched files returns zero matches; focused Jest passes 2/2 suites and 5/5 tests.

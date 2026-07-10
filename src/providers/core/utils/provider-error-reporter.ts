@@ -4,8 +4,8 @@ import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipe
 import {
   reportProviderErrorToRouterPolicy,
   reportProviderSuccessToRouterPolicy
-} from '../../../modules/llmswitch/bridge.js';
-import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../modules/llmswitch/bridge.js';
+} from '../../../modules/llmswitch/bridge/runtime-integrations.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../types/llmswitch-local-types.js';
 
 export const ERROR_PIPELINE_CONTRACT_FEATURE_ID = 'feature_id: error.pipeline_contract';
 
