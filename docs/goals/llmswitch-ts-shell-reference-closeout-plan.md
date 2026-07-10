@@ -673,3 +673,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for root bridge and legacy loader helper references returns zero matches.
 - Verification passed: focused Jest 3/3, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
 - Boundary: `responses-handler.routing-empty-pool.spec.ts` and `responses-handler.provider-outbound-reasoning.blackbox.spec.ts` remain future candidates because focused runs expose pre-existing fixture contract gaps around `NativeHubPipelineTestWrapper` pathing and current Rust `metadataCenterSnapshot` requirements; they were restored and are not included in this passing slice.
+
+### 2026-07-11 provider composite guard runtime import narrowed
+
+- `tests/provider/provider-composite-guards.test.ts` now mocks provider policy ingress through `src/modules/llmswitch/bridge/runtime-integrations.ts` instead of the root bridge barrel.
+- The test now uses the current explicit `recoverable` / `affectsHealth` error reporter contract and keeps its original assertion that provider errors go to router policy instead of `errorHandlingCenter` fallback.
+- Exact file scan for root bridge and legacy loader helper references returns zero matches.
+- Verification passed: focused Jest 2/2, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
+- Boundary: `responses-provider-direct-stream-incomplete.spec.ts` was checked and restored; after moving it to narrow facades it exposes a direct SSE passthrough behavioral assertion mismatch, so it needs a separate contract/test slice rather than being included in this reference-only cleanup.

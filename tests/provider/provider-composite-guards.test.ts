@@ -5,14 +5,9 @@ describe('Provider error reporting', () => {
     jest.resetModules();
 
     const reportProviderErrorToRouterPolicy = jest.fn(async (event) => event);
-    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.ts', () => ({
       reportProviderErrorToRouterPolicy,
-      extractAntigravityGeminiSessionId: () => undefined,
-      cacheAntigravitySessionSignature: () => {},
-      lookupAntigravitySessionSignatureEntry: () => undefined,
-      getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
-      resetAntigravitySessionSignatureCachesForTests: () => {},
-      warmupAntigravitySessionSignatureModule: async () => {}
+      reportProviderSuccessToRouterPolicy: jest.fn(async (event) => event)
     }));
     await jest.unstable_mockModule('../../src/error-handling/route-error-hub.ts', () => ({
       getRouteErrorHub: () => null,
@@ -36,7 +31,9 @@ describe('Provider error reporting', () => {
         providerKey: 'openai.test',
         routeName: 'test-route'
       },
-      dependencies: deps
+      dependencies: deps,
+      recoverable: true,
+      affectsHealth: true
     });
 
     expect(reportProviderErrorToRouterPolicy).toHaveBeenCalled();
@@ -47,14 +44,9 @@ describe('Provider error reporting', () => {
     jest.resetModules();
 
     const reportProviderErrorToRouterPolicy = jest.fn(async (event) => event);
-    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.ts', () => ({
       reportProviderErrorToRouterPolicy,
-      extractAntigravityGeminiSessionId: () => undefined,
-      cacheAntigravitySessionSignature: () => {},
-      lookupAntigravitySessionSignatureEntry: () => undefined,
-      getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
-      resetAntigravitySessionSignatureCachesForTests: () => {},
-      warmupAntigravitySessionSignatureModule: async () => {}
+      reportProviderSuccessToRouterPolicy: jest.fn(async (event) => event)
     }));
 
     const { emitProviderError } = await import('../../src/providers/core/utils/provider-error-reporter.ts');
