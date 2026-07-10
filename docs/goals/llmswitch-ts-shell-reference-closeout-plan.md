@@ -804,3 +804,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and test-local TS copies of finish-reason, direct-chat SSE reprojection, and Responses tool-argument normalization logic.
 - Exact file scan for root bridge paths, legacy loader helpers, and retired mock symbols in the touched spec returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 19/19 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
+
+### 2026-07-11 handler SSE finish-reason mock surface removed
+
+- `tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel and no longer declares legacy `importCoreDist` / `requireCoreDist` projection helpers.
+- Removed the spec-local `createMockCoreDistProjectionModule` TS projection copy and the broad root bridge mock blocks; the spec now exercises the real handler path with only snapshot-writer IO isolation where needed.
+- Two assertions were narrowed back to the transport layer they actually cover: client-close destroys upstream during Responses SSE transport, and required_action client close must not become a transport error. Continuation persistence remains owned by Chat Process / bridge/Rust gates, not this handler SSE spec.
+- Exact file scan for root bridge paths, legacy loader helpers, and retired local helper symbols in the touched spec returns zero matches.
+- Verification passed: focused Jest 1/1 suite, 24/24 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
