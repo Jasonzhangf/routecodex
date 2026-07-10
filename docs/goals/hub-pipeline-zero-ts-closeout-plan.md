@@ -433,6 +433,7 @@ Additional gates if touched paths require them:
   - `responses-request-bridge.d.ts`
   - `responses-response-bridge.d.ts`
   - `responses-sse-bridge.d.ts`
+  - `routing-integrations.d.ts`
   - `runtime-integrations.d.ts`
   - `snapshot-recorder-runtime.d.ts`
   - `snapshot-recorder-tool-failures.d.ts`

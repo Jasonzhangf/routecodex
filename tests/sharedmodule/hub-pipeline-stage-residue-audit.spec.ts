@@ -4216,7 +4216,6 @@ describe('hub pipeline stage residue audit', () => {
     const bridgeFiles = [
       'src/modules/llmswitch/bridge/routing-integrations.ts',
       'src/modules/llmswitch/bridge/routing-integrations.js',
-      'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge.ts',
       'src/modules/llmswitch/bridge.js',
       'src/modules/llmswitch/bridge/index.ts',
@@ -4237,7 +4236,6 @@ describe('hub pipeline stage residue audit', () => {
     const bridgeFiles = [
       'src/modules/llmswitch/bridge/routing-integrations.ts',
       'src/modules/llmswitch/bridge/routing-integrations.js',
-      'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge.ts',
       'src/modules/llmswitch/bridge.js',
     ];
@@ -4269,6 +4267,7 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-response-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
+      'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge/runtime-integrations.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-runtime.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.d.ts',
