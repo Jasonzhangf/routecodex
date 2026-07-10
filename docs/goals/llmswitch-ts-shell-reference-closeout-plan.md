@@ -71,7 +71,6 @@ Primary internal fan-out blockers:
 
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics-shared.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics.ts`
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-resp-semantics.ts`
@@ -322,6 +321,13 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Strict reference audit improved to `shellsWithHostTextRefs=2` and `coreModuleSubpathRefs=8`, with `host=[]`; remaining subpath refs are docs/scripts/other categories.
 - Verification passed: focused Jest 192/192, `verify:llmswitch-ts-shell-reference-audit`, zero-ts closeout, minimal TS surface, rustification audit, sharedmodule tsc, root tsc, JS syntax check, and `git diff --check`.
 - Remaining work: host bridge shell refs are closed; continue with `module-loader.ts`, package exports, internal fan-out, and deletion candidates.
+
+### 2026-07-10 native shared conversion core shell retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts` is physically deleted after exact source refs were migrated to the existing native router hotpath loader.
+- The moved surface is only binding/stringify/parse/error glue around required Rust/NAPI exports; no Hub/VR/provider semantics were added to TS.
+- Build-core required dist output now keys on `native-router-hotpath-loader.js` instead of the retired shared conversion core shell.
+- Verification passed: sharedmodule `tsc`, focused VR/stopmessage/residue/build-core Jest, strict shell reference audit, minimal TS surface, and rustification audit.
 
 ### 2026-07-09 routing-integrations host bridge shell refs direct-native wired
 

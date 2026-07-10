@@ -1929,7 +1929,7 @@
 # 2026-07-09: Deleted native split helpers must not keep live imports
 
 - `native-hub-pipeline-resp-semantics-shared.ts` and `native-hub-bridge-action-semantics-shared.ts` are retired split helpers. Do not restore them as facades.
-- If active source still imports a retired `native-*-shared.js`, move only binding/stringify/parse/error glue to an existing aggregate/core owner. Current owner for these helper surfaces is `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts`.
+- If active source still imports a retired `native-*-shared.js`, move only binding/stringify/parse/error glue to an existing native loader/aggregate owner. Current owner for these helper surfaces is `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.ts`.
 - Verification lock: active source grep for the retired helper paths must return no hits, `npm run verify:llmswitch-core-tsc` must pass, and `npm run build:base` must pass.
 
 # 2026-07-09: MetadataCenter runtime-control writer TS facade is retired
@@ -2084,3 +2084,10 @@
 - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-inbound-semantics.ts` is physically deleted from production source. Do not restore it as a production aggregate wrapper, required dist output, or Jest mock subpath.
 - Tests that need req_inbound direct native evidence must use `tests/sharedmodule/helpers/req-inbound-direct-native.ts`; runtime context capture remains host bridge `src/modules/llmswitch/bridge/native-exports.ts` calling Rust/NAPI truth in `hub_req_inbound_context_capture.rs`.
 - Function map and mainline call map no longer point runtime edges at the retired aggregate wrapper. Active import scan for the retired aggregate path should have no source/test/script imports outside residue absent-file locks.
+
+# 2026-07-10: Native shared conversion core shell is retired
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts` is physically deleted. Do not restore it as a production helper shell or required dist output.
+- Its remaining binding/stringify/parse/error glue moved into the existing `native-router-hotpath-loader.ts` native loader surface; this is loader plumbing only, not a new TS semantics owner.
+- Tests/scripts that need direct NAPI helper access should import those loader helper exports, while runtime semantics remain Rust/NAPI truth.
+- Current strict shell audit after deletion is `prodTsShellCount=7`, `shellsWithProdImporters=6`, `coreModuleSubpathRefs=3`; rustification audit is `prodTsFileCount=7`, `nonNativeFileCount=0`.

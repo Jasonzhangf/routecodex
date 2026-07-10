@@ -66,7 +66,7 @@
 | native-chat-process-post-governed-normalization-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-process-web-search-intent-semantics.ts | 54 | 0 | 已删：2026-06-07 Phase 8F-6 |
 | native-chat-request-filter-semantics.ts | 61 | 1 | 2 |
-| native-shared-conversion-semantics-core.ts | 60 | 7 | 2 |
+| native-shared-conversion-semantics-core.ts | 已删：2026-07-10 binding/stringify/parse/error glue moved into existing `native-router-hotpath-loader.ts`; no standalone shell remains | 0 | 0 |
 | native-shared-conversion-semantics-misc.ts | 90 | 3 | 4 |
 | native-shared-conversion-semantics-shell-utils.ts | 183 | 6 | 7 |
 | native-shared-conversion-semantics-tool-definitions.ts | 199 | 6 | 7 |

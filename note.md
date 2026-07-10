@@ -28558,3 +28558,9 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Added test-only direct native helper `tests/sharedmodule/helpers/virtual-router-bootstrap-direct-native.ts` and moved 20 direct test imports off the production wrapper.
 - Verification PASS so far: exact old wrapper scan has no active import; strict shell reference audit `prodTsShellCount=9`; `verify:llmswitch-core-tsc`.
 - Not closed / not committed: broad migrated VR/bootstrap Jest still fails on metadataCenterSnapshot/sessionId requirements, missing `config/providers/ali-coding-plan.json`, and old bootstrap projection expectations. Next step is to migrate those tests to host bridge contract or split verified focused gates without restoring the production wrapper.
+
+# 2026-07-10: native shared conversion core shell retired
+- Deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.ts` after exact source imports were migrated to `native-router-hotpath-loader.ts`.
+- Moved only native binding/stringify/parse/error glue into loader; no Hub/VR/provider semantics added to TS.
+- Updated tests/scripts/build-core output checks to use `native-router-hotpath-loader.js`; strict audit now reports `prodTsShellCount=7`, `shellsWithProdImporters=6`, `coreModuleSubpathRefs=3`.
+- Verification passed: focused Jest 222 + 23 tests, sharedmodule tsc, strict shell audit, minimal TS surface, rustification audit, function-map gate, mainline-call-map gate, deleted-path, thin-wrapper-only, build:base, git diff --check.

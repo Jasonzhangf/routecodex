@@ -8,7 +8,7 @@ import {
   parseRecord,
   readNativeFunction,
   safeStringify
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 function parseChatProcessMediaStripPayload(raw: string): { changed: boolean; messages: unknown[] } | null {
   const parsed = parseJson(raw);

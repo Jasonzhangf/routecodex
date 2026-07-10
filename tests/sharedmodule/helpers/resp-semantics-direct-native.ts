@@ -5,7 +5,7 @@ import {
   isNativeDisabledByEnv,
   readNativeFunction,
   safeStringify
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 export interface NativeRespInboundReasoningNormalizeInput {
   payload: Record<string, unknown>;

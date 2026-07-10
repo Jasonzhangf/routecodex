@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { readNativeFunction } from '../../dist/native/router-hotpath/native-shared-conversion-semantics-core.js';
+import { readNativeFunction } from '../../dist/native/router-hotpath/native-router-hotpath-loader.js';
 
 const nativeModulePath = process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH ||
   new URL('../../dist/native/router_hotpath_napi.node', import.meta.url).pathname;

@@ -5,14 +5,14 @@ import type {
   TargetMetadata
 } from '../native/router-hotpath/native-virtual-router-runtime.js';
 import { formatVirtualRouterHit, createVirtualRouterHitRecord, resolveSessionLogColorKey, type VirtualRouterHitLogConfig } from './virtual-router-hit-log.js';
-import { failNativeRequired } from '../native/router-hotpath/native-router-hotpath-loader.js';
 import {
+  failNativeRequired,
   parseJson,
   parseRecord,
   resolveRccUserDirWithNative as resolveRccUserDir,
   readNativeFunction,
   safeStringify
-} from '../native/router-hotpath/native-shared-conversion-semantics-core.js';
+} from '../native/router-hotpath/native-router-hotpath-loader.js';
 
 type NativeRouterRequest = Record<string, unknown>;
 

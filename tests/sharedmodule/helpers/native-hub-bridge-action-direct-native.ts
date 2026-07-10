@@ -10,7 +10,7 @@ import {
   readNativeJsonResult,
   safeStringify,
   shouldRethrowNativeRawError
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 
 // Inlined from retired native-hub-bridge-action-semantics-tools-request.ts

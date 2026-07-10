@@ -6,7 +6,7 @@ import {
   readNativeFunction,
   resolveRccUserDirWithNative as resolveRccUserDir,
   safeStringify,
-} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-core.js';
+} from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath-loader.js';
 
 export const DEFAULT_STOP_MESSAGE_MAX_REPEATS = 10;
 const NO_SESSION_DIR_OVERRIDE = '__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__';
