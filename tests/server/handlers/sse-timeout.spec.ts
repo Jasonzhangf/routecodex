@@ -19,17 +19,6 @@ describe('HTTP SSE stream timeout', () => {
   });
 
   it('ends stalled SSE streams with an error event', async () => {
-    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-      deriveFinishReasonNative: () => undefined,
-      projectSseErrorEventPayloadNative: (args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
-        type: 'error',
-        request_id: args.requestId,
-        status: args.status ?? 500,
-        message: args.message ?? 'sse error',
-        code: args.code ?? 'ERR_SSE_ERROR',
-      }),
-      writeSnapshotViaHooks: async () => undefined,
-    }));
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
