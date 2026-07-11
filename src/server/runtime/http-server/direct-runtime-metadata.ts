@@ -1,3 +1,5 @@
+import { propagatePipelineDryRunControl } from '../../../debug/pipeline-dry-run.js';
+
 const DIRECT_PROVIDER_RUNTIME_METADATA_KEYS = [
   'clientRequestId',
   'providerStreamNoContentTimeoutMs',
@@ -256,5 +258,6 @@ export function buildDirectProviderRuntimeMetadata(input: {
   if (input.providerProtocol === 'openai-responses') {
     output.__responsesDirectPassthrough = true;
   }
+  propagatePipelineDryRunControl(source, output);
   return output;
 }

@@ -6,12 +6,15 @@
  * this pipeline bypasses the full executor pipeline and forwards the request directly
  * to the provider.
  *
- * Hooks applied:
- * - Model override: if VR selected a target modelId different from the inbound
- *   model, override payload.model → targetModelId. Original client model is
- *   written to metadata center for observation.
- * - Thinking effort override: if route params specify a thinking level, override
- *   reasoning_effort and reasoning.effort.
+ * Hooks applied (request / response symmetric):
+ * - Request model override: if VR selected a target modelId different from the
+ *   inbound model, override payload.model → targetModelId. Original client model
+ *   is written to metadata center for observation.
+ * - Request thinking effort override: if route params specify a thinking level,
+ *   override reasoning_effort and reasoning.effort.
+ * - Response model restore: rewrite provider wire model back to original client
+ *   model on JSON body and SSE frames so the client sees a transparent proxy.
+ * - Response SSE headers: ensure client-facing stream headers are present.
  *
  * Contract: payload passthrough is preserved for all other fields, but error
  * policy passthrough is explicitly NOT preserved. All router-direct failures
@@ -20,6 +23,7 @@
  * projection.
  */
 
+import { PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
@@ -31,6 +35,7 @@ import {
   attachProviderRuntimeMetadata,
   extractProviderRuntimeMetadata
 } from '../../../providers/core/runtime/provider-runtime-metadata.js';
+import { isProviderRequestDryRunResponse } from '../../../debug/pipeline-dry-run.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -262,6 +267,22 @@ export async function executeRouterDirectPipeline(
     throw responseError;
   }
   const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
+  if (isProviderRequestDryRunResponse(response)) {
+    input.onSnapshotAfter?.(response, auditContext);
+    return {
+      used: true,
+      response,
+      providerHandle,
+      auditContext,
+      externalLatencyStartedAtMs: providerStartedAtMs,
+      externalLatencyMs,
+    };
+  }
+
+  // Symmetric response hook: restore client-visible model / stream headers.
+  response = applyDirectRouteResponseHooks(response, {
+    originalClientModel: auditContext.originalClientModel,
+  });
 
   input.onSnapshotAfter?.(response, auditContext);
 
@@ -329,6 +350,149 @@ function applyDirectRouteHooks(
   }
 
   return { payload: result, originalClientModel };
+}
+
+// ---------------------------------------------------------------------------
+// Hook: Response model restore + client-facing SSE headers (symmetric)
+// ---------------------------------------------------------------------------
+
+function rewriteModelFieldsDeep(value: unknown, clientModel: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteModelFieldsDeep(item, clientModel));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'model' && typeof nested === 'string' && nested.trim()) {
+      out[key] = clientModel;
+      continue;
+    }
+    out[key] = rewriteModelFieldsDeep(nested, clientModel);
+  }
+  return out;
+}
+
+function rewriteSseFrameClientModel(frame: string, clientModel: string): string {
+  const lines = frame.split(/\r?\n/);
+  return lines
+    .map((line) => {
+      if (!line.startsWith('data:')) {
+        return line;
+      }
+      const prefixLength = line.startsWith('data: ') ? 6 : 5;
+      const raw = line.slice(prefixLength);
+      if (!raw || raw === '[DONE]') {
+        return line;
+      }
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        const rewritten = rewriteModelFieldsDeep(parsed, clientModel);
+        return `data: ${JSON.stringify(rewritten)}`;
+      } catch {
+        return line;
+      }
+    })
+    .join('\n');
+}
+
+function createDirectClientModelRewriteStream(clientModel: string): Transform {
+  let buffer = '';
+  return new Transform({
+    transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback) {
+      buffer += typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
+      const parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        if (!part) {
+          continue;
+        }
+        this.push(`${rewriteSseFrameClientModel(part, clientModel)}\n\n`);
+      }
+      callback();
+    },
+    flush(callback: TransformCallback) {
+      if (buffer) {
+        this.push(rewriteSseFrameClientModel(buffer, clientModel));
+        buffer = '';
+      }
+      callback();
+    }
+  });
+}
+
+function wrapDirectSseStreamWithClientModel(stream: unknown, clientModel: string): Readable {
+  const transform = createDirectClientModelRewriteStream(clientModel);
+  if (stream instanceof Readable || (stream && typeof (stream as Readable).pipe === 'function')) {
+    const source = stream as Readable;
+    source.on('error', (error) => transform.destroy(error));
+    return source.pipe(transform);
+  }
+  // Fallback: materialize unknown stream-like values as empty passthrough.
+  const empty = new PassThrough();
+  empty.end();
+  return empty.pipe(transform);
+}
+
+function ensureDirectClientSseHeaders(headers: unknown): Record<string, string> {
+  const next: Record<string, string> = {};
+  if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+      if (typeof value === 'string' && value.trim()) {
+        next[key] = value;
+      }
+    }
+  }
+  if (!Object.keys(next).some((key) => key.toLowerCase() === 'content-type')) {
+    next['Content-Type'] = 'text/event-stream; charset=utf-8';
+  }
+  if (!Object.keys(next).some((key) => key.toLowerCase() === 'cache-control')) {
+    next['Cache-Control'] = 'no-cache, no-transform';
+  }
+  if (!Object.keys(next).some((key) => key.toLowerCase() === 'connection')) {
+    next.Connection = 'keep-alive';
+  }
+  return next;
+}
+
+/**
+ * Symmetric response hook for router-direct:
+ * - restore client model over provider wire model (JSON + SSE)
+ * - ensure client-facing SSE headers are present
+ */
+export function applyDirectRouteResponseHooks(
+  response: unknown,
+  options: { originalClientModel?: string }
+): unknown {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return response;
+  }
+  const clientModel =
+    typeof options.originalClientModel === 'string' && options.originalClientModel.trim()
+      ? options.originalClientModel.trim()
+      : '';
+  const record = { ...(response as Record<string, unknown>) };
+  const hasSse = record.sseStream !== undefined && record.sseStream !== null;
+
+  if (hasSse) {
+    record.headers = ensureDirectClientSseHeaders(record.headers);
+    if (clientModel) {
+      record.sseStream = wrapDirectSseStreamWithClientModel(record.sseStream, clientModel);
+    }
+    return record;
+  }
+
+  if (!clientModel) {
+    return response;
+  }
+
+  if (record.body && typeof record.body === 'object' && !Array.isArray(record.body)) {
+    record.body = rewriteModelFieldsDeep(record.body, clientModel) as Record<string, unknown>;
+    return record;
+  }
+
+  return rewriteModelFieldsDeep(record, clientModel);
 }
 
 // ---------------------------------------------------------------------------

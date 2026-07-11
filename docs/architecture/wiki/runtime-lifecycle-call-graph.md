@@ -23,6 +23,9 @@ flowchart LR
   DaemonRestartLoop["DaemonRestartLoop"]
   DaemonSupervisorLoop["DaemonSupervisorLoop"]
   RuntimeInstanceRecord["RuntimeInstanceRecord"]
+  RestartProcessSignal["RestartProcessSignal"]
+  RestartProcessHttpRequest["RestartProcessHttpRequest"]
+  ServerRestartCommand["ServerRestartCommand"]
   StopIntentRecord["StopIntentRecord"]
   ServerStopCommand["ServerStopCommand"]
   ServerPidCacheRecord["ServerPidCacheRecord"]
@@ -31,6 +34,8 @@ flowchart LR
   ServerStartCommand -->|rtl-02| ServerPidCacheRecord
   ServerStopCommand -->|rtl-03| StopIntentRecord
   ServerStartCommand -->|rtl-04| StopIntentRecord
+  ServerRestartCommand -->|rtl-05| RestartProcessHttpRequest
+  ServerRestartCommand -->|rtl-06| RestartProcessSignal
   ServerStartCommand -->|rtl-07| RuntimeInstanceRecord
   DaemonSupervisorLoop -->|rtl-08| RuntimeInstanceRecord
   DaemonRestartLoop -->|rtl-09| RuntimeInstanceRecord
@@ -44,6 +49,9 @@ flowchart LR
   class ServerPidCacheRecord anchored;
   class ServerStopCommand anchored;
   class StopIntentRecord anchored;
+  class ServerRestartCommand anchored;
+  class RestartProcessHttpRequest anchored;
+  class RestartProcessSignal anchored;
   class RuntimeInstanceRecord anchored;
   class DaemonSupervisorLoop anchored;
   class DaemonRestartLoop anchored;
@@ -56,6 +64,8 @@ flowchart LR
 | rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> writeServerPidCache` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> writeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> consumeServerStopIntent` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
+| rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `requestProcessRestartViaHttp -> registerRestartRoutes` |  | `runtime.lifecycle.restart_command`<br/>CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session |
+| rtl-06 | `ServerRestartCommand -> RestartProcessSignal` | anchored | `requestInPlaceRestart -> sendSignal` |  | `runtime.lifecycle.restart_command`<br/>CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session |
 | rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> writeRuntimeInstance` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
@@ -66,4 +76,4 @@ flowchart LR
 
 ## Other Chains
 
-[config.user_config_materialization.mainline](docs/architecture/wiki/mainline-call-graph.md) · [webui.config_editor_surface.mainline](docs/architecture/wiki/webui-config_editor_surface-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [responses.direct_passthrough.mainline](docs/architecture/wiki/responses-direct_passthrough-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [vr.hit_log_projection.mainline](docs/architecture/wiki/vr-hit_log_projection-mainline.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)
+[config.user_config_materialization.mainline](docs/architecture/wiki/mainline-call-graph.md) · [webui.config_editor_surface.mainline](docs/architecture/wiki/webui-config_editor_surface-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [responses.direct_passthrough.mainline](docs/architecture/wiki/responses-direct_passthrough-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [debug.pipeline_dry_run_loop.mainline](docs/architecture/wiki/debug-pipeline_dry_run_loop-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [vr.hit_log_projection.mainline](docs/architecture/wiki/vr-hit_log_projection-mainline.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)

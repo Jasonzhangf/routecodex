@@ -587,6 +587,7 @@ verification:
     integration:
       - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
     smoke:
+      - npm run test:pipeline-dry-run
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-binding-pending-gate
@@ -1616,6 +1617,33 @@ verification:
       - "M0 closes only the governance/doc shell. Do not claim src/debug is the sole runtime owner until the per-module migration slices M1-M9 are implemented and verified."
       - "Verification must prove the diagnostics taxonomy boundary: error diag artifacts move under debug, runtime diagnostics remain under their original runtime owner, and usage inline diag moves only with the logger surface."
 
+  - feature_id: debug.pipeline_dry_run_loop
+    change_risk: high
+    unit:
+      - src/debug/pipeline-dry-run.ts
+      - src/providers/core/runtime/http-request-executor.ts
+      - src/server/handlers/chat-handler.ts
+      - src/server/handlers/messages-handler.ts
+      - src/server/handlers/responses-handler.ts
+      - src/server/runtime/http-server/request-executor.ts
+      - scripts/replay-codex-sample.mjs
+      - scripts/dry-run-codex-response.ts
+    contract:
+      - tests/debug/pipeline-dry-run.spec.ts
+    integration:
+      - "node scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base http://127.0.0.1:<port>"
+      - "npm run dry-run:codex-response -- --sample <provider-response.json>"
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "Request dry-run verification must prove provider HTTP transport is not called, provider-request snapshot is still written, and sensitive provider headers are redacted from the diagnostic response."
+      - "Captured request dry-run must use the same API entrypoint plus local dry-run header; it must not bypass handlers or Hub/VR/provider runtime."
+      - "Captured response dry-run must reuse `convertProviderResponseIfNeeded`; no script-local response conversion truth is allowed."
+      - "After fixing request/response bugs, closure requires request dry-run plus response dry-run on the relevant live/captured sample before claiming the fix."
+
   - feature_id: debug.internal_error_numbering
     change_risk: high
     unit:
@@ -2581,6 +2609,22 @@ verification:
       - npm run build:base
     notes:
       - "Instance registry is the authoritative local declaration of managed runtime state; verification must prove instance.json write/read/update/remove under runtime-lifecycle path."
+
+  - feature_id: runtime.lifecycle.restart_command
+    change_risk: medium
+    unit:
+      - src/cli/commands/restart.ts
+    contract:
+      - tests/cli/restart-command.spec.ts
+      - tests/cli/restart-command.probe-host.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Restart command must request restart from the existing process/session via /daemon/restart-process or SIGUSR2; it must not spawn start --restart as a takeover path when live version differs."
 
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium

@@ -427,6 +427,39 @@
         <tr><td>dbg-01</td><td><code>DebugObs01SurfaceRequested -&gt; DebugObs07ReplayedOrInspected</code></td><td>anchored</td><td><code>createDebugToolkit -&gt; createDebugToolkit</code></td><td></td><td><code>debug.unified_surface</code>&lt;br/&gt;debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy</td></tr>
         </tbody>
         </table>
+        <h2>debug.pipeline_dry_run_loop.mainline</h2>
+        <p>Local-only request/response dry-run loop: real API requests stop at final provider HTTP request preparation, captured client samples replay through the same entrypoint, and captured provider responses reuse the existing response converter.</p>
+        <p>Entry contract: <code>DebugDryRun01LocalRequest</code> via <code>docs/architecture/wiki/debug-unified-surface-mainline-source.md</code></p>
+        <pre class="mermaid">flowchart LR
+          HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
+          DebugDryRun04CapturedProviderResponse[&quot;DebugDryRun04CapturedProviderResponse&quot;]
+          DebugDryRun03CapturedRequestReplay[&quot;DebugDryRun03CapturedRequestReplay&quot;]
+          ProviderReqOutbound07TransportRequest[&quot;ProviderReqOutbound07TransportRequest&quot;]
+          DebugDryRun02InternalControlCarrier[&quot;DebugDryRun02InternalControlCarrier&quot;]
+          DebugDryRun01LocalRequest[&quot;DebugDryRun01LocalRequest&quot;]
+          DebugDryRun01LocalRequest --&gt;|ddr-01| DebugDryRun02InternalControlCarrier
+          DebugDryRun02InternalControlCarrier --&gt;|ddr-02| ProviderReqOutbound07TransportRequest
+          DebugDryRun02InternalControlCarrier --&gt;|ddr-03| DebugDryRun03CapturedRequestReplay
+          DebugDryRun04CapturedProviderResponse --&gt;|ddr-04| HubRespOutbound04ClientSemantic
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class DebugDryRun01LocalRequest anchored;
+          class DebugDryRun02InternalControlCarrier anchored;
+          class ProviderReqOutbound07TransportRequest anchored;
+          class DebugDryRun03CapturedRequestReplay anchored;
+          class DebugDryRun04CapturedProviderResponse anchored;
+          class HubRespOutbound04ClientSemantic anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>ddr-01</td><td><code>DebugDryRun01LocalRequest -&gt; DebugDryRun02InternalControlCarrier</code></td><td>anchored</td><td><code>resolvePipelineDryRunForHandler -&gt; resolvePipelineDryRunControlFromHeaders</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
+        <tr><td>ddr-02</td><td><code>DebugDryRun02InternalControlCarrier -&gt; ProviderReqOutbound07TransportRequest</code></td><td>anchored</td><td><code>executeHttpRequestOnce -&gt; buildProviderRequestDryRunResponse</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
+        <tr><td>ddr-03</td><td><code>DebugDryRun02InternalControlCarrier -&gt; DebugDryRun03CapturedRequestReplay</code></td><td>anchored</td><td><code>main -&gt; fetch</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
+        <tr><td>ddr-04</td><td><code>DebugDryRun04CapturedProviderResponse -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>main -&gt; convertProviderResponseIfNeeded</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
+        </tbody>
+        </table>
         <h2>internal_error_numbering.mainline</h2>
         <p>RouteCodex-owned internal debug errors are assigned stable <code>500-1xx/2xx/3xx</code> codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage.</p>
         <p>Entry contract: <code>IntErrNum01SourceObserved</code> via <code>docs/architecture/wiki/internal-error-numbering-mainline-source.md</code></p>
@@ -594,6 +627,9 @@
           DaemonRestartLoop[&quot;DaemonRestartLoop&quot;]
           DaemonSupervisorLoop[&quot;DaemonSupervisorLoop&quot;]
           RuntimeInstanceRecord[&quot;RuntimeInstanceRecord&quot;]
+          RestartProcessSignal[&quot;RestartProcessSignal&quot;]
+          RestartProcessHttpRequest[&quot;RestartProcessHttpRequest&quot;]
+          ServerRestartCommand[&quot;ServerRestartCommand&quot;]
           StopIntentRecord[&quot;StopIntentRecord&quot;]
           ServerStopCommand[&quot;ServerStopCommand&quot;]
           ServerPidCacheRecord[&quot;ServerPidCacheRecord&quot;]
@@ -602,6 +638,8 @@
           ServerStartCommand --&gt;|rtl-02| ServerPidCacheRecord
           ServerStopCommand --&gt;|rtl-03| StopIntentRecord
           ServerStartCommand --&gt;|rtl-04| StopIntentRecord
+          ServerRestartCommand --&gt;|rtl-05| RestartProcessHttpRequest
+          ServerRestartCommand --&gt;|rtl-06| RestartProcessSignal
           ServerStartCommand --&gt;|rtl-07| RuntimeInstanceRecord
           DaemonSupervisorLoop --&gt;|rtl-08| RuntimeInstanceRecord
           DaemonRestartLoop --&gt;|rtl-09| RuntimeInstanceRecord
@@ -615,6 +653,9 @@
           class ServerPidCacheRecord anchored;
           class ServerStopCommand anchored;
           class StopIntentRecord anchored;
+          class ServerRestartCommand anchored;
+          class RestartProcessHttpRequest anchored;
+          class RestartProcessSignal anchored;
           class RuntimeInstanceRecord anchored;
           class DaemonSupervisorLoop anchored;
           class DaemonRestartLoop anchored;
@@ -627,6 +668,8 @@
         <tr><td>rtl-02</td><td><code>ServerStartCommand -&gt; ServerPidCacheRecord</code></td><td>anchored</td><td><code>writeServerPidCache -&gt; writeServerPidCache</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
         <tr><td>rtl-03</td><td><code>ServerStopCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>writeDaemonStopIntent -&gt; writeServerStopIntent</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
         <tr><td>rtl-04</td><td><code>ServerStartCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>consumeDaemonStopIntent -&gt; consumeServerStopIntent</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
+        <tr><td>rtl-05</td><td><code>ServerRestartCommand -&gt; RestartProcessHttpRequest</code></td><td>anchored</td><td><code>requestProcessRestartViaHttp -&gt; registerRestartRoutes</code></td><td></td><td><code>runtime.lifecycle.restart_command</code>&lt;br/&gt;CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session</td></tr>
+        <tr><td>rtl-06</td><td><code>ServerRestartCommand -&gt; RestartProcessSignal</code></td><td>anchored</td><td><code>requestInPlaceRestart -&gt; sendSignal</code></td><td></td><td><code>runtime.lifecycle.restart_command</code>&lt;br/&gt;CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session</td></tr>
         <tr><td>rtl-07</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-08</td><td><code>DaemonSupervisorLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-09</td><td><code>DaemonRestartLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>

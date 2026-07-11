@@ -11,6 +11,8 @@ import {
   captureClientHeaders,
   buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
+  attachPipelineDryRunForHandlerMetadata,
+  resolvePipelineDryRunForHandler,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
@@ -33,6 +35,11 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
+      return;
+    }
+    const dryRun = resolvePipelineDryRunForHandler(req);
+    if (dryRun.error) {
+      res.status(dryRun.error.status).json(dryRun.error.body);
       return;
     }
     const contentType = typeof req.headers['content-type'] === 'string'
@@ -121,7 +128,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: strippedPipelineBody,
-      metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
+      metadata: attachPipelineDryRunForHandlerMetadata(buildHandlerPipelineMetadata(requestBodyMetadata, {
         ...logMetadata,
         stream: wantsStream,
         clientRequestId,
@@ -130,14 +137,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         providerProtocol: 'anthropic-messages',
         clientHeaders,
         clientConnectionState
-      })
+      }), dryRun.control)
     });
     if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true
       });
     }
-    await sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
+    await sendPipelineResponse(res, result, requestId, { forceSSE: dryRun.control ? false : wantsStream, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     const acceptsSse = typeof req.headers['accept'] === 'string'

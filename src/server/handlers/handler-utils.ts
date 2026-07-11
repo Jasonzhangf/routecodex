@@ -1,4 +1,4 @@
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
 import type { HandlerContext } from './types.js';
 import {
@@ -23,6 +23,12 @@ import { MetadataCenter } from '../runtime/http-server/metadata-center/metadata-
 import { writeMetadataCenterSlot } from '../runtime/http-server/metadata-center/dualwrite-api.js';
 import { readRuntimeControlProjection } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 import { buildInboundLogSessionContext } from '../runtime/http-server/executor-metadata.js';
+import { isLocalRequest } from '../runtime/http-server/daemon-admin-routes.js';
+import {
+  attachPipelineDryRunControl,
+  resolvePipelineDryRunControlFromHeaders,
+  type PipelineDryRunControl
+} from '../../debug/pipeline-dry-run.js';
 export { sendPipelineResponse } from './handler-response-utils.js';
 import { assertClientResponseHasNoInternalCarriers as assertClientErrorBodyHasNoInternalCarriers } from './handler-response-utils.js';
 import { resolveInternalDebugErrorLogFields } from '../../debug/internal-error/index.js';
@@ -1022,6 +1028,29 @@ export function buildHandlerPipelineMetadata(
   delete merged.inboundStream;
   delete merged.outboundStream;
   return merged;
+}
+
+export function resolvePipelineDryRunForHandler(req: Request): {
+  control?: PipelineDryRunControl;
+  error?: { status: number; body: Record<string, unknown> };
+} {
+  const decision = resolvePipelineDryRunControlFromHeaders({
+    headers: req.headers as Record<string, unknown>,
+    isLocal: isLocalRequest(req),
+    source: 'local_header'
+  });
+  if ('error' in decision) {
+    return { error: decision.error };
+  }
+  return { control: decision.control };
+}
+
+export function attachPipelineDryRunForHandlerMetadata(
+  metadata: Record<string, unknown>,
+  control: PipelineDryRunControl | undefined
+): Record<string, unknown> {
+  attachPipelineDryRunControl(metadata, control);
+  return metadata;
 }
 
 export function buildHandlerLogMetadata(args: {

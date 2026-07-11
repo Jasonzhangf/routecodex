@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3847",
+  "version": "0.90.3865",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -203,6 +203,8 @@
     "config:validate:providers": "node scripts/validate-config-providers.mjs",
     "verify:e2e-toolcall": "node scripts/verify-e2e-toolcall.mjs && node scripts/verify-client-headers.mjs",
     "replay:codex-sample": "node scripts/replay-codex-sample.mjs",
+    "dry-run:codex-response": "tsx scripts/dry-run-codex-response.ts",
+    "test:pipeline-dry-run": "npm run jest:run -- --runTestsByPath tests/debug/pipeline-dry-run.spec.ts",
     "config:update:providers": "node scripts/update-config-providers.mjs",
     "models:update": "node scripts/update-models.mjs",
     "config:use-local": "BUILD_MODE=dev npm run llmswitch:ensure",

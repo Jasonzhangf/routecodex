@@ -141,8 +141,10 @@ description: RouteCodex 调试与架构路由入口
 1. red test / failing sample
 2. 改唯一 owner
 3. green gate
-4. live replay old sample
-5. note → MEMORY → lessons
+4. request dry-run：真实入口或 codex sample 走 `x-routecodex-dry-run: provider-request`，确认最终 provider-request 且未触碰上游
+5. response dry-run：相关 `provider-response*.json` 走 `npm run dry-run:codex-response -- --sample <file>`，确认现有 response converter 输出
+6. live replay old sample
+7. note → MEMORY → lessons
 
 ## 硬护栏
 - 单一路径：`HTTP -> Hub Pipeline -> VR -> Provider Runtime -> Upstream`

@@ -2437,6 +2437,52 @@ owners:
       - "diag is not synonymous with runtime diagnostics: error diag artifacts move under src/debug/diag, while VR/Hub/provider runtime diagnostics stay with their existing runtime owners."
       - "usage inline `diag=` rendering belongs to the logger submodule migration only; do not use debug consolidation to rewrite timing semantics or runtime decision fields."
 
+  - feature_id: debug.pipeline_dry_run_loop
+    status: active
+    summary: "local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay"
+    owner_kind: ts_runtime_owner
+    owner_scope: "debug-only dry-run control/result carrier plus sample replay commands; runtime code may only consume the internal carrier to stop before provider HTTP transport or reuse the existing provider-response converter"
+    owner_module: src/debug/pipeline-dry-run.ts
+    canonical_types:
+      - PipelineDryRunControl
+      - ProviderRequestDryRunResponse
+      - ProviderRequestDryRunBody
+    canonical_builders:
+      - resolvePipelineDryRunControlFromHeaders
+      - buildProviderRequestDryRunResponse
+      - buildProviderRequestDryRunPipelineResult
+    allowed_paths:
+      - src/debug/pipeline-dry-run.ts
+      - src/server/handlers
+      - src/server/runtime/http-server
+      - src/providers/core/runtime/http-request-executor.ts
+      - scripts/replay-codex-sample.mjs
+      - scripts/dry-run-codex-response.ts
+      - package.json
+      - tests/debug/pipeline-dry-run.spec.ts
+      - docs
+      - .agents/skills/rcc-dev-skills
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/modules/llmswitch/bridge
+      - src/modules/pipeline
+      - src/providers/profile
+      - src/client
+    required_tests:
+      - tests/debug/pipeline-dry-run.spec.ts
+      - scripts/replay-codex-sample.mjs
+      - scripts/dry-run-codex-response.ts
+    required_gates:
+      - npm run test:pipeline-dry-run
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "Dry-run control is accepted only from local diagnostic headers and is stored as a non-enumerable internal metadata carrier; request body `metadata` and client protocol fields must not become dry-run control truth."
+      - "Request dry-run must traverse the current server entry, Hub/VR/provider runtime path, write the normal provider-request snapshot, then stop before provider HTTP transport; it must not call upstream."
+      - "Response dry-run must load captured `provider-response*.json` samples and call the existing provider response converter; it must not implement a second provider-response parser or execute nested live pipeline."
+      - "This feature is diagnostic-only. It must not change normal provider request/response semantics, routing policy, health, cooldown, or retry decisions."
+
   - feature_id: debug.internal_error_numbering
     status: active
     summary: "Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped"
@@ -3391,6 +3437,43 @@ owners:
     notes:
       - "Authoritative description of the instance, not the pid cache."
       - "Wired from start.ts (daemon supervisor / daemon restart / direct spawn / shutdown-intent) and stop.ts (shutdown-intent); pid cache remains the transient hint, instance.json is the authoritative description."
+  - feature_id: runtime.lifecycle.restart_command
+    status: active
+    summary: "CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session"
+    owner_kind: ts_runtime_owner
+    owner_scope: "routecodex/rcc restart command target resolution, restart transport selection, SIGUSR2 or daemon restart-process request, and restart readiness wait"
+    owner_module: src/cli/commands/restart.ts
+    canonical_types:
+      - RestartCommandOptions
+      - RestartCommandContext
+      - RestartTarget
+    canonical_builders:
+      - createRestartCommand
+      - resolveRestartTargets
+      - requestProcessRestartViaHttp
+      - requestInPlaceRestart
+      - waitForRestart
+    allowed_paths:
+      - src/cli/commands/restart.ts
+      - src/cli/register/restart-command.ts
+      - src/cli.ts
+      - src/server/runtime/http-server/daemon-admin/restart-handler.ts
+      - tests/cli/restart-command.spec.ts
+      - tests/cli/restart-command.probe-host.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/cli/restart-command.spec.ts
+      - tests/cli/restart-command.probe-host.spec.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "restart is a request to the running process/session. It may call /daemon/restart-process or send SIGUSR2 to the target pid; it must not spawn a detached start --restart takeover path."
+      - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"
@@ -3833,7 +3916,6 @@ owners:
       - createClaudeCommand
       - createGuardianDaemonCommand
       - createInitCommand
-      - createRestartCommand
     allowed_paths:
       - src/cli/commands
       - src/cli/register

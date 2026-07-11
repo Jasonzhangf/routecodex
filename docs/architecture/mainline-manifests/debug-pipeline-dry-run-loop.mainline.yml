@@ -1,0 +1,37 @@
+lifecycle_id: debug.pipeline_dry_run_loop.mainline
+summary: local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay
+owner_feature_id: debug.pipeline_dry_run_loop
+owner_module: src/debug/pipeline-dry-run.ts
+entrypoint:
+  node_id: DebugDryRun01LocalRequest
+  wiki_page: docs/architecture/wiki/debug-unified-surface-mainline-source.md
+  call_map_chain_id: debug.pipeline_dry_run_loop.mainline
+node_ids:
+  - DebugDryRun01LocalRequest
+  - DebugDryRun02InternalControlCarrier
+  - ProviderReqOutbound07TransportRequest
+  - DebugDryRun03CapturedRequestReplay
+  - DebugDryRun04CapturedProviderResponse
+  - HubRespOutbound04ClientSemantic
+step_ids:
+  - ddr-01
+  - ddr-02
+  - ddr-03
+  - ddr-04
+edge_status_counts:
+  anchored: 4
+  partial: 0
+  binding_pending: 0
+  total: 4
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+  verification_map: docs/architecture/verification-map.yml
+  wiki_page: docs/architecture/wiki/debug-unified-surface-mainline-source.md
+verification:
+  min_call_map_chain: debug.pipeline_dry_run_loop.mainline
+  min_function_feature: debug.pipeline_dry_run_loop
+  required_gates:
+    - npm run test:pipeline-dry-run
+    - npm run verify:function-map-compile-gate
+    - npm run verify:architecture-mainline-call-map

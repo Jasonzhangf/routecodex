@@ -1,0 +1,50 @@
+lifecycle_id: debug.pipeline_dry_run_loop.mainline
+summary: "Local-only request/response dry-run loop: real API requests stop at
+  final provider HTTP request preparation, captured client samples replay
+  through the same entrypoint, and captured provider responses reuse the
+  existing response converter."
+owner_feature_id: debug.pipeline_dry_run_loop
+entrypoint:
+  node_id: DebugDryRun01LocalRequest
+  wiki_page: null
+  call_map_chain_id: debug.pipeline_dry_run_loop.mainline
+node_ids:
+  - DebugDryRun01LocalRequest
+  - DebugDryRun02InternalControlCarrier
+  - DebugDryRun03CapturedRequestReplay
+  - DebugDryRun04CapturedProviderResponse
+  - HubRespOutbound04ClientSemantic
+  - ProviderReqOutbound07TransportRequest
+edges:
+  - step_id: ddr-01
+    from_node: DebugDryRun01LocalRequest
+    to_node: DebugDryRun02InternalControlCarrier
+    status: anchored
+    owner_feature_id: debug.pipeline_dry_run_loop
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ddr-02
+    from_node: DebugDryRun02InternalControlCarrier
+    to_node: ProviderReqOutbound07TransportRequest
+    status: anchored
+    owner_feature_id: debug.pipeline_dry_run_loop
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ddr-03
+    from_node: DebugDryRun02InternalControlCarrier
+    to_node: DebugDryRun03CapturedRequestReplay
+    status: anchored
+    owner_feature_id: debug.pipeline_dry_run_loop
+    binding_pending: null
+    split_binding_id: null
+  - step_id: ddr-04
+    from_node: DebugDryRun04CapturedProviderResponse
+    to_node: HubRespOutbound04ClientSemantic
+    status: anchored
+    owner_feature_id: debug.pipeline_dry_run_loop
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

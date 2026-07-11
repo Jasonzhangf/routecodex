@@ -15,6 +15,7 @@ import {
   readRuntimeControlProjection,
   writeRuntimeControlSlot
 } from '../metadata-center/request-truth-readers.js';
+import { propagatePipelineDryRunControl } from '../../../../debug/pipeline-dry-run.js';
 
 const ATTEMPT_STATE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor/request-executor-attempt-state.ts',
@@ -111,6 +112,7 @@ export function prepareRequestExecutorAttemptState(args: {
     args.attempt,
     args.excludedProviderKeys
   );
+  propagatePipelineDryRunControl(args.initialMetadata, metadataForAttempt);
   delete metadataForAttempt.__routecodexRetryProviderKey;
   attachRuntimeCarrier(metadataForAttempt);
   const retryProviderKey = resolveAttemptRetryProviderKey({
@@ -192,6 +194,8 @@ export function finalizeRequestExecutorAttemptMetadata(args: {
     target: mergedMetadata,
     pipelineMetadata: pipelineMetadataRecord
   });
+  propagatePipelineDryRunControl(args.metadataForAttempt, mergedMetadata);
+  propagatePipelineDryRunControl(pipelineMetadataRecord, mergedMetadata);
   if (requestTruth.requestId) {
     mergedMetadata.requestId = requestTruth.requestId;
   }

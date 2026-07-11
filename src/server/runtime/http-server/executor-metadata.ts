@@ -22,6 +22,7 @@ import { preserveLiveClientAbortCarriers } from './executor/request-executor-cli
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
 import { extractServertoolCliResultRouteHintFromRequestNative } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
+import { propagatePipelineDryRunControl } from '../../../debug/pipeline-dry-run.js';
 
 const ATTEMPT_METADATA_RUNTIME_CONTROL_RELEASE_WRITER = {
   module: 'src/server/runtime/http-server/executor-metadata.ts',
@@ -840,6 +841,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
         }
       : {}),
   };
+  propagatePipelineDryRunControl(input.metadata, metadata);
   delete metadata.routeHint;
   delete metadata.responsesRequestContext;
   if (metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)) {

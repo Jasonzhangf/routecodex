@@ -15,6 +15,10 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { Readable } from 'node:stream';
 import { sanitizeProviderOutboundPayload } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { readRuntimeRequestTruthPortNumber } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
+import {
+  buildProviderRequestDryRunResponse,
+  shouldRunProviderRequestDryRun
+} from '../../../debug/pipeline-dry-run.js';
 
 const formatUnknownError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -597,6 +601,12 @@ export class HttpRequestExecutor {
         requestId: context.requestId,
         providerKey: context.providerKey,
         providerId: context.providerId
+      });
+    }
+    if (shouldRunProviderRequestDryRun(context)) {
+      return buildProviderRequestDryRunResponse({
+        requestInfo,
+        context
       });
     }
     const response = this.deps.executePreparedRequest

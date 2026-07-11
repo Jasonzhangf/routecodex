@@ -31,7 +31,7 @@ const CLIENT_REPLAY_METADATA_ALLOWLIST = new Set([
 
 function usage() {
   console.log(`Usage:
-  node scripts/replay-codex-sample.mjs --sample <file> [--label run1] [--base URL] [--key TOKEN]
+  node scripts/replay-codex-sample.mjs --sample <file> [--label run1] [--base URL] [--key TOKEN] [--dry-run provider-request]
 `);
 }
 
@@ -44,10 +44,16 @@ function parseArgs() {
     else if (arg === '--label') options.label = args[++i];
     else if (arg === '--base') options.base = args[++i];
     else if (arg === '--key') options.key = args[++i];
+    else if (arg === '--dry-run') options.dryRun = args[++i] || 'provider-request';
     else if (arg === '--help' || arg === '-h') { usage(); process.exit(0); }
     else { console.error(`Unknown arg: ${arg}`); usage(); process.exit(1); }
   }
   if (!options.sample) { usage(); process.exit(1); }
+  if (options.dryRun && options.dryRun !== 'provider-request') {
+    console.error(`Unsupported --dry-run mode: ${options.dryRun}`);
+    usage();
+    process.exit(1);
+  }
   return options;
 }
 
@@ -430,18 +436,21 @@ export async function main() {
   const headers = {
     ...sampleHeaders,
     'Content-Type': 'application/json',
-    'Accept': wantsSse ? 'text/event-stream' : 'application/json',
+    'Accept': opts.dryRun ? 'application/json' : wantsSse ? 'text/event-stream' : 'application/json',
     // Use x-routecodex-api-key to avoid Authorization header sanitization in some clients.
     'x-routecodex-api-key': opts.key,
     'OpenAI-Beta': sampleHeaders['openai-beta'] || 'responses-2024-12-17',
     'X-Route-Hint': sampleHeaders['x-route-hint'] || 'default'
   };
+  if (opts.dryRun) {
+    headers['x-routecodex-dry-run'] = opts.dryRun;
+  }
   const inferredTmux = extractTmuxSessionIdFromKey(opts.key);
   if (inferredTmux && !sampleHeaders['x-routecodex-client-tmux-session-id']) {
     headers['x-routecodex-client-tmux-session-id'] = inferredTmux;
   }
 
-  console.log(`[replay-codex-sample] ${endpoint} → ${targetUrl} (requestId=${requestId})`);
+  console.log(`[replay-codex-sample] ${endpoint} → ${targetUrl} (requestId=${requestId}${opts.dryRun ? ` dryRun=${opts.dryRun}` : ''})`);
 
   const res = await fetch(targetUrl, {
     method: 'POST',
@@ -453,6 +462,7 @@ export async function main() {
     endpoint,
     targetUrl,
     wantsSse,
+    dryRun: opts.dryRun || undefined,
     status: res.status,
     statusText: res.statusText,
     headers: Object.fromEntries(res.headers.entries())
@@ -463,7 +473,7 @@ export async function main() {
   }
   fs.writeFileSync(
     path.join(runDir, 'request.json'),
-    JSON.stringify({ endpoint, body: requestBody, headers: debugHeaders }, null, 2)
+    JSON.stringify({ endpoint, body: requestBody, headers: debugHeaders, dryRun: opts.dryRun || undefined }, null, 2)
   );
   fs.writeFileSync(path.join(runDir, 'response.meta.json'), JSON.stringify(meta, null, 2));
 
@@ -473,7 +483,11 @@ export async function main() {
     throw new Error(`HTTP ${res.status}: ${bodyText}`);
   }
 
-  if (wantsSse) {
+  if (opts.dryRun) {
+    const json = await res.json();
+    fs.writeFileSync(path.join(runDir, 'dry-run.provider-request.json'), JSON.stringify(json, null, 2));
+    console.log(`[replay-codex-sample] captured provider-request dry-run → ${runDir}`);
+  } else if (wantsSse) {
     const frames = await readSse(res);
     fs.writeFileSync(path.join(runDir, 'response.sse.log'), frames.map((f) => `${f}\n\n`).join(''), 'utf8');
     fs.writeFileSync(path.join(runDir, 'response.sse.ndjson'), frames.join('\n'), 'utf8');

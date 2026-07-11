@@ -4,6 +4,10 @@ import type { HubPipelineHandle, ProviderHandle, ProviderProtocol } from './type
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
+  buildProviderRequestDryRunPipelineResult,
+  isProviderRequestDryRunResponse
+} from '../../../debug/pipeline-dry-run.js';
+import {
   normalizeProviderFailureCodeKey,
   resolveProviderFailureClassification,
   resolveProviderFailureActionPlan,
@@ -1390,6 +1394,42 @@ export class HubRequestExecutor implements RequestExecutor {
             clientRequestId
           );
           const providerResponse = await handle.instance.processIncoming(providerPayload);
+          if (isProviderRequestDryRunResponse(providerResponse)) {
+            providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
+            logStage('provider.send.dry_run.completed', input.requestId, {
+              providerKey: target.providerKey,
+              elapsedMs: providerSendElapsedMs,
+              providerType: handle.providerType,
+              providerFamily: handle.providerFamily,
+              model: providerModel,
+              providerLabel,
+              attempt
+            });
+            return buildProviderRequestDryRunPipelineResult({
+              response: providerResponse,
+              metadata: mergedMetadata,
+              usageLogInfo: {
+                providerKey: target.providerKey,
+                model: providerModel,
+                requestModel:
+                  pipelineResult.processedRequest
+                  && typeof pipelineResult.processedRequest === 'object'
+                  && !Array.isArray(pipelineResult.processedRequest)
+                  && typeof (pipelineResult.processedRequest as Record<string, unknown>).model === 'string'
+                    ? String((pipelineResult.processedRequest as Record<string, unknown>).model)
+                    : undefined,
+                providerProtocol,
+                routeName: pipelineResult.routingDecision?.routeName,
+                poolId: readString(routingDecisionRecord?.poolId),
+                externalLatencyMs: providerSendElapsedMs,
+                trafficWaitMs: cumulativeTrafficWaitMs,
+                providerAttemptCount: attempt,
+                requestStartedAtMs: requestStartedAt,
+                providerRequestId,
+                inputRequestId: input.requestId
+              }
+            });
+          }
           const responseStatus = extractResponseStatus(providerResponse);
           providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
           cumulativeExternalLatencyMs += providerSendElapsedMs;

@@ -12,6 +12,8 @@ import {
   captureClientHeaders,
   buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
+  attachPipelineDryRunForHandlerMetadata,
+  resolvePipelineDryRunForHandler,
   readRequestBodyMetadata,
   stripRequestBodyMetadataForPipeline
 } from './handler-utils.js';
@@ -32,6 +34,11 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
+      return;
+    }
+    const dryRun = resolvePipelineDryRunForHandler(req);
+    if (dryRun.error) {
+      res.status(dryRun.error.status).json(dryRun.error.body);
       return;
     }
     const payload = (req.body && typeof req.body === 'object'
@@ -75,7 +82,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       headers: req.headers as Record<string, unknown>,
       query: req.query as Record<string, unknown>,
       body: pipelineBody,
-      metadata: buildHandlerPipelineMetadata(requestBodyMetadata, {
+      metadata: attachPipelineDryRunForHandlerMetadata(buildHandlerPipelineMetadata(requestBodyMetadata, {
         ...logMetadata,
         stream: wantsSSE,
         clientRequestId,
@@ -85,7 +92,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         providerProtocol: 'openai-chat',
         clientHeaders,
         clientConnectionState
-      })
+      }), dryRun.control)
     });
     if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
@@ -93,7 +100,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       });
     }
     await sendPipelineResponse(res, result, requestId, {
-      forceSSE: wantsSSE,
+      forceSSE: dryRun.control ? false : wantsSSE,
       entryEndpoint,
       ...(isVideoRequest ? { sseTotalTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS } : {})
     });

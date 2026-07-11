@@ -562,6 +562,57 @@ chains:
         status: anchored
         note: "The unified debug entry builds the canonical toolkit facade and routes all migrated debug sub-surfaces through the single debug owner module."
 
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    summary: "Local-only request/response dry-run loop: real API requests stop at final provider HTTP request preparation, captured client samples replay through the same entrypoint, and captured provider responses reuse the existing response converter."
+    entry_contract:
+      node: DebugDryRun01LocalRequest
+      owner_doc: docs/architecture/wiki/debug-unified-surface-mainline-source.md
+    edges:
+      - step_id: ddr-01
+        from_node: DebugDryRun01LocalRequest
+        to_node: DebugDryRun02InternalControlCarrier
+        caller_symbol: resolvePipelineDryRunForHandler
+        caller_file: src/server/handlers/handler-utils.ts
+        callee_symbol: resolvePipelineDryRunControlFromHeaders
+        callee_file: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        semantic_input: "loopback HTTP request with x-routecodex-dry-run provider-request header"
+        semantic_output: "non-enumerable internal dry-run control carrier or explicit local-only rejection"
+        status: anchored
+      - step_id: ddr-02
+        from_node: DebugDryRun02InternalControlCarrier
+        to_node: ProviderReqOutbound07TransportRequest
+        caller_symbol: executeHttpRequestOnce
+        caller_file: src/providers/core/runtime/http-request-executor.ts
+        callee_symbol: buildProviderRequestDryRunResponse
+        callee_file: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        semantic_input: "final PreparedHttpRequest after provider wire body/header/url construction and provider-request snapshot write"
+        semantic_output: "diagnostic provider-request JSON response; upstream HTTP transport not called"
+        status: anchored
+      - step_id: ddr-03
+        from_node: DebugDryRun02InternalControlCarrier
+        to_node: DebugDryRun03CapturedRequestReplay
+        caller_symbol: main
+        caller_file: scripts/replay-codex-sample.mjs
+        callee_symbol: fetch
+        callee_file: scripts/replay-codex-sample.mjs
+        owner_feature_id: debug.pipeline_dry_run_loop
+        semantic_input: "codex-samples client-request/http-request snapshot plus --dry-run provider-request"
+        semantic_output: "same live API entrypoint request with local dry-run header and saved dry-run.provider-request.json"
+        status: anchored
+      - step_id: ddr-04
+        from_node: DebugDryRun04CapturedProviderResponse
+        to_node: HubRespOutbound04ClientSemantic
+        caller_symbol: main
+        caller_file: scripts/dry-run-codex-response.ts
+        callee_symbol: convertProviderResponseIfNeeded
+        callee_file: src/server/runtime/http-server/executor/provider-response-converter.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        semantic_input: "codex-samples provider-response*.json with inferred or explicit entry endpoint/provider protocol"
+        semantic_output: "existing provider response converter output saved as response-dry-run.json"
+        status: anchored
+
   - chain_id: internal_error_numbering.mainline
     summary: "RouteCodex-owned internal debug errors are assigned stable `500-1xx/2xx/3xx` codes, projected only to debug artifacts, linked to external errors without wrapping them, and guarded from default client/provider payload leakage."
     entry_contract:
@@ -879,6 +930,28 @@ chains:
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port context"
         semantic_output: "stop-intent record if fresh TTL-valid intent exists, otherwise null"
+        status: anchored
+      - step_id: rtl-05
+        from_node: ServerRestartCommand
+        to_node: RestartProcessHttpRequest
+        caller_symbol: requestProcessRestartViaHttp
+        caller_file: src/cli/commands/restart.ts
+        callee_symbol: registerRestartRoutes
+        callee_file: src/server/runtime/http-server/daemon-admin/restart-handler.ts
+        owner_feature_id: runtime.lifecycle.restart_command
+        semantic_input: "target host/port plus configured restart API key when HTTP restart transport is selected"
+        semantic_output: "POST /daemon/restart-process asks the existing RouteCodex process to SIGUSR2 itself; no detached start --restart takeover"
+        status: anchored
+      - step_id: rtl-06
+        from_node: ServerRestartCommand
+        to_node: RestartProcessSignal
+        caller_symbol: requestInPlaceRestart
+        caller_file: src/cli/commands/restart.ts
+        callee_symbol: sendSignal
+        callee_file: src/cli.ts
+        owner_feature_id: runtime.lifecycle.restart_command
+        semantic_input: "target pid hints from listener discovery plus SIGUSR2"
+        semantic_output: "existing RouteCodex child receives SIGUSR2; managed start parent restarts the child inside the original session"
         status: anchored
       - step_id: rtl-07
         from_node: ServerStartCommand

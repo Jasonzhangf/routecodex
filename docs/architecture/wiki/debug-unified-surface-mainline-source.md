@@ -79,6 +79,33 @@ This is the target migration shell, not proof that the chain is runtime-anchored
 | `M8 debug.policy_violation_surface` | policy violation copy/reporting | manual copy convention in README/scripts | one policy observation surface |
 | `M9 cleanup` | old path deletion + global gates | migration shells and old residues remain | src/debug becomes true single authoring surface |
 
+## Pipeline Dry-Run Loop
+
+`debug.pipeline_dry_run_loop` is the first concrete M6 slice for request/response repair closeout.
+
+```mermaid
+flowchart LR
+  DebugDryRun01LocalRequest["DebugDryRun01LocalRequest<br/>loopback request asks for dry-run"]
+  DebugDryRun02InternalControlCarrier["DebugDryRun02InternalControlCarrier<br/>non-enumerable internal carrier"]
+  ProviderReqOutbound07TransportRequest["ProviderReqOutbound07TransportRequest<br/>final provider HTTP request prepared"]
+  DebugDryRun03CapturedRequestReplay["DebugDryRun03CapturedRequestReplay<br/>codex sample request replayed through live entry"]
+  DebugDryRun04CapturedProviderResponse["DebugDryRun04CapturedProviderResponse<br/>provider-response sample loaded"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic<br/>existing response converter output"]
+
+  DebugDryRun01LocalRequest -->|ddr-01| DebugDryRun02InternalControlCarrier
+  DebugDryRun02InternalControlCarrier -->|ddr-02| ProviderReqOutbound07TransportRequest
+  DebugDryRun02InternalControlCarrier -->|ddr-03| DebugDryRun03CapturedRequestReplay
+  DebugDryRun04CapturedProviderResponse -->|ddr-04| HubRespOutbound04ClientSemantic
+```
+
+Rules:
+
+- request dry-run is local-only and triggered by `x-routecodex-dry-run: provider-request`.
+- request dry-run must use the normal API handler, Hub/VR/provider runtime path, and stop only after final provider request preparation plus `provider-request` snapshot write.
+- captured request dry-run uses `node scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base http://127.0.0.1:<port>`.
+- captured response dry-run uses `npm run dry-run:codex-response -- --sample <provider-response.json>` and calls `convertProviderResponseIfNeeded`; no script-local response parser may become truth.
+- debug carrier state must not enter provider wire payload or normal client response payload.
+
 ## Boundary Rules
 
 ### Metadata

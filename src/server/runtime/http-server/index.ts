@@ -93,6 +93,11 @@ import {
 import {
   isToolCallContinuationResponseNative,
 } from '../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  buildProviderRequestDryRunPipelineResult,
+  isProviderRequestDryRunResponse,
+  propagatePipelineDryRunControl
+} from '../../../debug/pipeline-dry-run.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   readRuntimeControlProjection,
@@ -1025,6 +1030,7 @@ export class RouteCodexHttpServer {
                 : input.body,
           }
         : { __raw_request_body: input.body };
+    propagatePipelineDryRunControl(sourceMetadata, metadata);
     if (sourceMetadata) {
       bindExistingMetadataCenter(sourceMetadata, metadata);
     }
@@ -1073,6 +1079,7 @@ export class RouteCodexHttpServer {
     const relayMetadata = {
       ...(nextInput.metadata ?? {}),
     };
+    propagatePipelineDryRunControl(nextInput.metadata, relayMetadata);
     bindExistingMetadataCenter(metadata, relayMetadata);
     const preselectedRoute = {
       target: routeResult.target,
@@ -1278,6 +1285,7 @@ export class RouteCodexHttpServer {
       entryPort: typeof portConfig?.port === 'number' ? portConfig.port : localPort,
       ...(allowedProviders ? { allowedProviders } : {}),
     };
+    propagatePipelineDryRunControl(input.metadata, metadata);
     if (input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)) {
       const inputCenter = MetadataCenter.read(input.metadata as Record<string, unknown>);
       if (inputCenter) {
@@ -1390,6 +1398,7 @@ export class RouteCodexHttpServer {
           const relayMetadata = {
             ...(nextInput.metadata ?? {}),
           };
+          propagatePipelineDryRunControl(nextInput.metadata, relayMetadata);
           bindExistingMetadataCenter(
             nextInput.metadata && typeof nextInput.metadata === 'object' && !Array.isArray(nextInput.metadata)
               ? nextInput.metadata as Record<string, unknown>
@@ -1484,6 +1493,7 @@ export class RouteCodexHttpServer {
           routecodexProviderRelayBinding: portConfig.providerBinding,
           routecodexProviderRelayProtocol: handle.providerProtocol,
         };
+        propagatePipelineDryRunControl(nextInput.metadata, providerRelayMetadata);
         bindExistingMetadataCenter(
           nextInput.metadata && typeof nextInput.metadata === 'object' && !Array.isArray(nextInput.metadata)
             ? nextInput.metadata as Record<string, unknown>
@@ -1532,6 +1542,7 @@ export class RouteCodexHttpServer {
       routecodexRoutingPolicyGroup: portConfig.routingPolicyGroup,
       ...(allowedProviders && allowedProviders.length > 0 ? { allowedProviders } : {}),
     };
+    propagatePipelineDryRunControl(inputMetadataRecord, metadataForHub);
     const metadataCenter = bindExistingMetadataCenter(inputMetadataRecord, metadataForHub);
     if (directAttempt > 1) {
       if (inputMetadataRecord && inputMetadataRecord !== metadataForHub) {
@@ -2291,6 +2302,30 @@ export class RouteCodexHttpServer {
    */
   private async buildRouterDirectResult(directResult: RouterDirectResult, input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     const { response, providerHandle, auditContext } = directResult;
+    const inputMetadata = input.metadata && typeof input.metadata === 'object'
+      ? (input.metadata as Record<string, unknown>)
+      : {};
+    if (isProviderRequestDryRunResponse(response)) {
+      return buildProviderRequestDryRunPipelineResult({
+        response,
+        metadata: inputMetadata,
+        usageLogInfo: {
+          providerKey: auditContext.providerKey,
+          model: auditContext.providerModelId,
+          requestModel:
+            input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
+              ? ((input.body as any).model as string)
+              : undefined,
+          providerProtocol: providerHandle.providerProtocol,
+          routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
+          externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+          externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
+          requestStartedAtMs: Date.now(),
+          providerRequestId: input.requestId,
+          inputRequestId: input.requestId,
+        }
+      });
+    }
 
     const normalized = normalizeProviderResponse(response);
     const usage = directResult.capturedUsage ?? extractUsageFromResult(normalized, {
@@ -2313,9 +2348,6 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
-    const inputMetadata = input.metadata && typeof input.metadata === 'object'
-      ? (input.metadata as Record<string, unknown>)
-      : {};
     const directPipelineMetadata =
       directResult.pipelineMetadata && typeof directResult.pipelineMetadata === 'object' && !Array.isArray(directResult.pipelineMetadata)
         ? directResult.pipelineMetadata as Record<string, unknown>
@@ -2377,6 +2409,15 @@ export class RouteCodexHttpServer {
     } else if (normalizedMetadataCenter) {
       MetadataCenter.bind(directResponseMetadata, normalizedMetadataCenter);
     }
+    // Preserve client model identity for observability / any later client projection.
+    const clientModelForDirect =
+      (typeof auditContext.originalClientModel === 'string' && auditContext.originalClientModel.trim())
+      || (typeof requestModel === 'string' && requestModel.trim())
+      || undefined;
+    if (clientModelForDirect) {
+      directResponseMetadata.clientModelId = clientModelForDirect;
+      directResponseMetadata.originalModelId = clientModelForDirect;
+    }
     const baseResult: PipelineExecutionResult = {
       ...normalized,
       continuationOwner: 'direct',
@@ -2429,6 +2470,30 @@ export class RouteCodexHttpServer {
     providerBinding?: string,
     capturedUsage?: Record<string, unknown>,
   ): Promise<PipelineExecutionResult> {
+    const inputMetadata = input.metadata && typeof input.metadata === 'object'
+      ? (input.metadata as Record<string, unknown>)
+      : {};
+    if (isProviderRequestDryRunResponse(directResult.response)) {
+      return buildProviderRequestDryRunPipelineResult({
+        response: directResult.response,
+        metadata: inputMetadata,
+        usageLogInfo: {
+          providerKey: providerBinding,
+          model: this.extractProviderModel(payload),
+          requestModel:
+            input.body && typeof input.body === 'object' && typeof (input.body as any).model === 'string'
+              ? ((input.body as any).model as string)
+              : undefined,
+          providerProtocol: directResult.providerProtocol,
+          routeName: 'port.provider-direct',
+          externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+          externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
+          requestStartedAtMs: Date.now(),
+          providerRequestId: input.requestId,
+          inputRequestId: input.requestId,
+        }
+      });
+    }
     const normalized = normalizeProviderResponse(directResult.response);
     // Prefer usage extracted by the onSnapshotAfter hook; fall back to extraction here
     const usage = capturedUsage ?? extractUsageFromResult(normalized, {
@@ -2446,9 +2511,6 @@ export class RouteCodexHttpServer {
       normalized.body && typeof normalized.body === 'object'
         ? deriveFinishReason(normalized.body as Record<string, unknown>)
         : undefined;
-    const inputMetadata = input.metadata && typeof input.metadata === 'object'
-      ? (input.metadata as Record<string, unknown>)
-      : {};
     if (input.requestId && directResult.providerProtocol === 'openai-responses') {
       const responseBody = normalized.body;
       if (

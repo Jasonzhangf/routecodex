@@ -15,6 +15,8 @@ import {
   captureClientHeaders,
   buildHandlerLogMetadata,
   buildHandlerPipelineMetadata,
+  attachPipelineDryRunForHandlerMetadata,
+  resolvePipelineDryRunForHandler,
 } from './handler-utils.js';
 import {
   buildResponsesConversationPortScopeForHttp,
@@ -272,6 +274,11 @@ export async function handleResponses(
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' , code: 'not_ready' } });
       return;
     }
+    const dryRun = resolvePipelineDryRunForHandler(req);
+    if (dryRun.error) {
+      res.status(dryRun.error.status).json(dryRun.error.body);
+      return;
+    }
     if (preparedRuntime.kind === 'client_error') {
       res.status(preparedRuntime.status).json(preparedRuntime.body);
       return;
@@ -344,6 +351,8 @@ export async function handleResponses(
       res.status(200).json({ status: 'ready' });
       return;
     }
+    const pipelineMetadata = buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, responsesPipelineMetadata);
+    attachPipelineDryRunForHandlerMetadata(pipelineMetadata, dryRun.control);
 	    const pipelineInput = {
 	      entryEndpoint: pipelineEntryEndpoint,
 	      method: req.method,
@@ -352,7 +361,7 @@ export async function handleResponses(
 	      query: req.query as Record<string, unknown>,
 	      body: req.body,
       hubBody: pipelineBody,
-      metadata: buildHandlerPipelineMetadata(preparedPipelineBody.requestBodyMetadata, responsesPipelineMetadata)
+      metadata: pipelineMetadata
 	    };
     const activeRequestTimeoutMs =
       typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
@@ -469,7 +478,7 @@ export async function handleResponses(
       });
     }
     await sendPipelineResponse(res, result, effectiveRequestId, {
-      forceSSE: wantsStream,
+      forceSSE: dryRun.control ? false : wantsStream,
       entryEndpoint: pipelineEntryEndpoint,
       responsesRequestContext: requestContext,
       ...(isVideoRequest ? { sseTotalTimeoutMs: requestTimeoutMs } : {})
