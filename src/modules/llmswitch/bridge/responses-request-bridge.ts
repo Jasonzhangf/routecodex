@@ -179,6 +179,20 @@ export function buildResponsesPipelineMetadataForHttp(args: {
         writer: RESPONSES_PIPELINE_CONTINUATION_WRITER
       });
     }
+    if (
+      responsesResume?.continuationOwner === 'direct'
+      && typeof responsesResume.providerKey === 'string'
+      && responsesResume.providerKey.trim()
+    ) {
+      writeMetadataCenterSlot({
+        target: metadata,
+        family: 'runtime_control',
+        key: 'retryProviderKey',
+        value: responsesResume.providerKey.trim(),
+        writer: RESPONSES_PIPELINE_METADATA_WRITER,
+        reason: 'direct responses continuation provider pin'
+      });
+    }
   }
   return metadata;
 }

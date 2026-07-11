@@ -263,7 +263,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(readRuntimeControlProjection(metadata).providerProtocol).toBe('openai-responses');
   });
 
-  it('keeps direct continuation provider pin inside continuation context only', () => {
+  it('promotes direct continuation provider pin into runtime control', () => {
     const requestContext = {
       payload: { model: 'gpt-5.5', input: [] },
       context: { input: [] },
@@ -305,7 +305,7 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(center?.readContinuationContext().responsesResume).not.toHaveProperty('conversationId');
     expect(center?.readRequestTruth()).toEqual({});
     expect(readRuntimeControlProjection(metadata).routeHint).toBeUndefined();
-    expect(readRuntimeControlProjection(metadata).retryProviderKey).toBeUndefined();
+    expect(readRuntimeControlProjection(metadata).retryProviderKey).toBe('provider.key1.gpt-5.4');
     expect(readRuntimeControlProjection(metadata).providerProtocol).toBe('openai-responses');
   });
 

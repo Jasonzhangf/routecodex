@@ -28802,3 +28802,11 @@ Bridge-facing public surface (handler consumer, cannot delete/reorder):
 1. Add Rust NAPI for request-body metadata strip (`readRequestBodyMetadataForHttp` + `stripRequestBodyMetadataForPipelineForHttp`) — these are pure JSON extraction
 2. Rust-ify `planResponsesHandlerStreamForHttp` — pure stream intent logic
 3. Audit other bridge files: `responses-response-bridge.ts`, `routing-integrations.ts`, `runtime-integrations.ts`
+
+# 2026-07-11: direct Responses continuation provider pin restored
+
+- Scope: direct `/v1/responses` continuation regression found while continuing Rust/native closeout. Failing sample: `RCC_CONTINUATION_SCENARIO=direct node scripts/tests/responses-continuation-provider-key-blackbox.mjs` returned hits `["p1","p2"]`.
+- Root cause: direct continuation restore preserved `responsesResume.providerKey` in continuation context, but handler bridge did not promote direct-owned provider pin into `MetadataCenter.runtime_control.retryProviderKey`, so Rust Virtual Router had no forced provider target.
+- Change: `buildResponsesPipelineMetadataForHttp` now writes `runtime_control.retryProviderKey` only when `responsesResume.continuationOwner === "direct"` and `providerKey` is present. Relay continuation remains unpinned.
+- Verification PASS: focused Jest 5 suites / 76 tests; `npm run build:base`; direct blackbox now `["p1","p1"]` with `default/forced`; full direct+relay blackbox now direct `["p1","p1"]`, relay `["p1","p2"]`; touched-file `git diff --check`.
+- Non-target dirty files kept out: concurrent SSE finish-reason changes remain separate worktree state.

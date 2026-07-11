@@ -2216,3 +2216,9 @@
 - External test/config references were moved to dist/native or local opaque test types: Jest no longer maps `rcc-llmswitch-core/v2` or old relative core `src` specifiers to `sharedmodule/llmswitch-core/src`, and the unused `tests/jest-path-fix.js` mapper is deleted.
 - Build-core is native-only for llmswitch-core: `scripts/build-core.mjs` runs native hotpath build plus servertool wrapper generation and no longer runs `tsc -p sharedmodule/llmswitch-core/tsconfig.json`; the core package `build` script matches that native-only path.
 - Verification evidence: `npm run verify:llmswitch-zero-ts-closeout`, strict shell reference audit, rustification audit, minimal TS surface audit, function-map compile gate, architecture mainline/deleted-path/thin-wrapper gates, VR no-TS runtime, VR no-fallback semantics, servertool Rust-only, focused residue/minimal/apply-patch/stop-message Jest, `tsconfig.jest` TypeScript, `node scripts/build-core.mjs`, `git diff --check`, and `npm run build:base` pass. No global install/restart was run for this source-only closeout slice.
+
+# 2026-07-11: Direct Responses continuation provider pin projection
+
+- Direct-owned `/v1/responses` continuation restore must promote the stored direct `providerKey` into request-scoped `MetadataCenter.runtime_control.retryProviderKey`; Rust Virtual Router consumes that field to force same-provider direct continuation.
+- Relay-owned continuation must not write `retryProviderKey`. Keeping `responsesResume.providerKey` only in continuation context is not enough for direct provider pin, and reading provider pin from relay or flat legacy metadata is forbidden.
+- Verified regression evidence: direct continuation blackbox hits `["p1","p1"]` with `default/forced`; relay blackbox hits `["p1","p2"]`, proving relay remains unpinned.
