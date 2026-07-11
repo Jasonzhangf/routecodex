@@ -47,7 +47,6 @@ const mockBridgeModule = () => ({
   injectMcpToolsForResponsesJson: jest.fn(async () => []),
   convertResponsesRequestToChatNative: jest.fn((payload: unknown) => ({ payload })),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(async () => ({ mode: 'passthrough' })),
-  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   projectSseErrorEventPayloadNative: jest.fn(() => ({})),
   classifyProviderFailure: jest.fn(() => ({ code: 'UNKNOWN', retryable: false })),
   deriveFinishReasonNative: jest.fn(() => undefined),

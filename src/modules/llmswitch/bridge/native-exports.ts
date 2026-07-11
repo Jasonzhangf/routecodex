@@ -230,7 +230,6 @@ type NativeRouterHotpathJsonBinding = {
   resolveProviderRetryExecutionPolicyJson?: (
     inputJson: string
   ) => string;
-  hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
   buildResponsesPayloadFromChatJson?: (
     payloadJson: string,
     contextJson?: string
@@ -650,12 +649,6 @@ export function normalizeResponsesDirectCurrentRequestPayload(input: Record<stri
         ? (row.payload as Record<string, unknown>)
         : {},
   };
-}
-
-export function hasDeclaredApplyPatchToolNative(payload: unknown): boolean {
-  const parsed = invokeRouterHotpathJsonCapability('hasDeclaredApplyPatchToolJson', [payload ?? null]);
-  const row = assertNativeObject('hasDeclaredApplyPatchToolJson', parsed);
-  return row.hasDeclaredApplyPatchTool === true;
 }
 
 export function evaluateSingletonRoutePoolExhaustionNative(input: {

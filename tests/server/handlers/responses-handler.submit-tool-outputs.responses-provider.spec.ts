@@ -122,7 +122,6 @@ const createNativeExportsMock = () => ({
   }),
   buildAnthropicResponseFromChatJson: jest.fn(async (input: unknown) => input),
   sanitizeProviderOutboundPayload: jest.fn(async (input: unknown) => input),
-  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),
   planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),

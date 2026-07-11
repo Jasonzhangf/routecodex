@@ -9,8 +9,9 @@ const providerPath = path.join(root, 'src/providers/core/runtime/responses-provi
 const bridgePath = path.join(root, 'src/modules/llmswitch/bridge/native-exports.ts');
 const retiredNativeTsPath = path.join(root, 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-bridge-policy-semantics.ts');
 const rustPath = path.join(root, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
+const requiredExportsPath = path.join(root, 'sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
 
-for (const abs of [directPath, providerPath, bridgePath, rustPath]) {
+for (const abs of [directPath, providerPath, bridgePath, rustPath, requiredExportsPath]) {
   if (!fs.existsSync(abs)) {
     failures.push(`missing required file: ${path.relative(root, abs)}`);
   }
@@ -24,6 +25,7 @@ const providerSource = fs.readFileSync(providerPath, 'utf8');
 const bridgeSource = fs.readFileSync(bridgePath, 'utf8');
 const nativeTsSource = '';
 const rustSource = fs.readFileSync(rustPath, 'utf8');
+const requiredExportsSource = fs.readFileSync(requiredExportsPath, 'utf8');
 
 for (const forbidden of [
   'validateResponsesDirectToolShapeContractNative',
@@ -53,14 +55,17 @@ for (const expected of [
 if (directSource.includes('evaluateResponsesDirectRouteDecisionNative') || directSource.includes('evaluateDirectRouteDecision')) {
   failures.push('direct passthrough helper must not call native direct decision as provider-wire preflight');
 }
-if (!bridgeSource.includes('hasDeclaredApplyPatchToolNative')) {
-  failures.push('host native exports must expose hasDeclaredApplyPatchToolNative');
+if (bridgeSource.includes('hasDeclaredApplyPatchToolNative')) {
+  failures.push('host native exports must not mirror hasDeclaredApplyPatchToolNative; use Rust NAPI hasDeclaredApplyPatchToolJson directly');
 }
 if (!bridgeSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
   failures.push('host native exports must expose evaluateResponsesDirectRouteDecisionNative');
 }
 if (!rustSource.includes('has_declared_apply_patch_tool_json')) {
   failures.push('Rust NAPI must export has_declared_apply_patch_tool_json');
+}
+if (!requiredExportsSource.includes('hasDeclaredApplyPatchToolJson')) {
+  failures.push('required native exports must retain hasDeclaredApplyPatchToolJson');
 }
 if (!rustSource.includes('evaluate_responses_direct_route_decision_json')) {
   failures.push('Rust NAPI must export evaluate_responses_direct_route_decision_json');

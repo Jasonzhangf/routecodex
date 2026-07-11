@@ -157,7 +157,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     }),
     extractServertoolCliResultRouteHintFromRequestNative: () => undefined,
     getRouterHotpathJsonBindingSync: () => ({}),
-    hasDeclaredApplyPatchToolNative: () => false,
     hasRequestedToolsInSemanticsNative: () => false,
     injectMcpToolsForChatJson: async (payload: unknown) => payload,
     injectMcpToolsForResponsesJson: async (payload: unknown) => payload,

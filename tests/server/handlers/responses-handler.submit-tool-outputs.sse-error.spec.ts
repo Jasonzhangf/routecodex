@@ -93,7 +93,6 @@ const createNativeExportsMock = () => ({
       return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
     }),
   })),
-  hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   injectMcpToolsForChatJson: jest.fn((payload: unknown) => payload),
   injectMcpToolsForResponsesJson: jest.fn((payload: unknown) => payload),
   isToolCallContinuationResponseNative: jest.fn(() => false),
