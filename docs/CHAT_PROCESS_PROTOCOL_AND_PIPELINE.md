@@ -85,7 +85,7 @@
 
 **Responses（openai-responses）**
 - legacy `responsesContext` / `responseFormat`：可映射 → `chat.semantics.responses.context` / `chat.semantics.responses.responseFormat`（当前主路径已走 semantics；禁入枚举用于阻止旧路径回流到 metadata）。
-- `responsesResume`（submit_tool_outputs resume）：可映射 → `chat.semantics.responses.resume`（已落地到 inbound semantic gate，见 `.../req_inbound_stage2_semantic_map/index.ts:57`）。
+- `responsesResume`（submit_tool_outputs resume）：可映射 → `chat.semantics.responses.resume`（已落地到 Rust req_inbound / Chat Process semantic gate；旧 `req_inbound_stage2_semantic_map` TS stage 已删除）。
 
 ### 3.3 已落地的语义映射（作为基线）
 
@@ -94,15 +94,15 @@
 - `/v1/responses` tool-loop 恢复语义：
   - `responsesResume`（host side 临时注入）→ **必须**在 inbound semantic map 前提升为 `chat.semantics.responses.resume`
   - 并在需要时提升为 `chat.toolOutputs`（统一工具输出面）
-  - 位置：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/index.ts:57`
+  - 位置：Rust req_inbound / Chat Process governance owner；旧 `req_inbound_stage2_semantic_map` TS stage 已删除，不得作为当前入口恢复。
 
 - 客户端 tools raw schema：
   - `tools` 原始数组 → `chat.semantics.tools.clientToolsRaw`
-  - 位置：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/index.ts:51`
+  - 位置：Rust req_inbound / Chat Process governance owner；旧 `req_inbound_stage2_semantic_map` TS stage 已删除。
 
 - Anthropic tool alias：
   - `payload.tools` → `chat.semantics.tools.toolNameAliasMap`
-  - 位置：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.ts:176`
+  - 位置：Rust request governance / protocol mapping owner；旧 operation-table semantic mapper TS shell 已删除。
 
 ## 4) ServerTool followup 契约（你选的方案：override → canonical chat）
 
