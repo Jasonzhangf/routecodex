@@ -274,7 +274,7 @@ export type PrepareResponsesHandlerEntryForHttpResult =
       kind: 'scope_continuation_expired';
     };
 
-export function finalizeResponsesHandlerPayloadForHttp(args: {
+function finalizeResponsesHandlerPayloadForHttp(args: {
   payload: AnyRecord;
   entryEndpoint: string;
   isSubmitToolOutputs: boolean;
@@ -287,11 +287,11 @@ export function finalizeResponsesHandlerPayloadForHttp(args: {
   return payload;
 }
 
-export function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
+function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
   return shouldManageResponsesConversationForHttpNative(entryEndpoint);
 }
 
-export function buildResponsesScopeContinuationExpiredErrorForHttp(): {
+function buildResponsesScopeContinuationExpiredErrorForHttp(): {
   error: {
     message: string;
     type: 'invalid_request_error';
@@ -301,7 +301,7 @@ export function buildResponsesScopeContinuationExpiredErrorForHttp(): {
   return buildResponsesScopeContinuationExpiredErrorForHttpNative();
 }
 
-export function buildResponsesResumeClientErrorForHttp(args: {
+function buildResponsesResumeClientErrorForHttp(args: {
   status?: number;
   code?: string;
   origin?: string;
@@ -320,7 +320,7 @@ export function buildResponsesResumeClientErrorForHttp(args: {
   return buildResponsesResumeClientErrorForHttpNative(args);
 }
 
-export function shouldProjectResponsesResumeClientErrorForHttp(args: {
+function shouldProjectResponsesResumeClientErrorForHttp(args: {
   origin?: string;
 }): boolean {
   return shouldProjectResponsesResumeClientErrorForHttpNative(args.origin);
@@ -702,7 +702,7 @@ export async function prepareResponsesHandlerRuntimeForHttp(
   }
 }
 
-export async function captureResponsesRequestContextForHttp(args: {
+async function captureResponsesRequestContextForHttp(args: {
   requestId: string;
   payload: AnyRecord;
   context: AnyRecord;
@@ -719,7 +719,7 @@ export async function captureResponsesRequestContextForHttp(args: {
   });
 }
 
-export async function recordResponsesResponseForHttp(args: {
+async function recordResponsesResponseForHttp(args: {
   requestId: string;
   response: AnyRecord;
   providerKey?: string;
@@ -736,7 +736,7 @@ export async function recordResponsesResponseForHttp(args: {
   });
 }
 
-export async function seedResponsesToolCallResponseForHttp(args: {
+async function seedResponsesToolCallResponseForHttp(args: {
   requestId?: string;
   body: unknown;
   requestContext?: {
@@ -816,7 +816,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
   return nextMetadata;
 }
 
-export async function clearResponsesConversationByRequestIdForHttp(
+async function clearResponsesConversationByRequestIdForHttp(
   requestId?: string
 ): Promise<void> {
   await clearResponsesConversationByRequestId(requestId);
