@@ -9,14 +9,13 @@
 // canonical_builders: buildClientSseKeepaliveFrameForHttp, projectResponsesSseFrameForClientForHttp
 
 import {
-  buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl,
-} from './responses-sse-transport.js';
-import {
   projectResponsesSseFrameForClientNative,
   updateResponsesSseTransportTerminalStateNative,
 } from './native-exports.js';
 
-export const buildClientSseKeepaliveFrameForHttp = buildClientSseKeepaliveFrameForHttpImpl;
+export function buildClientSseKeepaliveFrameForHttp(_entryEndpoint?: string): string {
+  return ': keepalive\n\n';
+}
 
 export type ResponsesSseClientProjectionStateForHttp = {
   pendingApplyPatchArgumentDeltas: Record<string, string>;

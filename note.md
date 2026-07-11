@@ -29027,3 +29027,11 @@ Pure Rust NAPI candidates:
 - Live/install evidence: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on 5555/5520/10000 all report `0.90.3872`; installed dist contains recursive `serializeUnknown` and no restart adoption strings.
 - Installed semantic probe: importing `~/.rcc/install/current/dist/utils/process-lifecycle-logger.js` wrote a nested error record with `message`, `cause.message`, and `code=ABORT_ERR`, proving the installed logger no longer emits `{}` for this class.
 - Session evidence: parent PID `6357` (`start --snap`) remained, new child PID `36589` had PPID/PGID `6357`, so install restart stayed in the original start session.
+
+# 2026-07-11: responses SSE transport leaf shell retired
+
+- Scope: continue llmswitch external reference closeout by collapsing a one-function SSE transport leaf, without adding JS backfill or moving Rust-owned semantics into TS.
+- Deleted `src/modules/llmswitch/bridge/responses-sse-transport.ts`; `buildClientSseKeepaliveFrameForHttp` now lives directly on the existing handler-facing `responses-sse-bridge.ts` facade.
+- Updated architecture verifiers and red tests so they no longer keep the extra transport leaf alive; `hub-pipeline-stage-residue-audit` now requires the deleted path to stay absent.
+- Evidence: exact tracked-source scan now finds the deleted path only in the closeout doc and residue gate; active handler imports remain through `responses-sse-bridge.ts`.
+- Verification PASS: focused TypeScript; `verify:responses-handler-single-bridge-surface`; `verify:responses-sse-business-module`; focused Jest 3 suites / 222 tests; strict shell reference audit; zero-TS closeout verifier; deleted-path; thin-wrapper-only; function-map compile; `git diff --check`; `build:base`.

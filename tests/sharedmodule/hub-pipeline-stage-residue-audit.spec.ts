@@ -1792,7 +1792,6 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const sseFiles = [
       'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-      'src/modules/llmswitch/bridge/responses-sse-transport.ts',
     ];
     const findings: string[] = [];
     for (const relativePath of sseFiles) {
@@ -1813,7 +1812,6 @@ describe('hub pipeline stage residue audit', () => {
     const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const sseFiles = [
       'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-      'src/modules/llmswitch/bridge/responses-sse-transport.ts',
       'src/modules/llmswitch/bridge/native-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs',
@@ -4321,6 +4319,7 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-response-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
+      'src/modules/llmswitch/bridge/responses-sse-transport.ts',
       'src/modules/llmswitch/bridge/routing-integrations.d.ts',
       'src/modules/llmswitch/bridge/runtime-integrations.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-runtime.ts',

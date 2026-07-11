@@ -8,7 +8,6 @@ describe('server responses SSE business module contract', () => {
   it('keeps handler-response-sse transport-only and forbids SSE semantics in lifecycle bridge owners', () => {
     const handler = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
     const bridge = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
-    const sseTransport = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-transport.ts'), 'utf8');
     const responseLifecycleBridge = readFileSync(
       join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
       'utf8'
@@ -18,8 +17,8 @@ describe('server responses SSE business module contract', () => {
     expect(bridge).toContain('// feature_id: server.responses_sse_bridge_surface');
     expect(bridge).toContain('projectResponsesSseFrameForClientNative');
     expect(bridge).toContain('export function projectResponsesSseFrameForClientForHttp(');
-    expect(sseTransport).toContain('export function buildClientSseKeepaliveFrameForHttp(');
-    expect(sseTransport).not.toContain('export function shouldDropClientSseFrameForHttp(');
+    expect(bridge).toContain('export function buildClientSseKeepaliveFrameForHttp(');
+    expect(bridge).not.toContain('export function shouldDropClientSseFrameForHttp(');
     expect(bridge).not.toContain('shouldDropClientSseFrameForHttp');
 
     for (const forbiddenLocalDefinition of [

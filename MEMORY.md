@@ -2258,3 +2258,9 @@
 - Current rule: if live `/health` exists, install-release uses installed `rcc restart --port <port> --host <host>`; if live health is unavailable, it may use daemon `rcc start --no-restart --port <port>` only for a stopped target. Version mismatch after restart is a visible failure, not a takeover.
 - Verified current global evidence: installed truth is `routecodex/rcc/~/.rcc/install/current/package.json` all `0.90.3874`; `/health` on `5555`, `5520`, `10000`, and `4444` all reports ok/ready/pipelineReady `0.90.3874`.
 - Lifecycle evidence after the install window: `process-lifecycle.jsonl` shows `SIGUSR2 -> restart_delegate_parent_supervisor -> exitCode 75` under the original `start --snap` parent and no new `port_http_shutdown`/`shutdown_route` from install-release adoption.
+
+# 2026-07-11: Responses SSE extra transport leaf is deleted
+
+- `src/modules/llmswitch/bridge/responses-sse-transport.ts` is physically deleted; keepalive framing is part of the existing handler-facing `responses-sse-bridge.ts` facade, while SSE projection and terminal transport-state semantics remain Rust/NAPI-owned through `native-exports.ts`.
+- Architecture verifiers and red tests must not require the deleted leaf as a separate owner. `hub-pipeline-stage-residue-audit` locks the path as absent.
+- Verification evidence: focused TypeScript, `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, focused Jest 222/222, strict llmswitch shell audit, zero-TS closeout verifier, deleted-path, thin-wrapper-only, function-map compile, `git diff --check`, and `build:base` pass.

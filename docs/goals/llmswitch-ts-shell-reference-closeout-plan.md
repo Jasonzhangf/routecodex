@@ -984,3 +984,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Moved the remaining host IO/logging glue into `snapshot-recorder.ts` without adding a new public facade; semantic classifiers, trace planners, sample-window policy, and snapshot hook planning remain Rust/NAPI-owned through `native-exports.ts`.
 - Removed the stale no-fallback allowlist entry for the deleted runtime leaf and extended the residue gate so `snapshot-recorder-runtime.ts` must stay physically absent.
 - Verification passed: exact deleted-ref scan, focused snapshot/residue/unified-hub Jest 4 suites / 236 tests, strict shell reference audit, zero-TS closeout verifier, deleted-path, thin-wrapper-only, fallback-denylist, and scoped `git diff --check`.
+
+### 2026-07-11 Responses SSE transport leaf shell deleted
+
+- Deleted one-function host leaf `src/modules/llmswitch/bridge/responses-sse-transport.ts`; `buildClientSseKeepaliveFrameForHttp` now lives directly on the existing handler-facing `responses-sse-bridge.ts` facade.
+- Updated architecture verifier and red-test ownership checks so they no longer keep the extra transport leaf alive; the residue gate now locks the deleted path as physically absent.
+- Kept Rust/NAPI-owned SSE projection and terminal transport-state semantics unchanged through `projectResponsesSseFrameForClientNative` and `updateResponsesSseTransportTerminalStateNative`; the deleted leaf only owned a literal keepalive frame.

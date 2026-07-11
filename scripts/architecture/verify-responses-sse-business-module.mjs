@@ -8,7 +8,6 @@ const verificationMap = fs.readFileSync(path.join(root, 'docs/architecture/verif
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
 const handlerSource = fs.readFileSync(path.join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 const sseBridgeSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
-const sseTransportSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/responses-sse-transport.ts'), 'utf8');
 const nativeExportsSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/native-exports.ts'), 'utf8');
 const rustNapiSource = fs.readFileSync(
   path.join(root, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs'),
@@ -58,10 +57,10 @@ expectContains(packageJson, 'npm run verify:responses-sse-business-module', 'pac
 
 expectContains(handlerSource, "from '../../modules/llmswitch/bridge/responses-sse-bridge.js'", 'handler-response-sse.ts must import the dedicated SSE bridge facade');
 expectContains(sseBridgeSource, '// feature_id: server.responses_sse_bridge_surface', 'responses-sse-bridge.ts must stay feature-anchored');
-expectContains(sseTransportSource, 'export function buildClientSseKeepaliveFrameForHttp(', 'responses-sse-transport.ts must own keepalive framing');
+expectContains(sseBridgeSource, 'export function buildClientSseKeepaliveFrameForHttp(', 'responses-sse-bridge.ts must own keepalive framing');
 expectContains(rustNapiSource, 'updateResponsesContractProbeFromSseChunkJson', 'router-hotpath NAPI must expose the Rust-owned Responses contract probe');
 expectContains(nativeExportsSource, 'updateResponsesContractProbeFromSseChunkJson?:', 'native-exports.ts may type the raw Rust/NAPI contract probe capability');
-expectNotContains(sseTransportSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-transport.ts must not own frame-drop policy');
+expectNotContains(sseBridgeSource, 'export function shouldDropClientSseFrameForHttp(', 'responses-sse-bridge.ts must not own frame-drop policy');
 expectNotContains(nativeExportsSource, 'export function updateResponsesContractProbeFromSseChunkNative(', 'native-exports.ts must not expose a host TS wrapper for Rust-owned Responses contract probe semantics');
 expectNotContains(responseLifecycleBridgeSource, 'resolveResponsesRequestContextForHttp', 'responses-response-bridge.ts must not keep request-context facade salvage');
 expectNotContains(responseLifecycleBridgeSource, 'shouldDispatchResponsesSseToClientForHttp', 'responses-response-bridge.ts must not keep SSE dispatch facade salvage');
@@ -182,9 +181,9 @@ expectNotContains(
   'responses-response-bridge.ts must not own relay Responses SSE reprojection policy; client projection belongs to Rust owner before transport'
 );
 expectNotContains(
-  sseTransportSource,
+  sseBridgeSource,
   'response.required_action',
-  'responses-sse-transport.ts must not special-case response.required_action semantics'
+  'responses-sse-bridge.ts must not special-case response.required_action semantics'
 );
 expectNotContains(
   responseLifecycleBridgeSource,

@@ -86,9 +86,9 @@ function logResponsesSseTransportTrace(
   }
   try {
     const suffix = details && Object.keys(details).length > 0 ? ` ${JSON.stringify(details)}` : '';
-    console.warn(`[responses-sse-transport] ${stage} request=${requestLabel}${suffix}`);
+    console.warn(`[responses-sse] ${stage} request=${requestLabel}${suffix}`);
   } catch {
-    console.warn(`[responses-sse-transport] ${stage} request=${requestLabel}`);
+    console.warn(`[responses-sse] ${stage} request=${requestLabel}`);
   }
 }
 

@@ -105,24 +105,7 @@ const checks = [
     forbiddenTokens: [],
   },
   {
-    file: 'src/modules/llmswitch/bridge/responses-sse-transport.ts',
-    forbiddenLocalTokens: [
-      'export async function projectResponsesSseFrameForClientForHttp(',
-      'export async function normalizeResponsesSseFrameForClientForHttp(',
-      'export async function normalizeClientVisibleResponsesSseFrameForHttp(',
-      'function shouldSuppressDuplicateApplyPatchSseFrameForHttp(',
-      'function normalizeNestedResponsesPayloadInSseFrameForHttp(',
-      'function collectEmittedApplyPatchDoneCallIdsFromFrameForHttp(',
-      'function readResponsesSseCallIdForHttp(',
-      'function isApplyPatchFunctionCallRecordForHttp(',
-      'function readResponsesClientToolsRawForHttp(',
-      'response.required_action',
-    ],
-    forbiddenTokens: [],
-  },
-  {
     file: 'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-    allowedImport: './responses-sse-transport.js',
     forbiddenLocalTokens: [
       'createResponsesJsonToSseConverterForHttp',
       'createChatJsonToSseConverterForHttp',
