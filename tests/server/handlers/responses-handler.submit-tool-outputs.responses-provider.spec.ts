@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
+  finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockResumeResponsesConversation = jest.fn();
@@ -159,6 +160,7 @@ const createNativeExportsMock = () => ({
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
@@ -215,10 +217,10 @@ const createNativeExportsMock = () => ({
   writeSnapshotViaHooksNative: jest.fn(() => undefined),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false, reason: undefined })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
   classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
     request?: Record<string, unknown>;
   }) => {
     const request = input.request ?? {};

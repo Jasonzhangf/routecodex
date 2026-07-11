@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
+  finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockResumeResponsesConversation = jest.fn();
@@ -66,9 +67,9 @@ const createNativeExportsMock = () => ({
   describePipelineContractNative: jest.fn(() => ({})),
   describeVirtualRouterContractsNative: jest.fn(() => ({})),
   detectToolExecutionFailuresNative: jest.fn(() => []),
-  evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
   classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,
@@ -133,6 +134,7 @@ const createNativeExportsMock = () => ({
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;

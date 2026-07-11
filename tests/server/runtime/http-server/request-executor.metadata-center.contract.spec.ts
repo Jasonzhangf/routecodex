@@ -3,6 +3,7 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
+  finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockStateIntegrationsModule = {
@@ -45,9 +46,9 @@ const mockNativeExportsModule = () => ({
   classifyEmptyResponseSignalNative: jest.fn(() => null),
   detectRetryableEmptyAssistantResponseNative: jest.fn(() => null),
   detectToolExecutionFailuresNative: jest.fn(() => []),
-  deriveFinishReasonNative: jest.fn(() => undefined),
   classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  deriveFinishReasonNative: jest.fn(() => undefined),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
   getNetworkErrorCodes: jest.fn(() => []),
@@ -107,6 +108,7 @@ const mockNativeExportsModule = () => ({
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;

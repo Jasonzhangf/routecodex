@@ -103,6 +103,18 @@ function planResponsesRequestBodyForHttpFake(payload: unknown): {
   };
 }
 
+export function finalizeResponsesHandlerPayloadForHttpFake(args: {
+  payload?: AnyRecord;
+  isSubmitToolOutputs?: boolean;
+  outboundStream?: boolean;
+}): AnyRecord {
+  const payload = { ...(args.payload ?? {}) };
+  if (args.isSubmitToolOutputs !== true && args.outboundStream === true && payload.stream !== true) {
+    payload.stream = true;
+  }
+  return payload;
+}
+
 export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyRecord {
   const fake: AnyRecord = {
     buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
@@ -130,6 +142,8 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     describeVirtualRouterContractsWithNative: () => ({}),
     detectRetryableEmptyAssistantResponseNative: () => false,
     detectToolExecutionFailuresNative: () => [],
+    classifyRuntimeErrorSignalFromTextNative: () => null,
+    shouldLogClientToolErrorToConsoleNative: () => false,
     evaluateResponsesDirectRouteDecisionNative: () => ({}),
     evaluateSingletonRoutePoolExhaustionNative: () => ({}),
     extractSessionIdentifiersFromMetadataNative: (metadata: AnyRecord = {}) => ({
@@ -142,8 +156,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     hasDeclaredApplyPatchToolNative: () => false,
     hasRequestedToolsInSemanticsNative: () => false,
     injectMcpToolsForChatJson: async (payload: unknown) => payload,
-    classifyRuntimeErrorSignalFromTextNative: () => null,
-    shouldLogClientToolErrorToConsoleNative: () => false,
     injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
     isEmptyClientResponsePayloadNative: () => false,
     isProviderNativeResumeContinuationNative: () => false,
@@ -160,6 +172,7 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     planResponsesRequestBodyForHttpNative: planResponsesRequestBodyForHttpFake,
     buildResponsesResumeControlForContinuationContextForHttpNative:
       buildResponsesResumeControlForContinuationContextForHttpFake,
+    finalizeResponsesHandlerPayloadForHttpNative: finalizeResponsesHandlerPayloadForHttpFake,
     planResponsesHandlerStreamForHttpNative: (args: {
       payload?: AnyRecord;
       forceStream?: boolean;

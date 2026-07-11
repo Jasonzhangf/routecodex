@@ -5737,10 +5737,15 @@ pub fn build_responses_conversation_port_scope_for_http_json(
             Value::String(group.to_string()),
         );
     }
-    serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&Value::Object(output))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn copy_trimmed_string_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
+fn copy_trimmed_string_field(
+    input: &Map<String, Value>,
+    output: &mut Map<String, Value>,
+    key: &str,
+) {
     if let Some(value) = read_trimmed_string(input.get(key)) {
         output.insert(key.to_string(), Value::String(value));
     }
@@ -5759,7 +5764,8 @@ fn copy_number_field(input: &Map<String, Value>, output: &mut Map<String, Value>
 }
 
 fn first_trimmed_field(input: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| read_trimmed_string(input.get(*key)))
+    keys.iter()
+        .find_map(|key| read_trimmed_string(input.get(*key)))
 }
 
 #[napi_derive::napi(js_name = "buildResponsesResumeControlForContinuationContextForHttpJson")]
@@ -5812,10 +5818,12 @@ pub fn build_responses_resume_control_for_continuation_context_for_http_json(
                     row,
                     &["callId", "originalId", "call_id", "tool_call_id", "id"],
                 )?;
-                let output_text = first_trimmed_field(row, &["outputText", "output_text", "output"])?;
+                let output_text =
+                    first_trimmed_field(row, &["outputText", "output_text", "output"])?;
                 let mut item_output = serde_json::Map::new();
                 item_output.insert("callId".to_string(), Value::String(call_id));
-                if let Some(original_id) = first_trimmed_field(row, &["originalId", "original_id"]) {
+                if let Some(original_id) = first_trimmed_field(row, &["originalId", "original_id"])
+                {
                     item_output.insert("originalId".to_string(), Value::String(original_id));
                 }
                 item_output.insert("outputText".to_string(), Value::String(output_text));
@@ -5823,11 +5831,15 @@ pub fn build_responses_resume_control_for_continuation_context_for_http_json(
             })
             .collect();
         if !tool_outputs.is_empty() {
-            output.insert("toolOutputsDetailed".to_string(), Value::Array(tool_outputs));
+            output.insert(
+                "toolOutputsDetailed".to_string(),
+                Value::Array(tool_outputs),
+            );
         }
     }
 
-    serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
+    serde_json::to_string(&Value::Object(output))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi_derive::napi(js_name = "buildResponsesScopeContinuationExpiredErrorForHttpJson")]
@@ -5913,6 +5925,25 @@ pub fn plan_responses_handler_stream_for_http_json(
         "requestStartMeta": Value::Object(request_start_meta)
     });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "finalizeResponsesHandlerPayloadForHttpJson")]
+pub fn finalize_responses_handler_payload_for_http_json(
+    payload_json: String,
+    is_submit_tool_outputs: bool,
+    outbound_stream: bool,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut output = payload.as_object().cloned().unwrap_or_default();
+    if !is_submit_tool_outputs
+        && outbound_stream
+        && !matches!(output.get("stream"), Some(Value::Bool(true)))
+    {
+        output.insert("stream".to_string(), Value::Bool(true));
+    }
+    serde_json::to_string(&Value::Object(output))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
@@ -6305,24 +6336,27 @@ pub fn publish_responses_record_plan_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_responses_conversation_scope_plan, build_stop_hook_guidance_text_from_output,
-        convert_responses_output_to_input_items, execute_responses_conversation_store_operation,
+        build_responses_conversation_port_scope_for_http_json,
+        build_responses_conversation_scope_plan,
+        build_responses_resume_control_for_continuation_context_for_http_json,
+        build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
+        execute_responses_conversation_store_operation,
+        finalize_responses_handler_payload_for_http_json,
         materialize_provider_owned_submit_context, materialize_responses_continuation_payload,
         plan_responses_attach_entry_scopes, plan_responses_capture_pending_cleanup,
         plan_responses_captured_entry, plan_responses_continuation_lookup_by_response_id,
         plan_responses_continuation_meta, plan_responses_continuation_request_action,
         plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
-        build_responses_conversation_port_scope_for_http_json, plan_responses_handler_entry,
-        build_responses_resume_control_for_continuation_context_for_http_json,
-        plan_responses_handler_stream_for_http_json, plan_responses_persisted_entry,
-        plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
-        plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
-        plan_responses_release_request_payload, plan_responses_request_body_for_http,
-        plan_responses_request_context, plan_responses_scope_continuation_match,
-        plan_responses_store_sweep, plan_responses_store_tokens,
-        prepare_responses_conversation_entry, publish_responses_record_plan_json,
-        restore_responses_continuation_payload, resume_responses_conversation_payload,
+        plan_responses_handler_entry, plan_responses_handler_stream_for_http_json,
+        plan_responses_persisted_entry, plan_responses_rebind_request_id,
+        plan_responses_record_continuation_flag, plan_responses_record_scope_cleanup,
+        plan_responses_record_scope_entry_match, plan_responses_release_request_payload,
+        plan_responses_request_body_for_http, plan_responses_request_context,
+        plan_responses_scope_continuation_match, plan_responses_store_sweep,
+        plan_responses_store_tokens, prepare_responses_conversation_entry,
+        publish_responses_record_plan_json, restore_responses_continuation_payload,
+        resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
     use std::sync::{LazyLock, Mutex};
@@ -9708,6 +9742,43 @@ mod tests {
         .expect("stream plan json");
         assert!(plan["requestStartMeta"].get("type").is_none());
         assert!(plan["requestStartMeta"].get("timeoutMs").is_none());
+    }
+
+    #[test]
+    fn finalize_responses_handler_payload_for_http_forces_stream_only_for_non_submit() {
+        let finalized: Value = serde_json::from_str(
+            &finalize_responses_handler_payload_for_http_json(
+                json!({ "model": "gpt-5.5", "stream": false, "input": [] }).to_string(),
+                false,
+                true,
+            )
+            .expect("finalized payload"),
+        )
+        .expect("finalized payload json");
+        assert_eq!(finalized["stream"], json!(true));
+        assert_eq!(finalized["model"], json!("gpt-5.5"));
+
+        let submit: Value = serde_json::from_str(
+            &finalize_responses_handler_payload_for_http_json(
+                json!({ "response_id": "resp_1", "stream": false }).to_string(),
+                true,
+                true,
+            )
+            .expect("submit payload"),
+        )
+        .expect("submit payload json");
+        assert_eq!(submit["stream"], json!(false));
+
+        let non_stream: Value = serde_json::from_str(
+            &finalize_responses_handler_payload_for_http_json(
+                json!({ "model": "gpt-5.5" }).to_string(),
+                false,
+                false,
+            )
+            .expect("non-stream payload"),
+        )
+        .expect("non-stream payload json");
+        assert!(non_stream.get("stream").is_none());
     }
 
     #[test]

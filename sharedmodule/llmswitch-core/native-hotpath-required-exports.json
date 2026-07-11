@@ -209,6 +209,7 @@
   "buildResponsesResumeClientErrorForHttpJson",
   "shouldProjectResponsesResumeClientErrorForHttpJson",
   "planResponsesHandlerStreamForHttpJson",
+  "finalizeResponsesHandlerPayloadForHttpJson",
   "planResponsesRequestContextJson",
   "planResponsesContinuationRequestActionJson",
   "ensureBridgeOutputFieldsJson",

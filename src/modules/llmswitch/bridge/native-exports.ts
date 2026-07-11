@@ -160,6 +160,11 @@ type NativeRouterHotpathJsonBinding = {
     forceStream?: boolean,
     requestTimeoutMs?: number
   ) => string;
+  finalizeResponsesHandlerPayloadForHttpJson?: (
+    payloadJson: string,
+    isSubmitToolOutputs: boolean,
+    outboundStream: boolean
+  ) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -1469,6 +1474,25 @@ export function planResponsesHandlerStreamForHttpNative(args: {
   };
 }
 
+export function finalizeResponsesHandlerPayloadForHttpNative(args: {
+  payload: AnyRecord;
+  isSubmitToolOutputs: boolean;
+  outboundStream: boolean;
+}): AnyRecord {
+  const fn = getRouterHotpathJsonBindingSync().finalizeResponsesHandlerPayloadForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] finalizeResponsesHandlerPayloadForHttpJson not available');
+  }
+  const parsed = JSON.parse(
+    fn(
+      JSON.stringify(args.payload ?? {}),
+      args.isSubmitToolOutputs === true,
+      args.outboundStream === true
+    )
+  ) as unknown;
+  return assertNativeObject('finalizeResponsesHandlerPayloadForHttpJson', parsed);
+}
+
 export function classifyEmptyResponseSignalNative(
   stage: string,
   body: unknown
@@ -1501,30 +1525,6 @@ export function detectToolExecutionFailuresNative(body: unknown): ToolExecutionF
   return parsed as ToolExecutionFailureSignal[];
 }
 
-export function resolveProviderResponseRequestSemanticsNative(
-  processed: Record<string, unknown> | undefined,
-  standardized: Record<string, unknown> | undefined,
-  requestMetadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  const fn = getChatProcessNodeResultSemantics().resolveProviderResponseRequestSemanticsJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson not available');
-  }
-  const raw = fn(
-    JSON.stringify(processed ?? null),
-    JSON.stringify(standardized ?? null),
-    JSON.stringify(requestMetadata ?? null)
-  );
-  const parsed = JSON.parse(raw) as unknown;
-  if (parsed === null) {
-    return undefined;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson returned invalid payload');
-  }
-  return parsed as Record<string, unknown>;
-}
-
 export function classifyRuntimeErrorSignalFromTextNative(
   stage: string,
   message: string
@@ -1550,6 +1550,30 @@ export function shouldLogClientToolErrorToConsoleNative(failure: ToolExecutionFa
     throw new Error('[llmswitch-bridge] shouldLogClientToolErrorToConsoleJson not available');
   }
   return fn(JSON.stringify(failure ?? null));
+}
+
+export function resolveProviderResponseRequestSemanticsNative(
+  processed: Record<string, unknown> | undefined,
+  standardized: Record<string, unknown> | undefined,
+  requestMetadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const fn = getChatProcessNodeResultSemantics().resolveProviderResponseRequestSemanticsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson not available');
+  }
+  const raw = fn(
+    JSON.stringify(processed ?? null),
+    JSON.stringify(standardized ?? null),
+    JSON.stringify(requestMetadata ?? null)
+  );
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function updateResponsesContractProbeFromSseChunkNative(

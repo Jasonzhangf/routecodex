@@ -3,6 +3,10 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+  finalizeResponsesHandlerPayloadForHttpFake,
+} from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
@@ -456,6 +460,10 @@ const mockNativeExportsModule = () => ({
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
     typeof origin === 'string' && origin.trim() === 'client'
   ),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
+  ),
+  finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;

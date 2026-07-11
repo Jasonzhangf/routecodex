@@ -26,6 +26,7 @@ import {
   buildResponsesResumeClientErrorForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
+  finalizeResponsesHandlerPayloadForHttpNative,
   materializeProviderOwnedSubmitContext,
   planResponsesHandlerStreamForHttpNative,
   planResponsesRequestBodyForHttpNative,
@@ -279,10 +280,7 @@ export function finalizeResponsesHandlerPayloadForHttp(args: {
   isSubmitToolOutputs: boolean;
   outboundStream: boolean;
 }): AnyRecord {
-  const payload = args.payload;
-  if (!args.isSubmitToolOutputs && args.outboundStream && payload.stream !== true) {
-    payload.stream = true;
-  }
+  const payload = finalizeResponsesHandlerPayloadForHttpNative(args);
   if (!args.isSubmitToolOutputs && args.entryEndpoint === '/v1/responses') {
     applySystemPromptOverride(args.entryEndpoint, payload);
   }
