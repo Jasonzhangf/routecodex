@@ -337,7 +337,7 @@ MetaReq01EntryCaptured
 
 - Rust 真源模块：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/`。
 - Native help 入口：`describeHubPipelineContractsJson`、`describeVirtualRouterContractsJson`、`describeMetaCarrierContractsJson`、`describePipelineContractJson(nodeId)`。
-- TS 薄壳入口：`describeHubPipelineContractsNative`、`describeVirtualRouterContractsNative`、`describeMetaCarrierContractsNative`、`describePipelineContractNative(nodeId)`。
+- Rust/NAPI 入口：`describeHubPipelineContractsJson`、`describeVirtualRouterContractsJson`、`describeMetaCarrierContractsJson`、`describePipelineContractJson(nodeId)`；Host TS 不再镜像这些 contract help wrapper。
 - 节点修改前必须先读在线 contract；修改后必须用 `validatePipelineNodeContractBoundaryJson` 或对应红测证明 data / meta / observation / error 未串位。
 
 ### 7.1 Hub Pipeline

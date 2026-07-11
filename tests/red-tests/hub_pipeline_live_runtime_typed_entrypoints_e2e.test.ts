@@ -21,10 +21,10 @@ import { describe, it, expect } from '@jest/globals';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  describeHubPipelineContractsNative,
-  describeVirtualRouterContractsNative,
-  describePipelineContractNative,
-} from '../../src/modules/llmswitch/bridge/native-exports.js';
+  describeHubPipelineContractsDirectNative,
+  describeVirtualRouterContractsDirectNative,
+  describePipelineContractDirectNative,
+} from '../sharedmodule/helpers/hub-pipeline-contracts-direct-native';
 
 const REQUIRED_HUB_NODES = [
   'HubReqInbound02Standardized',
@@ -52,8 +52,8 @@ const EXPECTED_OWNER_BUILDERS: Record<string, string> = {
 describe('hub pipeline live runtime typed entrypoints e2e (Phase 6A/6B/6B-2)', () => {
   describe('contract registry is the live runtime source of truth', () => {
     it('returns all 7 hub typed nodes + 1 VR node from the native binary', () => {
-      const hub = describeHubPipelineContractsNative();
-      const vr = describeVirtualRouterContractsNative();
+      const hub = describeHubPipelineContractsDirectNative();
+      const vr = describeVirtualRouterContractsDirectNative();
       const hubNodeIds = (hub?.nodes ?? []).map((n: { nodeId: string }) => n.nodeId);
       const vrNodeIds = (vr?.nodes ?? []).map((n: { nodeId: string }) => n.nodeId);
       for (const required of REQUIRED_HUB_NODES) {
@@ -64,9 +64,9 @@ describe('hub pipeline live runtime typed entrypoints e2e (Phase 6A/6B/6B-2)', (
       }
     });
 
-    it('describePipelineContractNative returns the canonical ownerBuilder for every typed node', () => {
+    it('direct Rust describePipelineContractJson returns the canonical ownerBuilder for every typed node', () => {
       for (const [nodeId, ownerBuilder] of Object.entries(EXPECTED_OWNER_BUILDERS)) {
-        const detail = describePipelineContractNative(nodeId);
+        const detail = describePipelineContractDirectNative(nodeId);
         expect(detail?.node?.nodeId).toBe(nodeId);
         expect(detail?.node?.ownerBuilder).toBe(ownerBuilder);
         expect(typeof detail?.node?.help).toBe('string');
@@ -97,7 +97,7 @@ describe('hub pipeline live runtime typed entrypoints e2e (Phase 6A/6B/6B-2)', (
       ];
       const dataForbiddenFields = ['metadata', 'metaCarrier', 'runtimeMetadata', 'errorCarrier'];
       for (const nodeId of [...REQUIRED_HUB_NODES, ...REQUIRED_VR_NODES]) {
-        const detail = describePipelineContractNative(nodeId);
+        const detail = describePipelineContractDirectNative(nodeId);
         const controlIn = detail?.node?.controlIn as {
           allowedKinds?: string[];
           readFields?: string[];
@@ -130,8 +130,8 @@ describe('hub pipeline live runtime typed entrypoints e2e (Phase 6A/6B/6B-2)', (
     });
 
     it('locks the 8-node total so accidental deletion of a typed contract is caught', () => {
-      const hub = describeHubPipelineContractsNative();
-      const vr = describeVirtualRouterContractsNative();
+      const hub = describeHubPipelineContractsDirectNative();
+      const vr = describeVirtualRouterContractsDirectNative();
       const total = (hub?.nodes?.length ?? 0) + (vr?.nodes?.length ?? 0);
       expect(total).toBe(8);
     });

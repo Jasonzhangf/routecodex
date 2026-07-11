@@ -130,10 +130,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
       request: { model: payload.model, messages: [], tools: payload.tools }
     }),
     deriveFinishReasonNative: () => undefined,
-    describeHubPipelineContractsNative: () => ({}),
-    describeMetaCarrierContractsNative: () => ({}),
-    describePipelineContractNative: () => ({}),
-    describeVirtualRouterContractsNative: () => ({}),
     detectRetryableEmptyAssistantResponseNative: () => false,
     detectToolExecutionFailuresNative: () => [],
     classifyRuntimeErrorSignalNative: () => null,

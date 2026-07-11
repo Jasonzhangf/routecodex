@@ -97,7 +97,6 @@ describe('Hub Pipeline request type topology contract', () => {
     const registry = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs');
     const bindings = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs');
     const requiredExports = read('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
-    const tsBridge = read('src/modules/llmswitch/bridge/native-exports.ts');
     for (const token of [
       'describe_hub_pipeline_contracts',
       'describe_virtual_router_contracts',
@@ -136,7 +135,7 @@ describe('Hub Pipeline request type topology contract', () => {
       'describeMetaCarrierContractsNative',
       'describePipelineContractNative',
     ]) {
-      expect(tsBridge).toContain(token);
+      expect(read('src/modules/llmswitch/bridge/native-exports.ts')).not.toContain(token);
     }
   });
 });
