@@ -1,0 +1,48 @@
+# Independent Grok provider (Responses + Grok Build wire headers)
+#
+# Under ~/.rcc only:
+#   ~/.rcc/provider/grok/config.v2.toml
+#   ~/.rcc/provider/grok/auth/token-1.json   # session token SSOT (refresh+use)
+#   ~/.rcc/provider/grok/auth/token-2.json   # optional multi-token (priority)
+#
+# OAuth constants/helpers live in src/providers/auth/grok-auth.ts (opencode-aligned).
+# Wire auth headers remain Grok Build / cli-chat-proxy.
+
+version = "2.0.0"
+providerId = "grok"
+
+[provider]
+id = "grok"
+enabled = true
+type = "responses"
+baseURL = "https://cli-chat-proxy.grok.com/v1"
+transportBackend = "openai-sdk"
+defaultModel = "grok-build"
+
+[provider.auth]
+type = "apikey"
+rawType = "grok"
+selectionMode = "priority"
+# Inert placeholder so generic apikey resolve accepts config (not a real secret).
+apiKey = "grok-token-file-mode"
+tokenFile = "~/.rcc/provider/grok/auth/token-1.json"
+
+[provider.headers]
+# Grok Build CLI proxy black-box markers (Authorization is injected from token file).
+X-XAI-Token-Auth = "xai-grok-cli"
+x-grok-client-surface = "grok-build"
+x-grok-client-version = "0.2.93"
+
+[provider.responses]
+streaming = "always"
+
+[provider.concurrency]
+maxInFlight = 2
+acquireTimeoutMs = 60000
+staleLeaseMs = 300000
+
+[provider.models."grok-build"]
+supportsStreaming = true
+supportsThinking = true
+maxContext = 200000
+capabilities = ["text", "reasoning", "thinking", "tools"]

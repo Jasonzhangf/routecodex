@@ -7,7 +7,7 @@
 
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
-// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesResponseIdFromHttp
 
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
 import {
@@ -799,20 +799,6 @@ export async function captureResponsesRequestContextForHttp(args: {
   });
 }
 
-export function attachResponsesRequestContextToResultForHttp(args: {
-  entryEndpoint?: string;
-  resultMetadata: Record<string, unknown> | undefined;
-  requestContext: ResponsesRequestContextForHttp;
-}): Record<string, unknown> | undefined {
-  void args.requestContext;
-  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
-    return args.resultMetadata;
-  }
-  return {
-    ...(args.resultMetadata || {}),
-  };
-}
-
 export async function recordResponsesResponseForHttp(args: {
   requestId: string;
   response: AnyRecord;
@@ -893,11 +879,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
   routeHint?: string;
   continuationOwner?: 'direct' | 'relay';
 }): Promise<Record<string, unknown> | undefined> {
-  const nextMetadata = attachResponsesRequestContextToResultForHttp({
-    entryEndpoint: args.entryEndpoint,
-    resultMetadata: args.resultMetadata,
-    requestContext: args.requestContext,
-  });
+  const nextMetadata = args.resultMetadata;
   if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
     return nextMetadata;
   }

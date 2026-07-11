@@ -119,7 +119,6 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 let buildResponsesPipelineMetadataForHttp: any;
 let planResponsesHandlerStreamForHttp: any;
 let buildResponsesConversationPortScopeForHttp: any;
-let attachResponsesRequestContextToResultForHttp: any;
 let finalizeResponsesPipelineResultForHttp: any;
 let MetadataCenter: any;
 let readRuntimeControlProjection: any;
@@ -130,7 +129,6 @@ beforeAll(async () => {
     buildResponsesPipelineMetadataForHttp,
     planResponsesHandlerStreamForHttp,
     buildResponsesConversationPortScopeForHttp,
-    attachResponsesRequestContextToResultForHttp,
     finalizeResponsesPipelineResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
   runtimeIntegrations = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
@@ -234,7 +232,9 @@ describe('responses-request-bridge metadata center projection', () => {
     });
   });
 
-  it('does not write response-side request context attachment into metadata center', () => {
+  it('does not write response-side request context attachment into metadata center during finalize', async () => {
+    runtimeIntegrations.captureResponsesRequestContextForRequest.mockClear();
+    runtimeIntegrations.recordResponsesResponseForRequest.mockClear();
     const requestContext = {
       payload: { model: 'gpt-5.4', input: [] },
       context: { input: [] },
@@ -242,8 +242,10 @@ describe('responses-request-bridge metadata center projection', () => {
       conversationId: 'conv-resp-2'
     };
 
-    const nextMetadata = attachResponsesRequestContextToResultForHttp({
+    const nextMetadata = await finalizeResponsesPipelineResultForHttp({
       entryEndpoint: '/v1/responses',
+      requestId: 'req-no-context-attach',
+      body: { id: 'resp-no-context-attach', status: 'completed' },
       resultMetadata: {},
       requestContext
     });
@@ -251,6 +253,8 @@ describe('responses-request-bridge metadata center projection', () => {
     const center = MetadataCenter.read(nextMetadata);
     expect(center).toBeUndefined();
     expect(nextMetadata?.responsesRequestContext).toBeUndefined();
+    expect(runtimeIntegrations.captureResponsesRequestContextForRequest).not.toHaveBeenCalled();
+    expect(runtimeIntegrations.recordResponsesResponseForRequest).not.toHaveBeenCalled();
   });
 
   it('does not let handler finalize overwrite router-direct continuation state', async () => {
