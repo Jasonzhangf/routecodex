@@ -43,7 +43,6 @@ for (const forbidden of [
 }
 
 for (const expected of [
-  'evaluateResponsesDirectRouteDecisionNative',
   'evaluate_responses_direct_route_decision_json',
   'has_declared_apply_patch_tool_json',
 ]) {
@@ -58,8 +57,8 @@ if (directSource.includes('evaluateResponsesDirectRouteDecisionNative') || direc
 if (bridgeSource.includes('hasDeclaredApplyPatchToolNative')) {
   failures.push('host native exports must not mirror hasDeclaredApplyPatchToolNative; use Rust NAPI hasDeclaredApplyPatchToolJson directly');
 }
-if (!bridgeSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
-  failures.push('host native exports must expose evaluateResponsesDirectRouteDecisionNative');
+if (bridgeSource.includes('evaluateResponsesDirectRouteDecisionNative')) {
+  failures.push('host native exports must not mirror evaluateResponsesDirectRouteDecisionNative; use Rust NAPI evaluateResponsesDirectRouteDecisionJson directly');
 }
 if (!rustSource.includes('has_declared_apply_patch_tool_json')) {
   failures.push('Rust NAPI must export has_declared_apply_patch_tool_json');
@@ -69,6 +68,9 @@ if (!requiredExportsSource.includes('hasDeclaredApplyPatchToolJson')) {
 }
 if (!rustSource.includes('evaluate_responses_direct_route_decision_json')) {
   failures.push('Rust NAPI must export evaluate_responses_direct_route_decision_json');
+}
+if (!requiredExportsSource.includes('evaluateResponsesDirectRouteDecisionJson')) {
+  failures.push('required native exports must retain evaluateResponsesDirectRouteDecisionJson');
 }
 
 if (failures.length > 0) {

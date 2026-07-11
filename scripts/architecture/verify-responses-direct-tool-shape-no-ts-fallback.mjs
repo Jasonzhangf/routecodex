@@ -93,6 +93,9 @@ for (const forbidden of [
 if (nativeExports.includes('normalizeResponsesInputItemsForProviderWireNative')) {
   failures.push('native bridge must not expose a provider-wire Responses input normalizer for direct send');
 }
+if (nativeExports.includes('evaluateResponsesDirectRouteDecisionNative')) {
+  failures.push('native bridge must not expose evaluateResponsesDirectRouteDecisionNative host mirror');
+}
 
 if (failures.length > 0) {
   console.error('[verify:responses-direct-tool-shape-no-ts-fallback] failed');

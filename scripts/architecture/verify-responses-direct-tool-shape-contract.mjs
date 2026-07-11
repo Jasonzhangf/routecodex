@@ -58,6 +58,14 @@ if (responsesProvider.includes('assertNativeResponsesDirectContractAvailable')) 
   failures.push('responses-provider must not runtime-call direct protocol validator projector');
 }
 
+const nativeExports = read('src/modules/llmswitch/bridge/native-exports.ts');
+if (nativeExports.includes('evaluateResponsesDirectRouteDecisionNative')) {
+  failures.push('host native exports must not mirror evaluateResponsesDirectRouteDecisionNative');
+}
+if (!rustValidator.includes('evaluate_responses_direct_route_decision_json')) {
+  failures.push('Rust direct route decision export must remain available');
+}
+
 if (!ciJest.includes('tests/server/runtime/http-server/direct-passthrough-payload.spec.ts')) {
   failures.push('ci-jest must include tests/server/runtime/http-server/direct-passthrough-payload.spec.ts');
 }

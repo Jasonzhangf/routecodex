@@ -194,7 +194,6 @@ const createNativeExportsMock = () => ({
   }),
   convertResponsesRequestToChatNative: jest.fn((input: unknown) => input),
   normalizeResponsesDirectCurrentRequestPayload: jest.fn((input: unknown) => input),
-  evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ providerWireValid: true, requiresHubRelay: false })),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,

@@ -459,7 +459,7 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 ### 2026-07-11 request executor shared bridge mock consumer removed
 
 - `tests/server/runtime/http-server/request-executor.spec.ts` no longer imports `tests/helpers/bridge-http-server-mock.ts`.
-- The single request-executor bridge mock site now uses a file-local minimal mock exposing only `evaluateResponsesDirectRouteDecisionNative`, which is the only symbol required by the tested direct-payload contract branch.
+- The single request-executor bridge mock site now uses a file-local minimal mock; the former `evaluateResponsesDirectRouteDecisionNative` host wrapper is no longer required by active runtime code.
 - This removes one external consumer of the legacy helper APIs `importCoreDist`, `requireCoreDist`, `resolveImplForSubpath`, and `resolveBaseDir` without adding a new TS semantic owner.
 - Remaining `createBridgeHttpServerMock(...)` consumers are the submit-tool-outputs responses-provider regression and the SSE projection-timeout blackbox suite; both require dedicated contract review before migration.
 

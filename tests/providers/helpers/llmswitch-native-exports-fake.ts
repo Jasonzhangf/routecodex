@@ -148,7 +148,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
       failures: [],
       toolMessages: [],
     }),
-    evaluateResponsesDirectRouteDecisionNative: () => ({}),
     evaluateSingletonRoutePoolExhaustionNative: () => ({}),
     extractSessionIdentifiersFromMetadataNative: (metadata: AnyRecord = {}) => ({
       sessionId: metadata.sessionId ?? metadata.session_id,

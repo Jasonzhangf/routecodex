@@ -80,7 +80,6 @@ const createNativeExportsMock = () => ({
     failures: [],
     toolMessages: [],
   })),
-  evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,

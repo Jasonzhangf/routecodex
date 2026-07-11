@@ -498,7 +498,6 @@ const mockNativeExportsModule = () => ({
   detectToolExecutionFailuresNative: jest.fn(() => []),
   buildAnthropicResponseFromChatJson: jest.fn(),
   convertResponsesRequestToChatNative: jest.fn(),
-  evaluateResponsesDirectRouteDecisionNative: jest.fn(),
   injectMcpToolsForChatJson: jest.fn(),
   injectMcpToolsForResponsesJson: jest.fn(),
   mapChatToolsToBridgeJson: jest.fn(),

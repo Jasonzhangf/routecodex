@@ -778,31 +778,6 @@ export function convertResponsesRequestToChatNative(
   return assertNativeObject('runResponsesOpenaiRequestCodecJson', parsed);
 }
 
-export function evaluateResponsesDirectRouteDecisionNative(input: {
-  payload: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  inboundProtocol: string;
-  applyPatchMode?: string;
-}): {
-  providerWireValid: boolean;
-  requiresHubRelay: boolean;
-  reason?: string;
-  hasDeclaredApplyPatchTool?: boolean;
-} {
-  const parsed = invokeRouterHotpathJsonCapability('evaluateResponsesDirectRouteDecisionJson', [
-    input.payload ?? {},
-    input.metadata ?? {},
-    input.inboundProtocol ?? '',
-    input.applyPatchMode ?? '',
-  ]);
-  return assertNativeObject('evaluateResponsesDirectRouteDecisionJson', parsed) as {
-    providerWireValid: boolean;
-    requiresHubRelay: boolean;
-    reason?: string;
-    hasDeclaredApplyPatchTool?: boolean;
-  };
-}
-
 export function buildResponsesPayloadFromChatNative(
   payload: unknown,
   context?: Record<string, unknown>
