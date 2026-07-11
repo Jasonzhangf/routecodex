@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-import { resolveRccSnapshotsDirNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { resolveRccSnapshotsDirWithNative } from '../sharedmodule/helpers/config-direct-native.js';
 
 type EnvSnapshot = Record<
   'RCC_HOME' | 'ROUTECODEX_USER_DIR' | 'ROUTECODEX_HOME' | 'RCC_SNAPSHOT_DIR' | 'ROUTECODEX_SNAPSHOT_DIR',
@@ -58,17 +58,17 @@ describe('user data snapshots rust parity', () => {
   it('matches pre-wire snapshot env precedence', () => {
     process.env.RCC_SNAPSHOT_DIR = ' samples-a ';
     process.env.ROUTECODEX_SNAPSHOT_DIR = 'samples-b';
-    expect(resolveRccSnapshotsDirNativeSync('/tmp/rcc-home')).toBe(legacyResolve('/tmp/rcc-home'));
+    expect(resolveRccSnapshotsDirWithNative('/tmp/rcc-home')).toBe(legacyResolve('/tmp/rcc-home'));
   });
 
   it('matches pre-wire default snapshot path under rcc user dir', () => {
     process.env.RCC_HOME = '/tmp/rcc-home/.rcc';
-    expect(resolveRccSnapshotsDirNativeSync('/tmp/rcc-home')).toBe(legacyResolve('/tmp/rcc-home'));
+    expect(resolveRccSnapshotsDirWithNative('/tmp/rcc-home')).toBe(legacyResolve('/tmp/rcc-home'));
   });
 
   it('matches pre-wire retired snapshot rejection', () => {
     process.env.RCC_SNAPSHOT_DIR = '/tmp/rcc-home/.routecodex/codex-samples';
     expect(() => legacyResolve('/tmp/rcc-home')).toThrow('retired ~/.routecodex/codex-samples');
-    expect(() => resolveRccSnapshotsDirNativeSync('/tmp/rcc-home')).toThrow('retired ~/.routecodex/codex-samples');
+    expect(() => resolveRccSnapshotsDirWithNative('/tmp/rcc-home')).toThrow('retired ~/.routecodex/codex-samples');
   });
 });

@@ -1,9 +1,9 @@
 import path from 'node:path';
 
 import {
-  detectRouteCodexProviderConfigFormatSync,
-  detectRouteCodexUserConfigFormatSync,
-} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+  detectRouteCodexProviderConfigFormatWithNative,
+  detectRouteCodexUserConfigFormatWithNative,
+} from '../sharedmodule/helpers/config-direct-native.js';
 
 function legacyDetectUserConfigFormat(configPath: string): 'toml' {
   const ext = path.extname(configPath).trim().toLowerCase();
@@ -26,7 +26,7 @@ describe('config format detect rust parity', () => {
     ['/tmp/routecodex/config.TOML'],
     ['  /tmp/routecodex/config.toml  '],
   ])('matches pre-wire user TOML detection for %s', (configPath) => {
-    expect(detectRouteCodexUserConfigFormatSync(configPath)).toBe(legacyDetectUserConfigFormat(configPath));
+    expect(detectRouteCodexUserConfigFormatWithNative(configPath)).toBe(legacyDetectUserConfigFormat(configPath));
   });
 
   it.each([
@@ -34,7 +34,7 @@ describe('config format detect rust parity', () => {
     ['/tmp/provider/config.v2.TOML'],
     ['  /tmp/provider/config.v2.toml  '],
   ])('matches pre-wire provider TOML detection for %s', (configPath) => {
-    expect(detectRouteCodexProviderConfigFormatSync(configPath)).toBe(legacyDetectProviderConfigFormat(configPath));
+    expect(detectRouteCodexProviderConfigFormatWithNative(configPath)).toBe(legacyDetectProviderConfigFormat(configPath));
   });
 
   it.each([
@@ -43,7 +43,7 @@ describe('config format detect rust parity', () => {
     ['config.toml.bak'],
   ])('matches pre-wire user rejection for %s', (configPath) => {
     expect(() => legacyDetectUserConfigFormat(configPath)).toThrow('user config JSON support removed');
-    expect(() => detectRouteCodexUserConfigFormatSync(configPath)).toThrow('user config JSON support removed');
+    expect(() => detectRouteCodexUserConfigFormatWithNative(configPath)).toThrow('user config JSON support removed');
   });
 
   it.each([
@@ -52,6 +52,6 @@ describe('config format detect rust parity', () => {
     ['config.v2.toml.bak'],
   ])('matches pre-wire provider rejection for %s', (configPath) => {
     expect(() => legacyDetectProviderConfigFormat(configPath)).toThrow('provider config JSON support removed');
-    expect(() => detectRouteCodexProviderConfigFormatSync(configPath)).toThrow('provider config JSON support removed');
+    expect(() => detectRouteCodexProviderConfigFormatWithNative(configPath)).toThrow('provider config JSON support removed');
   });
 });
