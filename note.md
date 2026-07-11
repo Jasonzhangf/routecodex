@@ -28869,3 +28869,10 @@ Pure Rust NAPI candidates:
 - Change: physically deleted `tests/mocks/core-loader.ts`; it only exported empty `loadCoreModule` / `initializeModule` stubs and had no active importer.
 - Evidence: exact source scan excluding the deleted path found zero refs for `tests/mocks/core-loader`, `mocks/core-loader`, `loadCoreModule`, or `initializeModule`; strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, and `verify:architecture-thin-wrapper-only` all passed.
 - Non-target blocker: `verify:function-map-compile-gate` and `build:base` currently stop on an existing dirty Rust change that adds `shouldManageResponsesConversationForHttpJson` under a forbidden path; this deletion did not enter runtime build/live closure.
+
+# 2026-07-11: snapshot recorder tool-failure helper export narrowed
+
+- Scope: continue llmswitch host bridge surface closeout inside active snapshot recorder IO bridge.
+- Change: `classifyApplyPatchVerificationFailure` in `snapshot-recorder-tool-failures.ts` is now file-private; it had no external consumers and is only used by `classifyRuntimeErrorSignalFromText`.
+- Evidence: exact ref scan found only definition + same-file call; `npm run jest:run -- --runTestsByPath tests/sharedmodule/snapshot-recorder-native-plan.spec.ts` passed; `verify:architecture-snapshot-stage-contract`, `verify:architecture-snapshot-stage-owners`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `npx tsc --noEmit`, and touched-file `git diff --check` passed.
+- Non-target blockers observed: raw `npx jest` is wrong for this ESM/top-level-await test; `npm test -- ...` runs routing-instructions first and currently fails unrelated suites (`stopless-direct-mode-guard`, `stop-schema-lifecycle-contract`, `request-executor.single-attempt`, `daemon-admin.e2e`).

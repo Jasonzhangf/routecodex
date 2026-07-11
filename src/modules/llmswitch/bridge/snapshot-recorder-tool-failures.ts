@@ -24,7 +24,7 @@ function clipText(input: string, max = 320): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-export function classifyApplyPatchVerificationFailure(content: string): { errorType: string; matchedText: string } {
+function classifyApplyPatchVerificationFailure(content: string): { errorType: string; matchedText: string } {
   const raw = String(content || '');
   const lower = raw.toLowerCase();
   const invalidHeaderTokenMatch = raw.match(
