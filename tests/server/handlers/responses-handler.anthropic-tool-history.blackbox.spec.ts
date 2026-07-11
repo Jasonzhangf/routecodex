@@ -17,7 +17,7 @@ import {
   buildMetadataCenterTransportSnapshot,
   writeMetadataCenterSlot
 } from '../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
+import { DirectNativeHubPipelineTestWrapper as HubPipeline } from '../../sharedmodule/helpers/hub-pipeline-handle-direct-native.js';
 
 const TEST_RUNTIME_CONTROL_WRITER = {
   module: 'tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts',

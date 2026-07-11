@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
+import { DirectNativeHubPipelineTestWrapper as HubPipeline } from '../../sharedmodule/helpers/hub-pipeline-handle-direct-native.js';
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
