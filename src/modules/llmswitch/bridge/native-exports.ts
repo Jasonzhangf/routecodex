@@ -8,8 +8,9 @@
 // canonical_builders: evaluate_responses_direct_route_decision_json, has_declared_apply_patch_tool_json
 
 import path from 'node:path';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { resolveCorePackageDir } from '../core-loader.js';
+import { pathToFileURL } from 'node:url';
 
 type AnyRecord = Record<string, unknown>;
 type ToolExecutionFailureSignal = {
@@ -45,6 +46,139 @@ type NativeFailurePolicyModule = {
     reason: string;
   };
 };
+
+const BUILTIN_SHARED_MODULE_REL = path.join('sharedmodule', 'llmswitch-core');
+const PACKAGE_CANDIDATES = [
+  BUILTIN_SHARED_MODULE_REL,
+  path.join('node_modules', 'rcc-llmswitch-core'),
+];
+const CORE_DIST_PROBE_REL = path.join('native', 'servertool-wrapper.js');
+
+let corePackageDir: string | null = null;
+
+function getImportMetaUrlUnsafe(): string | undefined {
+  try {
+    return Function('return import.meta.url')() as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveNativeExportsModulePath(): string {
+  const metaUrl = getImportMetaUrlUnsafe();
+  if (typeof metaUrl === 'string' && metaUrl.length > 0) {
+    try {
+      return new URL(metaUrl).pathname;
+    } catch {
+      // continue to stack / cwd resolution
+    }
+  }
+  if (typeof __filename === 'string' && __filename.length > 0) {
+    return __filename;
+  }
+
+  const stack = String(new Error().stack || '');
+  for (const line of stack.split('\n')) {
+    const match = line.match(/(file:\/\/[^\s)]+native-exports\.(?:ts|js)|\/[^\s)]+native-exports\.(?:ts|js))/);
+    if (!match) {
+      continue;
+    }
+    const rawPath = match[1];
+    if (rawPath.startsWith('file://')) {
+      try {
+        return decodeURIComponent(new URL(rawPath).pathname);
+      } catch {
+        continue;
+      }
+    }
+    return rawPath;
+  }
+
+  return path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts');
+}
+
+function findPackageRootFromEntry(entryPath: string): string | null {
+  let current = path.dirname(entryPath);
+  while (true) {
+    const pkgJson = path.join(current, 'package.json');
+    if (fs.existsSync(pkgJson)) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function tryResolvePackageRootViaRequire(packageName: string, baseUrl: string): string | null {
+  try {
+    const require = createRequire(baseUrl);
+    const entry = require.resolve(packageName);
+    return findPackageRootFromEntry(entry);
+  } catch {
+    return null;
+  }
+}
+
+function resolveCorePackageDir(): string {
+  if (corePackageDir) {
+    return corePackageDir;
+  }
+
+  const moduleDir = path.dirname(resolveNativeExportsModulePath());
+  const builtinCandidates = [
+    path.resolve(moduleDir, '..', '..', '..', '..', BUILTIN_SHARED_MODULE_REL),
+    path.resolve(process.cwd(), BUILTIN_SHARED_MODULE_REL),
+  ];
+  for (const builtinDir of builtinCandidates) {
+    const distDir = path.join(builtinDir, 'dist');
+    if (fs.existsSync(distDir) && fs.existsSync(path.join(distDir, CORE_DIST_PROBE_REL))) {
+      corePackageDir = builtinDir;
+      return builtinDir;
+    }
+  }
+
+  const baseUrls = [
+    pathToFileURL(path.join(path.dirname(resolveNativeExportsModulePath()), 'package.json')).href,
+    pathToFileURL(path.join(process.cwd(), 'package.json')).href,
+  ];
+  for (const baseUrl of baseUrls) {
+    const root = tryResolvePackageRootViaRequire('rcc-llmswitch-core', baseUrl);
+    if (root) {
+      corePackageDir = root;
+      return root;
+    }
+  }
+
+  const startDirs = [
+    path.dirname(resolveNativeExportsModulePath()),
+    process.cwd(),
+  ];
+  for (const startDir of startDirs) {
+    let currentDir = startDir;
+    while (true) {
+      for (const pkgPath of PACKAGE_CANDIDATES) {
+        const candidate = path.join(currentDir, pkgPath);
+        if (fs.existsSync(candidate)) {
+          corePackageDir = candidate;
+          return candidate;
+        }
+      }
+      const parent = path.dirname(currentDir);
+      if (parent === currentDir) {
+        break;
+      }
+      currentDir = parent;
+    }
+  }
+
+  const targets = PACKAGE_CANDIDATES.map((pkg) => path.join('<project>', pkg)).join(' 或 ');
+  throw new Error(
+    `[llmswitch-core-loader] 无法定位 llmswitch 核心库，请执行 npm install 以确保 ${targets} 存在。`
+  );
+}
 
 type NativeChatProcessNodeResultSemantics = {
   deriveFinishReasonJson?: (bodyJson: string) => string;

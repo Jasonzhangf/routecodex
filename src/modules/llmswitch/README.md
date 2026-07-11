@@ -10,8 +10,8 @@ semantics belong to Rust/native owners under
 
 - `bridge/*.ts`: thin host IO, native binding, routing, snapshot, SSE, and
   continuation store shells.
-- `core-loader.ts`: package/dist path resolution for explicit llmswitch-core
-  dist modules when a remaining approved loader path needs it.
+- `bridge/native-exports.ts`: package/dist path resolution and explicit
+  llmswitch-core native binding loading.
 
 The broad `bridge.ts` and `bridge/index.ts` barrels are retired. Server/runtime
 callers must import the concrete leaf bridge module they own.

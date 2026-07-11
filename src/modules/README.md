@@ -32,7 +32,7 @@ src/modules/
 
 重点文件：
 - `llmswitch/bridge/*.ts`：Host IO / native binding / routing / snapshot / continuation 薄壳。
-- `llmswitch/core-loader.ts`：负责加载 `rcc-llmswitch-core`（symlink 或 npm 版本）。
+- `llmswitch/bridge/native-exports.ts`：负责加载 `rcc-llmswitch-core` native binding。
 - `config/pipeline-config-path.ts`：解析 `LLMSWITCH_PIPELINE_CONFIG` 等路径配置。
 
 ## Hub Pipeline 接入示例
