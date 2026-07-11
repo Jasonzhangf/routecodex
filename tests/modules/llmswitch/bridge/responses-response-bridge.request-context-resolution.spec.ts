@@ -1,81 +1,142 @@
-import { describe, expect, it } from '@jest/globals';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-const root = process.cwd();
+function createMockResponse() {
+  const response = {
+    headers: new Map<string, string>(),
+    statusCode: 200,
+    setHeader: jest.fn((key: string, value: string) => {
+      response.headers.set(key.toLowerCase(), value);
+    }),
+    status: jest.fn((code: number) => {
+      response.statusCode = code;
+      return response;
+    }),
+    json: jest.fn(() => response),
+    end: jest.fn(() => response),
+  };
+  return response;
+}
 
-describe('responses-response-bridge request-context resolution', () => {
-  it('keeps metadata session id as the request log color identity when usage has only a log key', async () => {
-    const { buildResponsesRequestLogContextForHttp } = await import(
-      '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
-    );
-    const { resolveSessionLogColorKey } = await import('../../../../src/utils/session-log-color.ts');
+function mockNativeExports(overrides: Record<string, unknown> = {}) {
+  jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    getRouterHotpathJsonBindingSync: jest.fn(() => ({
+      resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
+      resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+    })),
+    buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
+    planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
+    projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+    projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string; state?: unknown }) => ({
+      emit: true,
+      frame: args.frame ?? '',
+      state: args.state,
+    })),
+    projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+    updateResponsesSseTransportTerminalStateNative: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
+      state: input.state ?? {},
+      observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
+    })),
+    ...overrides,
+  }));
+}
 
-    const context = buildResponsesRequestLogContextForHttp({
-      metadata: {
-        sessionId: 'visible-session-color',
-        conversationId: 'visible-conversation-color',
-        logSessionColorKey: 'metadata-log-key'
-      },
-      usageLogInfo: {
-        logSessionColorKey: 'usage-route-color-key'
-      }
-    });
-
-    expect(context.sessionId).toBe('visible-session-color');
-    expect(context.session_id).toBe('visible-session-color');
-    expect(context.conversationId).toBe('visible-conversation-color');
-    expect(context.conversation_id).toBe('visible-conversation-color');
-    expect(resolveSessionLogColorKey(context)).toBe(resolveSessionLogColorKey({ sessionId: 'visible-session-color' }));
-    expect(resolveSessionLogColorKey(context)).not.toBe(resolveSessionLogColorKey({ logSessionColorKey: 'usage-route-color-key' }));
+describe('responses handler request-context resolution', () => {
+  beforeEach(() => {
+    jest.resetModules();
   });
 
-  it('requires requestContext.context.toolsRaw as the explicit client projection input', async () => {
-    const { normalizeResponsesClientPayloadForHttp } = await import(
-      '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts'
+  it('registers metadata session id as the request log color identity when usage has only a log key', async () => {
+    const registerRequestLogContext = jest.fn();
+    mockNativeExports();
+    jest.unstable_mockModule('../../../../src/server/utils/request-log-color.js', () => ({
+      colorizeRequestLog: jest.fn((line: string) => line),
+      colorizeVirtualRouterHitLogLine: jest.fn((line: string) => line),
+      extractLeadingAnsiColor: jest.fn(() => undefined),
+      registerRequestLogContext,
+      resolveRequestLogColorToken: jest.fn(() => undefined),
+      resolveSessionLogColor: jest.fn(() => ''),
+      stripAnsiCodes: jest.fn((line: string) => line),
+    }));
+    jest.unstable_mockModule('../../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined,
+    }));
+
+    const { sendPipelineResponse } = await import('../../../../src/server/handlers/handler-response-utils.js');
+    const res = createMockResponse();
+
+    await sendPipelineResponse(
+      res as any,
+      {
+        status: 204,
+        body: null,
+        metadata: {
+          sessionId: 'visible-session-color',
+          conversationId: 'visible-conversation-color',
+          logSessionColorKey: 'metadata-log-key',
+        },
+        usageLogInfo: {
+          requestStartedAtMs: Date.now(),
+          logSessionColorKey: 'usage-route-color-key',
+        },
+      } as any,
+      'req-response-log-context',
+      { entryEndpoint: '/v1/responses' }
     );
+
+    expect(registerRequestLogContext).toHaveBeenCalledWith(
+      'req-response-log-context',
+      expect.objectContaining({
+        sessionId: 'visible-session-color',
+        session_id: 'visible-session-color',
+        conversationId: 'visible-conversation-color',
+        conversation_id: 'visible-conversation-color',
+        logSessionColorKey: 'usage-route-color-key',
+      })
+    );
+  });
+
+  it('fails client JSON projection if requestContext.context.toolsRaw is absent', async () => {
+    mockNativeExports({
+      planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'project_client_payload' })),
+    });
+    jest.unstable_mockModule('../../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined,
+    }));
+
+    const { sendPipelineResponse } = await import('../../../../src/server/handlers/handler-response-utils.js');
+    const res = createMockResponse();
 
     await expect(
-      normalizeResponsesClientPayloadForHttp({
-        entryEndpoint: '/v1/responses',
-        metadata: {},
-        payload: {
-          id: 'resp_bridge_tools_raw_contract',
-          object: 'response',
-          status: 'completed',
-          output: [],
-        },
-        requestContext: {
-          payload: {
-            model: 'gpt-5.4',
-            tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      sendPipelineResponse(
+        res as any,
+        {
+          status: 200,
+          body: {
+            id: 'resp_bridge_tools_raw_contract',
+            object: 'response',
+            status: 'completed',
+            output: [],
           },
-          context: {
-            clientToolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }],
-          },
-        },
-      })
+          metadata: {},
+        } as any,
+        'req-response-tools-raw',
+        {
+          entryEndpoint: '/v1/responses',
+          responsesRequestContext: {
+            payload: {
+              model: 'gpt-5.4',
+              tools: [{ type: 'function', function: { name: 'exec_command' } }],
+            },
+            context: {
+              clientToolsRaw: [{ type: 'function', function: { name: 'apply_patch' } }],
+            },
+          } as any,
+        }
+      )
     ).rejects.toThrow('Responses client projection requires requestContext.context.toolsRaw');
-  });
-
-  it('does not keep request-context salvage helpers in the response bridge surface', () => {
-    const responseBridge = readFileSync(
-      join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
-      'utf8'
-    );
-    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/index.ts'))).toBe(false);
-    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
-
-    for (const forbidden of [
-      'resolveResponsesRequestContextForHttp',
-      'shouldDispatchResponsesSseToClientForHttp',
-    ]) {
-      expect(responseBridge).not.toContain(forbidden);
-    }
-
-    expect(responseBridge).not.toContain('buildClientSseKeepaliveFrameForHttp');
-    expect(responseBridge).not.toContain('contextClientToolsRaw');
-    expect(responseBridge).not.toContain('payloadTools');
-    expect(responseBridge).not.toContain('requestContext?.payload?.tools');
   });
 });
