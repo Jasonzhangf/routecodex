@@ -12,15 +12,16 @@ const __resetFinalizeMock = () => {
 };
 
 const mockBridgeModule = async () => ({
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+    resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
+    resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+  })),
+  projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
   buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
-  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({
-    pendingApplyPatchArgumentDeltas: {},
-    applyPatchCallIds: [],
-    emittedApplyPatchDoneCallIds: [],
-  })),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,
@@ -491,7 +492,7 @@ const mockBridgeModule = async () => ({
     return mod.buildResponsesPayloadFromChat(body, { requestId: requestLabel });
   }),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => frame),
-  projectResponsesSseFrameForClientForHttp: jest.fn(({ frame, state }: { frame: string; state?: unknown }) => ({ emit: true, frame, state })),
+  projectResponsesSseFrameForClientNative: jest.fn(({ frame, state }: { frame: string; state?: unknown }) => ({ emit: true, frame, state })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
@@ -509,13 +510,13 @@ const mockBridgeModule = async () => ({
   }),
   resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => 'openai-responses'),
   summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
-  updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
+  updateResponsesSseTransportTerminalStateNative: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
     state: input.state ?? {},
     observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
   })),
 });
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__stream_log_finish_reason',
@@ -555,7 +556,7 @@ async function loadSendPipelineResponse() {
 }
 
 async function loadNormalizeResponsesJsonBodyForHttp() {
-  const mod = await import('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js');
+  const mod = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
   return mod.normalizeResponsesJsonBodyForHttp;
 }
 

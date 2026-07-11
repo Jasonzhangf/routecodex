@@ -139,7 +139,7 @@ Round 3 loop guard:
 | request entry evidence capture wrong | `HubReqInbound02Standardized` / native req-inbound capture | handler-local continuation patch |
 | continuation save/restore wrong | Chat Process continuation boundary / canonical store owner | SSE, resp_outbound, req_inbound history rewrite |
 | provider raw SSE/body parse wrong | `ProviderRespInbound01Raw -> HubRespInbound02Parsed` Rust owner | handler/SSE frame repair |
-| client JSON/SSE projection wrong | Rust response projection owner before server frame | `handler-response-sse.ts` / `responses-sse-bridge.ts` business patch |
+| client JSON/SSE projection wrong | Rust response projection owner before server frame | `handler-response-sse.ts` business patch or restoring `responses-sse-bridge.ts` |
 | tool/history/stopless semantics wrong | request/response Chat Process governance | continuation store mutation |
 | control state missing | MetadataCenter owner / runtime-control family | payload/history/provider body field injection |
 

@@ -63,24 +63,19 @@ describe('responses-response-bridge request-context resolution', () => {
       join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
       'utf8'
     );
-    const sseBridge = readFileSync(
-      join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'),
-      'utf8'
-    );
     expect(existsSync(join(root, 'src/modules/llmswitch/bridge/index.ts'))).toBe(false);
+    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
 
     for (const forbidden of [
       'resolveResponsesRequestContextForHttp',
       'shouldDispatchResponsesSseToClientForHttp',
     ]) {
       expect(responseBridge).not.toContain(forbidden);
-      expect(sseBridge).not.toContain(forbidden);
     }
 
     expect(responseBridge).not.toContain('buildClientSseKeepaliveFrameForHttp');
     expect(responseBridge).not.toContain('contextClientToolsRaw');
     expect(responseBridge).not.toContain('payloadTools');
     expect(responseBridge).not.toContain('requestContext?.payload?.tools');
-    expect(sseBridge).toContain('buildClientSseKeepaliveFrameForHttp');
   });
 });

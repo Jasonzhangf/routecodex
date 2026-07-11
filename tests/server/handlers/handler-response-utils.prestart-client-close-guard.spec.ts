@@ -6,19 +6,20 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-respon
   prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(() => ({ mode: 'json' })),
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => ({
-  buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
-  createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({
-    pendingApplyPatchArgumentDeltas: {},
-    applyPatchCallIds: [],
-    emittedApplyPatchDoneCallIds: [],
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+    resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
+    resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
-  projectResponsesSseFrameForClientForHttp: jest.fn((input: { frame: string; state: unknown }) => ({
+  projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+  projectResponsesSseFrameForClientNative: jest.fn((input: { frame: string; state: unknown }) => ({
     emit: true,
     frame: input.frame,
     state: input.state,
   })),
-  updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: {
+  updateResponsesSseTransportTerminalStateNative: jest.fn((input: {
     chunk: unknown;
     state: Record<string, unknown> | undefined;
   }) => {

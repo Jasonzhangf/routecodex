@@ -43,25 +43,30 @@ function createLocalResponseBridgeMock(overrides: BridgeOverrides = {}): BridgeO
   };
 }
 
-function createLocalSseBridgeMock(overrides: BridgeOverrides = {}): BridgeOverrides {
+function createLocalNativeExportsMock(overrides: BridgeOverrides = {}): BridgeOverrides {
   return {
-    buildClientSseKeepaliveFrameForHttp: jest.fn(() => ': keepalive\n\n'),
-    createResponsesSseClientProjectionStateForHttp: jest.fn(createProjectionState),
-    projectResponsesSseFrameForClientForHttp: jest.fn((input: { frame?: string; state?: unknown }) => ({
+    getRouterHotpathJsonBindingSync: jest.fn(() => ({
+      resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
+      resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+    })),
+    projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+    projectResponsesSseFrameForClientNative: jest.fn((input: { frame?: string; state?: unknown }) => ({
       emit: true,
       frame: input.frame ?? '',
       state: input.state,
     })),
-    updateResponsesSseTransportTerminalStateForHttp: jest.fn(updateTerminalStateFromFrame),
+    updateResponsesSseTransportTerminalStateNative: jest.fn(updateTerminalStateFromFrame),
     ...overrides,
   };
 }
 
 function mockBridgeModules(overrides: BridgeOverrides = {}): void {
   const responseBridge = createLocalResponseBridgeMock(overrides);
-  const sseBridge = createLocalSseBridgeMock(overrides);
+  const nativeExports = createLocalNativeExportsMock(overrides);
   jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => responseBridge);
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => sseBridge);
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => nativeExports);
 }
 
 function parseSseEvents(text: string): Array<{ event?: string; data?: unknown }> {
@@ -234,7 +239,7 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('ends the client SSE response when projected frames never emit a terminal response', async () => {
     process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS = '120';
     mockBridgeModules({
-      projectResponsesSseFrameForClientForHttp: jest.fn((input: { state?: unknown }) => ({
+      projectResponsesSseFrameForClientNative: jest.fn((input: { state?: unknown }) => ({
         emit: false,
         frame: '',
         state: input.state,

@@ -5,6 +5,7 @@ const root = process.cwd();
 
 const staleHandlerProjectionSpec = 'tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts';
 const staleHandlerTerminalRepairSpec = 'tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts';
+const staleSseBridge = 'src/modules/llmswitch/bridge/responses-sse-bridge.ts';
 
 if (fs.existsSync(path.join(root, staleHandlerProjectionSpec))) {
   console.error('[verify:responses-handler-single-bridge-surface] failed');
@@ -15,6 +16,12 @@ if (fs.existsSync(path.join(root, staleHandlerProjectionSpec))) {
 if (fs.existsSync(path.join(root, staleHandlerTerminalRepairSpec))) {
   console.error('[verify:responses-handler-single-bridge-surface] failed');
   console.error(`- stale handler-side Responses terminal repair spec must stay deleted: ${staleHandlerTerminalRepairSpec}`);
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(root, staleSseBridge))) {
+  console.error('[verify:responses-handler-single-bridge-surface] failed');
+  console.error(`- duplicate SSE bridge facade must stay deleted: ${staleSseBridge}`);
   process.exit(1);
 }
 
@@ -105,18 +112,6 @@ const checks = [
     forbiddenTokens: [],
   },
   {
-    file: 'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-    forbiddenLocalTokens: [
-      'createResponsesJsonToSseConverterForHttp',
-      'createChatJsonToSseConverterForHttp',
-      'buildResponsesPayloadFromChatForHttp',
-      'prepareResponsesJsonBodyForSseBridgeForHttp',
-      'normalizeClientVisibleResponsesSseFrameForHttp(',
-      'response.required_action',
-    ],
-    forbiddenTokens: [],
-  },
-  {
     file: 'src/server/handlers/handler-response-utils.ts',
     allowedImport: '../../modules/llmswitch/bridge/responses-response-bridge.js',
     requiredImports: [
@@ -203,7 +198,7 @@ const checks = [
   },
   {
     file: 'src/server/handlers/handler-response-sse.ts',
-    allowedImport: '../../modules/llmswitch/bridge/responses-sse-bridge.js',
+    allowedImport: '../../modules/llmswitch/bridge/native-exports.js',
     requiredImports: [],
     forbiddenLocalTokens: [
       "from '../utils/finish-reason.js'",
@@ -233,6 +228,8 @@ const checks = [
       "'SSE stream ended before response.completed'",
       "'response.sse.stream.incomplete'",
       'shouldProjectClientSseFrame(parsed.eventName)',
+      'function projectResponsesSseFrameForClientForHttp(',
+      'function updateResponsesSseTransportTerminalStateForHttp(',
     ],
     forbiddenTokens: [],
   },
@@ -278,4 +275,4 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:responses-handler-single-bridge-surface] ok');
-console.log('- /v1/responses handler request/response layers use a single facade per side');
+console.log('- /v1/responses SSE transport has no duplicate TS bridge facade; Rust/NAPI remains semantic owner');

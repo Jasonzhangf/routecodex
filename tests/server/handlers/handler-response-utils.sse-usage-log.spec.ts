@@ -33,17 +33,22 @@ async function importHandlerWithUsageMock(logUsageSummary: ReturnType<typeof jes
       sanitizedBody: body
     })
   }));
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', () => ({
-    buildClientSseKeepaliveFrameForHttp: () => ': keepalive\n\n',
-    createResponsesSseClientProjectionStateForHttp: () => ({
-      pendingApplyPatchArgumentDeltas: {},
-      applyPatchCallIds: [],
-      emittedApplyPatchDoneCallIds: []
-    }),
-    projectResponsesSseFrameForClientForHttp: ({ frame, state }: any) => ({
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    getRouterHotpathJsonBindingSync: jest.fn(() => ({
+      resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
+      resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+      resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+    })),
+    projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+    projectResponsesSseFrameForClientNative: ({ frame, state }: any) => ({
       emit: true,
       frame,
       state
+    }),
+    updateResponsesSseTransportTerminalStateNative: (input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
+      state: input.state ?? {},
+      observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
     })
   }));
   jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

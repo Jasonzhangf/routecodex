@@ -26,7 +26,7 @@ Key owners:
 ## Main Rule
 
 - Rust owns client-visible Responses JSON body and SSE frame semantics.
-- TS server handler may only hold bridge / framing / transport shell.
+- TS server handler may only hold framing / transport shell; the duplicate `responses-sse-bridge.ts` facade is physically deleted.
 - JSON 与 SSE 对同一响应必须语义等价；不能一个通道保留 `required_action/tool_calls`，另一个 silently 丢失。
 
 ## Surface Flow
@@ -38,7 +38,7 @@ flowchart LR
   C --> D["HubRespChatProcess03Governed"]
   D --> E["hub.response_responses_client_projection<br/>project JSON body / SSE frame"]
   E --> F["server.responses_response_handler_bridge_surface<br/>sendPipelineResponse"]
-  E --> G["server.responses_sse_bridge_surface<br/>sendSsePipelineResponse / bridge facade"]
+  E --> G["server.responses_sse_bridge_surface<br/>sendSsePipelineResponse / handler transport facade"]
   F --> H["Client JSON"]
   G --> I["Client SSE"]
 ```
@@ -49,7 +49,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `hub.response_provider_sse_materialization` | provider raw stream -> parsed SSE/bodyText semantic materialization | `materialize_provider_response_sse_payload`, `build_provider_sse_stream_read_error_descriptor` | TS server/provider helper reimplementation |
 | `hub.response_responses_client_projection` | client-visible Responses JSON body and SSE frame projection | `project_responses_client_payload_for_client`, `project_responses_client_body_for_client`, `project_responses_sse_frame_for_client` | `provider-response-converter.ts` / shared old response utils duplicate semantics |
-| `server.responses_sse_bridge_surface` | SSE transport facade and single bridge surface | `src/modules/llmswitch/bridge/responses-sse-bridge.ts`, `src/server/handlers/handler-response-sse.ts` | TS protocol semantics growing back into handler |
+| `server.responses_sse_bridge_surface` | SSE transport facade with deleted duplicate bridge | `src/server/handlers/handler-response-sse.ts`, `src/modules/llmswitch/bridge/native-exports.ts` | TS protocol semantics growing back into handler or deleted bridge restored |
 | `server.responses_response_handler_bridge_surface` | final response lifecycle bridge for JSON/SSE dispatch | `sendPipelineResponse`, `sendSsePipelineResponse` mainline edge | second handler-local response protocol owner |
 
 ## JSON / SSE Equality Matrix
@@ -69,7 +69,7 @@ flowchart LR
 | --- | --- | --- |
 | `handler-response-sse.ts` | write frames, manage stream transport, hold opaque native state | rebuild `required_action`, repair tool-call ids, fallback to original frame on native failure |
 | `handler-response-utils.ts` | transport dispatch, internal-carrier assert, bridge handoff | parse metadata to patch response payload |
-| `responses-sse-bridge.ts` | single bridge facade | second protocol semantics owner |
+| `responses-sse-bridge.ts` | physically deleted duplicate facade | any restored runtime import |
 | Rust response projection owner | all client-visible Responses payload semantics | n/a |
 
 ## Gaps / Review Findings

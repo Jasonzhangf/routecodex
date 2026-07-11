@@ -145,7 +145,7 @@
         <h2>Main Rule</h2>
         <ul>
           <li>Rust owns client-visible Responses JSON body and SSE frame semantics.</li>
-          <li>TS server handler may only hold bridge / framing / transport shell.</li>
+          <li>TS server handler may only hold framing / transport shell; the duplicate <code>responses-sse-bridge.ts</code> facade is physically deleted.</li>
           <li>JSON 与 SSE 对同一响应必须语义等价；不能一个通道保留 <code>required_action/tool_calls</code>，另一个 silently 丢失。</li>
         </ul>
         <h2>Surface Flow</h2>
@@ -155,7 +155,7 @@
           C --&gt; D[&quot;HubRespChatProcess03Governed&quot;]
           D --&gt; E[&quot;hub.response_responses_client_projection&lt;br/&gt;project JSON body / SSE frame&quot;]
           E --&gt; F[&quot;server.responses_response_handler_bridge_surface&lt;br/&gt;sendPipelineResponse&quot;]
-          E --&gt; G[&quot;server.responses_sse_bridge_surface&lt;br/&gt;sendSsePipelineResponse / bridge facade&quot;]
+          E --&gt; G[&quot;server.responses_sse_bridge_surface&lt;br/&gt;sendSsePipelineResponse / handler transport facade&quot;]
           F --&gt; H[&quot;Client JSON&quot;]
           G --&gt; I[&quot;Client SSE&quot;]</pre>
         <h2>Owner Matrix</h2>
@@ -165,7 +165,7 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>hub.response_provider_sse_materialization</code></td><td>provider raw stream -&gt; parsed SSE/bodyText semantic materialization</td><td><code>materialize_provider_response_sse_payload</code>, <code>build_provider_sse_stream_read_error_descriptor</code></td><td>TS server/provider helper reimplementation</td></tr>
         <tr><td><code>hub.response_responses_client_projection</code></td><td>client-visible Responses JSON body and SSE frame projection</td><td><code>project_responses_client_payload_for_client</code>, <code>project_responses_client_body_for_client</code>, <code>project_responses_sse_frame_for_client</code></td><td><code>provider-response-converter.ts</code> / shared old response utils duplicate semantics</td></tr>
-        <tr><td><code>server.responses_sse_bridge_surface</code></td><td>SSE transport facade and single bridge surface</td><td><code>src/modules/llmswitch/bridge/responses-sse-bridge.ts</code>, <code>src/server/handlers/handler-response-sse.ts</code></td><td>TS protocol semantics growing back into handler</td></tr>
+        <tr><td><code>server.responses_sse_bridge_surface</code></td><td>SSE transport facade with deleted duplicate bridge</td><td><code>src/server/handlers/handler-response-sse.ts</code>, <code>src/modules/llmswitch/bridge/native-exports.ts</code></td><td>TS protocol semantics growing back into handler or deleted bridge restored</td></tr>
         <tr><td><code>server.responses_response_handler_bridge_surface</code></td><td>final response lifecycle bridge for JSON/SSE dispatch</td><td><code>sendPipelineResponse</code>, <code>sendSsePipelineResponse</code> mainline edge</td><td>second handler-local response protocol owner</td></tr>
         </tbody>
         </table>
@@ -189,7 +189,7 @@
         <tr><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>handler-response-sse.ts</code></td><td>write frames, manage stream transport, hold opaque native state</td><td>rebuild <code>required_action</code>, repair tool-call ids, fallback to original frame on native failure</td></tr>
         <tr><td><code>handler-response-utils.ts</code></td><td>transport dispatch, internal-carrier assert, bridge handoff</td><td>parse metadata to patch response payload</td></tr>
-        <tr><td><code>responses-sse-bridge.ts</code></td><td>single bridge facade</td><td>second protocol semantics owner</td></tr>
+        <tr><td><code>responses-sse-bridge.ts</code></td><td>physically deleted duplicate facade</td><td>any restored runtime import</td></tr>
         <tr><td>Rust response projection owner</td><td>all client-visible Responses payload semantics</td><td>n/a</td></tr>
         </tbody>
         </table>

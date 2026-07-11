@@ -29055,3 +29055,11 @@ Pure Rust NAPI candidates:
 - Red/green: added `direct SSE does not inherit provider-request dry-run from previous provider runtime metadata`; red before fix because `postStreamOrResponse` was not called, green after fix.
 - Verification PASS: focused red test, full `responses-provider.direct-passthrough` + `pipeline-dry-run` Jest suites, `npx tsc --noEmit --pretty false`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, `git diff --check`.
 - Not executed: no global install, managed restart, or live 5520 same-entry replay; live closure still requires installed build + in-session restart + old-sample/live SSE replay.
+
+# 2026-07-12: Responses SSE bridge facade deletion slice
+
+- Scope: continue host bridge external-reference contraction by deleting duplicate `src/modules/llmswitch/bridge/responses-sse-bridge.ts`.
+- Change: `src/server/handlers/handler-response-sse.ts` imports native SSE projection / terminal-state wrappers from `native-exports.ts` directly; local TS remains transport-only keepalive and opaque projection state seed.
+- Architecture/docs/gates updated so `server.responses_sse_bridge_surface` owner is handler transport facade plus Rust/NAPI projection, with `responses-sse-bridge.ts` listed only as a forbidden/restored path.
+- Test migration: handler SSE tests and red/static gates no longer mock/import the deleted SSE facade. The broad unified-semantics e2e file only retains deletion-required native SSE mock shape changes; unrelated temporary mock expansion was removed.
+- Boundary: this is source/gate closeout only; no global install/restart/live replay claimed for the SSE facade deletion.

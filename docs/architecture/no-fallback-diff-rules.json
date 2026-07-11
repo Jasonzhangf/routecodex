@@ -94,22 +94,6 @@
       "textContains": "JSON.stringify(input ?? {})"
     },
     {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
-      "textContains": "pendingApplyPatchArgumentDeltas = projected.state.pendingApplyPatchArgumentDeltas ?? {}"
-    },
-    {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
-      "textContains": "applyPatchCallIds = projected.state.applyPatchCallIds ?? []"
-    },
-    {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
-      "textContains": "emittedApplyPatchDoneCallIds = projected.state.emittedApplyPatchDoneCallIds ?? []"
-    },
-    {
-      "pathContains": "src/modules/llmswitch/bridge/responses-sse-bridge.ts",
-      "textContains": "return undefined;"
-    },
-    {
       "pathContains": "src/server/runtime/http-server/http-server-runtime-setup.ts",
       "textContains": "artifacts.runtime ?? {}"
     },

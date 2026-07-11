@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -7,19 +7,17 @@ const root = process.cwd();
 describe('server responses SSE business module contract', () => {
   it('keeps handler-response-sse transport-only and forbids SSE semantics in lifecycle bridge owners', () => {
     const handler = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
-    const bridge = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
     const responseLifecycleBridge = readFileSync(
       join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
       'utf8'
     );
 
-    expect(handler).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
-    expect(bridge).toContain('// feature_id: server.responses_sse_bridge_surface');
-    expect(bridge).toContain('projectResponsesSseFrameForClientNative');
-    expect(bridge).toContain('export function projectResponsesSseFrameForClientForHttp(');
-    expect(bridge).toContain('export function buildClientSseKeepaliveFrameForHttp(');
-    expect(bridge).not.toContain('export function shouldDropClientSseFrameForHttp(');
-    expect(bridge).not.toContain('shouldDropClientSseFrameForHttp');
+    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
+    expect(handler).toContain("from '../../modules/llmswitch/bridge/native-exports.js'");
+    expect(handler).toContain('projectResponsesSseFrameForClientNative');
+    expect(handler).toContain('function buildClientSseKeepaliveFrameForHttp(');
+    expect(handler).not.toContain('export function shouldDropClientSseFrameForHttp(');
+    expect(handler).not.toContain('shouldDropClientSseFrameForHttp');
 
     for (const forbiddenLocalDefinition of [
       'async function streamResponsesJsonAsSse(',
@@ -71,7 +69,6 @@ describe('server responses SSE business module contract', () => {
       'shouldRequireResponsesTerminalEventForHttp',
       'shouldDropClientSseFrameForHttp',
     ]) {
-      expect(bridge).not.toContain(forbiddenBridgeSemantic);
       expect(responseLifecycleBridge).not.toContain(forbiddenBridgeSemantic);
       expect(handler).not.toContain(forbiddenBridgeSemantic);
     }
@@ -90,13 +87,13 @@ describe('server responses SSE business module contract', () => {
     expect(handler).not.toContain('buildResponsesSseErrorPayloadForHttp');
     expect(handler).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
     expect(handler).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
-    expect(bridge).not.toContain('createResponsesJsonToSseConverterForHttp');
-    expect(bridge).not.toContain('createChatJsonToSseConverterForHttp');
-    expect(bridge).not.toContain('buildResponsesPayloadFromChatForHttp');
-    expect(bridge).not.toContain('prepareResponsesJsonBodyForSseBridgeForHttp');
-    expect(bridge).not.toContain('buildResponsesSseErrorPayloadForHttp');
-    expect(bridge).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
-    expect(bridge).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
+    expect(handler).not.toContain('createResponsesJsonToSseConverterForHttp');
+    expect(handler).not.toContain('createChatJsonToSseConverterForHttp');
+    expect(handler).not.toContain('buildResponsesPayloadFromChatForHttp');
+    expect(handler).not.toContain('prepareResponsesJsonBodyForSseBridgeForHttp');
+    expect(handler).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(handler).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(handler).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
   });
 
   it('locks SSE owner docs and gate wiring to the dedicated business module', () => {

@@ -492,7 +492,15 @@ const mockNativeExportsModule = () => ({
   }),
   buildResponsesPayloadFromChatNative: jest.fn(),
   projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.body ?? args?.payload ?? {}),
-  projectResponsesSseFrameForClientNative: jest.fn((args: any) => args?.frame ?? ''),
+  projectResponsesSseFrameForClientNative: jest.fn((args: any) => ({
+    emit: true,
+    frame: args?.frame ?? '',
+    state: args?.state ?? {},
+  })),
+  updateResponsesSseTransportTerminalStateNative: jest.fn((input: any) => ({
+    state: input?.state ?? {},
+    observedTerminal: String(input?.chunk ?? '').includes('response.completed') || String(input?.chunk ?? '').includes('response.done'),
+  })),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   convertResponsesRequestToChatNative: jest.fn(),
@@ -595,7 +603,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn((args: any) => args?.body ?? args),
     normalizeResponsesJsonBodyForHttp: jest.fn((payload: any) => payload),
     normalizeResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
-    projectResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
     projectResponsesClientPayloadForClientForHttp: jest.fn((payload: any) => payload),
     sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
     shouldDispatchResponsesSseToClientForHttp: jest.fn((args: any) => args?.forceSSE === true),
@@ -605,14 +612,12 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     isToolCallContinuationResponseForHttp: jest.fn(() => false),
     assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
     assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
-    buildClientSseKeepaliveFrameForHttp: jest.fn(() => ''),
     buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status: number) => ({ error: { requestLabel, status, message: 'missing stream' } })),
     buildResponsesSseErrorPayloadForHttp: jest.fn((args: any) => ({ error: args })),
     buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn(() => ({})),
     buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => ({})),
     buildResponsesPayloadFromChatForHttp: jest.fn((payload: any) => payload),
     buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-    createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({})),
     inspectResponsesContinuationProbeForHttp: jest.fn(() => undefined),
     inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((args: any) => ({ finishReason: args?.finishReason, seenTerminalEvent: args?.seenTerminalEvent ?? false, sawTerminalChunk: args?.sawTerminalChunk ?? false, sawResponsesCompletedChunk: args?.sawResponsesCompletedChunk ?? false, sawResponsesDoneEvent: args?.sawResponsesDoneEvent ?? false, sawAssistantMessageDoneTerminal: args?.sawAssistantMessageDoneTerminal ?? false, requiresResponsesTerminalEvent: args?.requiresResponsesTerminalEvent ?? false, terminalSource: args?.terminalSource, pendingTerminalEvent: args?.pendingTerminalEvent })),
     normalizeChatUsagePayloadForHttp: jest.fn((payload: any) => ({ normalized: false, payload })),
@@ -626,10 +631,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
     resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
     summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
-    updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: any) => ({
-      state: input?.state ?? {},
-      observedTerminal: String(input?.chunk ?? '').includes('response.completed') || String(input?.chunk ?? '').includes('response.done'),
-    })),
     importResponsesHandlerCoreDist: jest.fn(async () => ({})),
     planResponsesHandlerStreamForHttp: jest.fn((args: any) => ({
       outboundStream: args?.forceStream === true ? true : Boolean(args?.acceptsSse),
@@ -643,14 +644,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
   };
 };
 
-jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge/responses-sse-bridge.js',
-  buildResponsesSseBridgeDirectMockModule
-);
-jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge/responses-sse-bridge.ts',
-  buildResponsesSseBridgeDirectMockModule
-);
 jest.unstable_mockModule(
   '../../../src/modules/llmswitch/bridge/responses-response-bridge.js',
   buildResponsesSseBridgeDirectMockModule

@@ -23,17 +23,21 @@ import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { isClientDisconnectAbortError } from '../runtime/http-server/executor-provider.js';
 import { normalizeUsage, type UsageMetrics } from '../runtime/http-server/executor/usage-aggregator.js';
 import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
-// feature_id: server.responses_response_handler_bridge_surface
 import {
-  buildClientSseKeepaliveFrameForHttp,
-  createResponsesSseClientProjectionStateForHttp,
-  projectResponsesSseFrameForClientForHttp,
-  updateResponsesSseTransportTerminalStateForHttp,
-} from '../../modules/llmswitch/bridge/responses-sse-bridge.js';
+  projectResponsesSseFrameForClientNative,
+  updateResponsesSseTransportTerminalStateNative,
+} from '../../modules/llmswitch/bridge/native-exports.js';
 
+// feature_id: server.responses_sse_bridge_surface
 type FlushableResponse = Response & {
   flushHeaders?: () => void;
   flush?: () => void;
+};
+
+type ResponsesSseClientProjectionStateForHttp = {
+  pendingApplyPatchArgumentDeltas: Record<string, string>;
+  applyPatchCallIds: string[];
+  emittedApplyPatchDoneCallIds: string[];
 };
 
 type SendSsePipelineResponseArgs = {
@@ -58,6 +62,18 @@ const DEFAULT_SSE_TOTAL_TIMEOUT_MS = 300_000;
 
 function isResponsesSseEndpoint(entryEndpoint: string | undefined): boolean {
   return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+}
+
+function buildClientSseKeepaliveFrameForHttp(_entryEndpoint?: string): string {
+  return ': keepalive\n\n';
+}
+
+function createResponsesSseClientProjectionStateForHttp(): ResponsesSseClientProjectionStateForHttp {
+  return {
+    pendingApplyPatchArgumentDeltas: {},
+    applyPatchCallIds: [],
+    emittedApplyPatchDoneCallIds: [],
+  };
 }
 
 function readErrorCode(error: unknown): string | undefined {
@@ -709,7 +725,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     if (!isResponsesSseEndpoint(entryEndpoint)) {
       return;
     }
-    const terminalState = updateResponsesSseTransportTerminalStateForHttp({
+    const terminalState = updateResponsesSseTransportTerminalStateNative({
       chunk: frame,
       state: sseTransportTerminalState,
       flushRemainder: true,
@@ -743,7 +759,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       writeClientSseFrame(frame, 'response.sse.stream.write_frame', { recordSnapshot: false });
       return;
     }
-    const projection = projectResponsesSseFrameForClientForHttp({
+    const projection = projectResponsesSseFrameForClientNative({
       frame,
       eventName: parsed.eventName,
       data: parsed.data,

@@ -2277,3 +2277,9 @@
 - `SSE stream missing from pipeline result` can be a dry-run carrier leak, not an SSE transport bug. Confirm by checking `~/.rcc/codex-samples/openai-responses/ports/<port>/<requestId>/provider-response.json`: if `body.body.object=routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`, and current provider request is Codex SSE while metadata points at an older dry-run request, the root is direct provider runtime metadata isolation.
 - Fixed owner: `src/providers/core/runtime/responses-provider.ts` `processIncomingDirect()` must build context from the current request runtime carrier, not provider instance `getCurrentRuntimeMetadata()`. Previous behavior allowed stale `__rccDryRunSerialized` from a prior dry-run to stop later live direct SSE before upstream send.
 - Regression lock: `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts` includes `direct SSE does not inherit provider-request dry-run from previous provider runtime metadata`.
+
+# 2026-07-12: Responses SSE bridge facade is deleted
+
+- `src/modules/llmswitch/bridge/responses-sse-bridge.ts` is physically deleted. `handler-response-sse.ts` is now the only TS transport facade for `/v1/responses` SSE framing and calls `projectResponsesSseFrameForClientNative` / `updateResponsesSseTransportTerminalStateNative` directly through `native-exports.ts`.
+- SSE transport keepalive/state seed may remain in `handler-response-sse.ts`; client-visible projection, terminal-state evidence, required_action/tool semantics, repair decisions, continuation save/restore, and stopless/servertool governance remain Rust/NAPI or Chat Process owners.
+- Architecture gates now require the deleted bridge facade to stay absent and require the handler to import `native-exports.ts` instead of restoring the duplicate SSE bridge facade.

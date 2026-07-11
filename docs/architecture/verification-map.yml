@@ -1500,7 +1500,7 @@ verification:
       - "Validation must prove cross-boundary control state is carried by MetadataCenter families, not by request/response payload or history fields."
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "Tests must lock response save request-id priority: the current active provider request label passed to the Rust record planner wins over stale `requestTruth.requestId` after request-executor rebind."
-      - "SSE tests are not continuation gates. `handler-response-sse.ts` and `responses-sse-bridge.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
+      - "SSE tests are not continuation gates. `handler-response-sse.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
       - "Handler response-store integration tests are stale continuation-owner evidence if they expect `sendPipelineResponse` or SSE transport to save continuation; migrate those assertions to bridge/Rust owner tests instead of reintroducing handler-side save logic."
 
   - feature_id: tool.apply_patch_freeform_contract
@@ -2241,11 +2241,11 @@ verification:
   - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:
-      - src/modules/llmswitch/bridge/responses-sse-bridge.ts
+      - src/server/handlers/handler-response-sse.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts
       - tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts
       - src/server/handlers/handler-response-common.ts
-      - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
       - tests/red-tests/server_responses_sse_surface_single_owner.test.ts
@@ -2262,8 +2262,8 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Response SSE bridge must stay facade-only and must not grow TS response protocol semantics."
-      - "SSE transport, frame normalization, terminal/incomplete repair decisions, force-SSE JSON bridge, and direct-passthrough metadata guard are all locked behind the dedicated SSE bridge surface."
+      - "Deleted Response SSE bridge facade must stay absent; handler transport must not grow TS response protocol semantics."
+      - "SSE transport stays in the handler facade; frame projection and terminal-state evidence stay behind Rust/NAPI wrappers."
       - "Locked business-module rule: any drift of terminal-state parse, probe synthesis, or stream-end repair back into `handler-response-sse.ts` must fail static gate and red-test before runtime."
       - "Validation must prove SSE code is transport-only and cannot patch continuation history, request restore data, response save data, required_action semantics, or stopless/servertool governance."
       - "Validation must prove direct chat tool stream reprojection and relay Responses SSE reprojection helpers stay deleted from TS bridge/export surfaces."

@@ -12,7 +12,7 @@ describe('server responses SSE surface single owner', () => {
       .filter((line) => line.startsWith('import ') || line.startsWith('} from '));
     const joinedImports = importStatements.join('\n');
 
-    expect(source).toContain("from '../../modules/llmswitch/bridge/responses-sse-bridge.js'");
+    expect(source).toContain("from '../../modules/llmswitch/bridge/native-exports.js'");
     expect(source).not.toContain('responses-client-projection');
     expect(source).not.toContain('responses-stream-semantics');
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);
@@ -51,24 +51,25 @@ describe('server responses SSE surface single owner', () => {
   });
 
   it('physically deletes old SSE semantic owners', () => {
-    const bridgeSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
+    const handlerSource = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 
-    expect(bridgeSource).toContain('projectResponsesSseFrameForClientNative');
-    expect(bridgeSource).toContain('export function projectResponsesSseFrameForClientForHttp(');
-    expect(bridgeSource).not.toContain('responses-sse-semantics');
-    expect(bridgeSource).not.toContain('responses-client-projection');
-    expect(bridgeSource).not.toContain('buildResponsesSseErrorPayloadForHttp');
-    expect(bridgeSource).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
-    expect(bridgeSource).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
+    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
+    expect(handlerSource).toContain('projectResponsesSseFrameForClientNative');
+    expect(handlerSource).not.toContain('export function projectResponsesSseFrameForClientForHttp(');
+    expect(handlerSource).not.toContain('responses-sse-semantics');
+    expect(handlerSource).not.toContain('responses-client-projection');
+    expect(handlerSource).not.toContain('buildResponsesSseErrorPayloadForHttp');
+    expect(handlerSource).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
+    expect(handlerSource).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
   });
 
-  it('keeps responses-sse-bridge limited to SSE transport exports', () => {
-    const bridgeSource = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'), 'utf8');
+  it('keeps deleted SSE bridge surface from reappearing in handler', () => {
+    const handlerSource = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 
-    expect(bridgeSource).not.toContain('buildResponsesRequestLogContextForHttp');
-    expect(bridgeSource).not.toContain('prepareResponsesJsonClientDispatchPlanForHttp');
-    expect(bridgeSource).not.toContain('importResponsesHandlerCoreDist');
-    expect(bridgeSource).not.toContain('requireResponsesHandlerCoreDist');
-    expect(bridgeSource).not.toContain('ResponsesRequestContextForHttp');
+    expect(handlerSource).not.toContain('buildResponsesRequestLogContextForHttp');
+    expect(handlerSource).not.toContain('prepareResponsesJsonClientDispatchPlanForHttp');
+    expect(handlerSource).not.toContain('importResponsesHandlerCoreDist');
+    expect(handlerSource).not.toContain('requireResponsesHandlerCoreDist');
+    expect(handlerSource).not.toContain('ResponsesRequestContextForHttp');
   });
 });

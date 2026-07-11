@@ -1791,7 +1791,7 @@ describe('hub pipeline stage residue audit', () => {
   it('server response handler SSE contract probe must not classify response tool semantics in TS', () => {
     const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const sseFiles = [
-      'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
+      'src/server/handlers/handler-response-sse.ts',
     ];
     const findings: string[] = [];
     for (const relativePath of sseFiles) {
@@ -1811,7 +1811,6 @@ describe('hub pipeline stage residue audit', () => {
   it('server response handler terminal probe frames must not be owned by SSE transport', () => {
     const retiredFilePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-stream-semantics.ts');
     const sseFiles = [
-      'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
       'src/modules/llmswitch/bridge/native-exports.ts',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs',
