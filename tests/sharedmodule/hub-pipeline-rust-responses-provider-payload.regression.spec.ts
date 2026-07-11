@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { runHubPipelineLibWithNative } from './helpers/hub-pipeline-orchestration-direct-native.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
+import { DirectNativeHubPipelineTestWrapper as HubPipeline } from './helpers/hub-pipeline-handle-direct-native.js';
 import { executeRequestStagePipelineDirectNative as executeRequestStagePipeline } from './helpers/request-stage-direct-native.js';
 import { buildRequestMetadata } from '../../src/server/runtime/http-server/executor-metadata.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
