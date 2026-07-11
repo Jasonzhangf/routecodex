@@ -400,6 +400,6 @@ routecodex daemon status routing --server <server-id>
 ## 参考实现
 
 - 解析逻辑：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/parse.rs`
-- 类型定义：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs`，TS 只保留 `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` 绑定契约
+- 类型定义：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs`；历史 TS `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` 已删除，不得恢复为 source-side binding contract
 - 集成位置：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine`
 - Daemon 接口：`src/daemon/`（待实现）

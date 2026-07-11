@@ -456,15 +456,17 @@ provider → compatibility → llmswitch (final) → response
 Only `llmswitch-core` modules may perform:
 
 1. **Tool Calls Canonicalization**: Normalize tool_calls structure
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts`
+   - Implementation: Rust Chat Process tool governance / codec owners under `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
+   - Historical TS `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts` is deleted and must not be restored
 2. **Argument Stringification**: Convert tool arguments to proper string format
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts`
+   - Implementation: Rust request/response tool governance blocks under `router-hotpath-napi/src/req_process_stage1_tool_governance_blocks` and `router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks`
 3. **Result Envelope Stripping**: Remove tool result wrapper envelopes
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
+   - Implementation: Rust `responses_openai_codec.rs` plus direct native helper/test surfaces
+   - Historical TS `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts` is deleted and must not be restored
 4. **Schema Augmentation**: Normalize/augment tool schemas (and inject tool guidance when enabled)
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.ts` + `sharedmodule/llmswitch-core/src/guidance/index.ts`
+   - Implementation: Rust request/response tool governance owners; historical TS `tool-governor.ts` and `guidance/index.ts` are deleted
 5. **finish_reason=tool_calls Patching**: Set correct finish reason for tool calls
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
+   - Implementation: Rust response parsing / outbound projection owners, not the deleted TS Responses bridge
 
 #### V2 Guardrails
 - Any chain where non-llmswitch module references tool handling is rejected

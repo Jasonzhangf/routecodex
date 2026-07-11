@@ -10,7 +10,8 @@
      - 删除 `route()` 内 3 处调用，native 路由异常/无效 payload 直接抛错。
 
 2. **删除 edge stage 的 protocol/payload 回退路径**
-   - 文件：`sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts`
+   - 历史文件：`sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-edge-stage-semantics.ts`（已删除，不得恢复）
+   - 当前 owner：Rust Hub Pipeline / typed entrypoint under `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
    - 变更：
      - `parseFormatEnvelopePayload` 移除 `fallbackProtocol/fallbackPayload` 参数。
      - native 返回 envelope 若缺少 `format` 或 `payload`，直接返回 `null` -> 上层 fail-fast。

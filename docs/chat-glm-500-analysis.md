@@ -37,7 +37,8 @@
      - 删除“无 `tool_calls` 且内容为空/仅空白”的 `assistant` 回合，减少空 turn.
 
 ## 已落地（当前版本）
-- 实施位置：`sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts`
+- 当前实施位置：Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_openai_message_normalize.rs` 及 Chat Process / outbound 相关 Rust owner。
+- 历史 TS `sharedmodule/llmswitch-core/src/conversion/shared/openai-message-normalize.ts` 已删除，不得恢复为当前实施位置。
   - 统一对所有 `role:'tool'` 消息做“文本化+截断”，并在文本前加截断提示（例如：`[输出已截断至 2048 字符]`）。
   - 默认阈值：`RCC_TOOL_TEXT_LIMIT`（默认 2048，可调）。
   - `assistant` 含 `tool_calls` 时，将空字符串 `content` 规范为 `null`（保留混合内容）。

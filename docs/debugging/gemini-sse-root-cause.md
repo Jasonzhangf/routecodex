@@ -28,8 +28,9 @@ Client (receives final SSE)
    - 需要添加 `functionCall` → `tool_calls` 映射
    - 需要添加 `thought` → `reasoning_content` 映射
 
-2. `/sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts`
-   - 如果是逆向流程（JSON → SSE），也需要处理这些类型
+2. `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_sse_event_payload.rs`
+   - JSON → SSE / SSE → JSON 逆向流程由 Rust `build_gemini_sse_event_sequence_json` / `build_gemini_json_from_sse_json` owner 处理
+   - 历史 TS `/sharedmodule/llmswitch-core/src/sse/json-to-sse/gemini-json-to-sse-converter.ts` 已删除，不得恢复为当前入口
 
 3. 参考实现：  
    - `~/Documents/github/gcli2api` (user 提到的参考项目，目前无法访问)

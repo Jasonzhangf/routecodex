@@ -140,7 +140,9 @@ ContinuationOwnership = {
 ### B. relay 本地保存真源
 
 唯一真源：
-- `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts`
+- Rust `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs`
+- Host IO shell：`src/modules/llmswitch/bridge/responses-conversation-store-host.ts`
+- 历史 TS `sharedmodule/llmswitch-core/src/conversion/shared/responses-conversation-store.ts` 已删除，不得恢复为 relay continuation 真源
 
 职责：
 - 只保存 relay 本地 continuation 所需状态
