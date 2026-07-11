@@ -2283,3 +2283,9 @@
 - `src/modules/llmswitch/bridge/responses-sse-bridge.ts` is physically deleted. `handler-response-sse.ts` is now the only TS transport facade for `/v1/responses` SSE framing and calls `projectResponsesSseFrameForClientNative` / `updateResponsesSseTransportTerminalStateNative` directly through `native-exports.ts`.
 - SSE transport keepalive/state seed may remain in `handler-response-sse.ts`; client-visible projection, terminal-state evidence, required_action/tool semantics, repair decisions, continuation save/restore, and stopless/servertool governance remain Rust/NAPI or Chat Process owners.
 - Architecture gates now require the deleted bridge facade to stay absent and require the handler to import `native-exports.ts` instead of restoring the duplicate SSE bridge facade.
+
+# 2026-07-12: Responses JSON direct guard now uses direct native evidence
+
+- `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` no longer imports `src/modules/llmswitch/bridge/responses-response-bridge.*`; it validates direct passthrough dispatch and replay-safe client projection through direct Rust/NAPI helper calls.
+- `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` exposes `planResponsesJsonClientDispatchWithNative` and allows the existing client payload helper to pass context into `projectResponsesClientPayloadForClientJson`, so the test can prove Rust-owned model/metadata cleanup without preserving a TS bridge test dependency.
+- This is a test external-reference contraction only. `responses-response-bridge.ts` remains an active production facade through `handler-response-utils.ts` and is not a dead deletion candidate yet.

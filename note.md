@@ -29063,3 +29063,11 @@ Pure Rust NAPI candidates:
 - Architecture/docs/gates updated so `server.responses_sse_bridge_surface` owner is handler transport facade plus Rust/NAPI projection, with `responses-sse-bridge.ts` listed only as a forbidden/restored path.
 - Test migration: handler SSE tests and red/static gates no longer mock/import the deleted SSE facade. The broad unified-semantics e2e file only retains deletion-required native SSE mock shape changes; unrelated temporary mock expansion was removed.
 - Boundary: this is source/gate closeout only; no global install/restart/live replay claimed for the SSE facade deletion.
+
+# 2026-07-12: Responses response bridge test reference contraction
+
+- Scope: continue external-reference closeout without deleting active production owner. Current tracked graph shows `responses-response-bridge.ts` still has one production importer (`handler-response-utils.ts`), so it is not dead.
+- Change: `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` now calls direct Rust/NAPI helper evidence (`planResponsesJsonClientDispatchWithNative`, `projectResponsesClientPayloadForClientWithNative`) instead of importing or mocking `responses-response-bridge`.
+- Helper update: `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` gained `planResponsesJsonClientDispatchWithNative` and optional context passing for `projectResponsesClientPayloadForClientWithNative`.
+- Verification PASS: focused Jest 3 suites / 9 tests, strict `llmswitch-ts-shell-reference-audit --json`, and `git diff --check`.
+- Boundary: source/test contraction only; no runtime behavior change, global install, restart, or live replay claimed.

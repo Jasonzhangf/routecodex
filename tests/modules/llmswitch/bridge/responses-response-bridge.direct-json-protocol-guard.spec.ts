@@ -1,11 +1,11 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  normalizeResponsesClientPayloadForHttp,
-  prepareResponsesJsonClientDispatchPlanForHttp,
-} from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.js';
+  planResponsesJsonClientDispatchWithNative,
+  projectResponsesClientPayloadForClientWithNative,
+} from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
 
-describe('responses-response-bridge direct JSON protocol guard', () => {
+describe('Responses JSON direct native protocol guard', () => {
   it('router-direct JSON dispatch bypasses Responses client projection without requestContext', async () => {
     const body = {
       id: 'resp_direct_passthrough_no_context',
@@ -20,16 +20,20 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
       ],
     };
 
-    const output = await prepareResponsesJsonClientDispatchPlanForHttp({
+    const output = planResponsesJsonClientDispatchWithNative({
       entryEndpoint: '/v1/responses',
       continuationOwner: 'direct',
-      body,
-      metadata: {},
+      hasRequestContextToolsRaw: false,
     });
 
     expect(output).toEqual({
-      clientBody: body,
-      sanitizedBody: body,
+      action: 'direct_passthrough',
+      reason: 'direct_continuation_passthrough',
+    });
+    expect(body.output[0]).toEqual({
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: 'ok' }],
     });
   });
 
@@ -49,32 +53,27 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
       ],
     };
 
-    const output = await prepareResponsesJsonClientDispatchPlanForHttp({
+    const output = planResponsesJsonClientDispatchWithNative({
       entryEndpoint: '/v1/responses',
       continuationOwner: 'direct',
-      body,
-      metadata: {},
-      requestContext: {
-        payload: {
-          model: 'router-visible-model',
-          tools: [],
-        },
-        context: { toolsRaw: [] },
-      },
+      hasRequestContextToolsRaw: true,
     });
 
     expect(output).toEqual({
-      clientBody: body,
-      sanitizedBody: body,
+      action: 'direct_passthrough',
+      reason: 'direct_continuation_passthrough',
+    });
+    expect(body.output[0]).toEqual({
+      id: 'rs_direct_passthrough_with_context',
+      type: 'reasoning',
+      status: 'completed',
+      content: [{ type: 'reasoning_text', text: 'provider direct payload' }],
     });
   });
 
   it('RED: direct owner side-channel must not skip Responses replay-safe client projection', async () => {
-    const output = await normalizeResponsesClientPayloadForHttp({
-      entryEndpoint: '/v1/responses',
-      metadata: {},
-      hasSsePayload: () => false,
-      payload: {
+    const output = projectResponsesClientPayloadForClientWithNative(
+      {
         id: 'resp_direct_json_guard',
         object: 'response',
         status: 'completed',
@@ -104,14 +103,16 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
           },
         ],
       },
-      requestContext: {
-        payload: {
+      [],
+      {},
+      {
+        originalRequest: {
           model: 'gpt-5.4',
           tools: [],
         },
-        context: { toolsRaw: [] },
-      },
-    });
+        requestContext: { toolsRaw: [] },
+      }
+    );
 
     expect(output).toEqual({
       id: 'resp_direct_json_guard',
@@ -148,10 +149,8 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
   });
 
   it('strips response metadata from JSON client projection even when native payload includes it', async () => {
-    const output = await normalizeResponsesClientPayloadForHttp({
-      entryEndpoint: '/v1/responses',
-      metadata: {},
-      payload: {
+    const output = projectResponsesClientPayloadForClientWithNative(
+      {
         id: 'resp_direct_json_metadata_guard',
         object: 'response',
         status: 'completed',
@@ -172,14 +171,16 @@ describe('responses-response-bridge direct JSON protocol guard', () => {
           },
         ],
       },
-      requestContext: {
-        payload: {
+      [],
+      {},
+      {
+        originalRequest: {
           model: 'gpt-5.4',
           tools: [],
         },
-        context: { toolsRaw: [] },
-      },
-    });
+        requestContext: { toolsRaw: [] },
+      }
+    );
 
     expect(output).toEqual({
       id: 'resp_direct_json_metadata_guard',

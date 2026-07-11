@@ -1201,7 +1201,8 @@ export function projectResponsesClientBodyForClientWithNative(
 export function projectResponsesClientPayloadForClientWithNative(
   responsesPayload: unknown,
   toolsRaw: unknown[],
-  metadata: Record<string, unknown> | undefined
+  metadata: Record<string, unknown> | undefined,
+  context?: Record<string, unknown> | undefined
 ): Record<string, unknown> {
   const capability = 'projectResponsesClientPayloadForClientJson';
   const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
@@ -1215,7 +1216,7 @@ export function projectResponsesClientPayloadForClientWithNative(
   const payloadJson = safeStringify(responsesPayload);
   const toolsRawJson = safeStringify(toolsRaw ?? []);
   const metadataJson = safeStringify(metadata ?? {});
-  const contextJson = safeStringify(null);
+  const contextJson = safeStringify(context ?? null);
   if (!payloadJson || !toolsRawJson || !metadataJson || !contextJson) {
     return fail('json stringify failed');
   }
@@ -1229,6 +1230,37 @@ export function projectResponsesClientPayloadForClientWithNative(
       return fail('empty result');
     }
     const parsed = parseOutboundRecord(raw, 'parseProjectResponsesClientPayloadForClient');
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function planResponsesJsonClientDispatchWithNative(input: unknown): Record<string, unknown> {
+  const capability = 'planResponsesJsonClientDispatchJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseOutboundRecord(raw, 'parsePlanResponsesJsonClientDispatch');
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
