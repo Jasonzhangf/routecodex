@@ -165,6 +165,23 @@ function readTrimmedString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function readPositivePortCandidate(...candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+      return Math.floor(candidate);
+    }
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+    }
+  }
+  return undefined;
+}
+
 function readRuntimeScopeFromMetadata(metadata: Record<string, unknown>): { sessionDir?: string; rccUserDir?: string } {
   const rt = metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
     ? (metadata.__rt as Record<string, unknown>)
@@ -2217,8 +2234,10 @@ export class RouteCodexHttpServer {
     requestBody?: unknown;
     responseBody: unknown;
     providerKey?: string;
+    continuationOwner: 'direct';
     sessionId?: string;
     conversationId?: string;
+    matchedPort?: number;
     routingPolicyGroup?: string;
   }): Promise<void> {
     if (!args.requestId) return;
@@ -2243,6 +2262,7 @@ export class RouteCodexHttpServer {
           ...(args.providerKey ? { providerKey: args.providerKey } : {}),
           ...(args.sessionId ? { sessionId: args.sessionId } : {}),
           ...(args.conversationId ? { conversationId: args.conversationId } : {}),
+          ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
           ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
           entryKind: 'responses',
         });
@@ -2252,8 +2272,10 @@ export class RouteCodexHttpServer {
       requestId: args.requestId,
       response: args.responseBody as Record<string, unknown>,
       providerKey: args.providerKey,
+      continuationOwner: args.continuationOwner,
       sessionId: args.sessionId,
       conversationId: args.conversationId,
+      ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
       routingPolicyGroup: args.routingPolicyGroup,
       allowScopeContinuation: true,
     });
@@ -2294,6 +2316,10 @@ export class RouteCodexHttpServer {
     const inputMetadata = input.metadata && typeof input.metadata === 'object'
       ? (input.metadata as Record<string, unknown>)
       : {};
+    const directPipelineMetadata =
+      directResult.pipelineMetadata && typeof directResult.pipelineMetadata === 'object' && !Array.isArray(directResult.pipelineMetadata)
+        ? directResult.pipelineMetadata as Record<string, unknown>
+        : undefined;
     if (input.requestId && providerHandle.providerProtocol === 'openai-responses') {
       const responseBody = normalized.body;
       if (
@@ -2311,8 +2337,21 @@ export class RouteCodexHttpServer {
           requestBody: input.body,
           responseBody,
           providerKey: auditContext.providerKey,
+          continuationOwner: 'direct',
           sessionId: readSessionIdForUsageLog(inputMetadata),
           conversationId: readConversationIdForUsageLog(inputMetadata),
+          matchedPort: readPositivePortCandidate(
+            directPipelineMetadata?.matchedPort,
+            directPipelineMetadata?.routecodexLocalPort,
+            directPipelineMetadata?.localPort,
+            directPipelineMetadata?.entryPort,
+            directPipelineMetadata?.routecodexPort,
+            inputMetadata.matchedPort,
+            inputMetadata.routecodexLocalPort,
+            inputMetadata.localPort,
+            inputMetadata.entryPort,
+            inputMetadata.routecodexPort,
+          ),
           routingPolicyGroup:
             directResult.pipelineMetadata
             && typeof directResult.pipelineMetadata.routecodexRoutingPolicyGroup === 'string'
@@ -2426,8 +2465,16 @@ export class RouteCodexHttpServer {
           entryEndpoint: '/v1/responses',
           responseBody,
           providerKey: providerBinding,
+          continuationOwner: 'direct',
           sessionId: readSessionIdForUsageLog(inputMetadata),
           conversationId: readConversationIdForUsageLog(inputMetadata),
+          matchedPort: readPositivePortCandidate(
+            inputMetadata.matchedPort,
+            inputMetadata.routecodexLocalPort,
+            inputMetadata.localPort,
+            inputMetadata.entryPort,
+            inputMetadata.routecodexPort
+          ),
         });
       }
     }

@@ -28677,6 +28677,19 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Removed the matching test-only helper wrappers from `tests/sharedmodule/helpers/native-shared-conversion-direct-native.ts`.
 - Verification PASS: exact source-tracked scan shows retired names only in historical notes and negative assertions; `npm run build:native-hotpath`; focused Jest `native-required-exports-sse-stream`, `hub-pipeline-stage-residue-audit`, `responses-continuation-store` 263/263; `npm run verify:responses-history-protocol-contract`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; strict shell reference audit; minimal TS surface audit; rustification audit; deleted-path/thin-wrapper/fallback-denylist gates; `npm run build:base`; `git diff --check`.
 
+# 2026-07-10: 5520 cc.key1.gpt-5.5 502 runtime triage
+- Scope: investigated `openai-responses-router-gpt-5.4-20260710T204004175-491924-3077` first-hop `cc.key1.gpt-5.5` `HTTP_502`.
+- Evidence: immediately previous completed no-error request `203926444-491921-3074` also selected `cc.key1.gpt-5.5`, had `raw/prepared=134/134`, and completed with `router-direct:tools` usage `87858+247`; target request had `142/142`, first-hop `cc` 502, then rerouted and completed with usage `100231+385`.
+- Correlation: 20:39:42-20:40:08 window shows multiple routes (`longcontext`, `thinking`) and input sizes (`389`, `451`, `865`, `142`) receiving the same `cc` 502; later 20:40:50-20:41:07 shows comparable `cc` requests (`148`, `397`, `400`, `152`) completing without provider switch.
+- Reproduction: replayed surviving same-shape provider request payload (`model=gpt-5.5`, `stream=true`, `input_len=140`, `tools_len=14`) directly to `https://api.anyint.ai/openai/v1/responses`; upstream returned `HTTP 200` text/event-stream twice. This supports transient cc upstream/gateway failure, not RouteCodex request-shape bug for the 502 cluster.
+- Separate issue: later `cc` 400 samples are explicit `invalid_prompt` request errors and should be analyzed separately from the 502 cluster; 402 samples are provider/account quota/credit class, not same root as 502.
+
+# 2026-07-10: Responses direct 400 invalid_prompt tool-order fix
+- Confirmed live `0.90.3757` direct path could still send a current Responses request with `function_call_output` before the matching `function_call`, causing cc/AnyInt `HTTP_400 invalid_prompt`.
+- Rust fix: direct current request payload now uses `normalizeResponsesDirectCurrentRequestPayloadJson` before provider send; it only reorders same-batch tool outputs after their matching calls and stays on router-direct, not relay.
+- Rust req inbound normalization also keeps late call/output pairs legal for Hub/relay by reordering output after later call.
+- Verification: focused Rust tests pass (`normalize_responses_direct_current_request_payload_reorders_late_tool_output`, `normalize_responses_input_items` 15/15); direct provider/router Jest 47/47 pass; `build:native-hotpath`, `tsc --noEmit`, `git diff --check` pass; installed snapshot `0.90.3757-2026-07-10T150601Z`, restarted 5520, live replay `manual-400-order-fix-20260710T230757` returned HTTP 200 with normal model response. Native helper on the same body reports `changed=true` and order `message -> function_call -> function_call_output`.
+
 # 2026-07-10: Responses store host d.ts mirror deleted
 
 - Exact source-tracked scan found `src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts` had no active runtime/test importers; only residue audit referenced the path.
@@ -28685,6 +28698,7 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 # 2026-07-10: zero-ref bridge d.ts leaf mirrors deleted
 
 - Exact source-tracked scan found no active runtime/test importers for:
+  - `core-loader.d.ts`
   - `bridge.d.ts`
   - `bridge/index.d.ts`
   - `module-loader.d.ts`
@@ -28703,6 +28717,15 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
   - `state-integrations.d.ts`
 - Deleted them and added one residue audit that asserts the whole absent set stays deleted.
 
+# 2026-07-11: Responses store host singleton removed
+
+- Scope: continued Hub Pipeline/llmswitch external-reference closeout for `src/modules/llmswitch/bridge/responses-conversation-store-host.ts`.
+- Change: removed `ResponsesConversationStore` class, `globalThis.__rccResponsesConversationStore`, and raw global store access. The host now exposes module-level native-call functions around the single Rust `executeResponsesConversationStoreOperationJson` operation; prune timer remains host lifecycle only.
+- Test/gate fix: `request-executor.responses-store-cleanup.spec.ts` now isolates `ROUTECODEX_RESPONSES_CONVERSATION_STORE` with a temp file. Root cause of the red test was `clear_request` loading the user default persisted store and leaving an unrelated old entry, not current request cleanup failure.
+- Verification PASS: focused Jest 5 suites / 273 tests; `node --check scripts/tests/responses-store-error-release-blackbox.mjs`; `npm run verify:responses-history-protocol-contract`; `npm run verify:llmswitch-core-tsc`; `npx tsc --noEmit --pretty false`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-mainline-call-map`; `npm run verify:llmswitch-minimal-ts-surface -- --json`; `npm run verify:llmswitch-ts-shell-reference-audit`; `npm run verify:llmswitch-rustification-audit -- --json`; `npm run build:native-hotpath`; `npm run build:base`; `git diff --check`.
+- Exact residue scan: `__rccResponsesConversationStore` remains only in `hub-pipeline-stage-residue-audit.spec.ts` negative assertions.
+- Known non-target gap: old broad executor/blackbox fixtures still need a separate native-handle fixture migration; they were not used as closure evidence for this store singleton slice.
+
 # 2026-07-11: keepalive protocol loader helper consumer removed
 
 - Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / broad `bridge.js` test consumers.
@@ -28716,3 +28739,31 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Change: `tests/server/handlers/responses-sse-client-contract.blackbox.spec.ts` now removes the broad bridge mock entirely and exercises the real `responses-response-bridge` / `responses-sse-bridge` facade/native path; snapshot writer remains disabled only for test IO isolation.
 - Contract: no replacement TS projection, continuation, or repair mock was added; the blackbox stays client-facing evidence over current facade/native behavior.
 - Verification PASS: exact file scan for `importCoreDist|requireCoreDist|resolveImplForSubpath|resolveBaseDir|src/modules/llmswitch/bridge.js|src/modules/llmswitch/bridge.ts` returned zero matches; focused Jest 10/10 passed; strict shell reference audit passed with `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2`; `verify:responses-handler-single-bridge-surface`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate` passed.
+
+# 2026-07-11: required_action split-frame broad bridge mock removed
+
+- Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / broad bridge mocks in handler SSE regressions.
+- Change: `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts` now removes the broad bridge mock and source `.ts` bridge mocks entirely, exercising the real current response/SSE facade/native path; snapshot writer remains disabled only for test IO isolation.
+- Contract: no replacement TS projection, continuation, terminal-repair, or stream-end repair mock was added; the regression stays transport-only evidence that handler SSE does not split `response.required_action` frames.
+- Verification PASS: exact file scan for `importCoreDist|requireCoreDist|resolveImplForSubpath|resolveBaseDir|src/modules/llmswitch/bridge.js|src/modules/llmswitch/bridge.ts|responses-sse-bridge.ts|responses-response-bridge.ts` returned zero matches; focused Jest 1/1 passed; strict shell reference audit passed with `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2`; `verify:responses-handler-single-bridge-surface`, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate` passed.
+
+# 2026-07-11: provider response prebuilt SSE broad bridge mock removed
+
+- Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / broad root bridge mocks in provider response converter tests.
+- Change: `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts` now mocks only the active production collaborators `bridge/response-converter.js` and `bridge/snapshot-recorder.js`.
+- Removed dead root `src/modules/llmswitch/bridge.js` / `.ts`, `bridge/index`, and `bridge/module-loader` mocks plus the test-local `deriveFinishReasonNative` copy; no JS/TS semantic backfill was added.
+- Verification PASS: exact file scan for root bridge paths and legacy loader helpers returned zero matches; focused Jest 5/5 passed; strict shell reference audit passed (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` note-only); `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, `build:base`, and touched-file `git diff --check` passed.
+
+# 2026-07-11: provider response unified semantics broad bridge mock removed
+
+- Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` / broad root bridge mocks in provider response converter tests.
+- Change: `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts` now mocks only the active production collaborators `bridge/response-converter.js` and `bridge/snapshot-recorder.js`.
+- Removed root `src/modules/llmswitch/bridge.js` / `.ts`, `bridge/index`, and `bridge/module-loader` mocks plus test-local TS copies for finish-reason derivation, direct chat SSE reprojection, and Responses tool-argument normalization. The existing assertions now verify behavior through the current converter and bridge/native path instead of a test-local TS semantic mock.
+- Verification PASS: exact file scan for root bridge paths, legacy loader helpers, and retired mock symbols returned zero matches; focused Jest 19/19 passed; strict shell reference audit passed (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` note-only); `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `verify:function-map-compile-gate`, `build:base`, and touched-file `git diff --check` passed.
+
+# 2026-07-11: VR bootstrap dist wrapper script refs closed
+
+- Scope: continue external reference contraction for retired `dist/native/router-hotpath/native-virtual-router-bootstrap-config.js` script consumers.
+- Change: added a script-only direct native bootstrap helper and migrated the three active VR scripts to Rust/NAPI `bootstrapVirtualRouterConfigJson`; direct VR engine helper now maps thrown native `VIRTUAL_ROUTER_ERROR:*` into `VirtualRouterError`.
+- Deleted three stale standalone HubPipeline scripts after exact name scans found no active caller and execution showed they depended on the absent `dist/conversion/hub/pipeline/hub-pipeline.js` TS runtime surface.
+- Verification PASS: exact script scans for retired bootstrap wrapper and dist HubPipeline consumer returned zero matches; VR scripts 3/3 passed; helper syntax checks passed; strict shell reference audit, deleted-path, thin-wrapper-only, and function-map compile gates passed.

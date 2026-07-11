@@ -8,6 +8,7 @@ const {
   clearResponsesConversationByRequestId,
   clearAllResponsesConversationState,
   getResponsesConversationStoreDebugStats,
+  lookupResponsesContinuationByResponseId,
   resumeLatestResponsesContinuationByScope,
   resumeResponsesConversation,
 } = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js');
@@ -170,6 +171,108 @@ describe('http-server direct result metadata propagation', () => {
       model: 'gpt-5.5',
       providerProtocol: 'openai-responses',
       routeName: 'router-direct:thinking'
+    });
+  });
+
+  it('router-direct response save uses pipeline matchedPort for direct response_id lookup isolation', async () => {
+    const server = Object.create(RouteCodexHttpServer.prototype) as any;
+    server.extractProviderModel = () => 'gpt-5.4';
+    captureResponsesRequestContext({
+      requestId: 'req-router-direct-port-scope-save',
+      sessionId: 'sess-router-direct-port-scope-save',
+      conversationId: 'conv-router-direct-port-scope-save',
+      providerKey: 'test.key1',
+      payload: {
+        model: 'gpt-5.4',
+        store: true,
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'call tool' }]
+          }
+        ],
+        tools: [{ type: 'function', function: { name: 'lookup' } }]
+      },
+      context: {
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'call tool' }]
+          }
+        ],
+        toolsRaw: [{ type: 'function', function: { name: 'lookup' } }]
+      }
+    });
+
+    await server.buildRouterDirectResult({
+      response: {
+        status: 200,
+        data: {
+          id: 'resp-router-direct-port-scope-save',
+          object: 'response',
+          status: 'completed',
+          model: 'gpt-5.4',
+          output: [
+            {
+              type: 'function_call',
+              id: 'fc_router_direct_port_scope',
+              call_id: 'call_router_direct_port_scope',
+              name: 'lookup',
+              arguments: '{}'
+            }
+          ]
+        }
+      },
+      providerHandle: { providerProtocol: 'openai-responses', providerType: 'openai' },
+      auditContext: { providerKey: 'test.key1', routingDecision: { routeName: 'default' } },
+      externalLatencyStartedAtMs: 0,
+      externalLatencyMs: 12,
+      pipelineMetadata: {
+        matchedPort: 5555,
+        routecodexLocalPort: 5555,
+        entryPort: 5555,
+        routecodexRoutingPolicyGroup: 'gateway_priority_5555'
+      }
+    }, {
+      requestId: 'req-router-direct-port-scope-save',
+      body: {
+        model: 'gpt-5.4',
+        store: true,
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'call tool' }]
+          }
+        ],
+        tools: [{ type: 'function', function: { name: 'lookup' } }]
+      },
+      metadata: withRequestTruth({
+        sessionId: 'sess-router-direct-port-scope-save',
+        conversationId: 'conv-router-direct-port-scope-save'
+      }, {
+        requestId: 'req-router-direct-port-scope-save',
+        sessionId: 'sess-router-direct-port-scope-save',
+        conversationId: 'conv-router-direct-port-scope-save',
+      })
+    });
+
+    expect(lookupResponsesContinuationByResponseId(
+      'resp-router-direct-port-scope-save',
+      {
+        entryKind: 'responses',
+        continuationOwner: 'direct',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555'
+      }
+    )).toMatchObject({
+      responseId: 'resp-router-direct-port-scope-save',
+      requestId: 'req-router-direct-port-scope-save',
+      providerKey: 'test.key1',
+      continuationOwner: 'direct',
+      entryKind: 'responses'
     });
   });
 
@@ -600,7 +703,7 @@ describe('http-server direct result metadata propagation', () => {
     expect(stats.responseIndexSize).toBe(1);
     expect(stats.scopeIndexSize).toBe(1);
 
-    const restored = resumeLatestResponsesContinuationByScope({
+    const scopeRestored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-provider-direct-retention-success-next',
       sessionId: 'sess-provider-direct-success',
       payload: {
@@ -624,8 +727,26 @@ describe('http-server direct result metadata propagation', () => {
         ],
       },
     });
+    expect(scopeRestored).toBeNull();
 
-    expect(restored?.payload.previous_response_id).toBe('resp-provider-direct-success');
+    const resumed = resumeResponsesConversation(
+      'resp-provider-direct-success',
+      {
+        tool_outputs: [
+          {
+            call_id: 'call_provider_direct_1',
+            output: '/tmp',
+          },
+        ],
+      },
+      {
+        requestId: 'req-provider-direct-retention-success-next',
+        entryKind: 'responses',
+        continuationOwner: 'direct',
+      }
+    );
+
+    expect(resumed.payload.previous_response_id).toBe('resp-provider-direct-success');
   });
 
   it('provider-direct completed response without captured request context does not write continuation state', async () => {
