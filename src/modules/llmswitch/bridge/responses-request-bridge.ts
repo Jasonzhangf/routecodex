@@ -13,7 +13,6 @@ import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.j
 import {
   captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId,
-  finalizeResponsesConversationRequestRetention,
   lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest,
@@ -875,11 +874,4 @@ export async function captureResponsesInboundToolHistoryErrorsampleForHttp(args:
           : { message: String(args.error ?? 'unknown_error') }
     }
   });
-}
-
-export async function finalizeResponsesConversationRequestRetentionForHttp(
-  requestId?: string,
-  options?: { keepForSubmitToolOutputs?: boolean }
-): Promise<void> {
-  await finalizeResponsesConversationRequestRetention(requestId, options);
 }
