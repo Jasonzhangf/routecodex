@@ -43,6 +43,19 @@ function callConfigValue<T>(capability: string, input: AnyRecord): T {
   );
 }
 
+function parseOptionalStringObject(output: unknown, capability: string, keys: string[]): AnyRecord {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(`[config-direct-native] ${capability} returned invalid payload`);
+  }
+  const record = output as AnyRecord;
+  for (const key of keys) {
+    if (typeof record[key] !== 'undefined' && typeof record[key] !== 'string') {
+      throw new Error(`[config-direct-native] ${capability} returned invalid ${key}`);
+    }
+  }
+  return record;
+}
+
 function parseDecodedConfigTextOutput(output: unknown, label: string): {
   format: 'toml';
   parsed: AnyRecord;
@@ -71,6 +84,53 @@ function parseDetectedConfigFormatOutput(output: unknown, label: string): 'toml'
     throw new Error(`[config-direct-native] ${label} config format detector returned invalid payload`);
   }
   return 'toml';
+}
+
+function parsePersistedConfigFileOutput(output: unknown, label: string): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(`[config-direct-native] ${label} writer returned invalid payload`);
+  }
+  const persisted = output as AnyRecord;
+  if (
+    typeof persisted.path !== 'string' ||
+    persisted.format !== 'toml' ||
+    typeof persisted.raw !== 'string' ||
+    !persisted.parsed ||
+    typeof persisted.parsed !== 'object' ||
+    Array.isArray(persisted.parsed)
+  ) {
+    throw new Error(`[config-direct-native] ${label} writer returned invalid shape`);
+  }
+  return persisted as {
+    path: string;
+    format: 'toml';
+    raw: string;
+    parsed: AnyRecord;
+  };
+}
+
+function parseRuntimeManifestOutput(output: unknown): AnyRecord {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[config-direct-native] runtime config compiler returned invalid payload');
+  }
+  const manifest = output as AnyRecord;
+  if (
+    manifest.manifestVersion !== 'routecodex.runtime-config.v1' ||
+    !manifest.virtualRouterBootstrapInput ||
+    typeof manifest.virtualRouterBootstrapInput !== 'object' ||
+    Array.isArray(manifest.virtualRouterBootstrapInput) ||
+    !manifest.pipelineRuntimeConfig ||
+    typeof manifest.pipelineRuntimeConfig !== 'object' ||
+    Array.isArray(manifest.pipelineRuntimeConfig)
+  ) {
+    throw new Error('[config-direct-native] runtime config compiler returned invalid manifest');
+  }
+  return manifest;
 }
 
 export function decodeRouteCodexUserConfigTextWithNative(input: {
@@ -137,4 +197,180 @@ export function resolveRccSnapshotsDirWithNative(homeDir?: string): string {
     throw new Error('[config-direct-native] snapshot dir resolver returned invalid path');
   }
   return snapshotsDir;
+}
+
+export function resolveRouteCodexConfigPathWithNative(options: {
+  preferredPath?: string;
+  configName?: string;
+  allowDirectoryScan?: boolean;
+  baseDir?: string;
+} = {}): string {
+  return callConfigValue<string>('resolveRouteCodexConfigPathJson', {
+    preferredPath: options.preferredPath,
+    configName: options.configName,
+    allowDirectoryScan: options.allowDirectoryScan ?? true,
+    baseDir: options.baseDir,
+    cwd: process.cwd(),
+    homeDir: process.env.HOME,
+    execPath: process.execPath,
+    routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+    routecodexConfig: process.env.ROUTECODEX_CONFIG,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
+}
+
+export function planAuthFileResolutionWithNative(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value?: string;
+  filePath?: string;
+  cacheKey?: string;
+} {
+  const output = callConfigObject('planAuthFileResolutionJson', {
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
+  if (output.kind !== 'literal' && output.kind !== 'authFile') {
+    throw new Error('[config-direct-native] auth file planner returned invalid kind');
+  }
+  return output as {
+    kind: 'literal' | 'authFile';
+    value?: string;
+    filePath?: string;
+    cacheKey?: string;
+  };
+}
+
+export function resolveAuthFileKeyWithNative(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value: string;
+  cacheKey?: string;
+} {
+  const output = callConfigObject('resolveAuthFileKeyJson', {
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
+  if ((output.kind !== 'literal' && output.kind !== 'authFile') || typeof output.value !== 'string') {
+    throw new Error('[config-direct-native] auth file resolver returned invalid shape');
+  }
+  return output as {
+    kind: 'literal' | 'authFile';
+    value: string;
+    cacheKey?: string;
+  };
+}
+
+export function planRouteCodexConfigLoaderPathsWithNative(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+}): {
+  explicitPath?: string;
+  providerRootDir?: string;
+} {
+  return parseOptionalStringObject(
+    callConfigObject('planRouteCodexConfigLoaderPathsJson', {
+      explicitPath: input.explicitPath,
+      routecodexProviderDir: input.routecodexProviderDir,
+      rccProviderDir: input.rccProviderDir
+    }),
+    'planRouteCodexConfigLoaderPathsJson',
+    ['explicitPath', 'providerRootDir']
+  ) as {
+    explicitPath?: string;
+    providerRootDir?: string;
+  };
+}
+
+export function planProviderConfigRootWithNative(rootDir?: string): {
+  rootDir?: string;
+} {
+  return parseOptionalStringObject(
+    callConfigObject('planProviderConfigRootJson', { rootDir }),
+    'planProviderConfigRootJson',
+    ['rootDir']
+  ) as { rootDir?: string };
+}
+
+export function compileRouteCodexRuntimeManifestWithNative(input: AnyRecord): AnyRecord {
+  return parseRuntimeManifestOutput(callConfigObject('compileRouteCodexRuntimeManifestJson', input ?? {}));
+}
+
+export function writeRouteCodexUserConfigFileWithNative(input: {
+  configPath: string;
+  parsed: AnyRecord;
+  format?: 'toml';
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  return parsePersistedConfigFileOutput(
+    callConfigObject('writeRouteCodexUserConfigFileJson', {
+      configPath: input.configPath,
+      parsed: input.parsed ?? {},
+      format: input.format
+    }),
+    'user config'
+  );
+}
+
+export function writeRouteCodexProviderConfigFileWithNative(input: {
+  configPath: string;
+  parsed: AnyRecord;
+  format?: 'toml';
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  return parsePersistedConfigFileOutput(
+    callConfigObject('writeRouteCodexProviderConfigFileJson', {
+      configPath: input.configPath,
+      parsed: input.parsed ?? {},
+      format: input.format
+    }),
+    'provider config'
+  );
+}
+
+export function updateRouteCodexUserConfigStringScalarWithNative(input: {
+  configPath: string;
+  tablePath: string[];
+  key: string;
+  value: string;
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  return parsePersistedConfigFileOutput(
+    callConfigObject('updateRouteCodexUserConfigStringScalarJson', {
+      configPath: input.configPath,
+      tablePath: input.tablePath,
+      key: input.key,
+      value: input.value
+    }),
+    'user config scalar update'
+  );
 }

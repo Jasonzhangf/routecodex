@@ -3,10 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  updateRouteCodexUserConfigStringScalarNativeSync,
-  writeRouteCodexProviderConfigFileNativeSync,
-  writeRouteCodexUserConfigFileNativeSync,
-} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+  updateRouteCodexUserConfigStringScalarWithNative,
+  writeRouteCodexProviderConfigFileWithNative,
+  writeRouteCodexUserConfigFileWithNative,
+} from '../sharedmodule/helpers/config-direct-native.js';
 import { decodeProviderConfigFile } from '../../src/config/provider-config-codec.js';
 import { decodeUserConfigFile } from '../../src/config/user-config-codec.js';
 import { updateUserConfigStringScalar, writeUserConfigFile } from '../../src/config/user-config-writer.js';
@@ -29,7 +29,7 @@ describe('config writer rust parity', () => {
     await fs.mkdir(path.dirname(rustPath), { recursive: true });
 
     const tsWritten = await writeUserConfigFile(tsPath, payload);
-    const rustWritten = writeRouteCodexUserConfigFileNativeSync({ configPath: rustPath, parsed: payload });
+    const rustWritten = writeRouteCodexUserConfigFileWithNative({ configPath: rustPath, parsed: payload });
 
     expect(rustWritten).toEqual({
       ...tsWritten,
@@ -55,7 +55,7 @@ describe('config writer rust parity', () => {
     await fs.mkdir(path.dirname(rustPath), { recursive: true });
 
     const tsWritten = await writeProviderConfigFile(tsPath, payload);
-    const rustWritten = writeRouteCodexProviderConfigFileNativeSync({ configPath: rustPath, parsed: payload });
+    const rustWritten = writeRouteCodexProviderConfigFileWithNative({ configPath: rustPath, parsed: payload });
 
     expect(rustWritten).toEqual({
       ...tsWritten,
@@ -80,7 +80,7 @@ describe('config writer rust parity', () => {
       key: 'oauthBrowser',
       value: 'camoufox',
     });
-    const rustPersisted = updateRouteCodexUserConfigStringScalarNativeSync({
+    const rustPersisted = updateRouteCodexUserConfigStringScalarWithNative({
       configPath: rustPath,
       tablePath: [],
       key: 'oauthBrowser',
@@ -100,11 +100,11 @@ describe('config writer rust parity', () => {
     const userPath = path.join(root, 'config.json');
     const providerPath = path.join(root, 'config.v2.json');
 
-    expect(() => writeRouteCodexUserConfigFileNativeSync({
+    expect(() => writeRouteCodexUserConfigFileWithNative({
       configPath: userPath,
       parsed: { version: '2.0.0' },
     })).toThrow('user config JSON support removed');
-    expect(() => writeRouteCodexProviderConfigFileNativeSync({
+    expect(() => writeRouteCodexProviderConfigFileWithNative({
       configPath: providerPath,
       parsed: { version: '2.0.0' },
     })).toThrow('provider config JSON support removed');

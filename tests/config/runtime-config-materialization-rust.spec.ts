@@ -1,4 +1,4 @@
-import { compileRouteCodexRuntimeManifestSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { compileRouteCodexRuntimeManifestWithNative } from '../sharedmodule/helpers/config-direct-native.js';
 import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
 
 describe('Rust runtime config materialization', () => {
@@ -79,12 +79,12 @@ describe('Rust runtime config materialization', () => {
       })
     };
 
-    const manifest = compileRouteCodexRuntimeManifestSync({
+    const manifest = compileRouteCodexRuntimeManifestWithNative({
       userConfig,
       providerConfigs,
       options: { routingPolicyGroup: 'beta' }
     });
-    const repeated = compileRouteCodexRuntimeManifestSync({
+    const repeated = compileRouteCodexRuntimeManifestWithNative({
       userConfig,
       providerConfigs,
       options: { routingPolicyGroup: 'beta' }
@@ -128,7 +128,7 @@ describe('Rust runtime config materialization', () => {
   });
 
   it('fails fast when a forwarder provider target does not declare the requested model', () => {
-    expect(() => compileRouteCodexRuntimeManifestSync({
+    expect(() => compileRouteCodexRuntimeManifestWithNative({
       userConfig: {
         virtualrouter: {
           forwarders: {

@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { planRouteCodexConfigLoaderPathsNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { planRouteCodexConfigLoaderPathsWithNative } from '../sharedmodule/helpers/config-direct-native.js';
 
 function legacyPlan(input: {
   explicitPath?: string;
@@ -30,7 +30,7 @@ function legacyPlan(input: {
 describe('routecodex config loader path rust parity', () => {
   it('matches pre-wire explicit config path planning', () => {
     const input = { explicitPath: '  config.toml  ' };
-    expect(planRouteCodexConfigLoaderPathsNativeSync(input)).toEqual(legacyPlan(input));
+    expect(planRouteCodexConfigLoaderPathsWithNative(input)).toEqual(legacyPlan(input));
   });
 
   it('matches pre-wire provider root env precedence', () => {
@@ -38,7 +38,7 @@ describe('routecodex config loader path rust parity', () => {
       routecodexProviderDir: '  routecodex-provider  ',
       rccProviderDir: 'rcc-provider',
     };
-    expect(planRouteCodexConfigLoaderPathsNativeSync(input)).toEqual(legacyPlan(input));
+    expect(planRouteCodexConfigLoaderPathsWithNative(input)).toEqual(legacyPlan(input));
   });
 
   it('matches pre-wire provider root env fallback after blank primary', () => {
@@ -47,6 +47,6 @@ describe('routecodex config loader path rust parity', () => {
       routecodexProviderDir: '  ',
       rccProviderDir: 'rcc-provider',
     };
-    expect(planRouteCodexConfigLoaderPathsNativeSync(input)).toEqual(legacyPlan(input));
+    expect(planRouteCodexConfigLoaderPathsWithNative(input)).toEqual(legacyPlan(input));
   });
 });

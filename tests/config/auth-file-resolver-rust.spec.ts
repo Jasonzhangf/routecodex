@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  planAuthFileResolutionNativeSync,
-  resolveAuthFileKeyNativeSync,
-} from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+  planAuthFileResolutionWithNative,
+  resolveAuthFileKeyWithNative,
+} from '../sharedmodule/helpers/config-direct-native.js';
 import { AuthFileResolver } from '../../src/config/auth-file-resolver.js';
 
 async function mkTmp(prefix: string): Promise<string> {
@@ -52,7 +52,7 @@ describe('auth-file resolver rust parity', () => {
     const authDir = path.join(root, 'auth');
     const keyId = ' authfile-demo ';
 
-    expect(planAuthFileResolutionNativeSync({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
+    expect(planAuthFileResolutionWithNative({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
   });
 
   it('matches pre-wire authfile path plan semantics', async () => {
@@ -60,7 +60,7 @@ describe('auth-file resolver rust parity', () => {
     const authDir = path.join(root, 'auth');
     const keyId = 'authfile-demo-default';
 
-    expect(planAuthFileResolutionNativeSync({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
+    expect(planAuthFileResolutionWithNative({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
   });
 
   it('matches pre-wire empty authfile suffix path semantics', async () => {
@@ -68,7 +68,7 @@ describe('auth-file resolver rust parity', () => {
     const authDir = path.join(root, 'auth');
     const keyId = 'authfile-';
 
-    expect(planAuthFileResolutionNativeSync({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
+    expect(planAuthFileResolutionWithNative({ keyId, authDir })).toEqual(legacyPlan(keyId, authDir));
   });
 
   it('resolves authfile content through the native plan and keeps TS as IO/cache shell', async () => {
@@ -87,7 +87,7 @@ describe('auth-file resolver rust parity', () => {
     await fs.mkdir(authDir, { recursive: true });
     await fs.writeFile(path.join(authDir, 'demo'), '  sk-native-value  \n', 'utf8');
 
-    expect(resolveAuthFileKeyNativeSync({ keyId: 'authfile-demo', authDir })).toEqual(
+    expect(resolveAuthFileKeyWithNative({ keyId: 'authfile-demo', authDir })).toEqual(
       await legacyResolve('authfile-demo', authDir)
     );
   });
@@ -95,7 +95,7 @@ describe('auth-file resolver rust parity', () => {
   it('matches pre-wire literal key read semantics', async () => {
     const root = await mkTmp('routecodex-auth-native-literal-');
     const authDir = path.join(root, 'auth');
-    expect(resolveAuthFileKeyNativeSync({ keyId: 'literal-key', authDir })).toEqual(
+    expect(resolveAuthFileKeyWithNative({ keyId: 'literal-key', authDir })).toEqual(
       await legacyResolve('literal-key', authDir)
     );
   });
