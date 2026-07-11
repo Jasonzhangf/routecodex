@@ -419,7 +419,6 @@ const mockNativeExportsModule = () => ({
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,
   })),
   isToolCallContinuationResponseNative: jest.fn(() => false),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn(() => ({})),
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'none' })),

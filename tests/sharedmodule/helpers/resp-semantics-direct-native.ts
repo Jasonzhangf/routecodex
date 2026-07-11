@@ -1279,6 +1279,44 @@ export function projectResponsesSseFrameForClientWithNative(input: {
   }
 }
 
+export function updateResponsesContractProbeFromSseChunkWithNative(
+  chunk: unknown,
+  probe: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const capability = 'updateResponsesContractProbeFromSseChunkJson';
+  const fail = (reason?: string) => failNative<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const chunkJson = safeStringify(typeof chunk === 'string' ? chunk : String(chunk ?? ''));
+  const probeJson = safeStringify(probe ?? {});
+  if (!chunkJson || !probeJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(chunkJson, probeJson);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function projectSseErrorEventPayloadWithNative(input: {
   requestId: string;
   status: number;

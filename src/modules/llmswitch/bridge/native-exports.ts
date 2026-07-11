@@ -1490,22 +1490,6 @@ export function resolveProviderResponseRequestSemanticsNative(
   return parsed as Record<string, unknown>;
 }
 
-export function updateResponsesContractProbeFromSseChunkNative(
-  chunk: unknown,
-  probe: Record<string, unknown> | undefined
-): Record<string, unknown> {
-  const fn = getChatProcessNodeResultSemantics().updateResponsesContractProbeFromSseChunkJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] updateResponsesContractProbeFromSseChunkJson not available');
-  }
-  const raw = fn(JSON.stringify(typeof chunk === 'string' ? chunk : String(chunk ?? '')), JSON.stringify(probe ?? {}));
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] updateResponsesContractProbeFromSseChunkJson returned invalid payload');
-  }
-  return parsed as Record<string, unknown>;
-}
-
 export function updateResponsesSseTransportTerminalStateNative(input: {
   chunk: unknown;
   state: Record<string, unknown> | undefined;

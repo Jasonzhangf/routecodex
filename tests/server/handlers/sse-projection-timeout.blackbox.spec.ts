@@ -310,54 +310,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           && !Array.isArray(body)
           && (body as Record<string, unknown>).required_action
         ),
-        updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
-          const existing =
-            probe && typeof probe === 'object' && !Array.isArray(probe)
-              ? { ...(probe as Record<string, unknown>) }
-              : {};
-          const text =
-            typeof chunk === 'string'
-              ? chunk
-              : Buffer.isBuffer(chunk)
-                ? chunk.toString('utf8')
-                : '';
-          const dataLine = text
-            .split(/\r?\n/)
-            .find((line) => line.startsWith('data:'));
-          if (!dataLine) {
-            return existing;
-          }
-          const payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
-          const item = payload.item;
-          if (
-            payload.type === 'response.output_item.done'
-            && item
-            && typeof item === 'object'
-            && !Array.isArray(item)
-            && (item as Record<string, unknown>).type === 'function_call'
-          ) {
-            const toolCall = {
-              id: (item as Record<string, unknown>).id ?? 'call_tool_close_guard',
-              type: 'function',
-              name: (item as Record<string, unknown>).name ?? 'exec_command',
-              arguments: (item as Record<string, unknown>).arguments ?? '{}',
-              function: {
-                name: (item as Record<string, unknown>).name ?? 'exec_command',
-                arguments: (item as Record<string, unknown>).arguments ?? '{}',
-              }
-            };
-            return {
-              id: 'resp_tool_close_guard',
-              status: 'requires_action',
-              required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: { tool_calls: [toolCall] }
-              },
-              output: [{ ...(item as Record<string, unknown>) }]
-            };
-          }
-          return existing;
-        },
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -428,57 +380,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             || Array.isArray((body as Record<string, unknown>).output)
           )
         ),
-        updateResponsesContractProbeFromSseChunkNative: (chunk: unknown, probe: unknown) => {
-          const existing =
-            probe && typeof probe === 'object' && !Array.isArray(probe)
-              ? { ...(probe as Record<string, unknown>) }
-              : {};
-          const text =
-            typeof chunk === 'string'
-              ? chunk
-              : Buffer.isBuffer(chunk)
-                ? chunk.toString('utf8')
-                : '';
-          const dataLine = text
-            .split(/\r?\n/)
-            .find((line) => line.startsWith('data:'));
-          if (!dataLine) {
-            return existing;
-          }
-          const payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
-          const item = payload.item;
-          if (
-            payload.type === 'response.output_item.done'
-            && item
-            && typeof item === 'object'
-            && !Array.isArray(item)
-            && (item as Record<string, unknown>).type === 'function_call'
-          ) {
-            const toolCall = {
-              id: (item as Record<string, unknown>).id ?? 'call_probe_from_frame',
-              type: 'function',
-              name: (item as Record<string, unknown>).name ?? 'exec_command',
-              arguments: (item as Record<string, unknown>).arguments ?? '{}',
-            };
-            return {
-              ...existing,
-              id: existing.id ?? 'resp_probe_from_frame',
-              object: 'response',
-              status: 'requires_action',
-              required_action: {
-                type: 'submit_tool_outputs',
-                submit_tool_outputs: {
-                  tool_calls: [toolCall]
-                }
-              },
-              output: [{
-                type: 'function_call',
-                ...toolCall
-              }]
-            };
-          }
-          return existing;
-        },
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -541,11 +442,6 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('does not close a non-terminal text stream before the upstream stream ends', async () => {
     mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -614,11 +510,6 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('does not synthesize a terminal error when a non-terminal responses stream ends', async () => {
     mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -684,11 +575,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           && typeof body === 'object'
           && !Array.isArray(body)
           && (body as Record<string, unknown>).required_action
-        ),
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
         ),
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
@@ -761,11 +647,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           && !Array.isArray(body)
           && (body as Record<string, unknown>).required_action
         ),
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
         writeSnapshotViaHooks: async () => undefined,
@@ -836,11 +717,6 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('does not treat timeout-hint disconnect state as pre-start socket close', async () => {
     mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -929,11 +805,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           && typeof body === 'object'
           && !Array.isArray(body)
           && (body as Record<string, unknown>).required_action
-        ),
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
         ),
         writeSnapshotViaHooks: async () => undefined,
     });
@@ -1053,11 +924,6 @@ describe('HTTP Responses SSE projection timeout', () => {
   it('closes after a real terminal event without turning an empty probe repair into an error', async () => {
     mockBridgeModules({
         isToolCallContinuationResponseNative: () => false,
-        updateResponsesContractProbeFromSseChunkNative: (_chunk: unknown, probe: unknown) => (
-          probe && typeof probe === 'object' && !Array.isArray(probe)
-            ? probe
-            : {}
-        ),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

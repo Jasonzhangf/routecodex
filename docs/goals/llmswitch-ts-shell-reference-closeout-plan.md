@@ -178,6 +178,15 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ## Progress Notes
 
+### 2026-07-11 Responses SSE contract probe host wrapper removed
+
+- Removed the host TS wrapper `updateResponsesContractProbeFromSseChunkNative` from `src/modules/llmswitch/bridge/native-exports.ts`; the Rust/NAPI truth remains `updateResponsesContractProbeFromSseChunkJson`.
+- `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts` now uses test-only direct native glue for the contract-probe case instead of importing the host wrapper.
+- Removed stale Jest/mock fields that pretended the deleted wrapper still existed, including SSE timeout tests that previously carried local TS probe reconstruction.
+- `verify:responses-sse-business-module` now requires the Rust NAPI export and fails if the host wrapper is reintroduced.
+- Verification passed: deletion-prep red gate for the old wrapper, exact reference scans, focused Responses SSE/submit-tool Jest 20/20, `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, direct tool-shape gates, residue audit 211/211, strict shell reference audit, minimal TS surface audit, rustification audit, deleted-path, thin-wrapper, function-map compile gate, root `tsc`, native hotpath build, and touched-file `git diff --check`.
+- Known non-target blocker: root `npm run build:base` in the dirty main worktree currently stops on unrelated `debug.pipeline_dry_run_loop.mainline` binding budget state.
+
 ### 2026-07-09 VR provider bootstrap wrapper deleted
 
 - Physically deleted `sharedmodule/llmswitch-core/src/native/router-hotpath/native-virtual-router-bootstrap-providers.ts`.

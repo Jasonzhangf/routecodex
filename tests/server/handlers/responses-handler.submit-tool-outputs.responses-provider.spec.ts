@@ -230,7 +230,6 @@ const createNativeExportsMock = () => ({
     failures: [],
     toolMessages: [],
   })),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
     request?: Record<string, unknown>;
   }) => {

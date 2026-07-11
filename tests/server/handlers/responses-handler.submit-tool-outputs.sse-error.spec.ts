@@ -194,7 +194,6 @@ const createNativeExportsMock = () => ({
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
   sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload),
   shouldRecordSnapshotsNative: jest.fn(() => false),
-  updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
   updateResponsesSseTransportTerminalStateNative: jest.fn((input: { state?: Record<string, unknown>; chunk?: unknown }) => ({
     state: input.state ?? {},
     observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),

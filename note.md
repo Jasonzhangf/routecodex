@@ -28726,6 +28726,15 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Exact residue scan: `__rccResponsesConversationStore` remains only in `hub-pipeline-stage-residue-audit.spec.ts` negative assertions.
 - Known non-target gap: old broad executor/blackbox fixtures still need a separate native-handle fixture migration; they were not used as closure evidence for this store singleton slice.
 
+# 2026-07-11: Responses SSE contract probe host wrapper removed
+
+- Scope: continue llmswitch / Hub Pipeline external-reference closeout for Responses SSE contract probe semantics.
+- Change: removed `updateResponsesContractProbeFromSseChunkNative` from `src/modules/llmswitch/bridge/native-exports.ts`; retained Rust/NAPI `updateResponsesContractProbeFromSseChunkJson` as truth. Migrated the contract spec to test-only direct native glue and removed stale Jest/mock fields plus SSE timeout test-local probe reconstruction.
+- Red evidence: after extending `verify-responses-sse-business-module`, the gate failed while the host wrapper still existed: `native-exports.ts must not expose a host TS wrapper for Rust-owned Responses contract probe semantics`.
+- Exact scan: post-delete `updateResponsesContractProbeFromSseChunkNative` hits are only gate/residue denylist strings; `updateResponsesContractProbeFromSseChunkJson` remains in Rust NAPI, native availability typing, and direct test helper.
+- Verification PASS: focused Jest 4 suites / 20 tests; `verify:responses-handler-single-bridge-surface`; `verify:responses-sse-business-module`; Responses direct tool-shape gates; `hub-pipeline-stage-residue-audit` 211/211; strict `llmswitch-ts-shell-reference-audit`; minimal TS surface audit; rustification audit; deleted-path; thin-wrapper; function-map compile gate; root `tsc`; `build:native-hotpath`; touched-file `git diff --check`.
+- Known non-target blocker: dirty-worktree `npm run build:base` currently fails on unrelated `debug.pipeline_dry_run_loop.mainline` missing binding budget, not on this wrapper deletion.
+
 # 2026-07-11: keepalive protocol loader helper consumer removed
 
 - Scope: continued external reference contraction for legacy `importCoreDist` / `requireCoreDist` / broad `bridge.js` test consumers.

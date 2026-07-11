@@ -2,9 +2,9 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   projectResponsesSseFrameForClientNative,
-  updateResponsesContractProbeFromSseChunkNative,
   updateResponsesSseTransportTerminalStateNative
 } from '../../../../src/modules/llmswitch/bridge/native-exports.js';
+import { updateResponsesContractProbeFromSseChunkWithNative } from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
 
 describe('native-exports responses SSE contract', () => {
   it('calls router_hotpath SSE projection with the native multi-arg contract', () => {
@@ -96,7 +96,7 @@ describe('native-exports responses SSE contract', () => {
       '',
     ].join('\n');
 
-    const probe = updateResponsesContractProbeFromSseChunkNative(chunk, {});
+    const probe = updateResponsesContractProbeFromSseChunkWithNative(chunk, {});
     expect(probe).not.toEqual({});
     expect(probe).toEqual(
       expect.objectContaining({
