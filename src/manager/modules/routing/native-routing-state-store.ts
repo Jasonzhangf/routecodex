@@ -1,13 +1,4 @@
-/**
- * State Integrations Bridge
- *
- * Routing state and session identifier compatibility wrappers.
- */
-
-import {
-  extractSessionIdentifiersFromMetadataNative,
-  getRouterHotpathJsonBindingSync
-} from './native-exports.js';
+import { getRouterHotpathJsonBindingSync } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
 
 type RoutingInstructionState = Record<string, unknown>;
@@ -15,12 +6,11 @@ type NativeJsonBinding = Record<string, unknown>;
 
 const NO_SESSION_DIR_OVERRIDE = '__ROUTECODEX_NO_SESSION_DIR_OVERRIDE__';
 
-function buildStateIntegrationFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
+function buildRoutingStateFailure(stage: string, error: unknown, details?: Record<string, unknown>): Error {
   const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
-  const message = `[llmswitch-bridge.state-integrations] ${stage} failed: ${formatUnknownError(error)}${detailSuffix}`;
-  const wrapped = new Error(message);
+  const wrapped = new Error(`[manager.routing] ${stage} failed: ${formatUnknownError(error)}${detailSuffix}`);
   Object.assign(wrapped, {
-    code: 'STATE_INTEGRATION_FAILED',
+    code: 'ROUTING_STATE_STORE_FAILED',
     stage,
     details,
     cause: error
@@ -32,9 +22,7 @@ function nativeJsonBinding(): NativeJsonBinding {
   return getRouterHotpathJsonBindingSync() as unknown as NativeJsonBinding;
 }
 
-function requireNativeJsonFunction<T extends (...args: never[]) => unknown>(
-  capability: string,
-): T {
+function requireNativeJsonFunction<T extends (...args: never[]) => unknown>(capability: string): T {
   const fn = nativeJsonBinding()[capability];
   if (typeof fn !== 'function') {
     throw new Error(`${capability} native unavailable`);
@@ -71,7 +59,9 @@ function plainRoutingState(state: unknown): unknown {
 }
 
 function hydrateRoutingState(raw: unknown): unknown | null {
-  if (raw === null) return null;
+  if (raw === null) {
+    return null;
+  }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return raw;
   }
@@ -128,7 +118,7 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
     const raw = fn(key, normalizeSessionDirOverride());
     return deserializeRoutingStateFromNative(raw);
   } catch (error) {
-    throw buildStateIntegrationFailure('routing_state_store.load_state.invoke', error, { key });
+    throw buildRoutingStateFailure('routing_state_store.load_state.invoke', error, { key });
   }
 }
 
@@ -141,16 +131,6 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
     const fn = requireNativeJsonFunction<(key: string, stateJson: string, sessionDir?: string) => string | void>('saveRoutingInstructionStateJson');
     fn(key, serializeRoutingStateForNative(state), normalizeSessionDirOverride());
   } catch (error) {
-    throw buildStateIntegrationFailure('routing_state_store.save_sync.invoke', error, { key });
-  }
-}
-
-type SessionIdentifiers = { sessionId?: string; conversationId?: string };
-
-export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
-  try {
-    return extractSessionIdentifiersFromMetadataNative(meta);
-  } catch (error) {
-    throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
+    throw buildRoutingStateFailure('routing_state_store.save_sync.invoke', error, { key });
   }
 }

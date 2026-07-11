@@ -64,7 +64,7 @@ Primary host bridge blockers:
 | `src/modules/llmswitch/bridge/routing-integrations.ts` | `native-hub-pipeline-orchestration-semantics`, `runtime/virtual-router-host-effects`, `native-virtual-router-bootstrap-config` |
 | `src/modules/llmswitch/bridge/runtime-integrations.ts` | `conversion/snapshot-utils`, `native-sse-runtime`, `native-provider-runtime-ingress` |
 | `src/modules/llmswitch/bridge/snapshot-recorder.ts` | `conversion/hub/snapshot-recorder` |
-| `src/modules/llmswitch/bridge/state-integrations.ts` | `native-virtual-router-routing-state` |
+| `src/modules/llmswitch/bridge/state-integrations.ts` | closed: deleted after routing-state store IO moved to manager routing surface and session extraction moved to native-exports caller |
 | `src/providers/core/runtime/provider-failure-policy-native.ts` | direct `dist/native/router-hotpath/native-failure-policy` load |
 
 Primary internal fan-out blockers:
@@ -840,7 +840,7 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 ### 2026-07-11 request executor metadata-center root bridge mock removed
 
 - `tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels.
-- The spec now mocks only the active production leaf collaborators used by `request-executor.ts` and `executor-metadata.ts`: `runtime-integrations.js`, `routing-integrations.js`, `state-integrations.js`, and `native-exports.js`.
+- The spec now mocks only the active production leaf collaborators used by `request-executor.ts` and `executor-metadata.ts`: `runtime-integrations.js`, `routing-integrations.js`, and `native-exports.js`.
 - Removed the stale `resolveBaseDir` and `importCoreDist` helper fields from this metadata-center contract fixture without adding TS behavior.
 - Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
 - Verification gap: the focused spec remains OOM before and after this edit, so this slice does not claim metadata-center behavior closure.
@@ -990,3 +990,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Deleted one-function host leaf `src/modules/llmswitch/bridge/responses-sse-transport.ts`; `buildClientSseKeepaliveFrameForHttp` now lives directly on the existing handler-facing `responses-sse-bridge.ts` facade.
 - Updated architecture verifier and red-test ownership checks so they no longer keep the extra transport leaf alive; the residue gate now locks the deleted path as physically absent.
 - Kept Rust/NAPI-owned SSE projection and terminal transport-state semantics unchanged through `projectResponsesSseFrameForClientNative` and `updateResponsesSseTransportTerminalStateNative`; the deleted leaf only owned a literal keepalive frame.
+
+### 2026-07-11 state integrations bridge shell deleted
+
+- Deleted `src/modules/llmswitch/bridge/state-integrations.ts` after exact tracked-source scan showed only two active production consumers: routing manager state-store IO and executor metadata session-id extraction.
+- Moved routing state load/save host IO to `src/manager/modules/routing/native-routing-state-store.ts`, still calling Rust/NAPI JSON state-store capabilities for serialization and persistence truth.
+- Moved executor metadata session-id extraction to call `extractSessionIdentifiersFromMetadataNative` directly from `native-exports.ts`; stale Jest mocks and state-integrations focused specs were removed instead of preserving the old bridge shell.
+- The residue gate now locks `state-integrations.ts` as physically absent.

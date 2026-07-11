@@ -32,14 +32,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
   }),
 }), { virtual: true });
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  extractSessionIdentifiersFromMetadata: () => ({}),
-  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
-  loadRoutingInstructionStateSync: () => null,
-  saveRoutingInstructionStateAsync: async () => undefined,
-  saveRoutingInstructionStateSync: () => undefined,
-}), { virtual: true });
-
 import type { OpenAIStandardConfig } from '../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';

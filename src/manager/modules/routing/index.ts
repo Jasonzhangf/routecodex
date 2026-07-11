@@ -5,7 +5,7 @@ import {
   loadRoutingInstructionStateSync,
   saveRoutingInstructionStateAsync,
   saveRoutingInstructionStateSync
-} from '../../../modules/llmswitch/bridge/state-integrations.js';
+} from './native-routing-state-store.js';
 
 type RoutingInstructionState = unknown;
 

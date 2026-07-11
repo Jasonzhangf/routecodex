@@ -2,8 +2,8 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 // feature_id: hub.metadata_center_request_capture
 import { asRecord } from './provider-utils.js';
 import {
-  extractSessionIdentifiersFromMetadata
-} from '../../../modules/llmswitch/bridge/state-integrations.js';
+  extractSessionIdentifiersFromMetadataNative
+} from '../../../modules/llmswitch/bridge/native-exports.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   bindMetadataCenterRustMirror,
@@ -632,7 +632,7 @@ export function buildInboundLogSessionContext(input: InboundLogSessionContextInp
   if (requestHeaderConversationId) {
     requestTruthSource.conversationId = requestHeaderConversationId;
   }
-  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
+  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadataNative(requestTruthSource);
   const explicitSessionId = normalizeToken(extractedSessionIdentifiers.sessionId);
   const explicitConversationId = normalizeToken(extractedSessionIdentifiers.conversationId);
   const hasSemanticSessionSource = Boolean(
@@ -937,7 +937,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     delete rt.responsesRequestContext;
     requestTruthSource.__rt = rt;
   }
-  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadata(requestTruthSource);
+  const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadataNative(requestTruthSource);
   const existingSessionId = typeof extractedSessionIdentifiers.sessionId === 'string' && extractedSessionIdentifiers.sessionId.trim()
     ? extractedSessionIdentifiers.sessionId.trim()
     : undefined;

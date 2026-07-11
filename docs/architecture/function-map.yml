@@ -3237,6 +3237,7 @@ owners:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
     required_tests:
+      - tests/manager/routing/native-routing-state-store.spec.ts
       - tests/sharedmodule/routing-state-store-observability.spec.ts
       - tests/sharedmodule/routing-state-continuation-matrix.spec.ts
       - tests/manager/storage/jsonl-file-store.spec.ts

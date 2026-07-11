@@ -3,13 +3,6 @@ import { jest } from '@jest/globals';
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  extractSessionIdentifiersFromMetadata: () => ({}),
-  loadRoutingInstructionStateSync: () => null,
-  saveRoutingInstructionStateAsync: () => {},
-  saveRoutingInstructionStateSync: () => {},
-}));
-
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: jest.fn(async () => ({ record: () => {} })),
   resetSnapshotRecorderErrorsampleStateForTests: jest.fn(),

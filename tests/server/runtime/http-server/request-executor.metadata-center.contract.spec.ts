@@ -6,10 +6,6 @@ import {
   finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
-const mockStateIntegrationsModule = {
-  extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
-};
-
 const mockRuntimeIntegrationsModule = {
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
@@ -107,6 +103,7 @@ const mockNativeExportsModule = () => ({
     validateApplyPatchArgumentsJson: jest.fn(() => JSON.stringify({ ok: true })),
     validateCanonicalClientToolCallJson: jest.fn(() => JSON.stringify({ ok: true }))
   })),
+  extractSessionIdentifiersFromMetadataNative: jest.fn(() => ({})),
   hasRequestedToolsInSemanticsNative: jest.fn(() => false),
   isProviderNativeResumeContinuationNative: jest.fn(() => false),
   isRequiredToolCallTurnNative: jest.fn(() => false),
@@ -167,8 +164,6 @@ const mockNativeExportsModule = () => ({
   writeSnapshotViaHooksNative: jest.fn(() => undefined)
 });
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => mockStateIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations', () => mockStateIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations', () => mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => mockRoutingIntegrationsModule);

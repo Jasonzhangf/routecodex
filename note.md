@@ -29035,3 +29035,23 @@ Pure Rust NAPI candidates:
 - Updated architecture verifiers and red tests so they no longer keep the extra transport leaf alive; `hub-pipeline-stage-residue-audit` now requires the deleted path to stay absent.
 - Evidence: exact tracked-source scan now finds the deleted path only in the closeout doc and residue gate; active handler imports remain through `responses-sse-bridge.ts`.
 - Verification PASS: focused TypeScript; `verify:responses-handler-single-bridge-surface`; `verify:responses-sse-business-module`; focused Jest 3 suites / 222 tests; strict shell reference audit; zero-TS closeout verifier; deleted-path; thin-wrapper-only; function-map compile; `git diff --check`; `build:base`.
+
+# 2026-07-11: state integrations bridge shell retired
+
+- Scope: continue bridge shell closeout by deleting `src/modules/llmswitch/bridge/state-integrations.ts` after exact tracked-source scan showed only routing manager state IO and executor metadata session extraction as active production consumers.
+- Moved routing state host IO into `src/manager/modules/routing/native-routing-state-store.ts`; it still calls Rust/NAPI `serializeRoutingInstructionStateJson`, `deserializeRoutingInstructionStateJson`, `loadRoutingInstructionStateJson`, and `saveRoutingInstructionStateJson` as the persistence truth.
+- `src/server/runtime/http-server/executor-metadata.ts` now calls `extractSessionIdentifiersFromMetadataNative` directly from `native-exports.ts`; stale state-integrations Jest mocks/specs were removed.
+- Added positive/reverse manager routing test `tests/manager/routing/native-routing-state-store.spec.ts` and residue lock requiring `state-integrations.ts` to stay physically absent.
+- Evidence: exact tracked-source scan now finds `state-integrations` only in docs, historical fixtures, and the residue deleted-path list; no active source/test/script import or mock remains.
+- Verification PASS so far: focused TypeScript; focused Jest 4 suites / 272 tests; strict shell reference audit; zero-TS closeout verifier; deleted-path; thin-wrapper-only; function-map compile; `git diff --check`.
+
+# 2026-07-11: Responses direct SSE dry-run carrier isolation
+
+- Marker: responses-direct-dryrun-carrier-isolation-20260711.
+- Symptom: Codex `/v1/responses` SSE failed with client `stream disconnected before completion: stream closed before response.completed`; RouteCodex sample returned `sse_bridge_error: SSE stream missing from pipeline result`.
+- Evidence: failing provider samples `openai-responses-router-gpt-5.4-20260711T234013011-503221-10297` through `...503226-10302` were all `routecodex.pipeline_dry_run` with `stoppedBeforeProviderSend=true`. Their provider request was current Codex SSE (`codex_cli_rs`, `wantsSse=true`), but metadata carried stale `/v1/chat/completions` curl dry-run `requestId=openai-chat-unknown-unknown-20260711T233814617-503190-10266` and `__rccDryRunSerialized`.
+- Root cause: `ResponsesProvider.processIncomingDirect()` created context from provider instance `getCurrentRuntimeMetadata()` before applying the current request runtime carrier, so direct requests could inherit stale provider-request dry-run metadata from a previous non-direct/BaseProvider turn.
+- Change: `processIncomingDirect()` now builds provider context from the current direct request runtime carrier via `createProviderContextFromRequest`; stale provider instance metadata no longer enters direct SSE dry-run decision.
+- Red/green: added `direct SSE does not inherit provider-request dry-run from previous provider runtime metadata`; red before fix because `postStreamOrResponse` was not called, green after fix.
+- Verification PASS: focused red test, full `responses-provider.direct-passthrough` + `pipeline-dry-run` Jest suites, `npx tsc --noEmit --pretty false`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, `git diff --check`.
+- Not executed: no global install, managed restart, or live 5520 same-entry replay; live closure still requires installed build + in-session restart + old-sample/live SSE replay.

@@ -2264,3 +2264,16 @@
 - `src/modules/llmswitch/bridge/responses-sse-transport.ts` is physically deleted; keepalive framing is part of the existing handler-facing `responses-sse-bridge.ts` facade, while SSE projection and terminal transport-state semantics remain Rust/NAPI-owned through `native-exports.ts`.
 - Architecture verifiers and red tests must not require the deleted leaf as a separate owner. `hub-pipeline-stage-residue-audit` locks the path as absent.
 - Verification evidence: focused TypeScript, `verify:responses-handler-single-bridge-surface`, `verify:responses-sse-business-module`, focused Jest 222/222, strict llmswitch shell audit, zero-TS closeout verifier, deleted-path, thin-wrapper-only, function-map compile, `git diff --check`, and `build:base` pass.
+
+# 2026-07-11: State integrations bridge shell is deleted
+
+- `src/modules/llmswitch/bridge/state-integrations.ts` is physically deleted. Active routing-state IO now lives under `src/manager/modules/routing/native-routing-state-store.ts`, and request metadata session extraction calls `extractSessionIdentifiersFromMetadataNative` directly from the native bridge.
+- The routing-state persistence truth remains Rust/NAPI: TS only marshals host `Set`/`Map` containers around `serializeRoutingInstructionStateJson`, `deserializeRoutingInstructionStateJson`, `loadRoutingInstructionStateJson`, and `saveRoutingInstructionStateJson`.
+- Stale state-integrations Jest mocks/specs must not be restored; `hub-pipeline-stage-residue-audit` locks `state-integrations.ts` and `.d.ts` absent.
+
+# 2026-07-11: Responses direct SSE dry-run carrier isolation
+
+- Marker: responses-direct-dryrun-carrier-isolation-20260711.
+- `SSE stream missing from pipeline result` can be a dry-run carrier leak, not an SSE transport bug. Confirm by checking `~/.rcc/codex-samples/openai-responses/ports/<port>/<requestId>/provider-response.json`: if `body.body.object=routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`, and current provider request is Codex SSE while metadata points at an older dry-run request, the root is direct provider runtime metadata isolation.
+- Fixed owner: `src/providers/core/runtime/responses-provider.ts` `processIncomingDirect()` must build context from the current request runtime carrier, not provider instance `getCurrentRuntimeMetadata()`. Previous behavior allowed stale `__rccDryRunSerialized` from a prior dry-run to stop later live direct SSE before upstream send.
+- Regression lock: `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts` includes `direct SSE does not inherit provider-request dry-run from previous provider runtime metadata`.
