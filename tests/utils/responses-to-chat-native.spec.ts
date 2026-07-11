@@ -1,8 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { prepareResponsesRequestBodyForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { normalizeResponsesToChatBody } from '../../src/utils/responses-to-chat.js';
+import { planResponsesRequestBodyForHttpWithNative } from '../sharedmodule/helpers/native-shared-conversion-direct-native.js';
 
 describe('responses-to-chat native normalization', () => {
   test('materializes paired Responses function call and output into chat messages', () => {
@@ -265,7 +265,7 @@ describe('responses-to-chat native normalization', () => {
       }
     );
 
-    const prepared = prepareResponsesRequestBodyForHttp(body, runtimeMetadata);
+    const prepared = planResponsesRequestBodyForHttpWithNative(body);
     normalizeResponsesToChatBody(prepared.pipelineBody);
 
     const messages = prepared.pipelineBody.messages as Array<Record<string, unknown>>;

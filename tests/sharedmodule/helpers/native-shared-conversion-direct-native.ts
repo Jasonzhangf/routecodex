@@ -1683,6 +1683,56 @@ export function planResponsesRequestContextWithNative(input: unknown): Record<st
   }
 }
 
+export function planResponsesRequestBodyForHttpWithNative(payload: unknown): {
+  requestBodyMetadata?: Record<string, unknown>;
+  pipelineBody: Record<string, unknown>;
+} {
+  const capability = 'planResponsesRequestBodyForHttpJson';
+  const fail = (reason?: string) => failNativeRequired<{
+    requestBodyMetadata?: Record<string, unknown>;
+    pipelineBody: Record<string, unknown>;
+  }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? null);
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return fail('invalid payload');
+    }
+    const pipelineBody = parsed.pipelineBody;
+    if (!pipelineBody || typeof pipelineBody !== 'object' || Array.isArray(pipelineBody)) {
+      return fail('invalid pipelineBody');
+    }
+    const requestBodyMetadata = parsed.requestBodyMetadata;
+    if (
+      typeof requestBodyMetadata !== 'undefined'
+      && (!requestBodyMetadata || typeof requestBodyMetadata !== 'object' || Array.isArray(requestBodyMetadata))
+    ) {
+      return fail('invalid requestBodyMetadata');
+    }
+    return {
+      ...(requestBodyMetadata ? { requestBodyMetadata: requestBodyMetadata as Record<string, unknown> } : {}),
+      pipelineBody: pipelineBody as Record<string, unknown>,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function planResponsesContinuationRequestActionWithNative(input: unknown): Record<string, unknown> {
   const capability = 'planResponsesContinuationRequestActionJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
