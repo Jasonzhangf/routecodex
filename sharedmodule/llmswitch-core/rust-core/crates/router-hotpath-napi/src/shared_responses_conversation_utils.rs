@@ -4301,23 +4301,26 @@ impl ResponsesConversationStoreState {
         let request_id = options
             .as_object()
             .and_then(|row| read_trimmed_string(row.get("requestId")));
-        let resumed = resume_responses_conversation_payload(
+        let resumed = match resume_responses_conversation_payload(
             &entry,
             &response_id,
             &submit_payload,
             request_id.as_deref(),
-        )
-        .unwrap_or_else(|reason| {
-            serde_json::json!({
-                "error": {
-                    "type": "orphan_tool_result",
-                    "message": reason,
-                    "status": 400,
-                    "code": "hub_pipeline_context_capture_failed",
-                    "origin": "client"
-                }
-            })
-        });
+        ) {
+            Ok(resumed) => resumed,
+            Err(reason) => {
+                return responses_store_malformed_request(
+                    &reason,
+                    "orphan_tool_result",
+                    serde_json::json!({
+                        "context": "responses-conversation-store.resumeConversation",
+                        "responseId": response_id,
+                        "type": "orphan_tool_result",
+                        "origin": "client",
+                    }),
+                );
+            }
+        };
         if let Some(entry_request_id) = responses_store_read_entry_request_id(&entry) {
             self.detach_request_id(&entry_request_id);
         }

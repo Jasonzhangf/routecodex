@@ -37,7 +37,7 @@ async function waitForEndWithTimeout(stream: PassThrough, timeoutMs: number): Pr
 }
 
 describe('handler-response-utils required_action transport-only regression', () => {
-  it('does not split response.required_action SSE frames in the handler transport layer', async () => {
+  it('projects split response.required_action SSE frames through the Rust client projection owner', async () => {
     const previousProjectionTimeout = process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
     const previousTerminalCloseTimeout = process.env.ROUTECODEX_HTTP_SSE_TERMINAL_CLOSE_TIMEOUT_MS;
     const previousTotalTimeout = process.env.ROUTECODEX_HTTP_SSE_TIMEOUT_MS;
@@ -62,7 +62,6 @@ describe('handler-response-utils required_action transport-only regression', () 
           }
         }
       })}\n\n`;
-      await new Promise(() => {});
     }
 
     const res = new MockResponse();
@@ -120,12 +119,17 @@ describe('handler-response-utils required_action transport-only regression', () 
     const ended = await waitForEndWithTimeout(res, 1500);
     expect(ended).toBe(true);
     const text = chunks.join('');
-    expect(text).toContain('event: response.required_action');
-    expect(text).not.toContain('event: response.output_item.added');
-    expect(text).not.toContain('event: response.function_call_arguments.done');
-    expect(text).not.toContain('event: response.output_item.done');
-    expect(text).not.toContain('event: response.completed');
-    expect(text).not.toContain('event: response.done');
+    expect(text).not.toContain('event: response.required_action');
+    expect(text).toContain('event: response.output_item.added');
+    expect(text).toContain('event: response.function_call_arguments.delta');
+    expect(text).toContain('event: response.function_call_arguments.done');
+    expect(text).toContain('event: response.output_item.done');
+    expect(text).toContain('event: response.completed');
+    expect(text).toContain('event: response.done');
+    expect(text).toContain('data: [DONE]');
+    expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
+    expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
+    expect(text.indexOf('event: response.done')).toBeLessThan(text.indexOf('data: [DONE]'));
     if (previousProjectionTimeout === undefined) {
       delete process.env.ROUTECODEX_HTTP_SSE_PROJECTION_TIMEOUT_MS;
     } else {

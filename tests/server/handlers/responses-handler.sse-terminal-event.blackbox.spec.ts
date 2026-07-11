@@ -231,7 +231,7 @@ describe('responses-handler SSE terminal contract', () => {
     });
   });
 
-  it('HTTP blackbox: upstream required_action without response.completed is passed through without handler repair', async () => {
+  it('HTTP blackbox: upstream required_action without response.completed is projected and closed by Rust owner', async () => {
     const executePipeline = jest.fn(async () => ({
       status: 200,
       headers: {},
@@ -270,13 +270,18 @@ describe('responses-handler SSE terminal contract', () => {
       const eventNames = events.map((entry) => entry.event);
 
       expect(response.status).toBe(200);
-      expect(eventNames).toContain('response.required_action');
-      expect(text).toContain('event: response.required_action');
-      expect(text).not.toContain('event: response.output_item.added');
-      expect(text).not.toContain('event: response.function_call_arguments.done');
-      expect(text).not.toContain('event: response.output_item.done');
-      expect(text).not.toContain('event: response.completed');
-      expect(text).not.toContain('event: response.done');
+      expect(eventNames).not.toContain('response.required_action');
+      expect(text).not.toContain('event: response.required_action');
+      expect(text).toContain('event: response.output_item.added');
+      expect(text).toContain('event: response.function_call_arguments.delta');
+      expect(text).toContain('event: response.function_call_arguments.done');
+      expect(text).toContain('event: response.output_item.done');
+      expect(text).toContain('event: response.completed');
+      expect(text).toContain('event: response.done');
+      expect(text).toContain('data: [DONE]');
+      expect(text.indexOf('event: response.output_item.done')).toBeLessThan(text.indexOf('event: response.completed'));
+      expect(text.indexOf('event: response.completed')).toBeLessThan(text.indexOf('event: response.done'));
+      expect(text.indexOf('event: response.done')).toBeLessThan(text.indexOf('data: [DONE]'));
       expect(text).not.toContain('upstream_stream_incomplete');
       expect(text).not.toContain('stream closed before response.completed');
     });

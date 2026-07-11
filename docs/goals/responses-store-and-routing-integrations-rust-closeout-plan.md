@@ -257,3 +257,14 @@ Additional runtime closure, when behavior changes:
 
 - Physically deleted `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` after exact references showed it was not wired from package scripts, active function/verification maps, or architecture gates.
 - The deleted assertions were stale handler/SSE save expectations; current mainline owner remains `convertProviderResponse -> recordResponsesResponse`, with store/restore behavior covered by Rust and bridge owner tests.
+
+### 2026-07-11 Orphan tool output failure restored to Rust fail-fast
+
+- Root cause confirmed in `shared_responses_conversation_utils.rs`: `resume_conversation` converted `resume_responses_conversation_payload(...)` errors into an `ok` envelope with `payload:null`, which later surfaced as a handler/native capture 502 instead of the intended client-visible 400.
+- Rust owner now projects mismatched/orphan tool output ids as `MALFORMED_REQUEST` directly from the store path, keeping the failure on the continuation owner boundary.
+- Added direct regression sample `sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs` and wired it into `verify:responses-history-protocol-contract`.
+- Focused evidence:
+  - `npm run build:native-hotpath`
+  - `node sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs`
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts`
+  - `node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand tests/server/handlers/responses-handler.routing-empty-pool.spec.ts`

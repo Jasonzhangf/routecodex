@@ -1189,7 +1189,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
     }
   });
 
-  it('passes required_action stream frames through without handler-side repair', async () => {
+  it('projects required_action stream frames through Rust and writes native terminal closeout', async () => {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -1222,13 +1222,16 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     const output = chunks.join('');
-    expect(output).toContain('event: response.required_action');
-    expect(output).not.toContain('event: response.output_item.added');
-    expect(output).not.toContain('event: response.function_call_arguments.delta');
-    expect(output).not.toContain('event: response.function_call_arguments.done');
-    expect(output).not.toContain('event: response.output_item.done');
-    expect(output).not.toContain('event: response.completed');
-    expect(output).not.toContain('event: response.done');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).not.toContain('event: response.required_action');
+    expect(output).toContain('event: response.output_item.added');
+    expect(output).toContain('event: response.function_call_arguments.delta');
+    expect(output).toContain('event: response.function_call_arguments.done');
+    expect(output).toContain('event: response.output_item.done');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output).toContain('data: [DONE]');
+    expect(output.indexOf('event: response.output_item.done')).toBeLessThan(output.indexOf('event: response.completed'));
+    expect(output.indexOf('event: response.completed')).toBeLessThan(output.indexOf('event: response.done'));
+    expect(output.indexOf('event: response.done')).toBeLessThan(output.indexOf('data: [DONE]'));
   });
 });

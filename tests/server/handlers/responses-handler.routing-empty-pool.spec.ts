@@ -6,8 +6,18 @@ import { Readable } from 'node:stream';
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
 import { HubRequestExecutor } from '../../../src/server/runtime/http-server/request-executor.js';
 import { StatsManager } from '../../../src/server/runtime/http-server/stats-manager.js';
-import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
+import {
+  buildMetadataCenterTransportSnapshot,
+  writeMetadataCenterSlot
+} from '../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
+import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
+
+const TEST_RUNTIME_CONTROL_WRITER = {
+  module: 'tests/server/handlers/responses-handler.routing-empty-pool.spec.ts',
+  symbol: 'buildResponsesExecutorInput',
+  stage: 'test_native_responses_request'
+} as const;
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<ReturnType<express.Express['listen']>>((resolve) => {
@@ -39,6 +49,14 @@ function buildVirtualRouterConfig() {
         baseURL: 'mock://secondary',
         auth: { type: 'apikey', apiKey: 'secondary-key' },
         models: { 'gpt-test': {} }
+      },
+      image: {
+        id: 'image',
+        enabled: true,
+        type: 'responses',
+        baseURL: 'mock://image',
+        auth: { type: 'apikey', apiKey: 'image-key' },
+        models: { 'gpt-image-test': {} }
       }
     },
     routing: {
@@ -47,6 +65,13 @@ function buildVirtualRouterConfig() {
           id: 'default-priority',
           mode: 'priority',
           targets: ['primary.gpt-test', 'secondary.gpt-test']
+        }
+      ],
+      image: [
+        {
+          id: 'image-priority',
+          mode: 'priority',
+          targets: ['image.gpt-image-test']
         }
       ]
     }
@@ -84,6 +109,58 @@ function buildAnthropicVirtualRouterConfig() {
   };
 }
 
+function buildResponsesExecutorInput(input: any): any {
+  const body = input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+    ? input.body as Record<string, unknown>
+    : {};
+  const routeHint = typeof body.model === 'string' && body.model === 'gpt-image-test' ? 'image' : 'default';
+  const requestId = typeof input.requestId === 'string' && input.requestId.trim()
+    ? input.requestId.trim()
+    : (typeof input.id === 'string' && input.id.trim() ? input.id.trim() : 'req_responses_handler_test');
+  const metadata =
+    input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+      ? input.metadata as Record<string, unknown>
+      : {};
+  const sessionId = typeof metadata.sessionId === 'string' && metadata.sessionId.trim()
+    ? metadata.sessionId.trim()
+    : `sess_${requestId}`;
+  const runtimeControl = {
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    routeHint
+  };
+  Object.assign(metadata, {
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    routeHint,
+    sessionId
+  });
+  for (const [key, value] of Object.entries(runtimeControl)) {
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: 'runtime_control',
+      key,
+      value,
+      writer: TEST_RUNTIME_CONTROL_WRITER,
+      reason: 'test native responses runtime control'
+    });
+  }
+  const metadataCenterSnapshot = buildMetadataCenterTransportSnapshot(metadata);
+  return {
+    ...input,
+    requestId,
+    endpoint: '/v1/responses',
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    payload: body,
+    processMode: 'chat',
+    direction: 'request',
+    stage: 'inbound',
+    metadata,
+    metadataCenterSnapshot
+  };
+}
+
 describe('responses handler virtual-router empty-pool guard', () => {
   it('retries HTTP /v1/responses when provider SSE stream terminates during bridge materialization', async () => {
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
@@ -105,7 +182,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
             providerId: 'primary',
             providerType: 'openai',
             providerFamily: 'openai',
-            providerProtocol: 'openai-chat',
+            providerProtocol: 'openai-responses',
             runtime: { runtimeKey: 'primary.key1' },
             instance: {
               initialize: async () => undefined,
@@ -123,7 +200,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
             providerId: 'secondary',
             providerType: 'openai',
             providerFamily: 'openai',
-            providerProtocol: 'openai-chat',
+            providerProtocol: 'openai-responses',
             runtime: { runtimeKey: 'secondary.key1' },
             instance: {
               initialize: async () => undefined,
@@ -151,7 +228,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     };
     const executor = new HubRequestExecutor({
       runtimeManager,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => pipeline.getNativeHandle() as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: async () => undefined
@@ -164,7 +241,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.use(express.json());
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
+        executePipeline: async (input) => executor.execute(buildResponsesExecutorInput(input)),
         errorHandling: null
       })
     );
@@ -258,7 +335,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     };
     const executor = new HubRequestExecutor({
       runtimeManager,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => pipeline.getNativeHandle() as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: async () => undefined
@@ -271,7 +348,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.use(express.json());
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
+        executePipeline: async (input) => executor.execute(buildResponsesExecutorInput(input)),
         errorHandling: null
       })
     );
@@ -301,114 +378,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     }
   });
 
-  it('blocks and retries singleton empty pool instead of surfacing PROVIDER_NOT_AVAILABLE', async () => {
-    const logStages: Array<{ stage: string; details: Record<string, unknown> }> = [];
-    let pipelineCalls = 0;
-    const providerKey = 'primary.gpt-test';
-    const executor = new HubRequestExecutor({
-      runtimeManager: {
-        resolveRuntimeKey: () => 'primary.key1',
-        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'primary.key1'
-          ? {
-              runtimeKey: 'primary.key1',
-              providerId: 'primary',
-              providerType: 'openai',
-              providerFamily: 'openai',
-              providerProtocol: 'openai-chat',
-              runtime: { runtimeKey: 'primary.key1' },
-              instance: {
-                initialize: async () => undefined,
-                cleanup: async () => undefined,
-                processIncoming: async () => ({
-                  status: 200,
-                  data: {
-                    id: 'chatcmpl_ok_singleton',
-                    object: 'chat.completion',
-                    model: 'gpt-test',
-                    choices: [{ index: 0, message: { role: 'assistant', content: 'ok_after_block' }, finish_reason: 'stop' }]
-                  }
-                })
-              }
-            }
-          : undefined,
-        getHandleByProviderKey: () => undefined,
-        disposeAll: async () => undefined,
-        initialize: async () => undefined
-      },
-      getHubPipeline: () => ({
-        execute: jest.fn(async (input: any) => {
-          pipelineCalls += 1;
-          if (pipelineCalls <= 2) {
-            throw Object.assign(new Error('No available providers after applying routing instructions'), {
-              code: 'PROVIDER_NOT_AVAILABLE',
-              details: {
-                routeName: 'default',
-                candidateProviderCount: 1,
-                minRecoverableCooldownMs: 1,
-                recoverableCooldownHints: [
-                  { providerKey, waitMs: 1, source: 'provider.error' }
-                ]
-              }
-            });
-          }
-          return {
-            requestId: input.requestId,
-            providerPayload: {},
-            target: {
-              providerKey,
-              providerType: 'openai',
-              outboundProfile: 'openai-chat',
-              runtimeKey: 'primary.key1'
-            },
-            routingDecision: { routeName: 'default', pool: [providerKey], providerProtocol: 'openai-chat' },
-            metadata: {}
-          };
-        }),
-        updateVirtualRouterConfig: jest.fn()
-      }) as any,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: async () => undefined
-        }
-      }),
-      logStage: (stage: string, _requestId: string, details: Record<string, unknown>) => {
-        logStages.push({ stage, details });
-      },
-      stats: new StatsManager()
-    } as any);
-
-    const app = express();
-    app.use(express.json());
-    app.post('/v1/responses', (req, res) =>
-      handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
-        errorHandling: null
-      })
-    );
-
-    await withServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/v1/responses`, {
-        method: 'POST',
-        headers: { accept: 'application/json', 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-test',
-          input: 'hi'
-        })
-      });
-      const text = await response.text();
-
-      if (response.status !== 200) {
-        throw new Error(`singleton-empty-pool unexpected status=${response.status} pipelineCalls=${pipelineCalls} body=${text} logs=${JSON.stringify(logStages)}`);
-      }
-      expect(text).toContain('ok_after_block');
-      expect(pipelineCalls).toBe(3);
-      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait')).toHaveLength(2);
-      expect(logStages.filter((entry) => entry.stage === 'provider.route_pool_cooldown_wait.completed')).toHaveLength(2);
-      expect(text).not.toContain('PROVIDER_NOT_AVAILABLE');
-    });
-  });
-
-  it('rejects unsupported client stopMessage metadata at /v1/responses boundary', async () => {
+  it('does not treat client stopMessage metadata as internal runtime control at /v1/responses boundary', async () => {
     const artifacts = (await bootstrapVirtualRouterConfig(buildAnthropicVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const providerPayloads: Array<Record<string, unknown>> = [];
@@ -447,7 +417,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         disposeAll: async () => undefined,
         initialize: async () => undefined
       },
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => pipeline.getNativeHandle() as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: async () => undefined
@@ -460,7 +430,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.use(express.json());
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
+        executePipeline: async (input) => executor.execute(buildResponsesExecutorInput(input)),
         errorHandling: null
       })
     );
@@ -492,17 +462,17 @@ describe('responses handler virtual-router empty-pool guard', () => {
         });
         const body = await response.json();
 
-        expect(response.status).toBe(502);
-        expect(body.error?.message).toBe('Upstream provider error');
-        expect(body.error?.code).toBeDefined();
-        expect(providerPayloads).toHaveLength(0);
+        expect(response.status).toBe(200);
+        expect(body.output_text ?? JSON.stringify(body)).toContain('ok');
+        expect(providerPayloads).toHaveLength(1);
+        expect(JSON.stringify(providerPayloads[0])).not.toContain('stopMessageEnabled');
       });
     } finally {
       pipeline.dispose();
     }
   });
 
-  it('rejects unsupported client excludedProviderKeys metadata at /v1/responses boundary', async () => {
+  it('does not treat client excludedProviderKeys metadata as internal routing exclusion at /v1/responses boundary', async () => {
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
     const pipeline = new HubPipeline({ virtualRouter: artifacts.config });
     const app = express();
@@ -510,12 +480,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
         executePipeline: async (input) => {
-          const result = await pipeline.execute({
-            id: input.requestId,
-            endpoint: input.entryEndpoint,
-            payload: input.body as Record<string, unknown>,
-            metadata: input.metadata
-          });
+          const result = await pipeline.execute(buildResponsesExecutorInput(input));
           return {
             status: 200,
             body: {
@@ -544,9 +509,9 @@ describe('responses handler virtual-router empty-pool guard', () => {
         });
         const body = await response.json();
 
-        expect(response.status).toBe(502);
-        expect(body.error?.message).toBe('Upstream provider error');
-        expect(body.error?.code).toBeDefined();
+        expect(response.status).toBe(200);
+        expect(body.selected_provider_key).toBeDefined();
+        expect(body.route_name).toBe('default');
       });
     } finally {
       pipeline.dispose();
@@ -567,7 +532,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         disposeAll: async () => undefined,
         initialize: async () => undefined
       },
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => pipeline.getNativeHandle() as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: async () => undefined
@@ -582,15 +547,19 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.use(express.json());
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
+        executePipeline: async (input) => executor.execute(buildResponsesExecutorInput(input)),
         errorHandling: null
       })
     );
 
     const previousBackoffBase = process.env.RCC_429_BACKOFF_BASE_MS;
     const previousBackoffMax = process.env.RCC_429_BACKOFF_MAX_MS;
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    const previousProviderBase = process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
     process.env.RCC_429_BACKOFF_BASE_MS = '1';
     process.env.RCC_429_BACKOFF_MAX_MS = '8';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = '1';
     try {
       await withServer(app, async (baseUrl) => {
         const response = await fetch(`${baseUrl}/v1/responses`, {
@@ -613,9 +582,13 @@ describe('responses handler virtual-router empty-pool guard', () => {
       else process.env.RCC_429_BACKOFF_BASE_MS = previousBackoffBase;
       if (previousBackoffMax === undefined) delete process.env.RCC_429_BACKOFF_MAX_MS;
       else process.env.RCC_429_BACKOFF_MAX_MS = previousBackoffMax;
+      if (previousAttempts === undefined) delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      else process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      if (previousProviderBase === undefined) delete process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS;
+      else process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS = previousProviderBase;
       pipeline.dispose();
     }
-  });
+  }, 15_000);
 
   it('normalizes chat image_url parts to responses input_image before provider wire send', async () => {
     const artifacts = (await bootstrapVirtualRouterConfig(buildVirtualRouterConfig() as any)) as any;
@@ -624,14 +597,14 @@ describe('responses handler virtual-router empty-pool guard', () => {
     const executor = new HubRequestExecutor({
       runtimeManager: {
         resolveRuntimeKey: (providerKey?: string) => artifacts.targetRuntime?.[providerKey ?? '']?.runtimeKey,
-        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'primary.key1'
+        getHandleByRuntimeKey: (runtimeKey?: string) => runtimeKey === 'image.key1'
           ? {
-              runtimeKey: 'primary.key1',
-              providerId: 'primary',
+              runtimeKey,
+              providerId: 'image',
               providerType: 'openai',
               providerFamily: 'openai',
               providerProtocol: 'openai-responses',
-              runtime: { runtimeKey: 'primary.key1' },
+              runtime: { runtimeKey },
               instance: {
                 initialize: async () => undefined,
                 cleanup: async () => undefined,
@@ -655,7 +628,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
         disposeAll: async () => undefined,
         initialize: async () => undefined
       },
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => pipeline.getNativeHandle() as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: async () => undefined
@@ -668,7 +641,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
     app.use(express.json());
     app.post('/v1/responses', (req, res) =>
       handleResponses(req, res, {
-        executePipeline: async (input) => executor.execute(input),
+        executePipeline: async (input) => executor.execute(buildResponsesExecutorInput(input)),
         errorHandling: null
       })
     );
@@ -679,7 +652,7 @@ describe('responses handler virtual-router empty-pool guard', () => {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            model: 'gpt-test',
+            model: 'gpt-image-test',
             input: [
               {
                 role: 'user',

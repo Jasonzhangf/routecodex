@@ -1391,6 +1391,7 @@ verification:
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+      - sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs
     integration:
       - tests/modules/llmswitch/bridge/responses-openai-bridge.spec.ts
       - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
@@ -1403,6 +1404,7 @@ verification:
     notes:
       - "Continuation save/restore and scope isolation must be keyed by entry protocol, continuationOwner, and conversation/session scope in Rust."
       - "The old llmswitch-core `responses-conversation-store-native.ts` facade is forbidden; host IO must call native shared conversion semantics directly."
+      - "Validation must prove mismatched/orphan tool outputs fail fast as a client-visible 400 `MALFORMED_REQUEST` from the Rust store path, not as a delayed 502 caused by `payload:null` success envelopes."
 
   - feature_id: hub.req_chatprocess.tool_governance
     change_risk: high

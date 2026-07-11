@@ -72,6 +72,7 @@ for (const forbiddenLocalDefinition of [
   'async function dispatchResponsesJsonAsSse(',
   'function inspectResponsesTerminalStateFromSseChunk(',
   'function hasResponsesTerminalSseMarker(',
+  'function shouldProjectClientSseFrame(',
   'sawTerminalEvent',
   'terminalScanBuffer',
   'function buildStructuredSseErrorPayloadForHttp(',
@@ -89,6 +90,7 @@ for (const forbiddenLocalDefinition of [
   'function buildResponsesSseErrorPayload(',
   'function buildResponsesStreamIncompleteErrorPayload(',
   'deriveFinishReason(',
+  'shouldProjectClientSseFrame(parsed.eventName)',
 ]) {
   expectNotContains(
     handlerSource,

@@ -25,6 +25,7 @@ import { normalizeUsage, type UsageMetrics } from '../runtime/http-server/execut
 import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
+  buildResponsesTerminalSseFramesFromTransportStateForHttp,
   buildClientSseKeepaliveFrameForHttp,
   createResponsesSseClientProjectionStateForHttp,
   projectResponsesSseFrameForClientForHttp,
@@ -160,21 +161,6 @@ function readSseFrameUsage(parsed: { eventName?: string; data: Record<string, un
     ? finishReasonRaw.trim()
     : undefined;
   return { usage, finishReason };
-}
-
-function shouldProjectClientSseFrame(eventName: string | undefined): boolean {
-  return eventName === 'response.created'
-    || eventName === 'response.in_progress'
-    || eventName === 'response.output_item.added'
-    || eventName === 'response.function_call_arguments.delta'
-    || eventName === 'response.function_call_arguments.done'
-    || eventName === 'response.output_item.done'
-    || eventName === 'response.output_text.delta'
-    || eventName === 'response.output_text.done'
-    || eventName === 'response.reasoning_summary_text.delta'
-    || eventName === 'response.reasoning_summary_text.done'
-    || eventName === 'response.completed'
-    || eventName === 'response.done';
 }
 
 function writeSseDiagnosticSnapshot(
@@ -720,9 +706,44 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
   };
 
   let sseFinishReason: string | undefined;
+  const updateTransportTerminalStateFromFrame = (frame: string) => {
+    if (!isResponsesSseEndpoint(entryEndpoint)) {
+      return;
+    }
+    const terminalState = updateResponsesSseTransportTerminalStateForHttp({
+      chunk: frame,
+      state: sseTransportTerminalState,
+      flushRemainder: true,
+    });
+    sseTransportTerminalState = terminalState.state;
+    sseSemanticTerminalObserved = sseSemanticTerminalObserved || terminalState.observedTerminal;
+  };
+  const writeNativeTerminalCloseoutFrames = () => {
+    if (
+      !isResponsesSseEndpoint(entryEndpoint)
+      || isDirectPassthrough
+      || sseSemanticTerminalObserved
+    ) {
+      return;
+    }
+    const frames = buildResponsesTerminalSseFramesFromTransportStateForHttp({
+      state: sseTransportTerminalState,
+      requestLabel,
+    });
+    for (const terminalFrame of frames) {
+      if (!terminalFrame) {
+        continue;
+      }
+      writeClientSseFrame(terminalFrame, 'response.sse.stream.write_native_terminal_closeout_frame', {
+        recordSnapshot: false,
+      });
+      updateTransportTerminalStateFromFrame(terminalFrame);
+    }
+  };
   const writeProjectedClientSseFrame = (frame: string) => {
     const parsed = parseClientSseProjectionFrame(frame);
     if (frame.includes('data: [DONE]')) {
+      writeNativeTerminalCloseoutFrames();
       sseDoneSentinelObserved = true;
     }
     const usageFrame = readSseFrameUsage(parsed);
@@ -736,18 +757,12 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
       }
     }
     if (isResponsesSseEndpoint(entryEndpoint)) {
-      const terminalState = updateResponsesSseTransportTerminalStateForHttp({
-        chunk: frame,
-        state: sseTransportTerminalState,
-      });
-      sseTransportTerminalState = terminalState.state;
-      sseSemanticTerminalObserved = sseSemanticTerminalObserved || terminalState.observedTerminal;
+      updateTransportTerminalStateFromFrame(frame);
     }
     if (
       !parsed
       || !isResponsesSseEndpoint(entryEndpoint)
       || isDirectPassthrough
-      || !shouldProjectClientSseFrame(parsed.eventName)
     ) {
       writeClientSseFrame(frame, 'response.sse.stream.write_frame', { recordSnapshot: false });
       return;
@@ -861,6 +876,7 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     });
     if (!res.writableEnded && !res.destroyed) {
       try {
+        writeNativeTerminalCloseoutFrames();
         if (
           isResponsesSseEndpoint(entryEndpoint)
           && sseSemanticTerminalObserved

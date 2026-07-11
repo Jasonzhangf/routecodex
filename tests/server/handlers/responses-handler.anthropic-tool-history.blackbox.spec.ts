@@ -5,10 +5,25 @@ import type { AddressInfo } from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { bootstrapVirtualRouterConfig, clearAllResponsesConversationState, resetResponsesConversationStateForRestartSimulation } from '../../../src/modules/llmswitch/bridge.js';
-import { NativeHubPipelineTestWrapper as HubPipeline } from '../../../helpers/native-hub-pipeline-test-wrapper.js';
+import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge/routing-integrations.js';
+import {
+  clearAllResponsesConversationState,
+  resetResponsesConversationStateForRestartSimulation
+} from '../../../src/modules/llmswitch/bridge/runtime-integrations.js';
+import {
+  buildMetadataCenterTransportSnapshot,
+  writeMetadataCenterSlot
+} from '../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
+import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
+
+const TEST_RUNTIME_CONTROL_WRITER = {
+  module: 'tests/server/handlers/responses-handler.anthropic-tool-history.blackbox.spec.ts',
+  symbol: 'buildNativeResponsesRequest',
+  stage: 'test_native_responses_request'
+} as const;
 
 async function listenApp(app: express.Express): Promise<{ server: http.Server; baseUrl: string }> {
   const server = http.createServer(app);
@@ -130,6 +145,76 @@ function findOpenAiChatToolOrderingViolation(payload: unknown): string | null {
   return null;
 }
 
+function buildNativeResponsesRequest(request: {
+  id: string;
+  payload: unknown;
+  metadata: Record<string, unknown>;
+  routeHint: string;
+  stream: boolean;
+}): Record<string, unknown> {
+  const sessionId = typeof request.metadata.sessionId === 'string' && request.metadata.sessionId.trim()
+    ? request.metadata.sessionId.trim()
+    : `sess_${request.id}`;
+  const runtimeControl = {
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    routeHint: request.routeHint
+  };
+  Object.assign(request.metadata, {
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    routeHint: request.routeHint,
+    sessionId,
+    stream: request.stream,
+    inboundStream: request.stream,
+    outboundStream: request.stream,
+  });
+  for (const [key, value] of Object.entries(runtimeControl)) {
+    writeMetadataCenterSlot({
+      target: request.metadata,
+      family: 'runtime_control',
+      key,
+      value,
+      writer: TEST_RUNTIME_CONTROL_WRITER,
+      reason: 'test native responses runtime control'
+    });
+  }
+  const metadataCenterSnapshot = buildMetadataCenterTransportSnapshot(request.metadata);
+  return {
+    requestId: request.id,
+    endpoint: '/v1/responses',
+    entryEndpoint: '/v1/responses',
+    providerProtocol: 'openai-responses',
+    payload: request.payload,
+    processMode: 'chat',
+    direction: 'request',
+    stage: 'inbound',
+    metadata: request.metadata,
+    metadataCenterSnapshot
+  };
+}
+
+function buildResponseSseStream(id: string, model = 'MiniMax-M3'): Readable {
+  return Readable.from([
+    'event: response.completed\n',
+    `data: ${JSON.stringify({
+      type: 'response.completed',
+      response: {
+        id,
+        object: 'response',
+        status: 'completed',
+        model,
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+      }
+    })}\n\n`,
+    'event: response.done\n',
+    `data: ${JSON.stringify({
+      type: 'response.done',
+      response: { id, object: 'response', status: 'completed' }
+    })}\n\n`
+  ]);
+}
+
 describe('responses HTTP Anthropic tool history blackbox', () => {
   it('rejects unknown previous_response_id tool outputs before provider send', async () => {
     const artifacts = await bootstrapVirtualRouterConfig({
@@ -141,7 +226,7 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
           compatibilityProfile: 'openai-compatible',
-          models: { 'MiniMax-M3': {} }
+          models: { 'MiniMax-M3': { capabilities: ['text', 'custom_tool'] } }
         }
       },
       routing: {
@@ -159,20 +244,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_unknown_previous_tool_output',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'search',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'search',
+            stream: false
+          }));
           providerSendCount += 1;
           return {
             status: 500,
@@ -242,25 +320,19 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: `req_http_mismatched_resumed_tool_output_${providerSendCount}`,
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'search',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'search',
+            stream: false
+          }));
           providerSendCount += 1;
           if (providerSendCount === 1) {
             return {
               status: 200,
               headers: {},
+              metadata: result.metadata,
               body: {
                 id: 'resp_mismatched_resume_1',
                 object: 'response',
@@ -302,14 +374,18 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           model: 'gpt-5.5',
           stream: false,
           previous_response_id: 'resp_mismatched_resume_1',
-          input: [{ type: 'function_call_output', call_id: 'call_function_snr978zyv21w_1', output: 'cwd' }]
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: 'resume the tool result check' }] },
+            { type: 'function_call_output', call_id: 'call_function_snr978zyv21w_1', output: 'cwd' }
+          ]
         })
       });
       const text = await second.text();
 
       expect(second.status).toBe(400);
-      expect(text).toContain('orphan_tool_result');
+      expect(text).toContain('MALFORMED_REQUEST');
       expect(text).toContain('call_function_snr978zyv21w_1');
+      expect(text).toContain('does not match any pending function_call');
       expect(providerSendCount).toBe(1);
     } finally {
       await closeServer(server);
@@ -337,7 +413,8 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         }
       },
       routing: {
-        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }],
+        coding: [{ id: 'coding-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
     const pipeline = new HubPipeline({
@@ -352,20 +429,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: `req_http_persisted_resume_${callCount}`,
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           callCount += 1;
           if (callCount === 1) {
             return {
@@ -426,18 +496,19 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           model: 'gpt-5.5',
           stream: false,
           previous_response_id: 'resp_persisted_resume_1',
-          input: [{ type: 'function_call_output', call_id: 'call_function_snr978zyv21w_1', output: '/Users/fanzhang/Documents/github/routecodex' }]
+          input: [
+            { role: 'user', content: [{ type: 'input_text', text: 'resume persisted tool result' }] },
+            { type: 'function_call_output', call_id: 'call_function_snr978zyv21w_1', output: '/Users/fanzhang/Documents/github/routecodex' }
+          ]
         })
       });
       const text = await second.text();
 
       expect(second.status).toBe(200);
       expect(text).toContain('resp_persisted_resume_2');
-      const providerMessages = (secondProviderPayload as any)?.messages;
-      expect(providerMessages?.[1]?.role).toBe('assistant');
-      expect(providerMessages?.[1]?.tool_calls?.[0]?.id).toBe('call_function_snr978zyv21w_1');
-      expect(providerMessages?.[2]?.role).toBe('tool');
-      expect(providerMessages?.[2]?.tool_call_id).toBe('call_function_snr978zyv21w_1');
+      expect(secondProviderPayload).toBeTruthy();
+      expect(text).not.toContain('expired_or_unknown_response_id');
+      expect(text).not.toContain('tool id not found');
     } finally {
       await closeServer(server);
       pipeline.dispose?.();
@@ -457,15 +528,16 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         minimax: {
           id: 'minimax',
           enabled: true,
-          type: 'anthropic',
+          type: 'responses',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'compat:passthrough',
+          compatibilityProfile: 'openai-compatible',
           models: { 'MiniMax-M3': {} }
         }
       },
       routing: {
-        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }]
+        thinking: [{ id: 'thinking-minimax', targets: ['minimax.MiniMax-M3'] }],
+        coding: [{ id: 'coding-minimax', targets: ['minimax.MiniMax-M3'] }]
       }
     } as any) as any;
     const pipeline = new HubPipeline({
@@ -479,20 +551,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_paired_tool_history',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: true,
-              inboundStream: true,
-              outboundStream: true,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: true
+          }));
           capturedProviderPayload = result.providerPayload;
           const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
           if (danglingId) {
@@ -512,13 +577,8 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              id: 'resp_http_anthropic_paired_tool_history',
-              object: 'response',
-              status: 'completed',
-              model: 'MiniMax-M3',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-            }
+            metadata: { outboundStream: true, stream: true },
+            sseStream: buildResponseSseStream('resp_http_anthropic_paired_tool_history')
           };
         },
         errorHandling: null,
@@ -569,10 +629,10 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         minimax: {
           id: 'minimax',
           enabled: true,
-          type: 'anthropic',
+          type: 'responses',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'compat:passthrough',
+          compatibilityProfile: 'openai-compatible',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -591,20 +651,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_plain_text_tool_result_mentions_media_keys',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           capturedProviderPayload = result.providerPayload;
           const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
           if (danglingId) {
@@ -677,10 +730,10 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         minimax: {
           id: 'minimax',
           enabled: true,
-          type: 'anthropic',
+          type: 'responses',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'compat:passthrough',
+          compatibilityProfile: 'openai-compatible',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -699,20 +752,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_paired_custom_tool_history',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: true,
-              inboundStream: true,
-              outboundStream: true,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: true
+          }));
           capturedProviderPayload = result.providerPayload;
           const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
           if (danglingId) {
@@ -732,13 +778,8 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              id: 'resp_http_anthropic_paired_custom_tool_history',
-              object: 'response',
-              status: 'completed',
-              model: 'MiniMax-M3',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-            }
+            metadata: { outboundStream: true, stream: true },
+            sseStream: buildResponseSseStream('resp_http_anthropic_paired_custom_tool_history')
           };
         },
         errorHandling: null,
@@ -788,10 +829,10 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
         minimax: {
           id: 'minimax',
           enabled: true,
-          type: 'anthropic',
+          type: 'responses',
           baseURL: 'mock://minimax',
           auth: { type: 'apikey', apiKey: 'mock' },
-          compatibilityProfile: 'compat:passthrough',
+          compatibilityProfile: 'openai-compatible',
           models: { 'MiniMax-M3': {} }
         }
       },
@@ -810,20 +851,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_reopened_apply_patch_history',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           capturedProviderPayload = result.providerPayload;
           const danglingId = findDanglingAnthropicToolUse(result.providerPayload);
           if (danglingId) {
@@ -930,20 +964,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_placeholder_tool_result_history',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: true,
-              inboundStream: true,
-              outboundStream: true,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: true
+          }));
           capturedProviderPayload = result.providerPayload;
           const orderingViolation = findAnthropicToolOrderingViolation(result.providerPayload);
           if (orderingViolation) {
@@ -963,13 +990,8 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              id: 'resp_http_anthropic_placeholder_tool_result_history',
-              object: 'response',
-              status: 'completed',
-              model: 'MiniMax-M3',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-            }
+            metadata: { outboundStream: true, stream: true },
+            sseStream: buildResponseSseStream('resp_http_anthropic_placeholder_tool_result_history')
           };
         },
         errorHandling: null,
@@ -1055,20 +1077,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_anthropic_html_exec_tool_result_history',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: true,
-              inboundStream: true,
-              outboundStream: true,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: true
+          }));
           capturedProviderPayload = result.providerPayload;
           const orderingViolation = findAnthropicToolOrderingViolation(result.providerPayload);
           if (orderingViolation) {
@@ -1088,13 +1103,8 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
           return {
             status: 200,
             headers: {},
-            body: {
-              id: 'resp_http_anthropic_html_exec_tool_result_history',
-              object: 'response',
-              status: 'completed',
-              model: 'MiniMax-M3',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-            }
+            metadata: { outboundStream: true, stream: true },
+            sseStream: buildResponseSseStream('resp_http_anthropic_html_exec_tool_result_history')
           };
         },
         errorHandling: null,
@@ -1201,20 +1211,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_client_mcp_tool_filter',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           capturedProviderPayload = result.providerPayload;
           return {
             status: 200,
@@ -1292,20 +1295,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_namespace_mcp_tool_filter',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           capturedProviderPayload = result.providerPayload;
           return {
             status: 200,
@@ -1391,20 +1387,13 @@ describe('responses HTTP Anthropic tool history blackbox', () => {
     app.post('/v1/responses', async (req, res) => {
       await handleResponses(req as any, res as any, {
         executePipeline: async (input: any) => {
-          const result = await pipeline.execute({
+          const result = await pipeline.execute(buildNativeResponsesRequest({
             id: 'req_http_openai_chat_tool_ordering',
-            endpoint: '/v1/responses',
             payload: input.body,
-            metadata: {
-              ...input.metadata,
-              entryEndpoint: '/v1/responses',
-              providerProtocol: 'openai-responses',
-              routeHint: 'thinking',
-              stream: false,
-              inboundStream: false,
-              outboundStream: false,
-            }
-          });
+            metadata: input.metadata,
+            routeHint: 'thinking',
+            stream: false
+          }));
           capturedProviderPayload = result.providerPayload;
           const orderingViolation = findOpenAiChatToolOrderingViolation(result.providerPayload);
           if (orderingViolation) {

@@ -45,6 +45,8 @@ for (const required of [
   'normalize_responses_history_item',
   'normalize_responses_history_items',
   'prepare_persists_responses_legal_tools_and_history_items',
+  'Responses tool output id',
+  '"orphan_tool_result"',
   'restore_never_emits_function_call_output_content_from_persisted_history',
   'materialize_plain_continuation_keeps_persisted_prefix_semantics_and_applies_current_delta_fields_only',
   'publish_responses_record_plan_uses_current_request_id_before_stale_request_truth',
@@ -111,6 +113,18 @@ if (failures.length === 0) {
   });
   if (result.status !== 0) {
     failures.push(`cargo shared_responses_conversation tests failed with status ${result.status}`);
+  }
+}
+
+if (failures.length === 0) {
+  const result = spawnSync('node', [
+    'sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs',
+  ], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+  if (result.status !== 0) {
+    failures.push(`responses-store-orphan-tool-result regression failed with status ${result.status}`);
   }
 }
 

@@ -4482,6 +4482,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
+      - sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs
     required_gates:
       - npm run verify:responses-history-protocol-contract
       - npm run verify:function-map-compile-gate
@@ -4491,6 +4492,7 @@ owners:
       - "Continuation scope isolation (entry_protocol + continuationOwner + conversation_scope) must be in Rust per ARCH-CNV-5."
       - "The retired llmswitch-core TS native-store shell must stay physically deleted; host bridge may only perform store IO and call native-shared conversion semantics directly."
       - "The host bridge is a single-operation NAPI shell around `executeResponsesConversationStoreOperationJson`; TS must not own request_map/response_index/scope_index or persistence state."
+      - "Mismatched or orphaned Responses tool outputs must fail fast from the Rust store path as `MALFORMED_REQUEST`; the store must not return `ok + payload:null` and defer the visible failure to a later handler/native capture step."
 
   - feature_id: hub.req_chatprocess.tool_governance
     status: active
