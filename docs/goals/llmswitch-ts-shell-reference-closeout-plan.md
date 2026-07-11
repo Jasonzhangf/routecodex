@@ -874,3 +874,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact file scan for root bridge paths and legacy loader helpers in the touched spec returns zero matches; source-tracked global scan shows only gate/README/goal/history references, not active test/script/source consumers.
 - Focused Jest now loads and executes after the leaf mock migration, but remains red (2/18 pass, 16 fail) because the spec still expects `sendPipelineResponse` / SSE/handler closeout to save Responses continuation state. Function map, verification map, and mainline call map mark those expectations as stale: canonical save owner is `convertProviderResponse -> recordResponsesResponse`, and handler/SSE is transport-only.
 - This slice claims reference-surface contraction only. It does not claim handler response-store behavior closure and does not add handler-side continuation save logic.
+
+### 2026-07-11 stale handler response-store integration spec deleted
+
+- Deleted `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` after current function map, verification map, and `responses.continuation.mainline` confirmed it is not a continuation owner gate.
+- The deleted spec's failing assertions expected `sendPipelineResponse` / SSE/handler closeout to save or repair Responses continuation state, which conflicts with the immutable interval and transport-only handler/SSE boundary.
+- Remaining valid continuation/store coverage stays with the Rust/bridge owner gates: `tests/sharedmodule/responses-continuation-store.spec.ts`, `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`, `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts`, and `npm run verify:responses-history-protocol-contract`.

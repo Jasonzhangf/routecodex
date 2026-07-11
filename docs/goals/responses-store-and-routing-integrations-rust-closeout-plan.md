@@ -252,3 +252,8 @@ Additional runtime closure, when behavior changes:
 - That expectation conflicts with the immutable interval contract: handler/SSE/outbound may not save, repair, or infer continuation semantics after response Chat Process save.
 - Updated function map and verification map to remove this stale handler spec from continuation owner required tests/integration gates.
 - Future work must migrate any still-valid assertions to bridge/Rust owner tests or delete the stale handler spec; it must not be greened by adding handler-side continuation save logic.
+
+### 2026-07-11 Stale handler response-store integration spec deleted
+
+- Physically deleted `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` after exact references showed it was not wired from package scripts, active function/verification maps, or architecture gates.
+- The deleted assertions were stale handler/SSE save expectations; current mainline owner remains `convertProviderResponse -> recordResponsesResponse`, with store/restore behavior covered by Rust and bridge owner tests.
