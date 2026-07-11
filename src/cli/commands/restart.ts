@@ -4,6 +4,8 @@ import { homedir } from 'node:os';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
+// feature_id: runtime.lifecycle.restart_command
+
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
