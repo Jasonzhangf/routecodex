@@ -135,26 +135,3 @@ export function resolveCorePackageDir(): string {
     `[llmswitch-core-loader] 无法定位 llmswitch 核心库，请执行 npm install 以确保 ${targets} 存在。`
   );
 }
-
-function resolveCoreDistPath(subpath: string): string {
-  const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
-  const distDir = path.join(resolveCorePackageDir(), 'dist');
-  const candidate = path.join(distDir, `${clean}.js`);
-  if (!fs.existsSync(candidate)) {
-    throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认对应核心库包含该模块。`);
-  }
-  return candidate;
-}
-
-export function resolveCoreModulePath(subpath: string): string {
-  return resolveCoreDistPath(subpath);
-}
-
-export function resolveCoreModuleUrl(subpath: string): string {
-  const modulePath = resolveCoreDistPath(subpath);
-  return pathToFileURL(modulePath).href;
-}
-
-export async function importCoreModule<T = unknown>(subpath: string): Promise<T> {
-  return (await import(resolveCoreModuleUrl(subpath))) as T;
-}

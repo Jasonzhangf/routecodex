@@ -2663,6 +2663,38 @@ fn test_validate_apply_patch_arguments_repairs_arg_key_invalid_json_artifact() {
 }
 
 #[test]
+fn test_validate_apply_patch_arguments_syncs_patch_and_input_after_arg_key_artifact_repair() {
+    let patch_text = "*** Begin Patch\n*** Delete File: .apply_patch_escape_test.txt\n*** End Patch";
+    let injected = format!(
+        "{patch_text}</arg_key><arg_value>input</arg_key><arg_value>{patch_text}"
+    );
+    let raw = json!({
+        "arguments": {
+            "patch": injected
+        }
+    });
+    let out = validate_apply_patch_arguments_json(raw.to_string()).unwrap();
+    let parsed: Value = serde_json::from_str(out.as_str()).unwrap();
+    assert_eq!(parsed.get("ok").and_then(Value::as_bool), Some(true));
+    let normalized = parsed
+        .get("normalizedArguments")
+        .and_then(Value::as_str)
+        .expect("normalizedArguments");
+    let normalized_value: Value = serde_json::from_str(normalized).unwrap();
+    let patch = normalized_value
+        .get("patch")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let input = normalized_value
+        .get("input")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert_eq!(patch, patch_text);
+    assert_eq!(input, patch_text);
+    assert!(!patch.contains("</arg_key><arg_value>"));
+}
+
+#[test]
 fn test_validate_apply_patch_arguments_unrecoverable_arg_key_invalid_json_stays_invalid_json() {
     let raw = json!({
         "arguments": "{\"file\":\"a.ts\",\"changes\":[{\"kind\":\"create_file\",\"lines\":[\"x\"],\"file</arg_key><arg_value>a.ts}]}"

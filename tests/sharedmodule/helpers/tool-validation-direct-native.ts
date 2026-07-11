@@ -197,15 +197,20 @@ export function validateApplyPatchToolCallDirectNative(argsString: string): {
   normalizedArgs?: string;
 } {
   const rawArgsAny = parseToolArgsJsonDirectNative(typeof argsString === 'string' ? argsString : '{}');
+  const argsTrimmed = typeof argsString === 'string' ? argsString.trim() : '';
   const rawArgsWasObject = (() => {
     if (typeof argsString !== 'string') {
       return isRecord(rawArgsAny);
     }
-    const trimmed = argsString.trim();
-    return trimmed.startsWith('{') && trimmed.endsWith('}') && isRecord(rawArgsAny);
+    return argsTrimmed.startsWith('{') && argsTrimmed.endsWith('}') && isRecord(rawArgsAny);
   })();
+  const rawArgsRepairLostPayload =
+    rawArgsWasObject
+    && argsTrimmed.length > 2
+    && isRecord(rawArgsAny)
+    && Object.keys(rawArgsAny).length === 0;
   const applyPatchArgsSource =
-    rawArgsWasObject && shouldPassApplyPatchRecordToNative(rawArgsAny)
+    rawArgsWasObject && !rawArgsRepairLostPayload && shouldPassApplyPatchRecordToNative(rawArgsAny)
       ? rawArgsAny
       : typeof argsString === 'string'
         ? argsString

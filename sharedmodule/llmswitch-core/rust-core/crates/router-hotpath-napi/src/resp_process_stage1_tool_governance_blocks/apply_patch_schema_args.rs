@@ -48,6 +48,13 @@ fn read_apply_patch_source_from_args(args: &Map<String, Value>) -> Option<String
         .and_then(read_apply_patch_source_from_args)
 }
 
+fn build_canonical_apply_patch_args(patch: String) -> Map<String, Value> {
+    let mut out = Map::new();
+    out.insert("patch".to_string(), Value::String(patch.clone()));
+    out.insert("input".to_string(), Value::String(patch));
+    out
+}
+
 fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(String, bool)> {
     if args.contains_key("fileContent") || args.contains_key("file_content") {
         return None;
@@ -67,16 +74,14 @@ fn build_current_apply_patch_schema_args(args: &Map<String, Value>) -> Option<(S
     if is_line_edit {
         let canonical_patch =
             convert_servertool_line_edit_to_canonical_patch(&file_path, &patch_source);
-        let mut out = Map::new();
-        out.insert("patch".to_string(), Value::String(canonical_patch));
+        let out = build_canonical_apply_patch_args(canonical_patch);
         return Some((
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             true,
         ));
     }
     // Fallback: preserve only canonical patch carrier for model-visible history.
-    let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch_source));
+    let out = build_canonical_apply_patch_args(patch_source);
     Some((
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
         true,
@@ -1109,8 +1114,7 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
         build_structured_apply_patch_from_record(&args)
     {
         let patch = normalize_apply_patch_text(structured_patch.trim());
-        let mut out = Map::new();
-        out.insert("patch".to_string(), Value::String(patch));
+        let out = build_canonical_apply_patch_args(patch);
         return (
             serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
             structured_repaired,
@@ -1132,8 +1136,7 @@ pub(crate) fn normalize_apply_patch_schema_args(raw_args: Option<&Value>) -> (St
     let source_trimmed = patch_source.trim();
     let patch = normalize_apply_patch_text(source_trimmed);
     let repaired = patch.trim() != source_trimmed;
-    let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch));
+    let out = build_canonical_apply_patch_args(patch);
     (
         serde_json::to_string(&Value::Object(out)).unwrap_or_else(|_| "{}".to_string()),
         repaired,

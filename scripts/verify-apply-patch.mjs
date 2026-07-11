@@ -12,19 +12,12 @@ import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validatio
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
-const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
-const { importCoreModule } = await import(coreLoaderUrl);
 const bridgeNativeExportsUrl = pathToFileURL(
   path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')
 ).href;
 const { normalizeAssistantTextToToolCallsJson } = await import(bridgeNativeExportsUrl);
 
 const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value) => value;
-
-async function loadCoreModule(subpath) {
-  return importCoreModule(subpath);
-}
 
 function validateToolCall(toolName, argsString) {
   if (toolName !== 'apply_patch') {
@@ -34,15 +27,6 @@ function validateToolCall(toolName, argsString) {
 }
 
 async function runApplyPatchTextCase(label, payloadText) {
-  let canonicalizeChatResponseTools = null;
-  try {
-    const canonicalizerModule = await loadCoreModule('conversion/shared/tool-canonicalizer');
-    if (typeof canonicalizerModule?.canonicalizeChatResponseTools === 'function') {
-      canonicalizeChatResponseTools = canonicalizerModule.canonicalizeChatResponseTools;
-    }
-  } catch {
-    canonicalizeChatResponseTools = null;
-  }
   const message = {
     role: 'assistant',
     content: payloadText
@@ -79,9 +63,7 @@ async function runApplyPatchTextCase(label, payloadText) {
     ]
   };
 
-  const canonical = canonicalizeChatResponseTools
-    ? canonicalizeChatResponseTools(chatPayload)
-    : chatPayload;
+  const canonical = chatPayload;
   const tc = canonical?.choices?.[0]?.message?.tool_calls?.[0];
   if (!tc || typeof tc !== 'object') {
     throw new Error(`[verify-apply-patch] ${label}: missing tool_calls after canonicalization`);

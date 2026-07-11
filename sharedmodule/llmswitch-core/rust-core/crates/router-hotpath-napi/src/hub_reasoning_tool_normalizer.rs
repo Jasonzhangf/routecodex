@@ -2029,6 +2029,22 @@ fn collect_explicit_tool_calls_json_candidates(text: &str) -> Vec<String> {
     candidates
 }
 
+fn collect_fenced_json_payload_candidates(text: &str) -> Vec<String> {
+    let fenced = cached_regex(r"(?is)```\s*(?:json|jsonc)?\s*\n([\s\S]*?)\n\s*```");
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    for caps in fenced.captures_iter(text) {
+        let Some(inner) = caps.get(1) else {
+            continue;
+        };
+        let candidate = inner.as_str().trim().to_string();
+        if !candidate.is_empty() && seen.insert(candidate.clone()) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
 fn collect_embedded_explicit_tool_calls_json_candidates(text: &str) -> Vec<String> {
     if !text.contains("tool_calls") || text.contains("RCC_TOOL_CALLS") {
         return Vec::new();
@@ -2249,24 +2265,30 @@ fn has_explicit_tool_name_field(row: &Map<String, Value>) -> bool {
 }
 
 fn parse_plain_structured_apply_patch_json(text: &str, id_prefix: &str) -> Vec<Value> {
-    if !is_pure_json_payload(text) {
-        return Vec::new();
-    }
-    let Ok(parsed) = serde_json::from_str::<Value>(text.trim()) else {
-        return Vec::new();
-    };
-    if !is_structured_apply_patch_payload(&parsed) {
-        return Vec::new();
-    }
-    let args = serde_json::to_string(&parsed).unwrap_or_else(|_| "{}".to_string());
-    vec![serde_json::json!({
-        "id": create_harvested_tool_call_id(Some(id_prefix), 1),
-        "type": "function",
-        "function": {
-            "name": "apply_patch",
-            "arguments": args
+    let mut candidates = Vec::new();
+    candidates.push(text.trim().to_string());
+    candidates.extend(collect_fenced_json_payload_candidates(text));
+    for candidate in candidates {
+        if !is_pure_json_payload(candidate.as_str()) {
+            continue;
         }
-    })]
+        let Ok(parsed) = serde_json::from_str::<Value>(candidate.as_str()) else {
+            continue;
+        };
+        if !is_structured_apply_patch_payload(&parsed) {
+            continue;
+        }
+        let args = serde_json::to_string(&parsed).unwrap_or_else(|_| "{}".to_string());
+        return vec![serde_json::json!({
+            "id": create_harvested_tool_call_id(Some(id_prefix), 1),
+            "type": "function",
+            "function": {
+                "name": "apply_patch",
+                "arguments": args
+            }
+        })];
+    }
+    Vec::new()
 }
 
 fn consume_pattern(
@@ -3059,9 +3081,8 @@ pub fn normalize_assistant_text_to_tool_calls_json(
         }
         if mapped_calls.is_empty() {
             let mut explicit_calls = parse_explicit_json_tool_calls(text.as_str(), "reasoning");
-            if explicit_calls.is_empty() && is_pure_json_payload(text.as_str()) {
-                explicit_calls =
-                    parse_plain_structured_apply_patch_json(text.as_str(), "reasoning");
+            if explicit_calls.is_empty() {
+                explicit_calls = parse_plain_structured_apply_patch_json(text.as_str(), "reasoning");
             }
             if !explicit_calls.is_empty() {
                 mapped_calls.extend(explicit_calls);
@@ -3878,6 +3899,37 @@ exec_command
             .unwrap_or("{}");
         let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         assert_eq!(args_json["cmd"], "git status");
+        assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
+    }
+
+    #[test]
+    fn normalize_assistant_text_accepts_fenced_structured_apply_patch_payload() {
+        let message = json!({
+            "role": "assistant",
+            "content": "```json\n{\"file\":\"src/demo-fenced.ts\",\"changes\":[{\"kind\":\"replace\",\"target\":\"const status = \\\"old\\\";\",\"lines\":[\"const status = \\\"new\\\";\"]}]}\n```"
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        let function = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .expect("function");
+        assert_eq!(function.get("name").and_then(Value::as_str), Some("apply_patch"));
+        let arguments = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(arguments.contains("src/demo-fenced.ts"));
         assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
     }
 

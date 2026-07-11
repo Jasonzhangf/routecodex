@@ -1,28 +1,36 @@
 #!/usr/bin/env node
-/**
- * Regression: apply_patch tool surface is freeform-only.
- *
- * - MUST NOT enforce/emit structured `changes[]` schema.
- * - MUST NOT resurrect legacy `filePath` / structured patch schema at shared tool-mapping layer.
- * - Shared tool-mapping may omit parameters entirely; provider/runtime owners fill protocol-specific shape later.
- */
-
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..');
 const FEATURE_ID_APPLY_PATCH_FREEFORM_CONTRACT = 'feature_id: tool.apply_patch_freeform_contract';
+const require = createRequire(import.meta.url);
 
-async function loadToolMapping() {
-  const distPath = path.join(repoRoot, 'dist', 'conversion', 'shared', 'tool-mapping.js');
-  if (fs.existsSync(distPath)) {
-    return import(pathToFileURL(distPath).href);
+function loadNativeBinding() {
+  return require(path.join(repoRoot, 'dist', 'native', 'router_hotpath_napi.node'));
+}
+
+function mapBridgeToolsToChat(rawTools) {
+  const binding = loadNativeBinding();
+  const fn = binding.mapBridgeToolsToChatWithOptionsJson ?? binding.mapBridgeToolsToChatJson;
+  if (typeof fn !== 'function') {
+    throw new Error('mapBridgeToolsToChat native export is required');
   }
-  return import(pathToFileURL(path.join(repoRoot, 'src', 'conversion', 'shared', 'tool-mapping.ts')).href);
+  const payload =
+    fn === binding.mapBridgeToolsToChatWithOptionsJson
+      ? { tools: rawTools, options: {} }
+      : { tools: rawTools };
+  const raw = fn(JSON.stringify(payload));
+  const parsed = JSON.parse(String(raw || '{}'));
+  const mapped = Array.isArray(parsed) ? parsed : parsed?.tools;
+  if (!Array.isArray(mapped)) {
+    throw new Error('mapBridgeToolsToChat native export returned invalid tools');
+  }
+  return mapped;
 }
 
 function makeClientApplyPatchTool() {
@@ -56,7 +64,6 @@ function hasLegacyFilePathSchema(parameters) {
 
 async function main() {
   assert.equal(FEATURE_ID_APPLY_PATCH_FREEFORM_CONTRACT, 'feature_id: tool.apply_patch_freeform_contract');
-  const { mapBridgeToolsToChat } = await loadToolMapping();
 
   const rawTool = makeClientApplyPatchTool();
 
