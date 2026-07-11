@@ -683,6 +683,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/session-log-color-host.ts
       - src/utils/session-log-color.ts
     contract:
       - tests/sharedmodule/virtual-router-hit-log.spec.ts
@@ -699,6 +700,7 @@ verification:
       - npm run build:base
     notes:
       - "Focused closeout must prove Rust owns create/format/reason/color/session/provider parsing/telemetry projection and TS facade has no local semantic duplicate."
+      - "Session log color helpers must stay Rust-owned through the narrow `session-log-color-host.ts` bridge; server logging code may only consume resolved color tokens."
       - "This is diagnostic projection; live runtime closure is only required if claiming production log behavior, not for code/gate-only rustification."
 
   - feature_id: vr.route_host_effects

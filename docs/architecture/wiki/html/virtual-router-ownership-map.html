@@ -302,6 +302,7 @@
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/native-hotpath-required-exports.json</code></li>
           <li><code>src/modules/llmswitch/bridge/routing-integrations.ts</code></li>
+          <li><code>src/modules/llmswitch/bridge/session-log-color-host.ts</code></li>
           <li><code>src/utils/session-log-color.ts</code></li>
           <li><code>tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts</code></li>
           <li><code>tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts</code></li>
@@ -337,6 +338,7 @@
           <li>Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy.</li>
           <li>Retired TS <code>runtime/virtual-router-hit-log.ts</code> facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports.</li>
           <li>Runtime route host-effects planning/finalization is Rust-owned; <code>routing-integrations.ts</code> may only call <code>planVirtualRouterRouteHostEffectsJson</code> / <code>finalizeVirtualRouterRouteHostEffectsJson</code>, apply returned <code>cleanedRequest</code>, and emit returned log lines.</li>
+          <li>Session log color helpers must reach Rust through <code>src/modules/llmswitch/bridge/session-log-color-host.ts</code>; TS may not keep local color hashing or broad bridge ownership.</li>
         </ul>
         <h2>vr.route_host_effects</h2>
         <p>Summary: Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission</p>

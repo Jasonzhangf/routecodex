@@ -174,6 +174,7 @@ Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
 - `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - `src/modules/llmswitch/bridge/routing-integrations.ts`
+- `src/modules/llmswitch/bridge/session-log-color-host.ts`
 - `src/utils/session-log-color.ts`
 - `tests/sharedmodule/helpers/virtual-router-hit-log-direct-native.ts`
 - `tests/sharedmodule/helpers/virtual-router-engine-direct-native.ts`
@@ -205,6 +206,7 @@ Notes:
 - Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy.
 - Retired TS `runtime/virtual-router-hit-log.ts` facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports.
 - Runtime route host-effects planning/finalization is Rust-owned; `routing-integrations.ts` may only call `planVirtualRouterRouteHostEffectsJson` / `finalizeVirtualRouterRouteHostEffectsJson`, apply returned `cleanedRequest`, and emit returned log lines.
+- Session log color helpers must reach Rust through `src/modules/llmswitch/bridge/session-log-color-host.ts`; TS may not keep local color hashing or broad bridge ownership.
 
 ## vr.route_host_effects
 

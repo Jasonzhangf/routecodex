@@ -1,4 +1,4 @@
-import { getRouterHotpathJsonBindingSync } from '../modules/llmswitch/bridge/native-exports.js';
+import { getSessionLogColorBinding } from '../modules/llmswitch/bridge/session-log-color-host.js';
 
 function normalizeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -13,7 +13,7 @@ export function resolveSessionAnsiColor(sessionId?: unknown): string | undefined
   if (!normalized) {
     return undefined;
   }
-  const fn = getRouterHotpathJsonBindingSync().resolveSessionColorStr;
+  const fn = getSessionLogColorBinding().resolveSessionColorStr;
   if (typeof fn !== 'function') {
     throw new Error('[session-log-color] resolveSessionColorStr native export is required');
   }
@@ -25,7 +25,7 @@ export function resolveSessionLogColorKey(context?: Record<string, unknown> | nu
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     return undefined;
   }
-  const fn = getRouterHotpathJsonBindingSync().resolveSessionLogColorKeyJson;
+  const fn = getSessionLogColorBinding().resolveSessionLogColorKeyJson;
   if (typeof fn !== 'function') {
     throw new Error('[session-log-color] resolveSessionLogColorKeyJson native export is required');
   }
