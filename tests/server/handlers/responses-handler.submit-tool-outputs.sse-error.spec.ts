@@ -11,6 +11,18 @@ const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 
+const planResponsesRequestBodyForHttpMock = (payload: Record<string, unknown>) => {
+  const pipelineBody = { ...(payload ?? {}) };
+  const metadata = pipelineBody.metadata;
+  delete pipelineBody.metadata;
+  return {
+    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { requestBodyMetadata: metadata as Record<string, unknown> }
+      : {}),
+    pipelineBody,
+  };
+};
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   buildResponsesJsonFromSseStreamWithNative: jest.fn(async () => ({})),
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContextForRequest,
@@ -34,7 +46,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 const createNativeExportsMock = () => ({
   buildAnthropicResponseFromChatJson: jest.fn((payload: unknown) => payload),
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
   captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
@@ -53,6 +64,10 @@ const createNativeExportsMock = () => ({
   describeVirtualRouterContractsNative: jest.fn(() => ({})),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
+  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
+    sessionId: metadata?.sessionId ?? metadata?.session_id,
+    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
+  })),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
   getNetworkErrorCodes: jest.fn(() => []),
   getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
@@ -74,6 +89,7 @@ const createNativeExportsMock = () => ({
     responseId: responseIdFromPath,
   })),
   planResponsesJsonClientDispatchNative: jest.fn((args: { body?: unknown }) => ({ clientBody: args.body, sanitizedBody: args.body })),
+  planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
   planResponsesRequestContext: jest.fn(() => ({ shouldCapture: false, context: {} })),
   projectResponsesClientPayloadForClientNative: jest.fn((payload: unknown) => payload),
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({

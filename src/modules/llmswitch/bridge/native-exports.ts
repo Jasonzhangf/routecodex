@@ -59,7 +59,6 @@ type NativeChatProcessNodeResultSemantics = {
     stateJson: string,
     flushRemainder: boolean
   ) => string;
-  buildResponsesTerminalSseFramesFromProbeJson?: (probeJson: string, requestLabel: string) => string;
   resolveProviderResponseRequestSemanticsJson?: (
     processedJson: string,
     standardizedJson: string,
@@ -1387,22 +1386,6 @@ export function updateResponsesSseTransportTerminalStateNative(input: {
     state: state as Record<string, unknown>,
     observedTerminal: sawTerminalEvent,
   };
-}
-
-export function buildResponsesTerminalSseFramesFromProbeNative(
-  probe: Record<string, unknown> | undefined,
-  requestLabel: string
-): string[] {
-  const fn = getChatProcessNodeResultSemantics().buildResponsesTerminalSseFramesFromProbeJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] buildResponsesTerminalSseFramesFromProbeJson not available');
-  }
-  const raw = fn(JSON.stringify(probe ?? {}), String(requestLabel || 'unknown'));
-  const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed) || !parsed.every((frame) => typeof frame === 'string')) {
-    throw new Error('[llmswitch-bridge] buildResponsesTerminalSseFramesFromProbeJson returned invalid payload');
-  }
-  return parsed as string[];
 }
 
 export function extractServertoolCliResultRouteHintFromRequestNative(input: {

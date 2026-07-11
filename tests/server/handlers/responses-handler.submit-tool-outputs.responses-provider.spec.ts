@@ -9,6 +9,19 @@ const mockFinalizeResponsesConversationRequestRetention = jest.fn(async () => un
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockResumeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
+
+const planResponsesRequestBodyForHttpMock = (payload: Record<string, unknown>) => {
+  const pipelineBody = { ...(payload ?? {}) };
+  const metadata = pipelineBody.metadata;
+  delete pipelineBody.metadata;
+  return {
+    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { requestBodyMetadata: metadata as Record<string, unknown> }
+      : {}),
+    pipelineBody,
+  };
+};
+
 const createNativeExportsMock = () => ({
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
@@ -104,9 +117,14 @@ const createNativeExportsMock = () => ({
   hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),
+  planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
   convertResponsesRequestToChatNative: jest.fn((input: unknown) => input),
   normalizeResponsesDirectCurrentRequestPayload: jest.fn((input: unknown) => input),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ providerWireValid: true, requiresHubRelay: false })),
+  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
+    sessionId: metadata?.sessionId ?? metadata?.session_id,
+    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
+  })),
   buildResponsesPayloadFromChatNative: jest.fn((input: unknown) => input),
   projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
@@ -115,7 +133,6 @@ const createNativeExportsMock = () => ({
     state: undefined,
   })),
   projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
-  buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
   describeHubPipelineContractsNative: jest.fn(() => ({})),
   describeVirtualRouterContractsNative: jest.fn(() => ({})),
   describeMetaCarrierContractsNative: jest.fn(() => ({})),
@@ -374,10 +391,11 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
     });
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
       continuationOwner: 'direct',
+      providerKey: 'dibittai.crsa.gpt-5.4',
       responseId: 'resp_submit_direct_1',
       restored: false,
     });
-    expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).not.toHaveProperty('providerKey');
+    expect(MetadataCenter.read(pipelineInput.metadata)?.readRuntimeControl().retryProviderKey).toBe('dibittai.crsa.gpt-5.4');
   });
 
   it('rewrites relay submit_tool_outputs back to /v1/responses mainline after local materialization', async () => {

@@ -208,79 +208,6 @@ function expectResponsesToolCallContinuationSequence(text: string): void {
   expect(item?.name).toBe('exec_command');
 }
 
-function buildStandardToolCallTerminalFrames(
-  probe: unknown,
-  fallbackId: string
-): string[] {
-  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) {
-    return [];
-  }
-  const record = probe as Record<string, unknown>;
-  const requiredAction = record.required_action as Record<string, unknown> | undefined;
-  const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
-  const calls = Array.isArray(submit?.tool_calls) ? submit.tool_calls as Record<string, unknown>[] : [];
-  if (!calls.length) {
-    return [];
-  }
-  const frames: string[] = [];
-  calls.forEach((call, index) => {
-    const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
-    const fn = call.function as Record<string, unknown> | undefined;
-    const name = String(fn?.name ?? call.name ?? 'exec_command');
-    const args = String(fn?.arguments ?? call.arguments ?? '{}');
-    const itemId = `fc_${callId.replace(/^call_/, '')}`;
-    const added = {
-      type: 'response.output_item.added',
-      output_index: index,
-      item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: '', status: 'in_progress' }
-    };
-    const argsDelta = {
-      type: 'response.function_call_arguments.delta',
-      output_index: index,
-      item_id: itemId,
-      call_id: callId,
-      delta: args
-    };
-    const argsDone = {
-      type: 'response.function_call_arguments.done',
-      output_index: index,
-      item_id: itemId,
-      call_id: callId,
-      name,
-      arguments: args
-    };
-    const done = {
-      type: 'response.output_item.done',
-      output_index: index,
-      item: { id: itemId, type: 'function_call', call_id: callId, name, arguments: args, status: 'completed' }
-    };
-    frames.push(`event: response.output_item.added\ndata: ${JSON.stringify(added)}\n\n`);
-    frames.push(`event: response.function_call_arguments.delta\ndata: ${JSON.stringify(argsDelta)}\n\n`);
-    frames.push(`event: response.function_call_arguments.done\ndata: ${JSON.stringify(argsDone)}\n\n`);
-    frames.push(`event: response.output_item.done\ndata: ${JSON.stringify(done)}\n\n`);
-  });
-  const responsePayload = {
-    id: record.id ?? fallbackId,
-    object: 'response',
-    status: 'completed',
-    output: calls.map((call, index) => {
-      const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
-      const fn = call.function as Record<string, unknown> | undefined;
-      return {
-        id: `fc_${callId.replace(/^call_/, '')}`,
-        type: 'function_call',
-        call_id: callId,
-        name: String(fn?.name ?? call.name ?? 'exec_command'),
-        arguments: String(fn?.arguments ?? call.arguments ?? '{}'),
-        status: 'completed'
-      };
-    })
-  };
-  frames.push(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: responsePayload })}\n\n`);
-  frames.push(`event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response: responsePayload })}\n\n`);
-  return frames;
-}
-
 describe('HTTP Responses SSE projection timeout', () => {
   jest.setTimeout(10_000);
 
@@ -431,8 +358,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           }
           return existing;
         },
-        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
-          buildStandardToolCallTerminalFrames(probe, 'resp_tool_close_guard'),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -554,8 +479,6 @@ describe('HTTP Responses SSE projection timeout', () => {
           }
           return existing;
         },
-        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
-          buildStandardToolCallTerminalFrames(probe, 'resp_probe_from_frame'),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -623,7 +546,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -697,7 +619,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -769,7 +690,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
         writeSnapshotViaHooks: async () => undefined,
@@ -846,7 +766,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         captureResponsesConversationToolCallRequestContext: captureSpy,
         recordResponsesConversationToolCallResponse: recordSpy,
         writeSnapshotViaHooks: async () => undefined,
@@ -922,7 +841,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1017,8 +935,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: (probe: unknown) =>
-          buildStandardToolCallTerminalFrames(probe, 'resp_direct_passthrough_probe'),
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
@@ -1142,7 +1058,6 @@ describe('HTTP Responses SSE projection timeout', () => {
             ? probe
             : {}
         ),
-        buildResponsesTerminalSseFramesFromProbeNative: () => [],
         writeSnapshotViaHooks: async () => undefined,
     });
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({

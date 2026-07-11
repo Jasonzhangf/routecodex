@@ -28810,3 +28810,55 @@ Bridge-facing public surface (handler consumer, cannot delete/reorder):
 - Change: `buildResponsesPipelineMetadataForHttp` now writes `runtime_control.retryProviderKey` only when `responsesResume.continuationOwner === "direct"` and `providerKey` is present. Relay continuation remains unpinned.
 - Verification PASS: focused Jest 5 suites / 76 tests; `npm run build:base`; direct blackbox now `["p1","p1"]` with `default/forced`; full direct+relay blackbox now direct `["p1","p1"]`, relay `["p1","p2"]`; touched-file `git diff --check`.
 - Non-target dirty files kept out: concurrent SSE finish-reason changes remain separate worktree state.
+
+# 2026-07-11: hub pipeline rustification — continue note
+
+## Committed this session
+1. c0131e33c route responses ids through native bridge (sessionId/conversationId)
+2. aa69304c7 trim dead responses bridge exports (5 helpers private, shouldPersist deleted)
+3. 2204a7028 move request body prep to native (prepareResponsesRequestBodyForHttp → Rust)
+4. 1cfbc0b8a fix direct continuation provider pin
+
+## Key metrics
+- llmswitch-core TS: 0 files, 0 LOC (baseline maintained)
+- verify:llmswitch-rustification-audit: PASS
+- verify:function-map-compile-gate: PASS
+- responses-request-bridge.ts: 1032 lines, 10 export functions + 8 export types
+
+## responses-request-bridge.ts remaining exports
+Bridge-facing handler surface (10 export functions):
+- prepareResponsesRequestBodyForHttp — already Rust-backed (planResponsesRequestBodyForHttpNative)
+- buildResponsesPipelineMetadataForHttp — MetadataCenter+dualwrite, not pure JSON
+- buildResponsesConversationPortScopeForHttp — port context, pure JSON
+- planResponsesHandlerStreamForHttp — stream intent, pure JSON
+- finalizeResponsesHandlerPayloadForHttp — stream+system prompt
+- shouldManageResponsesConversationForHttp — endpoint string check
+- buildResponsesScopeContinuationExpiredErrorForHttp — static error
+- buildResponsesResumeClientErrorForHttp — static error
+- shouldProjectResponsesResumeClientErrorForHttp — origin check
+- attachResponsesRequestContextToResultForHttp — metadata merge (now no-op-ish)
+
+## What can still be moved
+### Low-hanging fruit (pure JSON, handler-visible but test-mockable)
+Pure Rust NAPI candidates:
+- shouldManageResponsesConversationForHttp → endpoint string compare
+- buildResponsesScopeContinuationExpiredErrorForHttp → static error shape
+- buildResponsesResumeClientErrorForHttp → static error shape
+- shouldProjectResponsesResumeClientErrorForHttp → origin string check
+
+### Deeper (needs Rust NAPI first)
+- buildResponsesConversationPortScopeForHttp → could use build_responses_conversation_scope_plan_json
+- planResponsesHandlerStreamForHttp → pure stream intent computation
+- finalizeResponsesHandlerPayloadForHttp → stream flag and system prompt
+
+### Not rustifiable (MetadataCenter-bound)
+- buildResponsesPipelineMetadataForHttp → MetadataCenter+dualwrite TS infrastructure
+- attachResponsesRequestContextToResultForHttp → metadata merge
+
+# 2026-07-11: SSE terminal probe TS wrapper removed
+
+- Scope: continue Hub Pipeline / llmswitch bridge external-reference closeout for Responses SSE terminal repair surface.
+- Change: removed the TS export `buildResponsesTerminalSseFramesFromProbeNative` from `native-exports.ts`; tests no longer mock or call that TS wrapper, and the local `buildStandardToolCallTerminalFrames` TS terminal-frame synthesizer was deleted from `sse-projection-timeout.blackbox.spec.ts`.
+- Contract: SSE/handler tests now keep terminal/probe state native-owned and do not synthesize `response.completed` / `response.done` terminal repair frames in TS. Remaining string hits are only architecture gate denylist/residue-audit patterns.
+- Verification PASS: exact ref scan for `buildResponsesTerminalSseFramesFromProbeNative|buildStandardToolCallTerminalFrames` has no active src/test consumer refs; focused Jest 4 passing suites (`native-exports.responses-sse-contract`, `sse-projection-timeout`, `submit-tool-outputs.sse-error`, `submit-tool-outputs.responses-provider`); `verify:responses-handler-single-bridge-surface`; `verify:responses-sse-business-module`; `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; strict `llmswitch-ts-shell-reference-audit`; `build:base`; touched-file `git diff --check`.
+- Known non-target gap: broad `handler-request-executor.unified-semantics.e2e.spec.ts` still fails 16 legacy expectations around continuation/materialization/SSE mock behavior when run directly; it was not used as closeout evidence for this SSE wrapper deletion.

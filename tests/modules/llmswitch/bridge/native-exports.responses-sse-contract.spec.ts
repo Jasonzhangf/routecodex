@@ -1,7 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  buildResponsesTerminalSseFramesFromProbeNative,
   projectResponsesSseFrameForClientNative,
   updateResponsesContractProbeFromSseChunkNative,
   updateResponsesSseTransportTerminalStateNative
@@ -83,7 +82,7 @@ describe('native-exports responses SSE contract', () => {
     );
   });
 
-  it('materializes chat completion chunk tool_calls into standard terminal responses frames', () => {
+  it('materializes chat completion chunk tool_calls into native-owned probe state', () => {
     const chunk = [
       'data: {"id":"chatcmpl_req_tool_terminal","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}',
       '',
@@ -115,17 +114,7 @@ describe('native-exports responses SSE contract', () => {
       })
     );
 
-    const frames = buildResponsesTerminalSseFramesFromProbeNative(
-      probe,
-      'req_chat_chunk_tool_terminal'
-    );
-    const wire = frames.join('');
-    expect(wire).toContain('event: response.output_item.added');
-    expect(wire).toContain('event: response.function_call_arguments.done');
-    expect(wire).toContain('event: response.output_item.done');
-    expect(wire).toContain('event: response.completed');
-    expect(wire).toContain('event: response.done');
-    expect(wire).not.toContain('event: response.required_action');
+    expect(JSON.stringify(probe)).not.toContain('response.required_action');
   });
 
   it('keeps partial Responses terminal blocks in native-owned transport state', () => {

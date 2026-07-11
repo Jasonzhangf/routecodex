@@ -1,5 +1,23 @@
 type AnyRecord = Record<string, unknown>;
 
+function planResponsesRequestBodyForHttpFake(payload: unknown): {
+  requestBodyMetadata?: AnyRecord;
+  pipelineBody: AnyRecord;
+} {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { pipelineBody: {} };
+  }
+  const pipelineBody = { ...(payload as AnyRecord) };
+  const metadata = pipelineBody.metadata;
+  delete pipelineBody.metadata;
+  return {
+    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { requestBodyMetadata: metadata as AnyRecord }
+      : {}),
+    pipelineBody,
+  };
+}
+
 export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyRecord {
   const fake: AnyRecord = {
     buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
@@ -29,6 +47,10 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     detectToolExecutionFailuresNative: () => [],
     evaluateResponsesDirectRouteDecisionNative: () => ({}),
     evaluateSingletonRoutePoolExhaustionNative: () => ({}),
+    extractSessionIdentifiersFromMetadataNative: (metadata: AnyRecord = {}) => ({
+      sessionId: metadata.sessionId ?? metadata.session_id,
+      conversationId: metadata.conversationId ?? metadata.conversation_id,
+    }),
     extractServertoolCliResultRouteHintFromRequestNative: () => undefined,
     getNetworkErrorCodes: () => [],
     getRouterHotpathJsonBindingSync: () => ({}),
@@ -48,6 +70,7 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     normalizeExplicitRoutePoolNative: () => ({}),
     normalizeResponsesDirectCurrentRequestPayload: (payload: AnyRecord) => ({ changed: false, payload }),
     planPrimaryExhaustedToDefaultPoolNative: () => ({}),
+    planResponsesRequestBodyForHttpNative: planResponsesRequestBodyForHttpFake,
     planResponsesContinuationRequestAction: async () => ({}),
     planResponsesHandlerEntry: async () => ({}),
     planResponsesJsonClientDispatchNative: () => ({}),
@@ -64,7 +87,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     stripResponsesStoredContextInputMediaNative: (payload: unknown) => payload,
     updateResponsesContractProbeFromSseChunkNative: () => ({}),
     updateResponsesSseTransportTerminalStateNative: (input: unknown) => input,
-    buildResponsesTerminalSseFramesFromProbeNative: () => [],
     validateApplyPatchArgumentsNative: () => ({ ok: true }),
     validateCanonicalClientToolCall: () => ({ ok: true }),
     validatePipelineNodeContractBoundaryNative: () => ({ ok: true }),
