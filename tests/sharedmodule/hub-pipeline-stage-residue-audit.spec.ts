@@ -4735,6 +4735,7 @@ describe('hub pipeline stage residue audit', () => {
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.js.map',
       'sharedmodule/llmswitch-core/src/native/router-hotpath/native-shared-conversion-semantics-tools.d.ts',
+      'src/types/llmswitch-local-types.js',
     ];
     const existing = forbiddenArtifacts.filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)));
 
