@@ -1,10 +1,10 @@
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../../handlers/types.js';
 // feature_id: server.provider_response_conversion_host
-import type { ProviderHandle } from '../types.js';
+import type { ProviderHandle, ProviderProtocol } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
-} from '../../../../modules/llmswitch/bridge/response-converter.js';
+} from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../../modules/llmswitch/bridge/snapshot-recorder.js';
@@ -110,6 +110,10 @@ const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
   symbol: 'syncBridgeRuntimeBackToPipelineMetadata',
   stage: 'provider_response_debug_snapshot'
 } as const;
+
+type ProviderResponseStageRecorder = {
+  record(stage: string, payload: object): void;
+};
 
 function buildBridgeInvocationMetadata(args: {
   metadata: Record<string, unknown>;
@@ -243,14 +247,26 @@ function readRuntimeControlForProviderResponseConverter(
 function readProviderProtocolForProviderResponseConverter(args: {
   metadata?: Record<string, unknown>;
   bridgeMetadata?: Record<string, unknown>;
-}): string {
+}): ProviderProtocol {
   const providerProtocol = readRuntimeControlForProviderResponseConverter(
     args.metadata ?? args.bridgeMetadata
   ).providerProtocol;
-  if (providerProtocol) {
+  if (
+    providerProtocol === 'openai-chat'
+    || providerProtocol === 'openai-responses'
+    || providerProtocol === 'anthropic-messages'
+    || providerProtocol === 'gemini-chat'
+  ) {
     return providerProtocol;
   }
   throw new Error('Provider response converter requires metadata center runtime_control.providerProtocol');
+}
+
+function asProviderResponseStageRecorder(value: unknown): ProviderResponseStageRecorder | undefined {
+  if (value && typeof value === 'object' && typeof (value as { record?: unknown }).record === 'function') {
+    return value as ProviderResponseStageRecorder;
+  }
+  return undefined;
 }
 
 export function buildResponseMetadataBagForProviderResponseConverter(args: {
@@ -447,18 +463,20 @@ export async function convertProviderResponseIfNeeded(
       bridgeMetadata
     });
     const serverToolsEnabled = options.serverToolsEnabled !== false;
-    let stageRecorder: unknown;
+    let stageRecorder: ProviderResponseStageRecorder | undefined;
     if (shouldEnableHubStageRecorder()) {
       logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,
         providerProtocol: bridgeProviderProtocol
       });
       const snapshotRecorderStartMs = Date.now();
-      stageRecorder = await bridgeCreateSnapshotRecorder(
-        bridgeMetadata,
-        typeof bridgeMetadata.entryEndpoint === 'string'
-          ? bridgeMetadata.entryEndpoint
-          : options.entryEndpoint || entry
+      stageRecorder = asProviderResponseStageRecorder(
+        await bridgeCreateSnapshotRecorder(
+          bridgeMetadata,
+          typeof bridgeMetadata.entryEndpoint === 'string'
+            ? bridgeMetadata.entryEndpoint
+            : options.entryEndpoint || entry
+        )
       );
       logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
         entryEndpoint: options.entryEndpoint || entry,

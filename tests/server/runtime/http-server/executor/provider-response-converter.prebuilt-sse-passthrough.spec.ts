@@ -17,10 +17,7 @@ async function readStreamBody(stream: NodeJS.ReadableStream): Promise<string> {
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
-  convertProviderResponse: mockConvertProviderResponse
-}));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.ts', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: mockConvertProviderResponse
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({

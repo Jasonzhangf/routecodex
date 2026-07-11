@@ -24,10 +24,7 @@ function buildPipelineMetadata(providerProtocol: string, extra: Record<string, u
   );
   return metadata;
 }
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
-  convertProviderResponse: mockConvertProviderResponse
-}));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.ts', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: mockConvertProviderResponse
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({

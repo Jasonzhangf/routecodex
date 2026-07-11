@@ -84,6 +84,7 @@ const deletedPathDenylist = [
   'src/modules/pipeline/modules/interfaces/pipeline-interfaces.ts',
   'src/modules/pipeline/modules/README.md',
   'src/modules/llmswitch/bridge/module-loader.ts',
+  'src/modules/llmswitch/bridge/response-converter.ts',
   'scripts/enhance-module.js',
   'docs/MODULE_ENHANCEMENT_SYSTEM.md',
   'docs/pipeline-routing-report.md',

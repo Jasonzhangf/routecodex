@@ -596,7 +596,7 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 
 ### 2026-07-11 provider response converter production root import narrowed
 
-- `src/server/runtime/http-server/executor/provider-response-converter.ts` now imports `convertProviderResponse` from `src/modules/llmswitch/bridge/response-converter.js` and `createSnapshotRecorder` from `src/modules/llmswitch/bridge/snapshot-recorder.js` instead of the root bridge barrel.
+- `src/server/runtime/http-server/executor/provider-response-converter.ts` now imports `convertProviderResponse` from `src/modules/llmswitch/bridge/provider-response-converter-host.js` and `createSnapshotRecorder` from `src/modules/llmswitch/bridge/snapshot-recorder.js` instead of the root bridge barrel or the retired `response-converter` forwarding shell.
 - Focused provider response converter tests now mock those two narrow facades directly for error logging, MetadataCenter provider protocol, and stopless runtime sync coverage.
 - Production root bridge scan now reports only `src/providers/core/runtime/responses-provider.ts`, `src/server/runtime/http-server/index.ts`, and `src/server/runtime/http-server/request-executor.ts` as remaining root bridge importers.
 - Verification passed: focused Jest 3 suites / 8 tests, `npx tsc --noEmit --pretty false`, strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only), `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, and `verify:function-map-compile-gate`.
@@ -787,21 +787,21 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 ### 2026-07-11 provider response finish-reason mock narrowed
 
 - `tests/server/runtime/http-server/executor/provider-response-converter.finish-reason.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels and no longer declares legacy `importCoreDist` / `requireCoreDist` loader helpers.
-- The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; finish-reason derivation runs through the current `server/utils/finish-reason.ts` native wrapper instead of a test-local TS copy.
+- The spec now mocks only the active production collaborators, `bridge/provider-response-converter-host.js` and `bridge/snapshot-recorder.js`; finish-reason derivation runs through the current `server/utils/finish-reason.ts` native wrapper instead of a test-local TS copy.
 - Exact file scan for root bridge paths, legacy loader helpers, and the retired `syncReasoningStopModeFromRequest` mock returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 5/5 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
 
 ### 2026-07-11 provider response prebuilt SSE mock narrowed
 
 - `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels, `bridge/index`, or `bridge/module-loader`.
-- The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and the test-local `deriveFinishReasonNative` copy.
+- The spec now mocks only the active production collaborators, `bridge/provider-response-converter-host.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and the test-local `deriveFinishReasonNative` copy.
 - Exact file scan for root bridge paths and legacy loader helpers in the touched spec returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 5/5 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
 
 ### 2026-07-11 provider response unified semantics mock narrowed
 
 - `tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrels, `bridge/index`, or `bridge/module-loader`.
-- The spec now mocks only the active production collaborators, `bridge/response-converter.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and test-local TS copies of finish-reason, direct-chat SSE reprojection, and Responses tool-argument normalization logic.
+- The spec now mocks only the active production collaborators, `bridge/provider-response-converter-host.js` and `bridge/snapshot-recorder.js`; removed legacy `importCoreDist` / `requireCoreDist` / `resolveImplForSubpath` helpers and test-local TS copies of finish-reason, direct-chat SSE reprojection, and Responses tool-argument normalization logic.
 - Exact file scan for root bridge paths, legacy loader helpers, and retired mock symbols in the touched spec returns zero matches.
 - Verification passed: focused Jest 1/1 suite, 19/19 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
 
@@ -892,3 +892,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Deleted `src/modules/llmswitch/bridge/module-loader.ts` after exact reference scans showed its only active source consumers used the local `AnyRecord` type; `resolveCoreModulePath` had no active runtime/test/script consumer.
 - Moved the local bridge-only `AnyRecord` type to `src/modules/llmswitch/bridge/bridge-types.ts` and rewired leaf bridge type imports there without adding runtime behavior.
 - Added the deleted TS shell to the deleted-path/residue gates so the path cannot return as a compatibility re-export shell.
+
+### 2026-07-11 response-converter forwarding shell deleted
+
+- Deleted `src/modules/llmswitch/bridge/response-converter.ts` after exact reference scans showed it was only a forwarding shell to `provider-response-converter-host.ts`.
+- Rewired the server provider response converter and focused tests to mock/import `src/modules/llmswitch/bridge/provider-response-converter-host.js` directly.
+- Added the deleted forwarding shell to deleted-path/residue gates so future tests cannot keep using it as a compatibility facade.

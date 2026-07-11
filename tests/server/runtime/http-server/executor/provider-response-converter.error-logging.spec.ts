@@ -5,7 +5,7 @@ const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const logStageSpy = jest.fn();
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
 }));
 

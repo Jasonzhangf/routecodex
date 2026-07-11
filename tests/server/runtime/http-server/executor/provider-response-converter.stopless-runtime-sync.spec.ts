@@ -4,7 +4,7 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const mockConvertProviderResponse = jest.fn();
 
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({

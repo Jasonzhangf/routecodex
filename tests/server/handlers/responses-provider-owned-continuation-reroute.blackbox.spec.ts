@@ -16,7 +16,7 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/snapshot-recorde
   resetSnapshotRecorderErrorsampleStateForTests: jest.fn(),
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/response-converter.js', () => ({
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: jest.fn(async () => ({ body: { ok: true } })),
 }));
 
