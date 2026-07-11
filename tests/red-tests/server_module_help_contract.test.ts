@@ -55,10 +55,10 @@ describe('Server module help contract (Phase Server-A)', () => {
     expect(ex).toContain('describeServerModuleHelpJson');
   });
 
-  it('TS wrappers expose describeServerContractsWithNative and describeServerModuleHelpWithNative', () => {
+  it('TS host wrappers do not mirror server help NAPI exports', () => {
     const ts = readSrc('src/modules/llmswitch/bridge/native-exports.ts');
-    expect(ts).toContain('describeServerContractsWithNative');
-    expect(ts).toContain('describeServerModuleHelpWithNative');
+    expect(ts).not.toContain('describeServerContractsWithNative');
+    expect(ts).not.toContain('describeServerModuleHelpWithNative');
   });
 
   it('Phase Server-A is read-only: server_contracts.rs has no #[napi_derive::napi] in its own file', () => {

@@ -307,8 +307,6 @@ type NativeHubVrNodeContracts = {
   describeVirtualRouterContractsWithNative?: () => AnyRecord;
   describeMetaCarrierContractsNative?: () => AnyRecord;
   describePipelineContractWithNative?: (nodeId: string) => AnyRecord;
-  describeServerContractsWithNative?: () => AnyRecord;
-  describeServerModuleHelpWithNative?: (moduleId: string) => AnyRecord;
 };
 
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
@@ -396,10 +394,6 @@ function buildHubVrNodeContractsFromRouterHotpathBinding(
       invoke('describeMetaCarrierContractsJson'),
     describePipelineContractWithNative: (nodeId: string) =>
       invoke('describePipelineContractJson', [String(nodeId || '')]),
-    describeServerContractsWithNative: () =>
-      invoke('describeServerContractsJson'),
-    describeServerModuleHelpWithNative: (moduleId: string) =>
-      invoke('describeServerModuleHelpJson', [String(moduleId || '')]),
   };
 }
 
@@ -1092,22 +1086,6 @@ export function describePipelineContractNative(nodeId: string): AnyRecord {
     throw new Error('[llmswitch-bridge] describePipelineContractWithNative not available');
   }
   return fn(nodeId);
-}
-
-export function describeServerContractsWithNative(): AnyRecord {
-  const fn = getHubVrNodeContracts().describeServerContractsWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] describeServerContractsWithNative not available');
-  }
-  return fn();
-}
-
-export function describeServerModuleHelpWithNative(moduleId: string): AnyRecord {
-  const fn = getHubVrNodeContracts().describeServerModuleHelpWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] describeServerModuleHelpWithNative not available');
-  }
-  return fn(moduleId);
 }
 
 export function shouldRecordSnapshotsNative(): boolean {

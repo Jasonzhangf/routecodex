@@ -4,13 +4,13 @@
 */
 
 import {
-  describeServerContractsWithNative,
-  describeServerModuleHelpWithNative
-} from '../../src/modules/llmswitch/bridge/native-exports.js';
+  describeServerContractsDirectNative,
+  describeServerModuleHelpDirectNative,
+} from './helpers/server-module-help-direct-native.js';
 
 describe('server module help live NAPI verification (Phase Server-E)', () => {
   it('lists exactly 5 server modules with contract version 2026-06-03.server-module-help.v1', () => {
-    const all = describeServerContractsWithNative();
+    const all = describeServerContractsDirectNative();
     expect(all).toMatchObject({
       contractVersion: '2026-06-03.server-module-help.v1',
     });
@@ -25,15 +25,15 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
   });
 
   it('each module forbids 7 internal carriers (metadata/metaCarrier/runtimeMetadata/errorCarrier/classifiedError/__rt/snapshot)', () => {
-    const all = describeServerContractsWithNative();
+    const all = describeServerContractsDirectNative();
     const expected = ['metadata', 'metaCarrier', 'runtimeMetadata', 'errorCarrier', 'classifiedError', '__rt', 'snapshot'];
     for (const m of (all.modules ?? []) as Array<{ moduleId: string; forbiddenCarriers: string[] }>) {
       expect(m.forbiddenCarriers).toEqual(expected);
     }
   });
 
-  it('describeServerModuleHelpWithNative returns a single module envelope', () => {
-    const one = describeServerModuleHelpWithNative('server.direct_passthrough');
+  it('describeServerModuleHelpDirectNative returns a single module envelope', () => {
+    const one = describeServerModuleHelpDirectNative('server.direct_passthrough');
     expect(one).toMatchObject({
       contractVersion: '2026-06-03.server-module-help.v1',
       module: { moduleId: 'server.direct_passthrough' },
@@ -41,7 +41,7 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
   });
 
   it('describes the unified error action queue policy', () => {
-    const one = describeServerModuleHelpWithNative('server.error_action_queue');
+    const one = describeServerModuleHelpDirectNative('server.error_action_queue');
     expect(one).toMatchObject({
       contractVersion: '2026-06-03.server-module-help.v1',
       module: {
