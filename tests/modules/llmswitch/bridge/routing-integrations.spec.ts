@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.ts');
+const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.js');
 
 describe('llmswitch bridge routing-integrations native handle surface', () => {
   it('does not expose deleted HubPipeline constructor bridge APIs', () => {

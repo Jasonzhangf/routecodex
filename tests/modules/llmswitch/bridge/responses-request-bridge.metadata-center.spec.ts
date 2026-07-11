@@ -41,7 +41,7 @@ beforeAll(async () => {
     buildResponsesPipelineMetadataForHttp,
     planResponsesHandlerStreamForHttp,
     attachResponsesRequestContextToResultForHttp
-  } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.ts'));
+  } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
   ({ MetadataCenter } = await import(
     '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
   ));

@@ -1,6 +1,6 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { prepareResponsesRequestBodyForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
+import { prepareResponsesRequestBodyForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import { normalizeResponsesToChatBody } from '../../src/utils/responses-to-chat.js';
 

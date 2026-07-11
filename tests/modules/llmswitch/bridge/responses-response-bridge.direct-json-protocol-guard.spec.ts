@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   normalizeResponsesClientPayloadForHttp,
   prepareResponsesJsonClientDispatchPlanForHttp,
-} from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.ts';
+} from '../../../../src/modules/llmswitch/bridge/responses-response-bridge.js';
 
 describe('responses-response-bridge direct JSON protocol guard', () => {
   it('router-direct JSON dispatch bypasses Responses client projection without requestContext', async () => {

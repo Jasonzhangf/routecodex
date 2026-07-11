@@ -19,9 +19,9 @@ import {
   resumeLatestResponsesContinuationByScope,
   getResponsesConversationStoreDebugStats,
   releaseResponsesConversationRequestPayload
-} from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts';
+} from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
-import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.ts';
+import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.js';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
   if (!Array.isArray(messages)) return null;

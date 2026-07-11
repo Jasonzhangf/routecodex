@@ -14,7 +14,7 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
       }),
     }));
 
-    const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.ts');
+    const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.js');
 
     expect(() => routing.executeHubPipelineNative('hp_missing_protocol', { id: 'req_1' })).toThrow(
       'hub_pipeline_missing_provider_protocol: HubPipeline requires metadata center runtime_control.providerProtocol',
@@ -37,7 +37,7 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
       }),
     }));
 
-    const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.ts');
+    const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.js');
 
     expect(() => routing.routeHubPipelineVirtualRouterNative('hp_no_provider', { model: 'gpt-5.5' }, {})).toThrow(
       'hub_pipeline_virtual_router_route failed: PROVIDER_NOT_AVAILABLE',
