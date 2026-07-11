@@ -65,25 +65,12 @@ jest.unstable_mockModule(
   })
 );
 
-function createRequestExecutorLocalBridgeMock() {
+function createRequestExecutorLocalRuntimeIntegrationsMock() {
   return {
     captureResponsesRequestContextForRequest: async () => undefined,
     clearResponsesConversationByRequestId: async () => undefined,
-    convertProviderResponse: async (value: unknown) => value,
-    createSnapshotRecorder: async () => ({
-      record: async () => undefined,
-      flush: async () => undefined,
-    }),
-    deriveFinishReasonNative: () => undefined,
-    evaluateResponsesDirectRouteDecisionNative: () => ({
-      providerWireValid: true,
-      requiresHubRelay: false,
-      reason: undefined,
-      hasDeclaredApplyPatchTool: false,
-    }),
-    extractSessionIdentifiersFromMetadata: () => ({}),
-    reportProviderErrorToRouterPolicy: async () => undefined,
-    reportProviderSuccessToRouterPolicy: async () => undefined,
+    reportProviderErrorToRouterPolicy: async (event: unknown) => event,
+    reportProviderSuccessToRouterPolicy: async (event: unknown) => event,
     rebindResponsesConversationRequestId: async () => undefined,
   };
 }
@@ -3351,7 +3338,10 @@ describe('HubRequestExecutor failover', () => {
 
   test('responses standard pipeline does not apply direct payload contract before provider.send', async () => {
     jest.resetModules();
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge.js', createRequestExecutorLocalBridgeMock);
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/runtime-integrations.js',
+      createRequestExecutorLocalRuntimeIntegrationsMock
+    );
     jest.unstable_mockModule(
       '../../../../src/modules/llmswitch/bridge/routing-integrations.js',
       createRequestExecutorLocalRoutingIntegrationsMock

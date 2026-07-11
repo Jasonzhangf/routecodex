@@ -849,3 +849,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The spec now mocks only the active provider runtime leaf surfaces: `runtime-integrations.js` for provider runtime reporting / SSE materialization and `native-exports.js` for direct payload normalization / provider wire sanitization / request conversion.
 - Exact file scan for legacy loader helpers and root bridge references in the touched spec returns zero matches.
 - Focused Jest loads successfully after the leaf mock migration and remains at the pre-existing direct SSE terminal baseline (0/3 pass, 3 fail), so this slice does not claim direct SSE behavior closure.
+
+### 2026-07-11 request executor standard pipeline root bridge mock removed
+
+- `tests/server/runtime/http-server/request-executor.spec.ts` no longer mocks the root `src/modules/llmswitch/bridge.js` barrel for the standard Responses pipeline contract.
+- Production `request-executor.ts` imports the active `runtime-integrations.js` and `routing-integrations.js` leaf bridge surfaces; the test now mirrors those collaborators instead of preserving the retired root bridge dependency.
+- Removed stale root-bridge-only mock fields for provider response conversion, snapshot recording, direct route decision, finish reason, and session identifier helpers from this local fixture without adding TS behavior.
+- Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
+- Focused Jest for `responses standard pipeline does not apply direct payload contract before provider.send` passes 1/1 after the leaf mock migration. The full `request-executor.spec.ts` suite remains at its pre-existing Hub pipeline runtime baseline, so this slice does not claim request-executor behavior closure.
