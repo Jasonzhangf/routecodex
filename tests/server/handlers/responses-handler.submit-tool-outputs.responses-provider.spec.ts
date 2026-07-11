@@ -196,6 +196,7 @@ const createNativeExportsMock = () => ({
   })),
   buildResponsesPayloadFromChatNative: jest.fn((input: unknown) => input),
   projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+  planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string; state?: unknown }) => ({
     emit: true,
     frame: args.frame ?? '',
@@ -295,68 +296,6 @@ jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
     return body?.status === 'completed' ? 'stop' : undefined;
   }),
 }));
-
-const createResponsesBridgeMock = () => ({
-  assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(() => undefined),
-  assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(() => undefined),
-  buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn(() => ({
-    type: 'error',
-    error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' },
-  })),
-  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-  buildResponsesSseErrorPayloadForHttp: jest.fn(() => ({
-    type: 'error',
-    error: { message: 'Upstream provider error', code: 'INTERNAL_ERROR' },
-  })),
-  buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn(() => ({
-    type: 'error',
-    error: { message: 'stream closed before response.completed', code: 'upstream_stream_incomplete' },
-  })),
-  buildResponsesStructuredSseErrorPayloadForHttp: jest.fn((_error: unknown, args?: { status?: number }) => ({
-    type: 'error',
-    status: args?.status ?? 500,
-    error: { message: 'Upstream provider error', code: 'INTERNAL_ERROR' },
-  })),
-  clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
-  createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
-    convertResponseToJsonToSse: async () => ({})
-  })),
-  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
-    convertResponseToJsonToSse: async () => ({})
-  })),
-  importResponsesHandlerCoreDist: jest.fn(async () => ({})),
-  inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn(() => ({ sawTerminalChunk: false })),
-  isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
-  sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
-  normalizeChatUsagePayloadForHttp: jest.fn((body: unknown) => ({
-    payload: body,
-    normalized: false,
-    source: undefined,
-  })),
-  normalizeResponsesClientPayloadForHttp: jest.fn((payload: unknown) => payload),
-  normalizeResponsesJsonBodyForHttp: jest.fn((payload: unknown) => payload),
-  normalizeResponsesSseFrameForClientForHttp: jest.fn((frame: string) => frame),
-  planResponsesContinuationCloseActionForHttp: jest.fn(() => ({ action: 'none' })),
-  planResponsesStreamEndRepairForHttp: jest.fn(() => ({ shouldRepair: false })),
-  prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn((body: unknown) => body),
-  prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async (args: { body: unknown }) => ({
-    clientBody: args.body,
-    sanitizedBody: args.body,
-    finishReason: undefined,
-  })),
-  rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
-  resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
-  resolveResponsesRequestContextForHttp: jest.fn((args: { fallback?: unknown }) => args.fallback),
-  resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => undefined),
-  resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
-  shouldClearResponsesConversationOnClientCloseForHttp: jest.fn(() => false),
-  shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false),
-  shouldDispatchResponsesSseToClientForHttp: jest.fn(() => false),
-  shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
-  summarizeResponsesSseFrameForLogForHttp: jest.fn(() => ({ kind: 'sse_frame' })),
-});
-
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', createResponsesBridgeMock);
 
 describe('responses-handler submit_tool_outputs same-protocol responses routing', () => {
   beforeEach(() => {
@@ -707,7 +646,6 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
 
   it('RED: relay submit_tool_outputs follow-up requires_action must persist the new response id for the next submit', async () => {
     const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
-    const bridge = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
 
     mockLookupResponsesContinuationByResponseId.mockResolvedValue({
       responseId: 'resp_submit_followup_1',
