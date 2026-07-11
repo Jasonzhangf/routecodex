@@ -13,6 +13,8 @@ const mockRuntimeIntegrationsModule = {
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   writeSnapshotViaHooks: jest.fn(async () => undefined),
   preloadCriticalBridgeRuntimeModules: jest.fn(async () => ({ loaded: [] })),
+  reportProviderErrorToRouterPolicy: jest.fn(async () => undefined),
+  reportProviderSuccessToRouterPolicy: jest.fn(async () => undefined),
   resumeResponsesConversation: jest.fn(async () => ({ payload: {}, meta: {} })),
   resumeLatestResponsesContinuationByScope: jest.fn(async () => null),
 };
@@ -26,37 +28,104 @@ const mockRoutingIntegrationsModule = {
   diagnoseHubPipelineVirtualRouterNative: jest.fn(async () => ({ diagnostics: {} })),
   getHubPipelineVirtualRouterStatusNative: jest.fn(async () => ({})),
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  resolveRccPathNativeSync: jest.fn((segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  }),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/routecodex-test/codex-samples'),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/routecodex-test'),
   disposeHubPipelineNative: jest.fn(),
 };
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => mockStateIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => mockRuntimeIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => mockRoutingIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', async () => {
-  const actual = await import('../../../../src/modules/llmswitch/bridge/native-exports.ts');
-  return {
-    ...actual,
-    getRouterHotpathJsonBindingSync: jest.fn(() => ({
-      hasStoplessDirectiveInRequestPayloadJson: jest.fn(() => JSON.stringify({ result: false }))
-    })),
-    resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
-    resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
-    hasRequestedToolsInSemanticsNative: jest.fn(() => false),
-    isRequiredToolCallTurnNative: jest.fn(() => false),
-    isToolResultFollowupTurnNative: jest.fn(() => false),
-    isProviderNativeResumeContinuationNative: jest.fn(() => false),
-    evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
-    planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
-    normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
-    mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
-      const currentList = Array.isArray(current) ? current : [];
-      const explicitList = Array.isArray(explicit) ? explicit : [];
-      return currentList.length > 0 ? currentList : explicitList;
+const mockNativeExportsModule = () => ({
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({})),
+  classifyEmptyResponseSignalNative: jest.fn(() => null),
+  detectRetryableEmptyAssistantResponseNative: jest.fn(() => null),
+  detectToolExecutionFailuresNative: jest.fn(() => []),
+  deriveFinishReasonNative: jest.fn(() => undefined),
+  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
+  getNetworkErrorCodes: jest.fn(() => []),
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    asFlatRecordJson: jest.fn((inputJson: string) => inputJson),
+    buildResponsesTerminalSseFramesFromProbeJson: jest.fn(() => JSON.stringify([])),
+    extractBridgeProviderResponsePayloadJson: jest.fn(() => null),
+    extractContentTextForStoplessScanJson: jest.fn(() => ''),
+    extractFirstBalancedJsonObjectJson: jest.fn(() => null),
+    extractLatestUserTextForStoplessScanJson: jest.fn(() => ''),
+    findNestedErrorMarkerJson: jest.fn(() => ''),
+    findNestedRawStringJson: jest.fn(() => ''),
+    hasStoplessDirectiveInRequestPayloadJson: jest.fn(() => JSON.stringify({ result: false })),
+    isClientDisconnectLikeErrorJson: jest.fn(() => JSON.stringify({ result: false })),
+    isContextLengthExceededErrorJson: jest.fn(() => JSON.stringify({ result: false })),
+    isGenericBridgeResponseContractErrorJson: jest.fn(() => JSON.stringify({ result: false })),
+    isRateLimitLikeErrorJson: jest.fn(() => JSON.stringify({ result: false })),
+    isRetryableNetworkSseWrapperErrorJson: jest.fn(() => JSON.stringify({ result: false })),
+    mergeObservedRoutePoolChainJson: jest.fn((currentJson: string | null, observedJson: string) => currentJson ?? observedJson),
+    normalizeExplicitRoutePoolJson: jest.fn((inputJson: string) => JSON.stringify({ pool: Array.isArray(JSON.parse(inputJson)) ? JSON.parse(inputJson) : [] })),
+    projectSseErrorEventPayloadJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson) as Record<string, unknown>;
+      return JSON.stringify({
+        type: 'error',
+        status: input.status,
+        error: {
+          message: input.message,
+          code: input.code,
+          request_id: input.requestId
+        }
+      });
     }),
-    resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
-    extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined)
-  };
+    resolveEntryProtocolFromEndpointJson: jest.fn(() => 'openai-responses'),
+    resolveSessionLogColorKeyJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson) as Record<string, unknown>;
+      return JSON.stringify({
+        key: String(input.requestId ?? input.sessionId ?? input.conversationId ?? 'test-session')
+      });
+    }),
+    tryParseJsonLikeStringJson: jest.fn(() => null),
+    updateResponsesContractProbeFromSseChunkJson: jest.fn((_chunkJson: string, probeJson: string) => probeJson),
+    updateResponsesSseTransportTerminalStateJson: jest.fn((_chunkJson: string, stateJson: string) => JSON.stringify({ state: JSON.parse(stateJson), sawTerminalEvent: false })),
+    validateApplyPatchArgumentsJson: jest.fn(() => JSON.stringify({ ok: true })),
+    validateCanonicalClientToolCallJson: jest.fn(() => JSON.stringify({ ok: true }))
+  })),
+  hasRequestedToolsInSemanticsNative: jest.fn(() => false),
+  isProviderNativeResumeContinuationNative: jest.fn(() => false),
+  isRequiredToolCallTurnNative: jest.fn(() => false),
+  isToolResultFollowupTurnNative: jest.fn(() => false),
+  mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
+    const currentList = Array.isArray(current) ? current : [];
+    const explicitList = Array.isArray(explicit) ? explicit : [];
+    return currentList.length > 0 ? currentList : explicitList;
+  }),
+  normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
+  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
+  projectSseErrorEventPayloadNative: jest.fn((input: { requestId: string; status: number; message: string; code: string }) => ({
+    type: 'error',
+    status: input.status,
+    error: {
+      message: input.message,
+      code: input.code,
+      request_id: input.requestId
+    }
+  })),
+  resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
+  resolveErrorErr05RouteAvailabilityDecisionNative: jest.fn(() => ({ candidateExhausted: false, defaultPoolAvailable: true })),
+  resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
+  resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
+  shouldRecordSnapshotsNative: jest.fn(() => false),
+  stripResponsesStoredContextInputMediaNative: jest.fn((inputEntries: unknown) => ({ changed: false, messages: Array.isArray(inputEntries) ? inputEntries : [] })),
+  writeSnapshotViaHooksNative: jest.fn(() => undefined)
 });
+
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations.js', () => mockStateIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/state-integrations', () => mockStateIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations', () => mockRuntimeIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => mockRoutingIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations', () => mockRoutingIntegrationsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports', mockNativeExportsModule);
 
 const ROOT = process.cwd();
 const REQUEST_EXECUTOR_PATH = path.join(ROOT, 'src/server/runtime/http-server/request-executor.ts');
