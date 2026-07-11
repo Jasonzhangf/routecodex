@@ -11,7 +11,7 @@ const __resetFinalizeMock = () => {
   finalizeRetentionMock.mockClear();
 };
 
-const mockBridgeModule = async () => ({
+const mockNativeExportsModule = async () => ({
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
     resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
@@ -21,7 +21,6 @@ const mockBridgeModule = async () => ({
   projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
   assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
   assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
-  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
   buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status = 502) => ({
     type: 'error',
     status,
@@ -31,7 +30,7 @@ const mockBridgeModule = async () => ({
       request_id: requestLabel,
     },
   })),
-  buildResponsesPayloadFromChatForHttp: jest.fn(async (payload: unknown) => ({
+  buildResponsesPayloadFromChatNative: jest.fn((payload: unknown, context?: Record<string, unknown>) => ({
     id: 'resp_chat_bridge_mock',
     object: 'response',
     status: 'completed',
@@ -44,7 +43,7 @@ const mockBridgeModule = async () => ({
         content: [{ type: 'output_text', text: 'OK' }]
       }
     ],
-    _source: payload
+    _requestId: typeof context?.requestId === 'string' ? context.requestId : undefined,
   })),
   createChatJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async (payload: Record<string, unknown>) => {
@@ -461,38 +460,10 @@ const mockBridgeModule = async () => ({
       _requestId: requestLabel,
     };
   }),
-  normalizeResponsesJsonBodyForHttp: jest.fn(async ({
-    body,
-    entryEndpoint,
-    requestLabel,
-    resolveBridge
-  }: {
-    body: unknown;
-    entryEndpoint?: string;
-    requestLabel?: string;
-    resolveBridge?: () => Promise<{ buildResponsesPayloadFromChat?: (payload: unknown, context?: Record<string, unknown>) => unknown }>;
-  }) => {
-    if (entryEndpoint !== '/v1/responses') {
-      return body;
-    }
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return body;
-    }
-    if ((body as Record<string, unknown>).object !== 'chat.completion') {
-      return body;
-    }
-    const mod = await (resolveBridge
-      ? resolveBridge()
-      : Promise.resolve({
-          buildResponsesPayloadFromChat: (payload: unknown) => payload
-        }));
-    if (typeof mod.buildResponsesPayloadFromChat !== 'function') {
-      throw new Error('[handler-response] buildResponsesPayloadFromChat not available');
-    }
-    return mod.buildResponsesPayloadFromChat(body, { requestId: requestLabel });
-  }),
   normalizeResponsesSseFrameForClientForHttp: jest.fn(async ({ frame }: { frame: string }) => frame),
   projectResponsesSseFrameForClientNative: jest.fn(({ frame, state }: { frame: string; state?: unknown }) => ({ emit: true, frame, state })),
+  projectResponsesClientPayloadForClientNative: jest.fn(({ payload }: { payload: unknown }) => payload),
+  planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
   rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
@@ -516,8 +487,7 @@ const mockBridgeModule = async () => ({
   })),
 });
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockBridgeModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__stream_log_finish_reason',
   deriveFinishReason: (body: unknown) => {
@@ -555,9 +525,9 @@ async function loadSendPipelineResponse() {
   return mod.sendPipelineResponse;
 }
 
-async function loadNormalizeResponsesJsonBodyForHttp() {
-  const mod = await import('../../../src/modules/llmswitch/bridge/responses-response-bridge.js');
-  return mod.normalizeResponsesJsonBodyForHttp;
+async function loadBuildResponsesPayloadFromChatNative() {
+  const mod = await import('../../../src/modules/llmswitch/bridge/native-exports.js');
+  return mod.buildResponsesPayloadFromChatNative;
 }
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
@@ -1220,10 +1190,10 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
     }
   });
 
-  it('normalizes chat.completion JSON into response object for /v1/responses JSON dispatch', async () => {
-    const normalizeResponsesJsonBodyForHttp = await loadNormalizeResponsesJsonBodyForHttp();
-    const normalized = await normalizeResponsesJsonBodyForHttp({
-      body: {
+  it('uses native conversion for chat.completion JSON response objects', async () => {
+    const buildResponsesPayloadFromChatNative = await loadBuildResponsesPayloadFromChatNative();
+    const normalized = buildResponsesPayloadFromChatNative(
+      {
         id: 'chatcmpl_json_dispatch_1',
         object: 'chat.completion',
         model: 'gpt-5.4-medium',
@@ -1238,17 +1208,8 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
           }
         ]
       },
-      entryEndpoint: '/v1/responses',
-      requestLabel: 'req_json_dispatch_chat_bridge',
-      resolveBridge: (async () => ({
-        buildResponsesPayloadFromChat: (payload: unknown) => ({
-          ...(payload as Record<string, unknown>),
-          object: 'response',
-          status: 'completed',
-          output: []
-        })
-      })) as any
-    }) as Record<string, unknown>;
+      { requestId: 'req_json_dispatch_chat_bridge' }
+    ) as Record<string, unknown>;
 
     expect(normalized.object).toBe('response');
     expect(normalized.object).not.toBe('chat.completion');

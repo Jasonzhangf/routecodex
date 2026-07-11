@@ -7,14 +7,6 @@ import { once } from 'node:events';
 
 type BridgeOverrides = Record<string, unknown>;
 
-function createProjectionState() {
-  return {
-    pendingApplyPatchArgumentDeltas: {},
-    applyPatchCallIds: [],
-    emittedApplyPatchDoneCallIds: [],
-  };
-}
-
 function updateTerminalStateFromFrame(input: {
   chunk: unknown;
   state: Record<string, unknown> | undefined;
@@ -33,16 +25,6 @@ function updateTerminalStateFromFrame(input: {
   };
 }
 
-function createLocalResponseBridgeMock(overrides: BridgeOverrides = {}): BridgeOverrides {
-  return {
-    buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-    prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(() => ({ mode: 'json' })),
-    normalizeResponsesClientPayloadForHttp: jest.fn((payload: unknown) => payload),
-    normalizeResponsesJsonBodyForHttp: jest.fn((payload: unknown) => payload),
-    ...overrides,
-  };
-}
-
 function createLocalNativeExportsMock(overrides: BridgeOverrides = {}): BridgeOverrides {
   return {
     getRouterHotpathJsonBindingSync: jest.fn(() => ({
@@ -58,14 +40,15 @@ function createLocalNativeExportsMock(overrides: BridgeOverrides = {}): BridgeOv
       state: input.state,
     })),
     updateResponsesSseTransportTerminalStateNative: jest.fn(updateTerminalStateFromFrame),
+    buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
+    projectResponsesClientPayloadForClientNative: jest.fn((input: { payload?: unknown }) => input.payload),
+    planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
     ...overrides,
   };
 }
 
 function mockBridgeModules(overrides: BridgeOverrides = {}): void {
-  const responseBridge = createLocalResponseBridgeMock(overrides);
   const nativeExports = createLocalNativeExportsMock(overrides);
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => responseBridge);
   jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => nativeExports);
 }
 
