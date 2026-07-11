@@ -2427,6 +2427,8 @@ verification:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
       - tests/sharedmodule/responses-sse-reasoning-summary-no-normalize.spec.ts
       - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
+      - tests/server/utils/finish-reason.spec.ts
+      - tests/server/utils/finish-reason.visible-success.spec.ts
       - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts
       - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
     integration: []
@@ -2437,6 +2439,7 @@ verification:
       - npm run build:base
     notes:
       - "Responses encode projection emits client protocol frames only; fallback frame synthesis is forbidden. Direct Rust/NAPI tests must keep the deleted TS event-payload wrapper from returning."
+      - "Finish-reason classification is Rust-owned through `finish-reason-host.ts`; `src/server/utils/finish-reason.ts` may only keep debug logging around the native call."
 
   - feature_id: sse.chat_stream_projection
     change_risk: high

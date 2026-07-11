@@ -1,4 +1,4 @@
-import { deriveFinishReasonNative } from '../../modules/llmswitch/bridge/native-exports.js';
+import { deriveFinishReasonNative } from '../../modules/llmswitch/bridge/finish-reason-host.js';
 
 const FINISH_REASON_DEBUG_ENABLED =
   process.env.ROUTECODEX_DEBUG_FINISH_REASON === '1' ||

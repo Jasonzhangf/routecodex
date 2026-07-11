@@ -4136,6 +4136,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
       - tests/sharedmodule/helpers/responses-sse-direct-native.ts
+      - src/modules/llmswitch/bridge/finish-reason-host.ts
       - src/server/handlers/handler-response-utils.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md
     forbidden_paths:
@@ -4146,6 +4147,8 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline
     required_tests:
       - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
+      - tests/server/utils/finish-reason.spec.ts
+      - tests/server/utils/finish-reason.visible-success.spec.ts
       - tests/server/handlers/handler-response-sse-frame-metadata-guard.spec.ts
       - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
     required_gates:
@@ -4154,6 +4157,7 @@ owners:
     migration_target: rust
     notes:
       - "Encode projection emits client protocol frames only through the Rust native owner. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden. The old Responses SSE TS event-payload wrapper is deleted; tests use direct Rust/NAPI evidence."
+      - "Finish-reason utility must remain a debug/thin host wrapper over `src/modules/llmswitch/bridge/finish-reason-host.ts`; classification stays in Rust `chat_node_result_semantics.rs`."
 
   - feature_id: sse.chat_stream_projection
     status: active
