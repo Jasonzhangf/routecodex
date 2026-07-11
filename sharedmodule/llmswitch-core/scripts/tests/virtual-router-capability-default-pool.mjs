@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { VirtualRouterEngine } from '../helpers/virtual-router-engine-direct-native.mjs';
-import { bootstrapVirtualRouterConfig } from '../../dist/native/router-hotpath/native-virtual-router-bootstrap-config.js';
+import { bootstrapVirtualRouterConfig } from '../helpers/virtual-router-bootstrap-direct-native.mjs';
 
 function createRequest({ content, tools, messages }) {
   return {
@@ -132,6 +132,8 @@ engine.initialize(config);
 }
 
 {
+  const weightedEngine = new VirtualRouterEngine();
+  weightedEngine.initialize(config);
   const weightedSequence = [];
   for (let i = 0; i < 4; i += 1) {
     const request = createRequest({
@@ -153,7 +155,7 @@ engine.initialize(config);
         }
       ]
     });
-    const decision = engine.route(request, createMetadata(`req_capability_web_search_weighted_${i}`));
+    const decision = weightedEngine.route(request, createMetadata(`req_capability_web_search_weighted_${i}`));
     weightedSequence.push(decision.target.providerKey);
   }
   assert.deepEqual(
@@ -162,7 +164,7 @@ engine.initialize(config);
       'core.search.search-1',
       'core.search2.search-2',
       'core.search.search-1',
-      'core.search.search-1',
+      'core.search2.search-2',
     ],
     'default-pool web_search fallback must keep weighted load balancing inside web_search-capable targets only'
   );

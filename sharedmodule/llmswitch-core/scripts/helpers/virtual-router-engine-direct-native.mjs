@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { parseVirtualRouterNativeError } from './native-router-hotpath-loader.mjs';
 
 const nodeRequire = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
@@ -16,6 +17,8 @@ function nativeFn(name) {
 }
 
 function normalizeNativeVirtualRouterError(error) {
+  const parsed = parseVirtualRouterNativeError(error);
+  if (parsed) return parsed;
   if (error instanceof Error) return error;
   if (typeof error === 'string' && error.startsWith('VIRTUAL_ROUTER_ERROR:')) {
     try {
@@ -137,90 +140,154 @@ export class VirtualRouterEngine {
   }
 
   route(request, metadata = {}) {
-    return parseNativeRoute(
-      this.nativeProxy.route(
-        JSON.stringify(request),
-        JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata))
-      )
-    );
+    try {
+      return parseNativeRoute(
+        this.nativeProxy.route(
+          JSON.stringify(request),
+          JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata))
+        )
+      );
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   diagnoseRoute(request, metadata = {}) {
     if (typeof this.nativeProxy.diagnoseRoute !== 'function') {
       throw new Error('VirtualRouterEngineProxy.diagnoseRoute is not available');
     }
-    return JSON.parse(
-      this.nativeProxy.diagnoseRoute(
-        JSON.stringify(request),
-        JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata))
-      )
-    );
+    try {
+      return JSON.parse(
+        this.nativeProxy.diagnoseRoute(
+          JSON.stringify(request),
+          JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata))
+        )
+      );
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   getStopMessageState(metadata = {}) {
-    return JSON.parse(
-      this.nativeProxy.getStopMessageState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)))
-    );
+    try {
+      return JSON.parse(
+        this.nativeProxy.getStopMessageState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)))
+      );
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   getPreCommandState(metadata = {}) {
-    return JSON.parse(
-      this.nativeProxy.getPreCommandState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)))
-    );
+    try {
+      return JSON.parse(
+        this.nativeProxy.getPreCommandState(JSON.stringify(injectVirtualRouterRuntimeMetadata(metadata)))
+      );
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   markProviderCooldown(providerKey, cooldownMs) {
-    this.nativeProxy.markProviderCooldown(providerKey, cooldownMs);
+    try {
+      this.nativeProxy.markProviderCooldown(providerKey, cooldownMs);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   clearProviderCooldown(providerKey) {
-    this.nativeProxy.clearProviderCooldown(providerKey);
+    try {
+      this.nativeProxy.clearProviderCooldown(providerKey);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   handleProviderFailure(event) {
-    this.nativeProxy.handleProviderFailure(JSON.stringify(event));
+    try {
+      this.nativeProxy.handleProviderFailure(JSON.stringify(event));
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   handleProviderError(event) {
-    this.nativeProxy.handleProviderError(JSON.stringify(event));
+    try {
+      this.nativeProxy.handleProviderError(JSON.stringify(event));
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   handleProviderSuccess(event) {
-    this.nativeProxy.handleProviderSuccess(JSON.stringify(event));
+    try {
+      this.nativeProxy.handleProviderSuccess(JSON.stringify(event));
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   getStatus() {
-    return JSON.parse(this.nativeProxy.getStatus());
+    try {
+      return JSON.parse(this.nativeProxy.getStatus());
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   resetProviderQuota(providerKey) {
-    this.nativeProxy.resetProviderQuota?.(providerKey);
+    try {
+      this.nativeProxy.resetProviderQuota?.(providerKey);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   recoverProviderQuota(providerKey) {
-    this.nativeProxy.recoverProviderQuota?.(providerKey);
+    try {
+      this.nativeProxy.recoverProviderQuota?.(providerKey);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   disableProviderQuota(providerKey, mode, durationMs) {
-    this.nativeProxy.disableProviderQuota?.(providerKey, mode, durationMs);
+    try {
+      this.nativeProxy.disableProviderQuota?.(providerKey, mode, durationMs);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   applyKeepPoolCooldownQuota(providerKey, cooldownUntilMs, lastErrorCode) {
-    this.nativeProxy.applyKeepPoolCooldownQuota?.(providerKey, cooldownUntilMs, lastErrorCode);
+    try {
+      this.nativeProxy.applyKeepPoolCooldownQuota?.(providerKey, cooldownUntilMs, lastErrorCode);
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   registerProviderRuntimeIngress() {
     if (typeof this.nativeProxy.registerProviderRuntimeIngress !== 'function') {
       throw new Error('VirtualRouterEngineProxy.registerProviderRuntimeIngress is not available');
     }
-    this.nativeProxy.registerProviderRuntimeIngress();
+    try {
+      this.nativeProxy.registerProviderRuntimeIngress();
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 
   unregisterProviderRuntimeIngress() {
     if (typeof this.nativeProxy.unregisterProviderRuntimeIngress !== 'function') {
       throw new Error('VirtualRouterEngineProxy.unregisterProviderRuntimeIngress is not available');
     }
-    this.nativeProxy.unregisterProviderRuntimeIngress();
+    try {
+      this.nativeProxy.unregisterProviderRuntimeIngress();
+    } catch (error) {
+      throw normalizeNativeVirtualRouterError(error);
+    }
   }
 }
 
