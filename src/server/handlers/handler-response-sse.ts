@@ -25,7 +25,6 @@ import { normalizeUsage, type UsageMetrics } from '../runtime/http-server/execut
 import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
-  buildResponsesTerminalSseFramesFromTransportStateForHttp,
   buildClientSseKeepaliveFrameForHttp,
   createResponsesSseClientProjectionStateForHttp,
   projectResponsesSseFrameForClientForHttp,
@@ -718,32 +717,9 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     sseTransportTerminalState = terminalState.state;
     sseSemanticTerminalObserved = sseSemanticTerminalObserved || terminalState.observedTerminal;
   };
-  const writeNativeTerminalCloseoutFrames = () => {
-    if (
-      !isResponsesSseEndpoint(entryEndpoint)
-      || isDirectPassthrough
-      || sseSemanticTerminalObserved
-    ) {
-      return;
-    }
-    const frames = buildResponsesTerminalSseFramesFromTransportStateForHttp({
-      state: sseTransportTerminalState,
-      requestLabel,
-    });
-    for (const terminalFrame of frames) {
-      if (!terminalFrame) {
-        continue;
-      }
-      writeClientSseFrame(terminalFrame, 'response.sse.stream.write_native_terminal_closeout_frame', {
-        recordSnapshot: false,
-      });
-      updateTransportTerminalStateFromFrame(terminalFrame);
-    }
-  };
   const writeProjectedClientSseFrame = (frame: string) => {
     const parsed = parseClientSseProjectionFrame(frame);
     if (frame.includes('data: [DONE]')) {
-      writeNativeTerminalCloseoutFrames();
       sseDoneSentinelObserved = true;
     }
     const usageFrame = readSseFrameUsage(parsed);
@@ -876,7 +852,6 @@ export async function sendSsePipelineResponse(args: SendSsePipelineResponseArgs)
     });
     if (!res.writableEnded && !res.destroyed) {
       try {
-        writeNativeTerminalCloseoutFrames();
         if (
           isResponsesSseEndpoint(entryEndpoint)
           && sseSemanticTerminalObserved

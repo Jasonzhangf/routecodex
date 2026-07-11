@@ -12,7 +12,6 @@ import {
   buildClientSseKeepaliveFrameForHttp as buildClientSseKeepaliveFrameForHttpImpl,
 } from './responses-sse-transport.js';
 import {
-  buildResponsesTerminalSseFramesFromProbeNative,
   projectResponsesSseFrameForClientNative,
   updateResponsesSseTransportTerminalStateNative,
 } from './native-exports.js';
@@ -54,15 +53,4 @@ export function updateResponsesSseTransportTerminalStateForHttp(input: {
   flushRemainder?: boolean;
 }): { state: Record<string, unknown>; observedTerminal: boolean } {
   return updateResponsesSseTransportTerminalStateNative(input);
-}
-
-export function buildResponsesTerminalSseFramesFromTransportStateForHttp(input: {
-  state: Record<string, unknown> | undefined;
-  requestLabel: string;
-}): string[] {
-  const probe =
-    input.state?.probe && typeof input.state.probe === 'object' && !Array.isArray(input.state.probe)
-      ? input.state.probe as Record<string, unknown>
-      : undefined;
-  return buildResponsesTerminalSseFramesFromProbeNative(probe, input.requestLabel);
 }

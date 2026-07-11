@@ -74,7 +74,6 @@ Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/
 Owner scope: Virtual Router read-only metadata-center-backed route scope surface for route hint, session scope, and stop-message routing reads
 
 Canonical types:
-- `MetadataCenter`
 - `MetaRoute03RouteCarrier`
 
 Canonical builders:

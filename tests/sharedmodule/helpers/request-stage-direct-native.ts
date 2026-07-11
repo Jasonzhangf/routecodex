@@ -9,7 +9,7 @@ import {
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   module: 'tests/sharedmodule/helpers/request-stage-direct-native.ts',
   symbol: 'executeRequestStagePipelineDirectNative',
-  stage: 'HubReqChatProcess03Governed',
+  stage: 'request_chatprocess_runtime_control',
 } as const;
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');

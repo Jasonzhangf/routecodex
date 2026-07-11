@@ -1152,7 +1152,6 @@ owners:
     owner_scope: "Virtual Router read-only metadata-center-backed route scope surface for route hint, session scope, and stop-message routing reads"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
     canonical_types:
-      - MetadataCenter
       - MetaRoute03RouteCarrier
     canonical_builders:
       - resolve_routing_state_key
@@ -1982,9 +1981,9 @@ owners:
 
   - feature_id: hub.response_post_servertool_client_projection
     status: active
-    summary: "Retired post-servertool response runtime-action bridge; provider-response fails fast when Rust returns servertoolRuntimeActions"
+    summary: "Retired post-servertool response action bridge; provider-response fails fast on legacy action lists"
     owner_kind: rust_ssot
-    owner_scope: "File-scoped Rust response effect normalization and servertool runtime-action retirement"
+    owner_scope: "File-scoped Rust response effect normalization and legacy post-servertool action retirement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
     canonical_types:
       - HubRespChatProcess03Governed
@@ -2012,7 +2011,7 @@ owners:
       - npm run verify:llmswitch-core-tsc
     migration_target: rust
     notes:
-      - "Server-side servertool runtime execution and post-servertool projection bridges are retired; non-empty `servertoolRuntimeActions` must fail fast in provider-response, and CLI-owned tools must be projected by Rust Chat Process before outbound."
+      - "Server-side post-servertool execution and projection bridges are retired; non-empty legacy action lists must fail fast in provider-response, and CLI-owned tools must be projected by Rust Chat Process before outbound."
 
   - feature_id: hub.response_responses_client_projection
     status: active

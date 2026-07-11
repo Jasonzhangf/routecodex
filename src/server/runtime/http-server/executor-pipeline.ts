@@ -20,7 +20,7 @@ const truthy = new Set(['1', 'true', 'yes', 'on']);
 const REQUEST_STAGE_RUNTIME_CONTROL_WRITER = {
   module: 'src/server/runtime/http-server/executor-pipeline.ts',
   symbol: 'runHubPipeline',
-  stage: 'HubReqChatProcess03Governed'
+  stage: 'request_chatprocess_runtime_control'
 } as const;
 
 function resolveEntryProtocolFromEndpoint(entryEndpoint: string): 'openai-responses' | 'anthropic-messages' | 'openai-chat' {
