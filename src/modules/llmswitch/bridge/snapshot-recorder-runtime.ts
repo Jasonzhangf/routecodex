@@ -7,7 +7,7 @@ import {
 
 type AnyRecord = Record<string, unknown>;
 export type SnapshotRecorder = unknown;
-export type RuntimeErrorGroup = 'parse-error' | 'exec-error';
+type RuntimeErrorGroup = 'parse-error' | 'exec-error';
 export interface RuntimeErrorSignal {
   group: RuntimeErrorGroup;
   errorType: string;
@@ -29,8 +29,8 @@ export interface ClientToolTraceSummaryEntry {
   at: string;
   stage: string;
 }
-export const MAX_STAGE_TRACE_ENTRIES = 40;
-export const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
+const MAX_STAGE_TRACE_ENTRIES = 40;
+const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
 export const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
 const clientToolErrorSampleWindow = new Map<string, number>();
@@ -62,7 +62,7 @@ function isTracePayloadCaptureEnabled(): boolean {
   return cachedTracePayloadCaptureEnabled;
 }
 
-export function clipText(input: string, max = 320): string {
+function clipText(input: string, max = 320): string {
   const text = String(input || '').trim();
   if (!text) return '';
   return text.length > max ? `${text.slice(0, max)}...` : text;

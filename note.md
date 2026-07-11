@@ -28876,3 +28876,10 @@ Pure Rust NAPI candidates:
 - Change: `classifyApplyPatchVerificationFailure` in `snapshot-recorder-tool-failures.ts` is now file-private; it had no external consumers and is only used by `classifyRuntimeErrorSignalFromText`.
 - Evidence: exact ref scan found only definition + same-file call; `npm run jest:run -- --runTestsByPath tests/sharedmodule/snapshot-recorder-native-plan.spec.ts` passed; `verify:architecture-snapshot-stage-contract`, `verify:architecture-snapshot-stage-owners`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `npx tsc --noEmit`, and touched-file `git diff --check` passed.
 - Non-target blockers observed: raw `npx jest` is wrong for this ESM/top-level-await test; `npm test -- ...` runs routing-instructions first and currently fails unrelated suites (`stopless-direct-mode-guard`, `stop-schema-lifecycle-contract`, `request-executor.single-attempt`, `daemon-admin.e2e`).
+
+# 2026-07-11: snapshot recorder runtime internal exports narrowed
+
+- Scope: continue host bridge surface closeout inside active snapshot recorder IO bridge without deleting the allowed `createSnapshotRecorder` factory.
+- Change: `RuntimeErrorGroup`, `MAX_STAGE_TRACE_ENTRIES`, `MAX_STAGE_TRACE_PAYLOAD_CHARS`, and `clipText` in `snapshot-recorder-runtime.ts` are now file-private; exact scans showed they are only consumed inside the same file.
+- Evidence: export-pattern scan now has zero hits for those names; focused Jest passed 4 suites / 31 tests (`snapshot-recorder-native-plan`, runtime-error errorsample write scopes); `verify:architecture-snapshot-stage-contract`, `verify:architecture-snapshot-stage-owners`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:function-map-compile-gate`, `npx tsc --noEmit`, `npm run build:base`, and touched-file `git diff --check` passed.
+- Architecture review: this does not add JS semantics, fallback, or a second runtime owner; it only removes external export surface from helpers that remain TS host IO/observation support.
