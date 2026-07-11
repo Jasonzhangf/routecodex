@@ -3599,12 +3599,10 @@ owners:
       - prepareResponsesHandlerEntryForHttp
       - captureResponsesRequestContextForHttp
       - recordResponsesResponseForHttp
+      - seedResponsesToolCallResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - captureResponsesInboundToolHistoryErrorsampleForHttp
-      - readResponsesSessionIdFromHttp
-      - readResponsesConversationIdFromHttp
-      - shouldPersistResponsesConversationForHttp
       - readResponsesResponseIdFromHttp
       - buildResponsesConversationPortScopeForHttp
       - planResponsesHandlerStreamForHttp

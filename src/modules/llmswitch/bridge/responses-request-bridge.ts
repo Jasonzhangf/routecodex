@@ -7,7 +7,7 @@
 
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
-// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesResponseIdFromHttp
 
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
 import {
@@ -315,15 +315,15 @@ export function planResponsesHandlerStreamForHttp(args: {
   };
 }
 
-export function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
+function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
   return extractSessionIdentifiersFromMetadataNative(metadata).sessionId;
 }
 
-export function readResponsesConversationIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
+function readResponsesConversationIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
   return extractSessionIdentifiersFromMetadataNative(metadata).conversationId;
 }
 
-export function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {
+function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return undefined;
   }
@@ -338,7 +338,7 @@ export function readRequestBodyMetadataForHttp(payload: unknown): Record<string,
   }
 }
 
-export function stripRequestBodyMetadataForPipelineForHttp<T>(payload: T): T {
+function stripRequestBodyMetadataForPipelineForHttp<T>(payload: T): T {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return payload;
   }
@@ -350,7 +350,7 @@ export function stripRequestBodyMetadataForPipelineForHttp<T>(payload: T): T {
   return withoutMetadata as T;
 }
 
-export function readClientAbortSignalForHttp(clientConnectionState: unknown): AbortSignal | undefined {
+function readClientAbortSignalForHttp(clientConnectionState: unknown): AbortSignal | undefined {
   if (!clientConnectionState || typeof clientConnectionState !== 'object') {
     return undefined;
   }
@@ -367,23 +367,7 @@ export function readClientAbortSignalForHttp(clientConnectionState: unknown): Ab
   return undefined;
 }
 
-export function shouldPersistResponsesConversationForHttp(payload: unknown): boolean {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return false;
-  }
-  const record = payload as Record<string, unknown>;
-  if (record.store === true) {
-    return true;
-  }
-  const previousResponseId =
-    typeof record.previous_response_id === 'string' && record.previous_response_id.trim()
-      ? record.previous_response_id.trim()
-      : '';
-  const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : [];
-  return Boolean(previousResponseId && toolOutputs.length > 0);
-}
-
-export function readResponsesResponseIdFromHttp(body: unknown): string | undefined {
+function readResponsesResponseIdFromHttp(body: unknown): string | undefined {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
   const record = body as Record<string, unknown>;
   const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
