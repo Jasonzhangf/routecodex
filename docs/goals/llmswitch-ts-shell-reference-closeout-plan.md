@@ -857,3 +857,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Removed stale root-bridge-only mock fields for provider response conversion, snapshot recording, direct route decision, finish reason, and session identifier helpers from this local fixture without adding TS behavior.
 - Exact file scan for `resolveBaseDir`, legacy loader helpers, and root bridge references in the touched spec returns zero matches.
 - Focused Jest for `responses standard pipeline does not apply direct payload contract before provider.send` passes 1/1 after the leaf mock migration. The full `request-executor.spec.ts` suite remains at its pre-existing Hub pipeline runtime baseline, so this slice does not claim request-executor behavior closure.
+
+### 2026-07-11 handler request-executor e2e root bridge mock removed
+
+- `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` no longer imports or mocks the root `src/modules/llmswitch/bridge.js` / `.ts` barrel and no longer declares legacy `importCoreDist`, `requireCoreDist`, `resolveImplForSubpath`, or `resolveBaseDir` helpers.
+- The spec now mocks current leaf bridge surfaces only: `runtime-integrations.js`, `native-exports.js`, `routing-integrations.js`, `responses-sse-bridge.js`, and `responses-response-bridge.js`.
+- Old object-style Hub pipeline fixture handles were migrated to a test-only native handle registry that calls `routing-integrations.executeHubPipelineNative`; fixture results are materialized to the current native result contract by carrying `routingDecision.providerProtocol` from `target.outboundProfile`.
+- Exact file scan for root bridge paths, legacy loader helpers, old object `getHubPipeline` fixtures, and `execute: pipelineExecute` returns zero matches.
+- Verification passed: strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, `coreModuleSubpathRefs=2` both note-only); `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `npm run build:base`; touched-file `git diff --check`.
+- Verification gap: focused Jest now loads and executes the suite through the native handle/provider-send path, but remains red (17/17) on existing continuation/request-context assertions and stale e2e fixture assumptions such as `previous_response_id` restoration and request-context payload mirroring. This slice does not claim handler request-executor behavior closure.

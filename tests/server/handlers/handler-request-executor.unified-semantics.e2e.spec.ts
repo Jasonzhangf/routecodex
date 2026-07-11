@@ -4,16 +4,43 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable } from 'node:stream';
 
-const { convertProviderResponse: coreConvertProviderResponse } = await import(
-  '../../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
-);
-
-const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
+let mockHubPipelineHandleId = 0;
+const mockHubPipelineExecutors = new Map<string, (input: unknown) => unknown>();
+
+function registerHubPipelineFixture(execute: (input: unknown) => unknown): string {
+  const handle = `handler-request-executor-native-handle-${++mockHubPipelineHandleId}`;
+  mockHubPipelineExecutors.set(handle, execute);
+  return handle;
+}
+
+function materializeHubPipelineFixtureResult(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+  const record = result as Record<string, unknown>;
+  const target = record.target && typeof record.target === 'object' && !Array.isArray(record.target)
+    ? record.target as Record<string, unknown>
+    : undefined;
+  const providerProtocol = typeof target?.outboundProfile === 'string' ? target.outboundProfile : undefined;
+  if (!providerProtocol) {
+    return result;
+  }
+  const routingDecision = record.routingDecision && typeof record.routingDecision === 'object' && !Array.isArray(record.routingDecision)
+    ? record.routingDecision as Record<string, unknown>
+    : {};
+  return {
+    ...record,
+    routingDecision: {
+      ...routingDecision,
+      providerProtocol
+    }
+  };
+}
 
 function extractTextFromProviderResponseBody(body: any): string {
   const data = body && typeof body === 'object' && body.data && typeof body.data === 'object'
@@ -219,6 +246,124 @@ const mockRuntimeIntegrationsModule = () => ({
 });
 
 const mockNativeExportsModule = () => ({
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    asFlatRecordJson: (inputJson: string) => inputJson,
+    buildJsonFromSseJson: (inputJson: string) => inputJson,
+    detectRetryableEmptyAssistantResponseJson: () => JSON.stringify({ retryable: false }),
+    extractBridgeProviderResponsePayloadJson: (inputJson: string) => inputJson,
+    extractContentTextForStoplessScanJson: () => '',
+    extractFirstBalancedJsonObjectJson: () => '',
+    extractLatestUserTextForStoplessScanJson: () => '',
+    findNestedErrorMarkerJson: () => '',
+    findNestedRawStringJson: () => '',
+    hasStoplessDirectiveInRequestPayloadJson: () => false,
+    isContextLengthExceededErrorJson: () => false,
+    isGenericBridgeResponseContractErrorJson: () => false,
+    isRetryableNetworkSseWrapperErrorJson: () => false,
+    isToolCallContinuationResponseJson: () => false,
+    mergeObservedRoutePoolChainJson: (_existingJson: string | null, observedJson: string) => observedJson,
+    normalizeExplicitRoutePoolJson: (inputJson: string) => JSON.stringify({ pool: JSON.parse(inputJson) }),
+    reportProviderErrorToRouterPolicyJson: (inputJson: string) => inputJson,
+    reportProviderSuccessToRouterPolicyJson: (inputJson: string) => inputJson,
+    trafficGovernorAcquireJson: (inputJson: string) => {
+      const input = JSON.parse(inputJson || '{}') as Record<string, unknown>;
+      return JSON.stringify({
+        permit: {
+          runtimeKey: input.runtimeKey,
+          providerKey: input.providerKey,
+          requestId: input.requestId,
+          leaseId: 'test-lease',
+          stateKey: 'test-state',
+          scopeKey: input.scopeKey,
+          maxInFlight: 1,
+          pid: process.pid,
+          serverId: 'test-server',
+          startedAt: Date.now(),
+          expiresAt: Date.now() + 60_000
+        },
+        policy: {
+          maxInFlight: 1,
+          acquireTimeoutMs: 0,
+          staleLeaseMs: 60_000,
+          requestsPerMinute: 60,
+          rpmTimeoutMs: 0,
+          rpmWindowMs: 60_000
+        },
+        waitedMs: 0,
+        activeInFlight: 1,
+        rpmInWindow: 1
+      });
+    },
+    trafficGovernorReleaseJson: () => JSON.stringify({ released: true, activeInFlight: 0 }),
+    trafficGovernorIsAtCapacityJson: () => false,
+    trafficGovernorObserveOutcomeJson: () => undefined,
+    resolveRccPathJson: (inputJson: string) => {
+      const input = JSON.parse(inputJson || '{}') as { segments?: unknown[] };
+      const parts = Array.isArray(input.segments) ? input.segments.map(String) : [];
+      return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
+    },
+    resolveRccSnapshotsDirJson: () => JSON.stringify('/tmp/routecodex-test/codex-samples'),
+    resolveRccUserDirJson: () => JSON.stringify('/tmp/routecodex-test'),
+    resolveSessionColorStr: () => JSON.stringify(''),
+    resolveSessionLogColorKeyJson: () => JSON.stringify('test-session-color'),
+    resolveEntryProtocolFromEndpointJson: (entryEndpoint: string) =>
+      entryEndpoint.includes('/v1/responses')
+        ? 'openai-responses'
+        : entryEndpoint.includes('/v1/messages')
+          ? 'anthropic-messages'
+          : 'openai-chat',
+    tryParseJsonLikeStringJson: (inputJson: string) => inputJson
+  })),
+  shouldRecordSnapshotsNative: jest.fn(() => false),
+  writeSnapshotViaHooksNative: jest.fn(() => undefined),
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: null })),
+  resolveEntryProtocolFromEndpointNative: jest.fn((entryEndpoint: string) =>
+    entryEndpoint.includes('/v1/responses')
+      ? 'openai-responses'
+      : entryEndpoint.includes('/v1/messages')
+        ? 'anthropic-messages'
+        : 'openai-chat'
+  ),
+  resolveErrorErr05RouteAvailabilityDecisionNative: jest.fn(() => ({ decision: 'available' })),
+  projectSseErrorEventPayloadNative: jest.fn((args: any) => ({
+    error: {
+      message: args?.message,
+      type: 'server_error',
+      code: args?.code,
+      status: args?.status,
+      request_id: args?.requestId,
+      ...(args?.error && typeof args.error === 'object' ? args.error : {})
+    }
+  })),
+  hasRequestedToolsInSemanticsNative: jest.fn(() => false),
+  isRequiredToolCallTurnNative: jest.fn(() => false),
+  isToolResultFollowupTurnNative: jest.fn(() => false),
+  isProviderNativeResumeContinuationNative: jest.fn(() => false),
+  detectRetryableEmptyAssistantResponseNative: jest.fn(() => null),
+  normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => Array.isArray(value) ? value : []),
+  mergeObservedRoutePoolChainNative: jest.fn((_existing: string[] | null, observed: string[]) => observed),
+  materializeProviderOwnedSubmitContext: jest.fn(async ({ payload }: any) => ({
+    payload: payload ?? {},
+    context: { input: Array.isArray(payload?.input) ? payload.input : [] }
+  })),
+  planResponsesRequestContext: jest.fn(async ({ payload }: any) => ({
+    kind: 'context',
+    payload: payload ?? {},
+    context: {
+      input: Array.isArray(payload?.input) ? payload.input : [],
+      toolsRaw: Array.isArray(payload?.tools) ? payload.tools : undefined
+    }
+  })),
+  planResponsesContinuationRequestAction: jest.fn(async (input: any) => ({
+    action:
+      input?.plannedEntryMode === 'submit_tool_outputs'
+        ? 'relay_submit'
+        : input?.plannedEntryMode === 'scope_materialize'
+          ? 'scope_materialize'
+          : 'none',
+    responseId: input?.responseId ?? input?.previousResponseId,
+    payload: {}
+  })),
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
   captureReqInboundResponsesContextSnapshot: jest.fn(async (args: any) => ({
     input: Array.isArray(args?.rawRequest?.input) ? args.rawRequest.input : [],
@@ -301,110 +446,64 @@ const mockNativeExportsModule = () => ({
   sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload)
 });
 
-const mockBridgeModule = () => ({
-  convertProviderResponse: coreConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder,
-  captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContext,
-  recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
-  loadRoutingInstructionStateSync: () => undefined,
-  rebindResponsesConversationRequestId: async () => {},
-  resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
-  materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
-  resumeResponsesConversation: mockResumeResponsesConversation,
-  loadRoutingInstructionStateSync: () => undefined,
-  saveRoutingInstructionStateAsync: async () => undefined,
-  saveRoutingInstructionStateSync: () => undefined,
-  planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
-  extractSessionIdentifiersFromMetadata: (metadata?: Record<string, unknown>) => ({
-    sessionId:
-      typeof metadata?.session_id === 'string'
-        ? metadata.session_id
-        : typeof metadata?.sessionId === 'string'
-        ? metadata.sessionId
-        : typeof (metadata?.__raw_request_body as Record<string, unknown> | undefined)?.metadata === 'object'
-          ? (((metadata?.__raw_request_body as Record<string, unknown>).metadata as Record<string, unknown>).session_id as string | undefined)
-          : undefined,
-    conversationId:
-      typeof metadata?.conversation_id === 'string'
-        ? metadata.conversation_id
-        : typeof metadata?.conversationId === 'string'
-        ? metadata.conversationId
-        : undefined
-  }),
-  extractContinuationContextSessionIdentifiersFromMetadata: () => ({
-    sessionId: undefined,
-    conversationId: undefined
-  }),
-  getStatsCenterSafe: () => ({
-    getSnapshot: () => null
-  }),
-  getLlmsStatsSnapshot: () => null,
-  importCoreDist: jest.fn(async () => ({})),
-  requireCoreDist: jest.fn(() => ({})),
-  resolveImplForSubpath: jest.fn(() => undefined),
-  resolveCoreModulePath: jest.fn(() => undefined),
-  resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
-  prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: any) => ({
-    normalizedPayload: args?.responsesPayload,
-    sanitizedPayload: args?.responsesPayload,
-    streamIntent: 'stream'
-  })),
-  createChatJsonToSseConverterForHttp: jest.fn(async () => ({
-    convertResponseToJsonToSse: async (payload: any) => Readable.from([
-      'event: response.completed\n',
-      `data: ${JSON.stringify(payload)}\n\n`
-    ])
-  })),
-  createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
-    convertResponseToJsonToSse: async (payload: any) => Readable.from([
-      'event: response.completed\n',
-      `data: ${JSON.stringify(payload)}\n\n`
-    ])
-  })),
-  resolveResponsesRequestContextForHttp: jest.fn(({ fallback }: any) => fallback),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: any) => {
-    const adapterContext = input?.adapterContext && typeof input.adapterContext === 'object' && !Array.isArray(input.adapterContext)
-      ? input.adapterContext
-      : undefined;
-    const rawRequestBody = adapterContext?.__raw_request_body && typeof adapterContext.__raw_request_body === 'object' && !Array.isArray(adapterContext.__raw_request_body)
-      ? adapterContext.__raw_request_body
-      : undefined;
-    if (!rawRequestBody) {
-      return undefined;
-    }
-    const readRouteHint = (value: unknown) => {
-      if (!value || typeof value !== 'object') {
-        return undefined;
-      }
-      const record = value as Record<string, unknown>;
-      const routeHint = record.routeHint;
-      return typeof routeHint === 'string' && routeHint.trim() ? routeHint.trim() : undefined;
-    };
-    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).tool_outputs) ? (rawRequestBody as Record<string, unknown>).tool_outputs as unknown[] : []) {
-      const routeHint = readRouteHint(item);
-      if (routeHint) return routeHint;
-    }
-    for (const item of Array.isArray((rawRequestBody as Record<string, unknown>).input) ? (rawRequestBody as Record<string, unknown>).input as unknown[] : []) {
-      const routeHint = readRouteHint(item);
-      if (routeHint) return routeHint;
-    }
-    return undefined;
-  }),
-  ...mockRuntimeIntegrationsModule(),
-  ...mockNativeExportsModule(),
-  sanitizeFollowupText: async (raw: unknown) => (typeof raw === 'string' ? raw : '')
-});
-
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', mockNativeExportsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports', mockNativeExportsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
+  executeHubPipelineNative: (handle: string, input: unknown) => {
+    const execute = mockHubPipelineExecutors.get(handle);
+    if (!execute) {
+      throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
+    }
+    return materializeHubPipelineFixtureResult(execute(input));
+  },
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  resolveRccPathNativeSync: (segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  },
+  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
+}));
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations.ts', () => ({
+  executeHubPipelineNative: (handle: string, input: unknown) => {
+    const execute = mockHubPipelineExecutors.get(handle);
+    if (!execute) {
+      throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
+    }
+    return materializeHubPipelineFixtureResult(execute(input));
+  },
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  resolveRccPathNativeSync: (segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  },
+  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
+}));
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations', () => ({
+  executeHubPipelineNative: (handle: string, input: unknown) => {
+    const execute = mockHubPipelineExecutors.get(handle);
+    if (!execute) {
+      throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
+    }
+    return materializeHubPipelineFixtureResult(execute(input));
+  },
+  markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
+  markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  resolveRccPathNativeSync: (segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  },
+  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
+}));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge', mockBridgeModule);
 jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provider-response-converter.js', () => ({
   convertProviderResponseIfNeeded: mockConvertProviderResponseIfNeeded
 }));
@@ -460,6 +559,7 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn(() => []),
     buildResponsesPayloadFromChatForHttp: jest.fn((payload: any) => payload),
     buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
+    createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({})),
     inspectResponsesContinuationProbeForHttp: jest.fn(() => undefined),
     inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((args: any) => ({ finishReason: args?.finishReason, seenTerminalEvent: args?.seenTerminalEvent ?? false, sawTerminalChunk: args?.sawTerminalChunk ?? false, sawResponsesCompletedChunk: args?.sawResponsesCompletedChunk ?? false, sawResponsesDoneEvent: args?.sawResponsesDoneEvent ?? false, sawAssistantMessageDoneTerminal: args?.sawAssistantMessageDoneTerminal ?? false, requiresResponsesTerminalEvent: args?.requiresResponsesTerminalEvent ?? false, terminalSource: args?.terminalSource, pendingTerminalEvent: args?.pendingTerminalEvent })),
     normalizeChatUsagePayloadForHttp: jest.fn((payload: any) => ({ normalized: false, payload })),
@@ -707,7 +807,6 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
-    mockCreateSnapshotRecorder.mockClear();
     mockCaptureResponsesRequestContext.mockClear();
     mockRecordResponsesResponseForRequest.mockClear();
     mockResumeResponsesConversation.mockReset();
@@ -724,7 +823,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('keeps responses endpoint inbound payload intact and restores previous_response_id at final HTTP response', async () => {
-    const pipelineExecute = jest.fn(async (input: any) => ({
+    const pipelineExecute = jest.fn((input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 responses handler 整链验证' }]
@@ -801,11 +900,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -878,7 +973,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       requestId: 'req_prev_http_direct_1',
     });
 
-    const pipelineExecute = jest.fn(async (input: any) => ({
+    const pipelineExecute = jest.fn((input: any) => ({
       providerPayload: {
         model: 'gpt-5.4',
         previous_response_id: input?.payload?.previous_response_id ?? null,
@@ -936,11 +1031,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -1037,7 +1128,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (input: any) => {
+    const pipelineExecute = jest.fn((input: any) => {
       const firstInput = input?.payload?.input?.[0];
       if (firstInput?.type === 'function_call_output') {
         throw new Error('orphan_tool_result: first item must not start with output-only replay');
@@ -1098,11 +1189,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -1169,7 +1256,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('returns visible blocked exec_command feedback from HTTP /v1/responses for directory git checkout', async () => {
-    const pipelineExecute = jest.fn(async () => ({
+    const pipelineExecute = jest.fn(() => ({
       providerPayload: { model: 'claude-sonnet-4-5', messages: [{ role: 'user', content: 'restore src dir' }] },
       standardizedRequest: { model: 'claude-sonnet-4-5', messages: [{ role: 'user', content: 'restore src dir' }] },
       processedRequest: {
@@ -1237,11 +1324,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: { handleError: jest.fn(async () => ({ success: true })) }
       } as any),
@@ -1296,7 +1379,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
 
   it('keeps responses stream requests compatible when client does not advertise SSE accept', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 responses handler 非 SSE accept 流式整链验证' }]
@@ -1348,11 +1431,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -1432,7 +1511,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 submit_tool_outputs 整链验证' }]
@@ -1500,11 +1579,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -1611,7 +1686,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'gpt-5.5',
         messages: [{ role: 'user', content: '继续执行 submit truth 整链验证' }]
@@ -1662,11 +1737,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -1730,7 +1801,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('captures /v1/responses request context before returning tool_calls so submit_tool_outputs can resume', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       status: 200,
       body: {
         id: 'resp_capture_tool_1',
@@ -1803,7 +1874,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('blackbox keeps streamed tool_call continuation context under response id without missing request context', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       status: 200,
       body: {
         id: 'resp_stream_capture_tool_1',
@@ -1900,7 +1971,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 auto submit_tool_outputs 整链验证' }]
@@ -1951,11 +2022,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -2012,7 +2079,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
 
   it('keeps namespace tools intact at /v1/responses handler boundary before pipeline routing', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: 'check Chrome state' }]
@@ -2063,11 +2130,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -2123,7 +2186,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('keeps ordinary /v1/responses payload untouched at handler boundary so continuation can be resolved after routing', async () => {
-    const pipelineExecute = jest.fn(async (input: any) => ({
+    const pipelineExecute = jest.fn((input: any) => ({
       status: 200,
       body: {
         object: 'response',
@@ -2232,7 +2295,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (input: any) => {
+    const pipelineExecute = jest.fn((input: any) => {
       const firstInput = input.body?.input?.[0];
       if (firstInput?.type === 'function_call_output') {
         throw new Error('orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_1');
@@ -2295,7 +2358,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('keeps chat endpoint inbound mapping at handler boundary and returns final chat completion through executor/converter chain', async () => {
-    const pipelineExecute = jest.fn(async (input: any) => ({
+    const pipelineExecute = jest.fn((input: any) => ({
       providerPayload: {
         model: 'gemini-2.5-pro',
         contents: [{ role: 'user', parts: [{ text: '继续执行 chat handler 整链验证' }] }]
@@ -2361,11 +2424,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -2422,7 +2481,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
 
   it('parses /v1/messages SSE request body and preserves the last JSON event into the unified pipeline', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 messages handler SSE 整链验证（第二帧）' }]
@@ -2484,11 +2543,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -2555,7 +2610,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
   it('keeps messages endpoint inbound payload intact and returns anthropic message body through executor/converter chain', async () => {
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
         messages: [{ role: 'user', content: '继续执行 messages handler 整链验证' }]
@@ -2631,11 +2686,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
     const executor = createRequestExecutor({
       runtimeManager: createSingleHandleRuntimeManager(handle),
-      getHubPipeline: () => ({
-        execute: pipelineExecute,
-        updateVirtualRouterConfig: jest.fn(),
-        dispose: jest.fn()
-      } as any),
+      getHubPipeline: () => registerHubPipelineFixture(pipelineExecute) as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => ({ success: true }))
@@ -2711,7 +2762,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       }
     });
 
-    const pipelineExecute = jest.fn(async (_input: any) => ({
+    const pipelineExecute = jest.fn((_input: any) => ({
       status: 200,
       body: {
         id: 'resp_submit_capture_next_1',
