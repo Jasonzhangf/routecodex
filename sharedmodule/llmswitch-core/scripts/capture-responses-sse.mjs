@@ -10,7 +10,7 @@
  * Usage:
  *   LMSTUDIO_BASEURL=http://127.0.0.1:1234/v1 \
  *   LMSTUDIO_API_KEY=lm-studio \
- *   node scripts/capture-responses-sse.mjs --file tools/responses-debug-client/payloads/lmstudio-tool.json
+ *   node sharedmodule/llmswitch-core/scripts/capture-responses-sse.mjs --file scripts/tools-dev/responses-debug-client/payloads/tool.json
  *
  * The captures are stored under ~/.routecodex/codex-samples/openai-responses/lmstudio-golden
  * so we can diff them against our bridge output.
@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
-const repoRoot = path.resolve(path.dirname(__filename), '..');
+const repoRoot = path.resolve(path.dirname(__filename), '../../..');
 
 function parseArgs(argv) {
   const args = { file: undefined, out: undefined };
@@ -52,7 +52,7 @@ async function ensureDir(dir) {
 }
 
 function defaultPayloadPath() {
-  const fallback = path.join('tools', 'responses-debug-client', 'payloads', 'lmstudio-tool.json');
+  const fallback = path.join('scripts', 'tools-dev', 'responses-debug-client', 'payloads', 'tool.json');
   return path.join(repoRoot, fallback);
 }
 
