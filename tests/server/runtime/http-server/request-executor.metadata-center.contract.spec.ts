@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 const mockStateIntegrationsModule = {
   extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
-  extractContinuationContextSessionIdentifiersFromMetadata: jest.fn(() => ({})),
 };
 
 const mockRuntimeIntegrationsModule = {

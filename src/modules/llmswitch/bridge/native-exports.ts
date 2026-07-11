@@ -140,6 +140,7 @@ type NativeRouterHotpathJsonBinding = {
   ) => string;
   sanitizeProviderOutboundPayloadJson?: (inputJson: string) => string;
   normalizeResponsesDirectCurrentRequestPayloadJson?: (inputJson: string) => string;
+  extractSessionIdentifiersJson?: (metadataJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -1236,6 +1237,29 @@ export function validateApplyPatchArgumentsNative(applyPatchArgsSource: unknown)
   }
   return JSON.parse(fn(JSON.stringify(applyPatchArgsSource ?? null)));
 }
+
+export function extractSessionIdentifiersFromMetadataNative(
+  metadata: Record<string, unknown> | undefined
+): { sessionId?: string; conversationId?: string } {
+  const fn = getRouterHotpathJsonBindingSync().extractSessionIdentifiersJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] extractSessionIdentifiersJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(metadata ?? null))) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] extractSessionIdentifiersJson returned invalid payload');
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    ...(typeof record.sessionId === 'string' && record.sessionId.trim()
+      ? { sessionId: record.sessionId.trim() }
+      : {}),
+    ...(typeof record.conversationId === 'string' && record.conversationId.trim()
+      ? { conversationId: record.conversationId.trim() }
+      : {}),
+  };
+}
+
 export function classifyEmptyResponseSignalNative(
   stage: string,
   body: unknown

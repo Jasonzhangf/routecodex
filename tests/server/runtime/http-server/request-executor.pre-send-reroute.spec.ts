@@ -11,7 +11,6 @@ const mockBridgeModule = () => ({
   saveRoutingInstructionStateAsync: () => {},
   saveRoutingInstructionStateSync: () => {},
   extractSessionIdentifiersFromMetadata: () => ({}),
-  extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
   rebindResponsesConversationRequestId: mockRebindResponsesConversationRequestId,
   captureResponsesRequestContextForRequest: jest.fn(async () => undefined),
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),

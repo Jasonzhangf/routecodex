@@ -4,7 +4,10 @@
  * Routing state and session identifier compatibility wrappers.
  */
 
-import { getRouterHotpathJsonBindingSync } from './native-exports.js';
+import {
+  extractSessionIdentifiersFromMetadataNative,
+  getRouterHotpathJsonBindingSync
+} from './native-exports.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
 
 type RoutingInstructionState = Record<string, unknown>;
@@ -144,48 +147,10 @@ export function saveRoutingInstructionStateSync(key: string, state: unknown | nu
 
 type SessionIdentifiers = { sessionId?: string; conversationId?: string };
 
-function readNormalizedMetadataToken(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
-  if (!source || typeof source !== 'object') {
-    return undefined;
-  }
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed) {
-        return trimmed;
-      }
-    }
-  }
-  return undefined;
-}
-
 export function extractSessionIdentifiersFromMetadata(meta: Record<string, unknown> | undefined): SessionIdentifiers {
   try {
-    const sessionId = readNormalizedMetadataToken(meta, [
-      'sessionId',
-      'session_id'
-    ]);
-    const conversationId = readNormalizedMetadataToken(meta, [
-      'conversationId',
-      'conversation_id'
-    ]);
-    return {
-      ...(sessionId ? { sessionId } : {}),
-      ...(conversationId ? { conversationId } : {})
-    };
+    return extractSessionIdentifiersFromMetadataNative(meta);
   } catch (error) {
     throw buildStateIntegrationFailure('session_identifiers.extract.invoke', error);
-  }
-}
-
-export function extractContinuationContextSessionIdentifiersFromMetadata(
-  meta: Record<string, unknown> | undefined
-): SessionIdentifiers {
-  try {
-    void meta;
-    return {};
-  } catch (error) {
-    throw buildStateIntegrationFailure('session_identifiers.extract_continuation.invoke', error);
   }
 }

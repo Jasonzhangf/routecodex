@@ -4,7 +4,6 @@ const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
   extractSessionIdentifiersFromMetadata: () => ({}),
   loadRoutingInstructionStateSync: () => null,
   saveRoutingInstructionStateAsync: () => {},

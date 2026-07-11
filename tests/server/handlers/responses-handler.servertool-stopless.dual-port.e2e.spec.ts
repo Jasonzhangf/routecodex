@@ -13,7 +13,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
     sessionId: typeof metadata?.session_id === 'string' ? metadata.session_id : undefined,
     conversationId: typeof metadata?.conversation_id === 'string' ? metadata.conversation_id : undefined
   })),
-  extractContinuationContextSessionIdentifiersFromMetadata: jest.fn(() => ({})),
   getStatsCenterSafe: jest.fn(() => ({ getSnapshot: () => null, recordProviderUsage: () => {} })),
   getLlmsStatsSnapshot: jest.fn(() => null)
 }));

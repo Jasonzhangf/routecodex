@@ -33,7 +33,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 }), { virtual: true });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.js', () => ({
-  extractContinuationContextSessionIdentifiersFromMetadata: () => ({}),
   extractSessionIdentifiersFromMetadata: () => ({}),
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   loadRoutingInstructionStateSync: () => null,
