@@ -176,7 +176,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 }));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', createNativeExportsMock);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', createNativeExportsMock);
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
