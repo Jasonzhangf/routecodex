@@ -2,8 +2,10 @@ import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
+  appendSnapshotStageTraceNative,
   resetSnapshotRecorderErrorsampleStateNative,
   shouldWriteClientToolErrorsampleNative,
+  summarizeSnapshotStageTraceNative,
 } from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
@@ -30,8 +32,6 @@ export interface ClientToolTraceSummaryEntry {
   at: string;
   stage: string;
 }
-const MAX_STAGE_TRACE_ENTRIES = 40;
-const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
 export const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
 const truthy = new Set(['1', 'true', 'yes', 'on']);
@@ -145,46 +145,41 @@ export function logRuntimeErrorSignal(args: {
   );
 }
 
-function cloneForErrorsample(value: unknown): unknown {
-  if (!isTracePayloadCaptureEnabled()) {
-    return undefined;
-  }
-  try {
-    const text = JSON.stringify(value);
-    if (text.length <= MAX_STAGE_TRACE_PAYLOAD_CHARS) {
-      return JSON.parse(text);
-    }
-    return {
-      clipped: true,
-      bytes: text.length,
-      preview: text.slice(0, MAX_STAGE_TRACE_PAYLOAD_CHARS)
-    };
-  } catch {
-    return { clipped: true, reason: 'serialize_failed' };
-  }
-}
-
 export function appendStageTrace(trace: StageTraceEntry[], stage: string, payload: AnyRecord): void {
-  const shouldCapturePayload = isTracePayloadCaptureEnabled();
-  trace.push({
-    at: new Date().toISOString(),
-    stage,
-    payload: shouldCapturePayload ? cloneForErrorsample(payload) : undefined
-  });
-  if (trace.length > MAX_STAGE_TRACE_ENTRIES) {
-    trace.splice(0, trace.length - MAX_STAGE_TRACE_ENTRIES);
+  const capturePayload = isTracePayloadCaptureEnabled();
+  let payloadJson = 'null';
+  let serializeError = '';
+  if (capturePayload) {
+    try {
+      payloadJson = JSON.stringify(payload) ?? 'null';
+    } catch (error) {
+      serializeError = error instanceof Error ? error.message : String(error ?? 'unknown');
+    }
   }
+  const nextTrace = appendSnapshotStageTraceNative({
+    trace,
+    stage,
+    payloadJson,
+    capturePayload,
+    timestamp: new Date().toISOString(),
+    serializeError,
+  }) as StageTraceEntry[];
+  trace.splice(0, trace.length, ...nextTrace);
 }
 
 export function cloneStageTraceSummary(
   trace: StageTraceEntry[],
   limit = MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
 ): ClientToolTraceSummaryEntry[] {
-  const tail = limit > 0 ? trace.slice(-limit) : trace;
-  return tail.map((item) => ({
-    at: item.at,
-    stage: item.stage
-  }));
+  return summarizeSnapshotStageTraceNative(trace, limit).map((item) => {
+    if (typeof item.at !== 'string' || typeof item.stage !== 'string') {
+      throw new Error('[snapshot-recorder] summarizeSnapshotStageTraceNative returned invalid trace summary');
+    }
+    return {
+      at: item.at,
+      stage: item.stage,
+    };
+  });
 }
 
 function resolveClientToolErrorSampleWindowMs(): number {

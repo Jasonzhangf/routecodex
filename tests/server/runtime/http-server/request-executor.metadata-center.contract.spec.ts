@@ -51,6 +51,8 @@ const mockNativeExportsModule = () => ({
   shouldLogRuntimeErrorSignalToConsoleNative: jest.fn(() => false),
   shouldWriteClientToolErrorsampleNative: jest.fn(() => true),
   resetSnapshotRecorderErrorsampleStateNative: jest.fn(() => undefined),
+  appendSnapshotStageTraceNative: jest.fn(({ trace }: { trace?: unknown[] }) => trace ?? []),
+  summarizeSnapshotStageTraceNative: jest.fn((trace: unknown[]) => trace),
   shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
   shouldInspectToolFailuresNative: jest.fn(() => false),
   resolveRequestTailSummaryNative: jest.fn(() => null),

@@ -3065,6 +3065,33 @@ pub fn reset_snapshot_recorder_errorsample_state_json_bridge() -> NapiResult<boo
     snapshot_tool_failures::reset_snapshot_recorder_errorsample_state_json()
 }
 
+#[napi(js_name = "appendSnapshotStageTraceJson")]
+pub fn append_snapshot_stage_trace_json_bridge(
+    trace_json: String,
+    stage: String,
+    payload_json: String,
+    capture_payload: bool,
+    timestamp: String,
+    serialize_error: String,
+) -> NapiResult<String> {
+    snapshot_tool_failures::append_snapshot_stage_trace_json(
+        trace_json,
+        stage,
+        payload_json,
+        capture_payload,
+        timestamp,
+        serialize_error,
+    )
+}
+
+#[napi(js_name = "summarizeSnapshotStageTraceJson")]
+pub fn summarize_snapshot_stage_trace_json_bridge(
+    trace_json: String,
+    limit: u32,
+) -> NapiResult<String> {
+    snapshot_tool_failures::summarize_snapshot_stage_trace_json(trace_json, limit)
+}
+
 #[napi(js_name = "shouldInspectRuntimeErrorFastJson")]
 pub fn should_inspect_runtime_error_fast_json_bridge(
     stage: String,

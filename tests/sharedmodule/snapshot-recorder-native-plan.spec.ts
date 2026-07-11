@@ -33,6 +33,8 @@ jest.unstable_mockModule(
     shouldLogRuntimeErrorSignalToConsoleNative: () => false,
     shouldWriteClientToolErrorsampleNative: () => true,
     resetSnapshotRecorderErrorsampleStateNative: () => undefined,
+    appendSnapshotStageTraceNative: ({ trace }: { trace?: unknown[] }) => trace ?? [],
+    summarizeSnapshotStageTraceNative: (trace: unknown[]) => trace,
     shouldInspectRuntimeErrorFastNative: () => false,
     shouldInspectToolFailuresNative: () => false,
     resolveRequestTailSummaryNative: () => null,

@@ -87,6 +87,8 @@
   "shouldLogRuntimeErrorSignalToConsoleJson",
   "shouldWriteClientToolErrorsampleJson",
   "resetSnapshotRecorderErrorsampleStateJson",
+  "appendSnapshotStageTraceJson",
+  "summarizeSnapshotStageTraceJson",
   "shouldInspectRuntimeErrorFastJson",
   "shouldInspectToolFailuresJson",
   "resolveRequestTailSummaryJson",

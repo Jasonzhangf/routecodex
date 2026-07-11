@@ -5,6 +5,8 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_TRAILING_TOOL_MESSAGES: usize = 8;
 const MAX_RUNTIME_SIGNAL_SCAN_STEPS: usize = 1200;
+const MAX_STAGE_TRACE_ENTRIES: usize = 40;
+const MAX_STAGE_TRACE_PAYLOAD_CHARS: usize = 120_000;
 static CLIENT_TOOL_ERROR_SAMPLE_WINDOW: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
 
 fn read_trimmed(value: Option<&Value>) -> String {
@@ -1150,6 +1152,94 @@ pub fn reset_snapshot_recorder_errorsample_state_json() -> NapiResult<bool> {
     Ok(true)
 }
 
+pub fn append_snapshot_stage_trace_json(
+    trace_json: String,
+    stage: String,
+    payload_json: String,
+    capture_payload: bool,
+    timestamp: String,
+    serialize_error: String,
+) -> NapiResult<String> {
+    let mut trace: Vec<Value> =
+        serde_json::from_str(&trace_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let mut entry = Map::new();
+    entry.insert("at".to_string(), Value::String(timestamp));
+    entry.insert("stage".to_string(), Value::String(stage));
+    if capture_payload {
+        if !serialize_error.trim().is_empty() {
+            entry.insert(
+                "payload".to_string(),
+                json_object(vec![
+                    ("clipped", Value::Bool(true)),
+                    ("reason", Value::String("serialize_failed".to_string())),
+                ]),
+            );
+        } else if payload_json.len() <= MAX_STAGE_TRACE_PAYLOAD_CHARS {
+            let payload: Value = serde_json::from_str(&payload_json)
+                .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            entry.insert("payload".to_string(), payload);
+        } else {
+            entry.insert(
+                "payload".to_string(),
+                json_object(vec![
+                    ("clipped", Value::Bool(true)),
+                    (
+                        "bytes",
+                        Value::Number(serde_json::Number::from(payload_json.len())),
+                    ),
+                    (
+                        "preview",
+                        Value::String(
+                            payload_json
+                                .chars()
+                                .take(MAX_STAGE_TRACE_PAYLOAD_CHARS)
+                                .collect(),
+                        ),
+                    ),
+                ]),
+            );
+        }
+    }
+    trace.push(Value::Object(entry));
+    if trace.len() > MAX_STAGE_TRACE_ENTRIES {
+        let drop_count = trace.len() - MAX_STAGE_TRACE_ENTRIES;
+        trace.drain(0..drop_count);
+    }
+    serde_json::to_string(&trace).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+pub fn summarize_snapshot_stage_trace_json(trace_json: String, limit: u32) -> NapiResult<String> {
+    let trace: Value =
+        serde_json::from_str(&trace_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let Some(items) = trace.as_array() else {
+        return Ok("[]".to_string());
+    };
+    let effective_limit = limit as usize;
+    let start = if effective_limit > 0 && items.len() > effective_limit {
+        items.len() - effective_limit
+    } else {
+        0
+    };
+    let mut summary: Vec<Value> = Vec::new();
+    for item in &items[start..] {
+        let Some(record) = item.as_object() else {
+            continue;
+        };
+        let mut row = Map::new();
+        row.insert(
+            "at".to_string(),
+            Value::String(read_trimmed(record.get("at"))),
+        );
+        row.insert(
+            "stage".to_string(),
+            Value::String(read_trimmed(record.get("stage"))),
+        );
+        summary.push(Value::Object(row));
+    }
+    serde_json::to_string(&Value::Array(summary))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1399,5 +1489,60 @@ mod tests {
             10_000.0,
         )
         .unwrap());
+    }
+
+    #[test]
+    fn appends_and_summarizes_stage_trace_in_native_truth() {
+        let mut raw = "[]".to_string();
+        for index in 0..42 {
+            raw = append_snapshot_stage_trace_json(
+                raw,
+                format!("stage_{index}"),
+                json!({"index": index}).to_string(),
+                true,
+                format!("2026-01-01T00:00:{index:02}Z"),
+                String::new(),
+            )
+            .unwrap();
+        }
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let items = parsed.as_array().unwrap();
+        assert_eq!(items.len(), 40);
+        assert_eq!(items[0]["stage"], "stage_2");
+        assert_eq!(items[39]["payload"]["index"], 41);
+
+        let summary_raw = summarize_snapshot_stage_trace_json(raw, 2).unwrap();
+        let summary: Value = serde_json::from_str(&summary_raw).unwrap();
+        assert_eq!(summary.as_array().unwrap().len(), 2);
+        assert_eq!(summary[0]["stage"], "stage_40");
+        assert!(summary[0].get("payload").is_none());
+    }
+
+    #[test]
+    fn stage_trace_respects_capture_and_serialize_failure() {
+        let no_capture = append_snapshot_stage_trace_json(
+            "[]".to_string(),
+            "stage_no_capture".to_string(),
+            json!({"ok": true}).to_string(),
+            false,
+            "2026-01-01T00:00:00Z".to_string(),
+            String::new(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&no_capture).unwrap();
+        assert!(parsed[0].get("payload").is_none());
+
+        let serialize_failed = append_snapshot_stage_trace_json(
+            "[]".to_string(),
+            "stage_failed".to_string(),
+            "null".to_string(),
+            true,
+            "2026-01-01T00:00:00Z".to_string(),
+            "cannot serialize".to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&serialize_failed).unwrap();
+        assert_eq!(parsed[0]["payload"]["clipped"], true);
+        assert_eq!(parsed[0]["payload"]["reason"], "serialize_failed");
     }
 }

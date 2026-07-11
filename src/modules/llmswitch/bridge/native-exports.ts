@@ -69,6 +69,15 @@ type NativeChatProcessNodeResultSemantics = {
     nowMs: number
   ) => boolean;
   resetSnapshotRecorderErrorsampleStateJson?: () => boolean;
+  appendSnapshotStageTraceJson?: (
+    traceJson: string,
+    stage: string,
+    payloadJson: string,
+    capturePayload: boolean,
+    timestamp: string,
+    serializeError: string
+  ) => string;
+  summarizeSnapshotStageTraceJson?: (traceJson: string, limit: number) => string;
   shouldInspectRuntimeErrorFastJson?: (stage: string, payloadJson: string) => boolean;
   shouldInspectToolFailuresJson?: (stage: string) => boolean;
   resolveRequestTailSummaryJson?: (stage: string, payloadJson: string) => string;
@@ -1599,6 +1608,46 @@ export function resetSnapshotRecorderErrorsampleStateNative(): void {
     throw new Error('[llmswitch-bridge] resetSnapshotRecorderErrorsampleStateJson not available');
   }
   fn();
+}
+
+export function appendSnapshotStageTraceNative(args: {
+  trace: unknown[];
+  stage: string;
+  payloadJson: string;
+  capturePayload: boolean;
+  timestamp: string;
+  serializeError: string;
+}): unknown[] {
+  const fn = getChatProcessNodeResultSemantics().appendSnapshotStageTraceJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] appendSnapshotStageTraceJson not available');
+  }
+  const raw = fn(
+    JSON.stringify(args.trace ?? []),
+    String(args.stage || ''),
+    String(args.payloadJson || 'null'),
+    Boolean(args.capturePayload),
+    String(args.timestamp || ''),
+    String(args.serializeError || '')
+  );
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] appendSnapshotStageTraceJson returned invalid payload');
+  }
+  return parsed;
+}
+
+export function summarizeSnapshotStageTraceNative(trace: unknown[], limit: number): Array<Record<string, unknown>> {
+  const fn = getChatProcessNodeResultSemantics().summarizeSnapshotStageTraceJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] summarizeSnapshotStageTraceJson not available');
+  }
+  const raw = fn(JSON.stringify(trace ?? []), Number(limit));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] summarizeSnapshotStageTraceJson returned invalid payload');
+  }
+  return parsed as Array<Record<string, unknown>>;
 }
 
 export function shouldInspectRuntimeErrorFastNative(stage: string, payload: unknown): boolean {
