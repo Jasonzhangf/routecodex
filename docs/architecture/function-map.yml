@@ -4561,11 +4561,14 @@ owners:
       - stage_a_conversion_shared_responses_openai_owner_boundary
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+      - src/modules/llmswitch/bridge/responses-to-chat-host.ts
+      - src/utils/responses-to-chat.ts
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
       - tests/sharedmodule/responses-function-tool-normalization.compat.spec.ts
+      - tests/utils/responses-to-chat-native.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -4575,6 +4578,7 @@ owners:
     notes:
       - "Responses/OpenAI codec request context must be returned explicitly by Rust/native, not hidden in TS ctxMap state."
       - "Retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts` must stay physically deleted; tests use direct router_hotpath_napi evidence instead."
+      - "`src/utils/responses-to-chat.ts` is a mutating compatibility shell only; it must call Rust through `responses-to-chat-host.ts` and must not import the broad `native-exports.js` surface directly."
 
   - feature_id: conversion.responses.store
     status: active

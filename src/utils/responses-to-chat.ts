@@ -1,4 +1,4 @@
-import { convertResponsesRequestToChatNative } from '../modules/llmswitch/bridge/native-exports.js';
+import { convertResponsesRequestToChatNative } from '../modules/llmswitch/bridge/responses-to-chat-host.js';
 
 export function normalizeResponsesToChatBody(body: Record<string, unknown>): void {
   const hasInput = Array.isArray(body.input);

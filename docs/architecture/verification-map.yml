@@ -1371,9 +1371,12 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+      - src/modules/llmswitch/bridge/responses-to-chat-host.ts
+      - src/utils/responses-to-chat.ts
     contract:
       - tests/sharedmodule/responses-function-tool-normalization.compat.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/utils/responses-to-chat-native.spec.ts
     integration:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
     smoke:
@@ -1385,6 +1388,7 @@ verification:
     notes:
       - "Responses/OpenAI request and response codec truth must remain in responses_openai_codec.rs."
       - "The retired TS codec shell `sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts` must stay physically deleted; test evidence calls direct router_hotpath_napi exports."
+      - "The HTTP/client `responses-to-chat` shell must use the narrow `responses-to-chat-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
 
   - feature_id: conversion.responses.store
     change_risk: high
