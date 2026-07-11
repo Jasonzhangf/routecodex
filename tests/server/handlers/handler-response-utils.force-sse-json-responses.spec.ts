@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { Readable, Transform } from 'node:stream';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { buildResponsesPayloadFromChatWithNative } from '../../sharedmodule/helpers/resp-semantics-direct-native.js';
 
 const finalizeRetentionMock = jest.fn(async (_requestId: string, _options?: unknown) => undefined);
 
@@ -507,11 +508,6 @@ jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
 async function loadSendPipelineResponse() {
   const mod = await import('../../../src/server/handlers/handler-response-utils.js');
   return mod.sendPipelineResponse;
-}
-
-async function loadBuildResponsesPayloadFromChatNative() {
-  const mod = await import('../../../src/modules/llmswitch/bridge/native-exports.js');
-  return mod.buildResponsesPayloadFromChatNative;
 }
 
 describe('handler-response-utils forceSSE responses json bridge', () => {
@@ -1175,8 +1171,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
   });
 
   it('uses native conversion for chat.completion JSON response objects', async () => {
-    const buildResponsesPayloadFromChatNative = await loadBuildResponsesPayloadFromChatNative();
-    const normalized = buildResponsesPayloadFromChatNative(
+    const normalized = buildResponsesPayloadFromChatWithNative(
       {
         id: 'chatcmpl_json_dispatch_1',
         object: 'chat.completion',
