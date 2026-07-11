@@ -328,16 +328,15 @@ live 证据：
     - 几乎整面 re-export `responses-response-bridge.ts` 的 SSE/projector/guard symbols
     - 当前是 facade-only public surface，不是第二套独立语义实现
   - `src/modules/llmswitch/bridge/index.ts`
-    - 仍分别 re-export
-      - `responses-sse-bridge.ts`
-      - `responses-response-bridge.ts`
+    - 已物理删除；当前 residue gate 要求该 broad barrel 不得恢复
+    - 后续 SSE/response surface 收口只能在 leaf bridge owner 上完成，不能通过恢复 broad barrel 重新聚合
 - 当前 gate 事实：
   - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts`
     - 不是在锁“唯一 SSE 语义 owner”
     - 它实际锁的是：
       - `handler-response-sse.ts` 必须继续同时 import `responses-sse-bridge.js` 与 `responses-response-bridge.js`
       - `handler-response-utils.ts` 也必须继续保持 split import
-      - `index.ts` 不要把 SSE symbols 混进 lifecycle bridge export 段
+      - 已删除的 `bridge/index.ts` broad barrel 不得恢复为 SSE/lifecycle 聚合出口
   - `scripts/architecture/verify-responses-handler-single-bridge-surface.mjs`
     - 也明确要求
       - `responses-handler.ts` 只能走 request facade
@@ -1191,18 +1190,16 @@ live 证据：
 - 删除候选：
   - 在 callers 全迁到唯一 facade 后，`responses-sse-bridge.ts` 应收缩为最小 facade 或物理删除，避免继续维持 SSE / response 双桥 surface。
 
-### A.1 `bridge/index.ts` 把两个 surface 同时公开，继续放大“非唯一出口”
+### A.1 `bridge/index.ts` broad barrel 已删除
 
 - 代码证据：
   - `src/modules/llmswitch/bridge/index.ts`
-  - 同时 re-export：
-    - `from './responses-sse-bridge.js'`
-    - `from './responses-response-bridge.js'`
+  - 当前已物理删除；`tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`、`tests/red-tests/server_responses_sse_surface_single_owner.test.ts`、`tests/server/handlers/handler-response-sse-wrapper-contract.spec.ts` 和 `tests/modules/llmswitch/bridge/responses-response-bridge.request-context-resolution.spec.ts` 均锁定其不存在
 - 审计结论：
-  - 这里不是第二语义 owner，但它把两套 facade surface 都暴露成公共入口，放大了“出口非唯一”的可见面。
-  - 只要 `index.ts` 继续同时公开这两套 surface，后续 caller 很容易继续依赖 split facade，而不是唯一桥面。
-- 删除/收口候选：
-  - 等 caller 收敛后，`index.ts` 应只暴露唯一 responses response bridge surface；SSE 专用 facade 若无独立 owner 价值，应一并删除或缩成内部私有文件。
+  - 这里曾经不是第二语义 owner，但它把两套 facade surface 都暴露成公共入口，放大了“出口非唯一”的可见面。
+  - 该 broad barrel 已完成物理删除，后续 caller 不得再依赖它；剩余收口目标只剩 leaf `responses-sse-bridge.ts` facade 与 handler import split。
+- 收口候选：
+  - `responses-sse-bridge.ts` 若无独立 owner 价值，应删除或缩成内部私有文件；禁止通过恢复 `bridge/index.ts` 作为兼容聚合壳来完成迁移。
 
 ### B. `handler-response-sse.ts` 当前同时依赖两个 bridge surface
 
@@ -1224,8 +1221,8 @@ live 证据：
   - `src/modules/llmswitch/bridge/responses-sse-bridge.ts`
   - 原因：几乎整面 re-export `responses-response-bridge.ts`，不是独立语义 owner。
 - 候选 2：
-  - `src/modules/llmswitch/bridge/index.ts` 内对 `responses-sse-bridge.ts` 的公共 re-export
-  - 原因：继续把 split facade 暴露为公共入口，放大“非唯一出口”。
+  - 已完成：`src/modules/llmswitch/bridge/index.ts` 已物理删除，其对 `responses-sse-bridge.ts` 的公共 re-export 不再存在。
+  - 后续要求：保持 deleted-path/residue gate，禁止恢复 broad barrel 作为兼容聚合壳。
 - 当前还不能直接删的原因：
   - `handler-response-sse.ts` 仍显式依赖这层 facade
   - `tests/red-tests/server_responses_sse_surface_single_owner.test.ts` 当前只锁 import/source 关系，还没锁“物理删除后只能剩唯一 facade”
