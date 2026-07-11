@@ -28916,3 +28916,12 @@ Pure Rust NAPI candidates:
 - Added red/green residue gate: `hub-pipeline-stage-residue-audit` now forbids those public host wrapper functions while asserting the Rust required exports remain present.
 - Evidence: exact tracked-source scan after deletion shows only `native-hotpath-required-exports.json`, binding interface type entries, direct native test helpers, and the new gate text.
 - Verification PASS: focused Jest 5 suites / 222 tests; strict `llmswitch-ts-shell-reference-audit`; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; direct tool-shape/SSE/handler bridge audits; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`.
+
+# 2026-07-11: router-direct media forwarding shell retired
+
+- Scope: continue external reference closeout for a leaf server runtime shell that only forwarded to a llmswitch host wrapper.
+- Deleted `src/server/runtime/http-server/router-direct-media-capability.ts`; exact tracked-source scan showed `stripDirectTargetUnsupportedMedia` had no active importer.
+- Deleted host wrapper `stripResponsesStoredContextInputMediaNative` from `src/modules/llmswitch/bridge/native-exports.ts` and removed stale mock fields; retained Rust/NAPI raw export `stripResponsesStoredContextInputMediaJson`.
+- Added/extended red-green residue gate in `hub-pipeline-stage-residue-audit`: before deletion it failed on both the wrapper and the file, after deletion it passed.
+- Evidence: post-delete exact scan shows only `native-hotpath-required-exports.json`, native binding interface typing, direct native test helper, and gate text.
+- Verification PASS: focused Jest 2 suites / 227 tests; strict shell audit; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`; `npm run build:base`.

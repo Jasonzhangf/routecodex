@@ -263,7 +263,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     resolveProviderRetryExecutionPolicyNative: () => ({}),
     sanitizeProviderOutboundPayload: async (input: { payload: AnyRecord }) => input.payload,
     shouldRecordSnapshotsNative: () => false,
-    stripResponsesStoredContextInputMediaNative: (payload: unknown) => payload,
     updateResponsesSseTransportTerminalStateNative: (input: unknown) => input,
     validateCanonicalClientToolCall: () => ({ ok: true }),
     writeSnapshotViaHooksNative: () => undefined,

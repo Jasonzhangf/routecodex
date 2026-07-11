@@ -952,3 +952,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Added a residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` that fails if those public host wrapper functions return while requiring the Rust/NAPI raw exports to remain present.
 - Red/green evidence: the new gate first failed with the four wrapper names present, then passed after deletion.
 - Verification passed: focused Jest 5 suites / 222 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; direct tool-shape/SSE/handler bridge audits; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`.
+
+### 2026-07-11 router-direct media forwarding shell deleted
+
+- Deleted zero-consumer forwarding shell `src/server/runtime/http-server/router-direct-media-capability.ts`; exact tracked-source scan showed its exported `stripDirectTargetUnsupportedMedia` had no active importer.
+- Removed the now-unreferenced host wrapper `stripResponsesStoredContextInputMediaNative` from `src/modules/llmswitch/bridge/native-exports.ts` and stale test mock fields, while keeping Rust/NAPI raw export `stripResponsesStoredContextInputMediaJson` and direct native test helper access.
+- Extended the residue gate so the forwarding shell must stay physically absent and the host wrapper cannot return while the Rust raw export remains required.
+- Red/green evidence: the gate first failed on both the existing wrapper and existing shell, then passed after deletion.
+- Verification passed: focused Jest 2 suites / 227 tests; exact source scan; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`; `npm run build:base`.

@@ -487,21 +487,6 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   return assertNativeObject('captureReqInboundResponsesContextSnapshotJson', parsed);
 }
 
-export function stripResponsesStoredContextInputMediaNative(
-  inputEntries: unknown,
-  placeholderText = '[Image omitted]'
-): { changed: boolean; messages: unknown[] } {
-  const parsed = invokeRouterHotpathJsonCapability('stripResponsesStoredContextInputMediaJson', [
-    Array.isArray(inputEntries) ? inputEntries : [],
-    String(placeholderText || '[Image omitted]'),
-  ]);
-  const row = assertNativeObject('stripResponsesStoredContextInputMediaJson', parsed);
-  if (typeof row.changed !== 'boolean' || !Array.isArray(row.messages)) {
-    throw new Error('[llmswitch-bridge] stripResponsesStoredContextInputMediaJson returned invalid payload');
-  }
-  return row as { changed: boolean; messages: unknown[] };
-}
-
 export async function captureReqInboundResponsesContextSnapshot(input: {
   rawRequest: Record<string, unknown>;
   requestId?: string;

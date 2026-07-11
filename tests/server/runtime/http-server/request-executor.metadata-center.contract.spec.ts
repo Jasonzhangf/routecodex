@@ -164,7 +164,6 @@ const mockNativeExportsModule = () => ({
   resolveProviderResponseRequestSemanticsNative: jest.fn(() => undefined),
   resolveProviderRetryExecutionPolicyNative: jest.fn(() => undefined),
   shouldRecordSnapshotsNative: jest.fn(() => false),
-  stripResponsesStoredContextInputMediaNative: jest.fn((inputEntries: unknown) => ({ changed: false, messages: Array.isArray(inputEntries) ? inputEntries : [] })),
   writeSnapshotViaHooksNative: jest.fn(() => undefined)
 });
 

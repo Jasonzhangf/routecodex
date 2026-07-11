@@ -356,12 +356,29 @@ describe('hub pipeline stage residue audit', () => {
       'injectMcpToolsForChatJson',
       'injectMcpToolsForResponsesJson',
       'buildAnthropicResponseFromChatJson',
+      'stripResponsesStoredContextInputMediaNative',
+    ];
+    const requiredRustExports = [
+      'mapChatToolsToBridgeJson',
+      'injectMcpToolsForChatJson',
+      'injectMcpToolsForResponsesJson',
+      'buildAnthropicResponseFromChatJson',
+      'stripResponsesStoredContextInputMediaJson',
     ];
 
     const findings = retiredHostWrappers
       .filter((symbol) => new RegExp(`export\\s+(?:async\\s+)?function\\s+${symbol}\\b`).test(hostSource));
     expect(findings).toEqual([]);
-    expect(requiredExports).toEqual(expect.arrayContaining(retiredHostWrappers));
+    expect(requiredExports).toEqual(expect.arrayContaining(requiredRustExports));
+  });
+
+  it('zero-consumer router-direct media forwarding shell must stay physically deleted', () => {
+    const shellPath = path.join(
+      process.cwd(),
+      'src/server/runtime/http-server/router-direct-media-capability.ts',
+    );
+
+    expect(fs.existsSync(shellPath)).toBe(false);
   });
 
   it('legacy runHubPipelineStageJson Rust export and stage branches must be physically removed', () => {
