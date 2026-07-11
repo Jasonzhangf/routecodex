@@ -462,21 +462,16 @@ describe('cli restart command', () => {
     expect(signals).toEqual([{ pid: 701, signal: 'SIGUSR2' }]);
   });
 
-  it('requests in-session restart when live version lags behind current release', async () => {
+  it('adopts the current runtime via start --restart when live version lags behind current release', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const failMessages: string[] = [];
+    const spawnCalls: Array<{ command: string; args: readonly string[] }> = [];
     let call = 0;
     createRestartCommand(program, {
       isDevPackage: false,
       isWindows: false,
       defaultDevPort: 5555,
-      createSpinner: async () => ({
-        ...createStubSpinner(),
-        fail: (text?: string) => {
-          failMessages.push(String(text || ''));
-        }
-      }),
+      createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
       findListeningPids: (port) => {
         call += 1;
@@ -499,6 +494,7 @@ describe('cli restart command', () => {
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
+      env: {},
       fsImpl: {
         existsSync: () => true,
         readFileSync: () => [
@@ -508,20 +504,33 @@ describe('cli restart command', () => {
           ''
         ].join('\n')
       } as any,
-      env: {
-        npm_package_version: '0.90.3595'
-      },
+      nodeBin: 'node',
+      cliEntryPath: '/snapshot/dist/cli.js',
+      spawn: ((command: string, args: readonly string[]) => {
+        spawnCalls.push({ command, args });
+        return {
+          once(event: string, cb: (...args: unknown[]) => void) {
+            if (event === 'exit') {
+              setImmediate(() => cb(0, null));
+            }
+            return this;
+          }
+        } as any;
+      }) as any,
+      getExpectedVersion: () => '0.90.3595',
       exit: (code) => {
         throw new Error(`exit:${code}`);
       }
     });
 
-    try {
-      await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
-    } catch (error) {
-      throw new Error(`${String(error)} :: ${failMessages.join(' | ')}`);
-    }
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
 
-    expect(signals).toEqual([{ pid: 71641, signal: 'SIGUSR2' }]);
+    expect(signals).toEqual([]);
+    expect(spawnCalls).toEqual([
+      {
+        command: 'node',
+        args: ['/snapshot/dist/cli.js', 'start', '--restart', '--port', '5555']
+      }
+    ]);
   });
 });

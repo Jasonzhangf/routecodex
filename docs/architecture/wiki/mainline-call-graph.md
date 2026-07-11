@@ -545,7 +545,6 @@ Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle
 
 ```mermaid
 flowchart LR
-  StartRestartTakeoverGuard["StartRestartTakeoverGuard"]
   StartShutdownHandler["StartShutdownHandler"]
   DaemonRestartLoop["DaemonRestartLoop"]
   DaemonSupervisorLoop["DaemonSupervisorLoop"]
@@ -569,7 +568,6 @@ flowchart LR
   ServerStartCommand -->|rtl-10| RuntimeInstanceRecord
   StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
   ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
-  ServerStartCommand -->|rtl-13| StartRestartTakeoverGuard
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -584,7 +582,6 @@ flowchart LR
   class DaemonSupervisorLoop anchored;
   class DaemonRestartLoop anchored;
   class StartShutdownHandler anchored;
-  class StartRestartTakeoverGuard anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -601,7 +598,6 @@ flowchart LR
 | rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> updateRuntimeInstanceStatus` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
-| rtl-13 | `ServerStartCommand -> StartRestartTakeoverGuard` | anchored | `createStartCommand -> refuseExplicitRestartTakeoverIfOccupied` |  | `runtime.lifecycle.start_command`<br/>CLI start owns server process launch and must not hide restart semantics behind explicit start --restart takeover |
 
 ## stopless.session.mainline
 

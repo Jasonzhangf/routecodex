@@ -92,7 +92,7 @@ requireIncludes('runtime_lifecycle row', sectionFor(matrix, 'runtime_lifecycle')
   'tests/cli/stop-command.spec.ts',
   'tests/cli/restart-command.spec.ts',
   'rcc start --snap',
-  'Explicit `rcc start --restart --port <port>` is a guard/fail-fast test',
+  'rcc start --restart --port <port>',
   'rcc stop --port <port>',
   'rcc restart --port <port>',
   '~/.rcc/logs/process-lifecycle.jsonl',

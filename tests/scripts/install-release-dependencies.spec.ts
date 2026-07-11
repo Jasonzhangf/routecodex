@@ -8,18 +8,15 @@ describe('install-release dependency installation', () => {
     expect(releaseScript).not.toContain('--omit=optional');
   });
 
-  it('does not stop an existing runtime during release verification adoption', () => {
-    expect(releaseScript).not.toContain('adopt_release_runtime_for_port');
-    expect(releaseScript).not.toContain('/shutdown');
-    expect(releaseScript).not.toContain('rcc start --restart');
-    expect(releaseScript).not.toContain('install-release.runtime-version-adoption');
+  it('starts adopted release runtime through the daemon path so install can exit', () => {
+    expect(releaseScript).toMatch(
+      /ROUTECODEX_START_DAEMON=1\s*\\\s*\n\s*RCC_START_DAEMON=1\s*\\[\s\S]*rcc start --restart --port "\$VERIFY_PORT"/
+    );
   });
 
-  it('uses restart for live runtime and no-restart start only when no live runtime is available', () => {
-    expect(releaseScript).toContain('rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"');
-    expect(releaseScript).not.toContain('|| start_release_runtime_for_port');
-    expect(releaseScript).toMatch(
-      /ROUTECODEX_START_DAEMON=1\s*\\\s*\n\s*RCC_START_DAEMON=1\s*\\[\s\S]*rcc start --no-restart --port "\$VERIFY_PORT"/
+  it('starts release runtime when restart has no live server to target', () => {
+    expect(releaseScript).toContain(
+      'rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST" || start_release_runtime_for_port'
     );
   });
 });

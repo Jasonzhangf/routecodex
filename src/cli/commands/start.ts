@@ -3,7 +3,6 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
-// feature_id: runtime.lifecycle.start_command
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import { writeRuntimeInstance, updateRuntimeInstanceStatus } from '../../utils/runtime-instance-registry.js';
@@ -628,51 +627,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             logStartNonBlocking(ctx, 'daemon_supervisor_stop_force', error, { port: resolvedPort, daemonPid });
           }
         };
-        const refuseExplicitRestartTakeoverIfOccupied = async (): Promise<void> => {
-          if (options.restart !== true || options.exclusive === true || daemonSupervisor) {
-            return;
-          }
-          const occupied: Array<{ port: number; pids: number[]; healthy: boolean }> = [];
-          for (const p of effectivePortGroup) {
-            const pids = ctx.findListeningPids(p);
-            if (pids.length > 0) {
-              occupied.push({ port: p, pids, healthy: false });
-              continue;
-            }
-            for (const host of buildLocalProbeHostCandidates(serverHost)) {
-              const probe = await probeRouteCodexHealth({
-                fetchImpl: ctx.fetch,
-                host,
-                port: p,
-                timeoutMs: 800
-              });
-              if (probe.ok) {
-                occupied.push({ port: p, pids: [], healthy: true });
-                break;
-              }
-            }
-          }
-          if (occupied.length === 0) {
-            return;
-          }
-          logProcessLifecycleSync({
-            event: 'start_restart_takeover_refused',
-            source: 'cli.start',
-            details: {
-              reason: 'explicit_start_restart_existing_runtime',
-              ports: occupied.map((item) => ({
-                port: item.port,
-                pids: item.pids,
-                healthy: item.healthy
-              }))
-            }
-          });
-          spinner.fail(`start --restart refuses to stop existing RouteCodex runtime on port-group: ${occupied.map((item) => item.port).join(', ')}`);
-          ctx.logger.error(`Use 'rcc restart --port ${resolvedPort} --host ${serverHost}' for in-session restart.`);
-          ctx.logger.error(`Use 'rcc stop --port ${resolvedPort}' before start only when an explicit stop is intended.`);
-          ctx.exit(1);
-        };
-        await refuseExplicitRestartTakeoverIfOccupied();
         if (shouldRestart && !daemonSupervisor) {
           startPortGroupLock = acquireStartPortGroupLock({
             fsImpl,
