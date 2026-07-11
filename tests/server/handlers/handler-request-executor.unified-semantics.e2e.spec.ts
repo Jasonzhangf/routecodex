@@ -490,8 +490,9 @@ const mockNativeExportsModule = () => ({
       },
     };
   }),
-  buildResponsesPayloadFromChatNative: jest.fn(),
-  projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.body ?? args?.payload ?? {}),
+  buildResponsesPayloadFromChatNative: jest.fn((payload: any) => payload),
+  projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.payload ?? args),
+  planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
   projectResponsesSseFrameForClientNative: jest.fn((args: any) => ({
     emit: true,
     frame: args?.frame ?? '',
@@ -503,6 +504,23 @@ const mockNativeExportsModule = () => ({
   })),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
+  classifyRuntimeErrorSignalNative: jest.fn(() => null),
+  shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  shouldLogRuntimeErrorSignalToConsoleNative: jest.fn(() => false),
+  shouldWriteClientToolErrorsampleNative: jest.fn(() => true),
+  resetSnapshotRecorderErrorsampleStateNative: jest.fn(() => undefined),
+  appendSnapshotStageTraceNative: jest.fn(({ trace }: { trace?: unknown[] }) => trace ?? []),
+  summarizeSnapshotStageTraceNative: jest.fn((trace: unknown[]) => trace),
+  shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
+  shouldInspectToolFailuresNative: jest.fn(() => false),
+  resolveRequestTailSummaryNative: jest.fn(() => null),
+  summarizeClientToolObservationNative: jest.fn(() => ({
+    topLevelKeys: [],
+    failureCount: 0,
+    toolMessageCount: 0,
+    failures: [],
+    toolMessages: [],
+  })),
   convertResponsesRequestToChatNative: jest.fn(),
   normalizeAssistantTextToToolCallsJson: jest.fn(),
   sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload)
@@ -528,9 +546,43 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrat
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
   },
-  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
-  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
-}));
+	  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+	  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test',
+	  detectRouteCodexProviderConfigFormatSync: () => 'toml',
+	  decodeRouteCodexProviderConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  coerceRouteCodexProviderConfigV2Sync: (parsed: unknown) => parsed,
+	  parseRouteCodexTomlRecordSync: () => ({}),
+	  serializeRouteCodexTomlRecordSync: (record: unknown) => JSON.stringify(record ?? {}),
+	  updateRouteCodexTomlStringScalarInTableSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  detectRouteCodexUserConfigFormatSync: () => 'toml',
+	  decodeRouteCodexUserConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  writeRouteCodexUserConfigFileNativeSync: jest.fn(),
+	  writeRouteCodexProviderConfigFileNativeSync: jest.fn(),
+	  updateRouteCodexUserConfigStringScalarNativeSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  loadRouteCodexConfigNativeSync: jest.fn(() => ({
+	    configPath: '/tmp/routecodex-test/config.toml',
+	    userConfig: {},
+	    providerProfiles: {}
+	  })),
+	  resolveRouteCodexProviderConfigV2IdentitySync: (input: { provider?: unknown; dirId?: string }) => ({
+	    providerId: String(input.dirId ?? 'test'),
+	    provider: input.provider && typeof input.provider === 'object' ? input.provider : {}
+	  }),
+	  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+	  planAuthFileResolutionNativeSync: jest.fn(() => ({ kind: 'literal', value: '' })),
+	  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({})),
+	  planProviderConfigRootNativeSync: jest.fn(() => ({})),
+	  resolveAuthFileKeyNativeSync: jest.fn(() => ''),
+	  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+	  planRouteCodexProviderConfigV2FilesSync: (fileNames: string[]) =>
+	    fileNames.map((fileName) => ({ fileName, isBaseFile: fileName === 'config.v2.toml' }))
+	}));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations.ts', () => ({
   executeHubPipelineNative: (handle: string, input: unknown) => {
     const execute = mockHubPipelineExecutors.get(handle);
@@ -545,9 +597,43 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrat
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
   },
-  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
-  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
-}));
+	  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+	  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test',
+	  detectRouteCodexProviderConfigFormatSync: () => 'toml',
+	  decodeRouteCodexProviderConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  coerceRouteCodexProviderConfigV2Sync: (parsed: unknown) => parsed,
+	  parseRouteCodexTomlRecordSync: () => ({}),
+	  serializeRouteCodexTomlRecordSync: (record: unknown) => JSON.stringify(record ?? {}),
+	  updateRouteCodexTomlStringScalarInTableSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  detectRouteCodexUserConfigFormatSync: () => 'toml',
+	  decodeRouteCodexUserConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  writeRouteCodexUserConfigFileNativeSync: jest.fn(),
+	  writeRouteCodexProviderConfigFileNativeSync: jest.fn(),
+	  updateRouteCodexUserConfigStringScalarNativeSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  loadRouteCodexConfigNativeSync: jest.fn(() => ({
+	    configPath: '/tmp/routecodex-test/config.toml',
+	    userConfig: {},
+	    providerProfiles: {}
+	  })),
+	  resolveRouteCodexProviderConfigV2IdentitySync: (input: { provider?: unknown; dirId?: string }) => ({
+	    providerId: String(input.dirId ?? 'test'),
+	    provider: input.provider && typeof input.provider === 'object' ? input.provider : {}
+	  }),
+	  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+	  planAuthFileResolutionNativeSync: jest.fn(() => ({ kind: 'literal', value: '' })),
+	  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({})),
+	  planProviderConfigRootNativeSync: jest.fn(() => ({})),
+	  resolveAuthFileKeyNativeSync: jest.fn(() => ''),
+	  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+	  planRouteCodexProviderConfigV2FilesSync: (fileNames: string[]) =>
+	    fileNames.map((fileName) => ({ fileName, isBaseFile: fileName === 'config.v2.toml' }))
+	}));
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations', () => ({
   executeHubPipelineNative: (handle: string, input: unknown) => {
     const execute = mockHubPipelineExecutors.get(handle);
@@ -562,9 +648,43 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrat
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
   },
-  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
-  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test'
-}));
+	  resolveRccSnapshotsDirNativeSync: () => '/tmp/routecodex-test/codex-samples',
+	  resolveRccUserDirNativeSync: () => '/tmp/routecodex-test',
+	  detectRouteCodexProviderConfigFormatSync: () => 'toml',
+	  decodeRouteCodexProviderConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  coerceRouteCodexProviderConfigV2Sync: (parsed: unknown) => parsed,
+	  parseRouteCodexTomlRecordSync: () => ({}),
+	  serializeRouteCodexTomlRecordSync: (record: unknown) => JSON.stringify(record ?? {}),
+	  updateRouteCodexTomlStringScalarInTableSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  detectRouteCodexUserConfigFormatSync: () => 'toml',
+	  decodeRouteCodexUserConfigTextSync: (input: { raw?: string }) => ({
+	    format: 'toml',
+	    parsed: input.raw ? { raw: input.raw } : {}
+	  }),
+	  writeRouteCodexUserConfigFileNativeSync: jest.fn(),
+	  writeRouteCodexProviderConfigFileNativeSync: jest.fn(),
+	  updateRouteCodexUserConfigStringScalarNativeSync: (input: { raw?: string }) => String(input.raw ?? ''),
+	  loadRouteCodexConfigNativeSync: jest.fn(() => ({
+	    configPath: '/tmp/routecodex-test/config.toml',
+	    userConfig: {},
+	    providerProfiles: {}
+	  })),
+	  resolveRouteCodexProviderConfigV2IdentitySync: (input: { provider?: unknown; dirId?: string }) => ({
+	    providerId: String(input.dirId ?? 'test'),
+	    provider: input.provider && typeof input.provider === 'object' ? input.provider : {}
+	  }),
+	  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+	  planAuthFileResolutionNativeSync: jest.fn(() => ({ kind: 'literal', value: '' })),
+	  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({})),
+	  planProviderConfigRootNativeSync: jest.fn(() => ({})),
+	  resolveAuthFileKeyNativeSync: jest.fn(() => ''),
+	  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+	  planRouteCodexProviderConfigV2FilesSync: (fileNames: string[]) =>
+	    fileNames.map((fileName) => ({ fileName, isBaseFile: fileName === 'config.v2.toml' }))
+	}));
 
 jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provider-response-converter.js', () => ({
   convertProviderResponseIfNeeded: mockConvertProviderResponseIfNeeded
@@ -574,85 +694,19 @@ jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/provi
 }));
 
 jest.unstable_mockModule('../../../src/server/runtime/http-server/servertool-admin-state.js', () => ({
-  isServerToolEnabled: () => false
+  getServerToolRuntimeState: () => ({ enabled: false }),
+  isServerToolEnabled: () => false,
+  logServerToolFiring: jest.fn(),
+  readServerToolStatsSnapshot: jest.fn(() => ({})),
+  setServerToolEnabled: jest.fn(() => ({ enabled: false }))
 }));
 jest.unstable_mockModule('../../../src/server/runtime/http-server/servertool-admin-state.ts', () => ({
-  isServerToolEnabled: () => false
+  getServerToolRuntimeState: () => ({ enabled: false }),
+  isServerToolEnabled: () => false,
+  logServerToolFiring: jest.fn(),
+  readServerToolStatsSnapshot: jest.fn(() => ({})),
+  setServerToolEnabled: jest.fn(() => ({ enabled: false }))
 }));
-
-const buildResponsesSseBridgeDirectMockModule = () => {
-  return {
-    createChatJsonToSseConverterForHttp: jest.fn(async () => ({
-      convertResponseToJsonToSse: async (payload: any) => Readable.from([
-        'event: response.completed\n',
-        `data: ${JSON.stringify(payload)}\n\n`
-      ])
-    })),
-    createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
-      convertResponseToJsonToSse: async (payload: any) => Readable.from([
-        'event: response.completed\n',
-        `data: ${JSON.stringify(payload)}\n\n`
-      ])
-    })),
-    prepareResponsesJsonSseDispatchPlanForHttp: jest.fn(async (args: any) => ({
-      normalizedPayload: args?.responsesPayload,
-      sanitizedPayload: args?.responsesPayload,
-      streamIntent: 'stream'
-    })),
-    resolveResponsesRequestContextForHttp: jest.fn(({ fallback }: any) => fallback),
-    prepareResponsesJsonBodyForSseBridgeForHttp: jest.fn((args: any) => args?.body ?? args),
-    normalizeResponsesJsonBodyForHttp: jest.fn((payload: any) => payload),
-    normalizeResponsesSseFrameForClientForHttp: jest.fn((args: any) => args?.frame ?? ''),
-    projectResponsesClientPayloadForClientForHttp: jest.fn((payload: any) => payload),
-    sanitizeDirectPassthroughResponsesSseFrameForHttp: jest.fn((frame: string) => frame),
-    shouldDispatchResponsesSseToClientForHttp: jest.fn((args: any) => args?.forceSSE === true),
-    shouldRequireResponsesTerminalEventForHttp: jest.fn(() => false),
-    shouldReprojectRelayResponsesSseForHttp: jest.fn(() => false),
-    isDirectPassthroughTransportKeepaliveFrameForHttp: jest.fn(() => false),
-    isToolCallContinuationResponseForHttp: jest.fn(() => false),
-    assertDirectPassthroughResponsesSseFrameForHttp: jest.fn(),
-    assertDirectPassthroughResponsesSseMetadataIsolationForHttp: jest.fn(),
-    buildResponsesMissingSseBridgeErrorPayloadForHttp: jest.fn((requestLabel: string, status: number) => ({ error: { requestLabel, status, message: 'missing stream' } })),
-    buildResponsesSseErrorPayloadForHttp: jest.fn((args: any) => ({ error: args })),
-    buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn(() => ({})),
-    buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => ({})),
-    buildResponsesPayloadFromChatForHttp: jest.fn((payload: any) => payload),
-    buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-    inspectResponsesContinuationProbeForHttp: jest.fn(() => undefined),
-    inspectResponsesTerminalStateFromSseChunkForHttp: jest.fn((args: any) => ({ finishReason: args?.finishReason, seenTerminalEvent: args?.seenTerminalEvent ?? false, sawTerminalChunk: args?.sawTerminalChunk ?? false, sawResponsesCompletedChunk: args?.sawResponsesCompletedChunk ?? false, sawResponsesDoneEvent: args?.sawResponsesDoneEvent ?? false, sawAssistantMessageDoneTerminal: args?.sawAssistantMessageDoneTerminal ?? false, requiresResponsesTerminalEvent: args?.requiresResponsesTerminalEvent ?? false, terminalSource: args?.terminalSource, pendingTerminalEvent: args?.pendingTerminalEvent })),
-    normalizeChatUsagePayloadForHttp: jest.fn((payload: any) => ({ normalized: false, payload })),
-    normalizeResponsesClientPayloadForHttp: jest.fn((payload: any) => payload),
-    planResponsesContinuationCloseActionForHttp: jest.fn(() => ({})),
-    planResponsesStreamEndRepairForHttp: jest.fn(() => ({ shouldRepairTerminalFrames: false })),
-    prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async ({ body }: any) => ({ clientBody: body, sanitizedBody: body, finishReason: detectToolCallFinishReason(body) })),
-    requireResponsesHandlerCoreDist: jest.fn(() => ({})),
-    resolveResponsesClientPayloadFinishReasonForHttp: jest.fn(() => undefined),
-    resolveResponsesProviderProtocolHintFromSseFrameForHttp: jest.fn(() => undefined),
-    resolveRelayResponsesClientSseStreamForHttp: jest.fn(async () => undefined),
-    resolveResponsesTerminalProbeFinishReasonForHttp: jest.fn(() => undefined),
-    summarizeResponsesSseFrameForLogForHttp: jest.fn(() => null),
-    importResponsesHandlerCoreDist: jest.fn(async () => ({})),
-    planResponsesHandlerStreamForHttp: jest.fn((args: any) => ({
-      outboundStream: args?.forceStream === true ? true : Boolean(args?.acceptsSse),
-      requestStartMeta: {},
-      streamIntent: args?.forceStream === true || args?.acceptsSse ? 'stream' : 'non_stream'
-    })),
-    clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
-    resolveResponsesConversationClearReasonForHttp: jest.fn(() => undefined),
-    shouldClearResponsesConversationOnClientCloseForHttp: jest.fn(() => false),
-    shouldClearResponsesConversationOnFailureForHttp: jest.fn(() => false)
-  };
-};
-
-jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge/responses-response-bridge.js',
-  buildResponsesSseBridgeDirectMockModule
-);
-jest.unstable_mockModule(
-  '../../../src/modules/llmswitch/bridge/responses-response-bridge.ts',
-  buildResponsesSseBridgeDirectMockModule
-);
-
 
 const { createRequestExecutor, __requestExecutorTestables } = await import(
   '../../../src/server/runtime/http-server/request-executor.js'
