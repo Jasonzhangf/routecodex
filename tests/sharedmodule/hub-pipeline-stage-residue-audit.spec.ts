@@ -3389,9 +3389,9 @@ describe('hub pipeline stage residue audit', () => {
     const scannedFiles = [
       'src/utils/session-log-color.ts',
       'src/modules/llmswitch/bridge/routing-integrations.ts',
-      'src/types/rcc-llmswitch-core.d.ts',
       'sharedmodule/llmswitch-core/package.json',
     ];
+    expect(fs.existsSync(path.join(repoRoot, 'src/types/rcc-llmswitch-core.d.ts'))).toBe(false);
     const findings = scannedFiles.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
       return [
