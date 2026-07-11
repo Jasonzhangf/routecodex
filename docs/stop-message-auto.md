@@ -91,8 +91,8 @@ Provider response
 - Rust persisted lookup / session scope owner: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs`
 - Stopless loop state owner: request-scoped MetadataCenter `runtime_control.stopless` plus current request tool output; goal state is removed.
 - NAPI bridge: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- TS native thin wrapper: `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts`
-- TS execution shell: `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
+- Host native thin shell: `src/modules/llmswitch/bridge/native-exports.ts`
+- Runtime side effects: Rust effect plans plus Host IO execution; old `sharedmodule/llmswitch-core/src/native/router-hotpath/native-servertool-core-semantics.ts` and `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` are deleted and must not be restored.
 - Focused tests: `tests/servertool/stopless-cli-continuation.spec.ts`
 
 ## 7. 验证

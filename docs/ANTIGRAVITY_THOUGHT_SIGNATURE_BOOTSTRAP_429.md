@@ -55,19 +55,14 @@ Replay 同样以内部 followup 方式执行，并携带 `__shadowCompareForcedP
 - preflight 返回仍含 `error` 且 `status` 为 `429/400`：停止 bootstrap，返回原始错误（让 Host 的 provider retry / route fallback 逻辑接管）。
 - 通过 runtime metadata `antigravityThoughtSignatureBootstrapAttempted` 做一次性防重入。
 
-## 实现位置（代码入口）
+## 实现状态（代码入口）
 
-- ServerTool auto handler：
-  - `sharedmodule/llmswitch-core/src/servertool/handlers/antigravity-thought-signature-bootstrap.ts`
-- ServerTool orchestration 二阶段（preflight + replay）：
-  - `sharedmodule/llmswitch-core/src/servertool/engine.ts`
-- 允许该 flow 在 followup 中继续执行 servertools（仅白名单 flow）：
-  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
-- `clock.get` followup 清理 `tool_config`（避免被锁死在 clock-only）：
-  - `sharedmodule/llmswitch-core/src/servertool/handlers/clock.ts`
+- 本文描述的是历史 bootstrap 方案；列出的 llmswitch-core TS servertool / provider-response 入口已物理删除，不是当前 runtime 入口。
+- 若重新接入该 flow，必须落到 Rust `servertool-core` / `router-hotpath-napi` owner，并通过 `src/modules/llmswitch/bridge/*` Host N-API 壳执行；禁止恢复旧 `sharedmodule/llmswitch-core/src/servertool/**` 或 `conversion/hub/response/provider-response.ts`。
+- 当前可复用的 active 基础能力是 Rust Gemini/OpenAI codec 对 `thoughtSignature` / `thought_signature` 的保留与投影，以及 `sharedmodule/llmswitch-core/src/conversion/compat/profiles/chat-gemini.json` 的 compat profile authoring 数据。
 - Antigravity/Gemini provider 将 429/400(signature) 以 response 形式回传（让 llmswitch-core 能编排）：
   - `src/providers/core/runtime/gemini-http-provider.ts`
-  - `src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 历史 `src/providers/core/runtime/gemini-cli-http-provider.ts` 已删除，不能作为当前入口引用。
 
 ## 与 `docs/SERVERTOOL_CLOCK_DESIGN.md` 的关系
 
@@ -77,4 +72,3 @@ Replay 同样以内部 followup 方式执行，并携带 `__shadowCompareForcedP
 - followup 必须请求 `clock.get`（不是 list）
 
 Clock 的职责仍然是“时间/闹钟”，thoughtSignature bootstrap 仅把它当成可控、低风险、可强制调用的 servertool 触发器。
-

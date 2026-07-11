@@ -35,13 +35,11 @@ HubRespChatProcess03Governed
 
 基于当前仓内审计，现状是：
 
-- Rust 已具备部分 servertool 热路径语义与 plan/export 能力；
-- 但真实 servertool 执行主链仍在 TS：
+- Rust 已具备 servertool 热路径语义与 plan/export 能力；
+- 旧真实 servertool TS 执行主链已经物理删除，不得恢复：
   - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts`
-- handler 注册仍是代码 side-effect 注册，不是 JSON skeleton 驱动；
-- `reasoning.stop / clock / stop_message_auto / continue_execution / web_search` 仍有 TS 业务真相残留；
-- `.bak` 与历史过渡逻辑仍在主路径附近，说明尚未完成真正收敛。
+- 当前剩余工作不是恢复 TS handler 注册，而是继续保证 Rust `servertool-core` / `router-hotpath-napi` 是唯一语义 owner，并用 residue gates 防止旧 TS servertool files 回潮。
 
 因此本文的设计目标不是“Rust 增量增强”，而是 **把 servertool 定义为 router-hotpath-napi 内的一个完整原生子系统**，TS 仅保留 transport shell。
 
@@ -555,7 +553,6 @@ servertool 的真正骨架层：
 
 可临时保留：
 
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-router-hotpath.ts`
 - `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
 - 少量 transport bridge helper
 
