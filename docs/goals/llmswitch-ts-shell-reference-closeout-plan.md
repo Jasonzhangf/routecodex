@@ -898,3 +898,15 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Deleted `src/modules/llmswitch/bridge/response-converter.ts` after exact reference scans showed it was only a forwarding shell to `provider-response-converter-host.ts`.
 - Rewired the server provider response converter and focused tests to mock/import `src/modules/llmswitch/bridge/provider-response-converter-host.js` directly.
 - Added the deleted forwarding shell to deleted-path/residue gates so future tests cannot keep using it as a compatibility facade.
+
+### 2026-07-11 remaining bridge `.ts` mock audit
+
+- Source-tracked exact scan currently finds only three active `.ts` bridge mock registrations, all in `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`:
+  - `runtime-integrations.ts`
+  - `native-exports.ts`
+  - `routing-integrations.ts`
+- These are test-only Jest ESM mock IDs, not production importers. Strict shell reference audit still passes with `prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`, and `coreModuleSubpathRefs=2` note-only.
+- Directly deleting those three `.ts` mock registrations is not safe: the focused e2e then stops hitting the intended `runtime-integrations` / `native-exports` / `routing-integrations` mocks and runs through the real bridge path, causing 16 handler/request-executor failures around continuation/request-context/SSE fixture behavior.
+- Broad Jest `moduleNameMapper` canonicalization and absolute extensionless mock registration were both tested and did not make the `.ts` module identity hit the same mock as the production `.js`/extensionless imports. Do not repeat those approaches.
+- The closeout route is a test-harness restructure, not a runtime change and not JS backfill: split this e2e away from source-file `.ts` module IDs, or move it to an allowed native-handle/server boundary fixture where production `.js` imports and Jest's stripped extensionless ID are the only mock surfaces.
+- Verification gap: the focused e2e is currently red on the broader dirty worktree even after reverting the failed `.ts`-mock-removal experiment, so this audit does not claim behavior closure. It only records that the remaining `.ts` bridge refs are test harness identity locks requiring a separate harness slice.
