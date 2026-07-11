@@ -1019,6 +1019,17 @@ chains:
         semantic_input: "port + status=shutdown-intent + notes.source=cli.stop"
         semantic_output: "instance.json status promoted to shutdown-intent on stop request"
         status: anchored
+      - step_id: rtl-13
+        from_node: ServerStartCommand
+        to_node: StartRestartTakeoverGuard
+        caller_symbol: createStartCommand
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: refuseExplicitRestartTakeoverIfOccupied
+        callee_file: src/cli/commands/start.ts
+        owner_feature_id: runtime.lifecycle.start_command
+        semantic_input: "explicit --restart start request plus resolved port group and listener/health observations"
+        semantic_output: "existing runtime is refused before stop-intent or /shutdown; stopped target may proceed to start"
+        status: anchored
 
   - chain_id: stopless.session.mainline
     summary: "Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."

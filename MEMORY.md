@@ -1246,6 +1246,14 @@
   - managed `routecodex restart --port 5555` moved live `/health.version` on both `5555` and `5520` to `0.90.3596`
   - same-entry `/v1/responses` probe `/tmp/p0-rust-live-5555-after-restart.json` showed first-turn stopless `exec_command`, no leaked stop schema, and continuation completion
 
+# 2026-07-11: restart must stay in original managed session
+
+- Correction to 2026-07-06 restart adoption rule: `restart.ts` must not compare live `/health.version` and spawn `start --restart --port <target>`. That creates a new start/session takeover and can stop the originally started server/session.
+- Current restart truth: `rcc restart` / `routecodex restart --port <port>` requests restart from the existing process/session. It uses `/daemon/restart-process` when authorized, otherwise sends `SIGUSR2` to target listener pid(s). With a managed start parent, child exit code 75 is handled by the original parent supervisor in the same session.
+- `runtime.lifecycle.restart_command` owns `src/cli/commands/restart.ts`; required regression tests are `tests/cli/restart-command.spec.ts` and `tests/cli/restart-command.probe-host.spec.ts`.
+- Verified release evidence on 2026-07-11: global install `routecodex/rcc 0.90.3868` from `~/.rcc/install/current -> releases/routecodex-0.90.3868-2026-07-11T125522Z`; installed dist has 0 matches for `adoptCurrentRuntimeViaStart|targetsNeedRuntimeAdoption|getExpectedVersion|start --restart`; explicit global `rcc restart --port 5555 --host 127.0.0.1` reported in-place signal restart, kept original `start --snap` parent PID `85830`, and replaced child `23167 -> 24868` under the same parent; `/health` on `5555`, `5520`, and `10000` returned ok/ready/pipelineReady version `0.90.3868`.
+- Final release evidence on 2026-07-11 supersedes the same-day `0.90.3868` snapshot after another install overwrote `~/.rcc/install/current` to `0.90.3879`: final global install is `routecodex/rcc 0.90.3869` from `~/.rcc/install/current -> releases/routecodex-0.90.3869-2026-07-11T131712Z`; installed dist has 0 matches for `adoptCurrentRuntimeViaStart|targetsNeedRuntimeAdoption|getExpectedVersion|start --restart`; explicit installed `rcc restart --port 5555 --host 127.0.0.1` reported in-place signal restart, kept original `start --snap` parent PID `49609`, and replaced child `82268 -> 85819` under the same parent; `/health` on `5555`, `5520`, and `10000` returned ok/ready/pipelineReady version `0.90.3869`, and `routecodex port status 5555 --json` returned `ok:true`, `localPort:5555`, `routingPolicyGroup:"gateway_priority_5555"`.
+
 # 2026-07-06: Runtime config materialization is Rust-owned and JSON config support is removed
 
 - Rust SSOT: RouteCodex runtime manifest / VR bootstrap materialization is owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs` through `compileRouteCodexRuntimeManifestJson`.
@@ -2222,3 +2230,17 @@
 - Direct-owned `/v1/responses` continuation restore must promote the stored direct `providerKey` into request-scoped `MetadataCenter.runtime_control.retryProviderKey`; Rust Virtual Router consumes that field to force same-provider direct continuation.
 - Relay-owned continuation must not write `retryProviderKey`. Keeping `responsesResume.providerKey` only in continuation context is not enough for direct provider pin, and reading provider pin from relay or flat legacy metadata is forbidden.
 - Verified regression evidence: direct continuation blackbox hits `["p1","p1"]` with `default/forced`; relay blackbox hits `["p1","p2"]`, proving relay remains unpinned.
+
+# 2026-07-11: Process lifecycle logger preserves nested error semantics
+
+- Marker: process-lifecycle-nested-error-20260711.
+- `process-lifecycle.jsonl` failure records with `details.error={}` are silent-failure bugs in the lifecycle logger, not acceptable evidence. The unique owner is `src/utils/process-lifecycle-logger.ts`; fix recursive serialization there rather than adding caller-specific message fields.
+- Verified fixed behavior: installed `0.90.3872` recursively serializes nested `Error` values with `name`, `message`, `stack`, `cause`, and extra fields such as `code`. Focused logger/port-utils tests, TypeScript, runtime lifecycle gate, function-map gate, `build:base`, global install, live health on 5555/5520/10000, and installed-dist logger probe passed.
+
+# 2026-07-11: install-release must not use start --restart takeover
+
+- Marker: install-release-no-start-restart-20260711.
+- Root cause of the remaining "restart closes server" symptom: release/install verification could still invoke `rcc start --restart --port <port>` and `/shutdown` adoption even after `restart.ts` was fixed. That path stops the existing managed process/session instead of asking the original session to restart.
+- Current rule: if live `/health` exists, install-release uses installed `rcc restart --port <port> --host <host>`; if live health is unavailable, it may use daemon `rcc start --no-restart --port <port>` only for a stopped target. Version mismatch after restart is a visible failure, not a takeover.
+- Verified current global evidence: installed truth is `routecodex/rcc/~/.rcc/install/current/package.json` all `0.90.3874`; `/health` on `5555`, `5520`, `10000`, and `4444` all reports ok/ready/pipelineReady `0.90.3874`.
+- Lifecycle evidence after the install window: `process-lifecycle.jsonl` shows `SIGUSR2 -> restart_delegate_parent_supervisor -> exitCode 75` under the original `start --snap` parent and no new `port_http_shutdown`/`shutdown_route` from install-release adoption.

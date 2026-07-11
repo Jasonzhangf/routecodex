@@ -18,6 +18,7 @@ node_ids:
   - ServerRestartCommand
   - ServerStartCommand
   - ServerStopCommand
+  - StartRestartTakeoverGuard
   - StartShutdownHandler
   - StopIntentRecord
 edges:
@@ -103,6 +104,13 @@ edges:
     to_node: RuntimeInstanceRecord
     status: anchored
     owner_feature_id: runtime.lifecycle.instance_registry
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-13
+    from_node: ServerStartCommand
+    to_node: StartRestartTakeoverGuard
+    status: anchored
+    owner_feature_id: runtime.lifecycle.start_command
     binding_pending: null
     split_binding_id: null
 verification:

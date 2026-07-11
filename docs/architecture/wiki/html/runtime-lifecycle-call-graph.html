@@ -139,6 +139,7 @@
         <p>Managed server lifecycle: <code>ROUTECODEX_SESSION_DIR</code> is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and <code>tmuxSessionId</code> / request <code>sessionId</code> / <code>conversationId</code> stay separate namespaces rather than directory-derived identity.</p>
         <p>Entry contract: <code>ServerPidCacheRecord</code> via <code>docs/design/server-runtime-lifecycle-ssot.md</code></p>
         <pre class="mermaid">flowchart LR
+          StartRestartTakeoverGuard[&quot;StartRestartTakeoverGuard&quot;]
           StartShutdownHandler[&quot;StartShutdownHandler&quot;]
           DaemonRestartLoop[&quot;DaemonRestartLoop&quot;]
           DaemonSupervisorLoop[&quot;DaemonSupervisorLoop&quot;]
@@ -162,6 +163,7 @@
           ServerStartCommand --&gt;|rtl-10| RuntimeInstanceRecord
           StartShutdownHandler --&gt;|rtl-11| RuntimeInstanceRecord
           ServerStopCommand --&gt;|rtl-12| RuntimeInstanceRecord
+          ServerStartCommand --&gt;|rtl-13| StartRestartTakeoverGuard
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -175,7 +177,8 @@
           class RuntimeInstanceRecord anchored;
           class DaemonSupervisorLoop anchored;
           class DaemonRestartLoop anchored;
-          class StartShutdownHandler anchored;</pre>
+          class StartShutdownHandler anchored;
+          class StartRestartTakeoverGuard anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -192,6 +195,7 @@
         <tr><td>rtl-10</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-11</td><td><code>StartShutdownHandler -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-12</td><td><code>ServerStopCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; updateRuntimeInstanceStatus</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
+        <tr><td>rtl-13</td><td><code>ServerStartCommand -&gt; StartRestartTakeoverGuard</code></td><td>anchored</td><td><code>createStartCommand -&gt; refuseExplicitRestartTakeoverIfOccupied</code></td><td></td><td><code>runtime.lifecycle.start_command</code>&lt;br/&gt;CLI start owns server process launch and must not hide restart semantics behind explicit start --restart takeover</td></tr>
         </tbody>
         </table>
         <h2>Other Chains</h2>

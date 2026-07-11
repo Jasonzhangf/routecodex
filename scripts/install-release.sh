@@ -228,70 +228,32 @@ verify_runtime_health() {
     node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&typeof body.version==='string'&&body.version!==expected){console.log(body.version);process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
   }
 
-  write_release_adoption_stop_intent() {
-    node - "$VERIFY_PORT" <<'NODE'
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const port = Number(process.argv[2]);
-if (!Number.isFinite(port) || port <= 0) process.exit(1);
-const rawHome = String(process.env.RCC_HOME || process.env.ROUTECODEX_USER_DIR || process.env.ROUTECODEX_HOME || '').trim();
-const home = rawHome
-  ? path.resolve(rawHome.startsWith('~/') ? path.join(os.homedir(), rawHome.slice(2)) : rawHome)
-  : path.join(os.homedir(), '.rcc');
-const filePath = path.join(home, 'state', 'runtime-lifecycle', 'ports', String(Math.floor(port)), 'stop-intent.json');
-fs.mkdirSync(path.dirname(filePath), { recursive: true });
-fs.writeFileSync(filePath, JSON.stringify({
-  port: Math.floor(port),
-  requestedAtMs: Date.now(),
-  source: 'install-release.runtime-version-adoption',
-  pid: process.pid
-}), 'utf8');
-NODE
+  probe_release_runtime_available() {
+    curl -fsS --max-time 2 "$VERIFY_HEALTH_URL" >/dev/null 2>&1
   }
 
-  wait_until_health_unavailable() {
-    local attempt=1
-    local max_attempts=80
-    while [ "$attempt" -le "$max_attempts" ]; do
-      if ! curl -fsS --max-time 1 "$VERIFY_HEALTH_URL" >/dev/null 2>&1; then
-        return 0
-      fi
-      sleep 0.5
-      attempt=$((attempt + 1))
-    done
-    return 1
+  restart_release_runtime_for_port() {
+    ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
+    ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
+    RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
+    rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"
   }
 
-  adopt_release_runtime_for_port() {
-    local previous_version="$1"
-    echo "🔁 检测到 live runtime version=${previous_version}，执行 release snapshot 单端口接管: ${VERIFY_HOST}:${VERIFY_PORT}"
-    write_release_adoption_stop_intent
-    curl -fsS --max-time 3 -X POST "${VERIFY_BASE_URL}/shutdown" \
-      -H "x-routecodex-stop-caller-pid: $$" \
-      -H "x-routecodex-stop-caller-ts: $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      -H "x-routecodex-stop-caller-cwd: ${PWD}" \
-      -H "x-routecodex-stop-caller-cmd: scripts/install-release.sh" \
-      >/dev/null
-    if ! wait_until_health_unavailable; then
-      fail "旧 runtime 未在 stop-intent + /shutdown 后释放 ${VERIFY_HOST}:${VERIFY_PORT}"
-    fi
-    start_release_runtime_for_port
-  }
-
-  start_release_runtime_for_port() {
+  start_release_runtime_when_stopped() {
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
     ROUTECODEX_START_DAEMON=1 \
     RCC_START_DAEMON=1 \
     ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
     RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
-    rcc start --restart --port "$VERIFY_PORT"
+    rcc start --no-restart --port "$VERIFY_PORT"
   }
 
-  ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
-  ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
-  RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
-  rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST" || start_release_runtime_for_port
+  if probe_release_runtime_available; then
+    restart_release_runtime_for_port
+  else
+    echo "ℹ️  ${VERIFY_HEALTH_URL} 当前不可用，按 stopped 状态启动 release runtime"
+    start_release_runtime_when_stopped
+  fi
 
   local attempt=1
   local max_attempts=20
@@ -306,8 +268,11 @@ NODE
       fi
       wrong_version="$(health_reports_ready_wrong_version "$health_dump" || true)"
       if [ -n "$wrong_version" ]; then
-        adopt_release_runtime_for_port "$wrong_version"
-        break
+        echo "❌ live runtime version 仍不匹配: ${VERIFY_HEALTH_URL} expected=${EXPECTED_VERSION} actual=${wrong_version}"
+        echo "最近一次响应:"
+        cat "$health_dump"
+        rm -f "$health_dump"
+        exit 1
       fi
     fi
     sleep 1

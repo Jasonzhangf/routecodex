@@ -108,9 +108,18 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 `rcc restart --port 5555`：
 
 1. `status(port)`。
-2. `stopped` → 直接 `start`。
-3. `running` / `degraded` → `stop` → 等 released → `start`。
-4. `port-conflict` → fail-fast 报 `port-conflict`，要求用户手动处理。
+2. `stopped` → fail-fast 提示先 `start`；`restart` 不负责新建 detached session。
+3. `running` / `degraded` → 请求现有进程重启：优先 `/daemon/restart-process`，否则只对目标 listener pid 发 `SIGUSR2`。
+4. 受管 `start` parent 存在时，server child 以 restart code `75` 退出，由原 parent supervisor 在原 session 内重新拉起 child。
+5. `port-conflict` → fail-fast 报 `port-conflict`，要求用户手动处理。
+6. 禁止 `restart` 命令自行 spawn `start --restart` 接管；版本落后也必须通过原进程/原 supervisor 重启。
+7. install/release 验证也不得用 `start --restart` 或 `/shutdown` 接管旧 runtime；live runtime 存在时只能调用 `rcc restart`，重启后版本仍不匹配则显式失败。
+
+`rcc start --restart --port 5555`：
+
+1. 这不是 restart transport。若目标端口/端口组已有 listener 或健康 RouteCodex runtime，必须在写 stop-intent 和调用端口释放逻辑之前 fail-fast。
+2. 用户需要原 session 内重启时使用 `rcc restart --port 5555`。
+3. 只有目标确认处于 stopped/free 状态时，`start` 才能继续 launch；若需要显式停止，必须走 `rcc stop` 或明确 destructive/exclusive 流程。
 
 `rcc start --port 5555`：
 

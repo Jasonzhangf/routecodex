@@ -2626,6 +2626,24 @@ verification:
     notes:
       - "Restart command must request restart from the existing process/session via /daemon/restart-process or SIGUSR2; it must not spawn start --restart as a takeover path when live version differs."
 
+  - feature_id: runtime.lifecycle.start_command
+    change_risk: medium
+    unit:
+      - src/cli/commands/start.ts
+      - scripts/install-release.sh
+    contract:
+      - tests/cli/start-command.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
+    integration:
+      - tests/cli/start-command.spec.ts
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Explicit `start --restart` must fail before stop-intent or /shutdown when a runtime already exists. Install release verification must use in-session `rcc restart` for live runtime and `rcc start --no-restart` only when the target is stopped."
+
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium
     unit:
