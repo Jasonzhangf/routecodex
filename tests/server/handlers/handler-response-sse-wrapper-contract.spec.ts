@@ -37,12 +37,13 @@ describe('response SSE wrapper contract', () => {
   });
 
   it('does not expose a body-level sseStream predicate as a canonical bridge builder', () => {
-    const responseBridge = readRepoFile('src/modules/llmswitch/bridge/responses-response-bridge.ts');
+    const handler = readRepoFile('src/server/handlers/handler-response-utils.ts');
+    const sseHandler = readRepoFile('src/server/handlers/handler-response-sse.ts');
 
     expect(existsSync(resolve(root, 'src/modules/llmswitch/bridge/index.ts'))).toBe(false);
     expect(existsSync(resolve(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
 
-    for (const source of [responseBridge]) {
+    for (const source of [handler, sseHandler]) {
       expect(source).not.toContain('hasResponsesSsePayloadForHttp');
       expect(source).not.toContain('hasSsePayload:');
       expect(source).not.toContain('args.hasSsePayload');

@@ -25,7 +25,7 @@ describe('server responses SSE surface single owner', () => {
   it('keeps handler-response-utils transport-only without continuation save owner', () => {
     const source = readFileSync(join(root, 'src/server/handlers/handler-response-utils.ts'), 'utf8');
 
-    expect(source).toContain("from '../../modules/llmswitch/bridge/responses-response-bridge.js'");
+    expect(source).toContain('prepareResponsesJsonClientDispatchPlanForHttp');
     expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
   });
 
@@ -34,17 +34,17 @@ describe('server responses SSE surface single owner', () => {
   });
 
   it('does not let responses-response-bridge own SSE semantic helpers', () => {
-    const source = readFileSync(join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'), 'utf8');
+    const source = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 
     for (const forbiddenExport of [
-      'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
-      'export function inspectResponsesContinuationProbeForHttp(',
-      'export function planResponsesStreamEndRepairForHttp(',
-      'export function resolveResponsesTerminalProbeFinishReasonForHttp(',
-      'export function shouldRequireResponsesTerminalEventForHttp(',
-      'export async function createResponsesJsonToSseConverterForHttp(',
-      'export async function projectResponsesSseFrameForClientForHttp(',
-      'export async function normalizeResponsesSseFrameForClientForHttp(',
+      'inspectResponsesTerminalStateFromSseChunkForHttp',
+      'inspectResponsesContinuationProbeForHttp',
+      'planResponsesStreamEndRepairForHttp',
+      'resolveResponsesTerminalProbeFinishReasonForHttp',
+      'shouldRequireResponsesTerminalEventForHttp',
+      'createResponsesJsonToSseConverterForHttp',
+      'projectResponsesSseFrameForClientForHttp',
+      'normalizeResponsesSseFrameForClientForHttp',
     ]) {
       expect(source).not.toContain(forbiddenExport);
     }
