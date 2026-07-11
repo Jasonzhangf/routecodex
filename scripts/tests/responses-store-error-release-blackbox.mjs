@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import express from 'express';
+import { getResponsesConversationStoreDebugStats } from '../helpers/llmswitch-direct-native.mjs';
 
 function setEnv(name, value) {
   const old = process.env[name];
@@ -102,11 +103,7 @@ async function createHarness(userConfig) {
 }
 
 async function getStoreStats() {
-  const store = await import('../../dist/modules/llmswitch/bridge/responses-conversation-store-host.js');
-  if (typeof store.getResponsesConversationStoreDebugStats !== 'function') {
-    throw new Error('responses conversation store debug stats unavailable');
-  }
-  return store.getResponsesConversationStoreDebugStats();
+  return getResponsesConversationStoreDebugStats();
 }
 
 async function main() {

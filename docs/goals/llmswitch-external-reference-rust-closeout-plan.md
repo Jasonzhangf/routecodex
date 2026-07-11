@@ -184,3 +184,25 @@ Then replay the same endpoint/sample that proves the installed runtime consumes 
   - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-call-id-style-route-wins.mjs`
 - Exact source scan for those five touched scripts now returns zero `dist/modules/llmswitch/bridge/native-exports.js` references.
 - Remaining `dist/modules/llmswitch/bridge/native-exports.js` source references are docs/memory history plus release-install surface verification; no new runtime semantic owner was introduced.
+
+## 2026-07-11 Remaining blackbox bridge refs contracted to direct native helper
+
+- Added `scripts/helpers/llmswitch-direct-native.mjs` for script-only direct native access to:
+  - `hubPipelineVirtualRouterStatusJson`
+  - `executeResponsesConversationStoreOperationJson`
+- Migrated the remaining active blackbox/script references away from host bridge dist runtime files:
+  - `scripts/tests/provider-failure-ban-blackbox.mjs`
+  - `scripts/tests/responses-continuation-provider-key-blackbox.mjs` (relay-only seed path)
+  - `scripts/tests/responses-store-error-release-blackbox.mjs`
+- Exact source scan now leaves `dist/modules/llmswitch/bridge/*` only in `scripts/verify-rcc-release-install.mjs`, where the import is an install-surface compatibility contract rather than a runtime/test semantic owner.
+- Validation:
+  - `node --check` passed for `scripts/helpers/llmswitch-direct-native.mjs` and the 3 touched blackbox scripts.
+  - Exact source scan under `scripts tests sharedmodule/llmswitch-core/scripts` now reports only `scripts/verify-rcc-release-install.mjs` for `dist/modules/llmswitch/bridge/*`.
+  - `node scripts/tests/provider-failure-ban-blackbox.mjs` passed after the helper was aligned to the same native registry precedence as the runtime.
+  - `node scripts/tests/responses-store-error-release-blackbox.mjs` passed.
+  - `RCC_CONTINUATION_SCENARIO=relay node scripts/tests/responses-continuation-provider-key-blackbox.mjs` passed, proving the touched relay branch works with the direct native helper.
+  - `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json` passed.
+  - `npm run verify:llmswitch-rustification-audit -- --json` passed.
+  - `git diff --check` passed.
+- Residual risk:
+  - The full `node scripts/tests/responses-continuation-provider-key-blackbox.mjs` still fails in the untouched `direct` scenario because current runtime behavior routes the resumed continuation to `p2` instead of preserving the expected `p1` pin. This is a pre-existing runtime regression outside the relay-branch reference-contraction slice and must be fixed at the direct continuation owner before this blackbox can be fully green.

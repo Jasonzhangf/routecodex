@@ -8,7 +8,7 @@ import path from 'node:path';
 import express from 'express';
 import {
   getHubPipelineVirtualRouterStatusNative
-} from '../../dist/modules/llmswitch/bridge/routing-integrations.js';
+} from '../helpers/llmswitch-direct-native.mjs';
 
 const BLACKBOX_MODEL_ID = 'gpt-5.3-codex';
 
