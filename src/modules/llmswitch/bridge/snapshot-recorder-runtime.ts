@@ -199,21 +199,11 @@ function resolveClientToolErrorSampleWindowMs(): number {
   return Math.floor(parsed);
 }
 
-export function isRecordableApplyPatchErrorType(errorType: string): boolean {
-  return true;
-}
-
 export function shouldWriteClientToolErrorsample(args: {
   endpoint: string;
   stage: string;
   failure: ToolExecutionFailureSignal;
 }): boolean {
-  if (
-    args.failure.toolName === 'apply_patch' &&
-    !isRecordableApplyPatchErrorType(args.failure.errorType)
-  ) {
-    return false;
-  }
   if (
     args.failure.toolName === 'exec_command' &&
     args.failure.errorType === 'exec_command_non_zero_exit' &&

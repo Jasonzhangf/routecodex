@@ -12,7 +12,6 @@ import {
 import {
   appendStageTrace,
   cloneStageTraceSummary,
-  isRecordableApplyPatchErrorType,
   logClientToolError,
   logRuntimeErrorSignal,
   resetSnapshotRecorderErrorsampleStateForTests,
@@ -318,7 +317,7 @@ export async function createSnapshotRecorder(
 
         if (shouldInspectRuntimeErrorFast(stage, p)) {
           const signal = classifyRuntimeErrorSignalNative(stage, p);
-          if (signal && isRecordableApplyPatchErrorType(signal.errorType)) {
+          if (signal) {
             const requestId = typeof (context as any)?.requestId === 'string' ? String((context as any).requestId) : '';
             const dedupKey = [requestId, stage, signal.group, signal.errorType, signal.matchedText].join('|');
             if (!runtimeErrorDedup.has(dedupKey)) {
