@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockStateIntegrationsModule = {
   extractSessionIdentifiersFromMetadata: jest.fn(() => ({})),
@@ -99,6 +102,9 @@ const mockNativeExportsModule = () => ({
   normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
+  ),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;
