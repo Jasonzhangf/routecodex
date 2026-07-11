@@ -3839,6 +3839,7 @@ owners:
     allowed_paths:
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
+      - src/modules/llmswitch/bridge/sse-projection-host.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
@@ -3865,7 +3866,7 @@ owners:
       - "All request/response business semantics must complete in Chat Process before RespOutbound."
       - "locked business module: the SSE surface is an independent transport-only module and may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
-      - "Deleted TS SSE bridge facade must stay physically absent; handler may only hold transport IO and call native projection wrappers."
+      - "Deleted TS SSE bridge facade must stay physically absent; handler may only hold transport IO and call native projection wrappers through the narrow SSE projection host."
       - "Boundary gate phrase: no SSE event allowlist, required_action parsing, response payload rebuilding, or protocol projection in TS."
       - "SSE terminal/probe/incomplete-repair is not a business module. Required_action detection, continuation probe synthesis, terminal repair, frame projection semantics, and persistence belong to Rust owners before this transport-only SSE surface."
       - "Neither `handler-response-sse.ts` nor `responses-response-bridge.ts` may keep `response.*` semantic event allowlists, required_action frame parsing, terminal-state parsing, client-close continuation gating, probe finish_reason resolution, stream-end semantic repair decisions, or TS SSE frame projector helpers."

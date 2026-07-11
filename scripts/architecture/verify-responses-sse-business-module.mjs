@@ -61,7 +61,7 @@ if (fs.existsSync(sseBridgePath)) {
 if (fs.existsSync(responseBridgePath)) {
   failures.push('responses-response-bridge.ts must stay physically deleted; handler JSON transport and Rust/NAPI own remaining response projection semantics');
 }
-expectContains(handlerSource, "from '../../modules/llmswitch/bridge/native-exports.js'", 'handler-response-sse.ts must call native SSE projection wrappers directly after duplicate facade deletion');
+expectContains(handlerSource, "from '../../modules/llmswitch/bridge/sse-projection-host.js'", 'handler-response-sse.ts must call native SSE projection wrappers through the narrow SSE projection host');
 expectContains(handlerSource, 'function buildClientSseKeepaliveFrameForHttp(', 'handler-response-sse.ts may own transport-only keepalive framing');
 expectContains(rustNapiSource, 'updateResponsesContractProbeFromSseChunkJson', 'router-hotpath NAPI must expose the Rust-owned Responses contract probe');
 expectContains(nativeExportsSource, 'updateResponsesContractProbeFromSseChunkJson?:', 'native-exports.ts may type the raw Rust/NAPI contract probe capability');

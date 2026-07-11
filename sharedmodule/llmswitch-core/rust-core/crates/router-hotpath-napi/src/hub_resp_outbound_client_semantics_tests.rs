@@ -2341,6 +2341,54 @@ fn project_responses_sse_frame_for_client_keeps_completed_function_call_frame_st
 }
 
 #[test]
+fn project_responses_sse_frame_for_client_required_action_emits_terminal_frames() {
+    let data = json!({
+        "type": "response.required_action",
+        "response": {
+            "id": "resp_required_action_sse",
+            "object": "response",
+            "status": "requires_action"
+        },
+        "required_action": {
+            "type": "submit_tool_outputs",
+            "submit_tool_outputs": {
+                "tool_calls": [{
+                    "id": "call_required_action_sse_1",
+                    "type": "function_call",
+                    "name": "update_plan",
+                    "arguments": "{\"plan\":[{\"step\":\"split-frame\"}]}"
+                }]
+            }
+        }
+    });
+    let frame = format!(
+        "event: response.required_action\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    );
+
+    let projected = project_responses_sse_frame_for_client(
+        &frame,
+        Some("response.required_action"),
+        &data,
+        &json!([]),
+        &json!({}),
+        &json!({}),
+    );
+
+    assert_eq!(projected["emit"], Value::Bool(true));
+    let output_frame = projected["frame"].as_str().expect("frame");
+    assert!(output_frame.contains("event: response.output_item.added"));
+    assert!(output_frame.contains("event: response.function_call_arguments.delta"));
+    assert!(output_frame.contains("event: response.function_call_arguments.done"));
+    assert!(output_frame.contains("event: response.output_item.done"));
+    assert!(output_frame.contains("event: response.completed"));
+    assert!(output_frame.contains("event: response.done"));
+    assert!(output_frame.contains("data: [DONE]"));
+    assert!(output_frame.contains("\"status\":\"completed\""));
+    assert!(!output_frame.contains("\"required_action\""));
+}
+
+#[test]
 fn project_responses_sse_frame_for_client_keeps_completed_when_tool_output_already_present() {
     let frame = format!(
         "event: response.completed\ndata: {}\n\n",

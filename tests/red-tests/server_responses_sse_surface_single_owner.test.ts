@@ -12,7 +12,7 @@ describe('server responses SSE surface single owner', () => {
       .filter((line) => line.startsWith('import ') || line.startsWith('} from '));
     const joinedImports = importStatements.join('\n');
 
-    expect(source).toContain("from '../../modules/llmswitch/bridge/native-exports.js'");
+    expect(source).toContain("from '../../modules/llmswitch/bridge/sse-projection-host.js'");
     expect(source).not.toContain('responses-client-projection');
     expect(source).not.toContain('responses-stream-semantics');
     expect(joinedImports).not.toMatch(/buildResponsesSseErrorPayloadForHttp[\s\S]*responses-response-bridge\.js/);

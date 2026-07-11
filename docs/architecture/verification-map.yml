@@ -2242,6 +2242,7 @@ verification:
     change_risk: high
     unit:
       - src/server/handlers/handler-response-sse.ts
+      - src/modules/llmswitch/bridge/sse-projection-host.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts
       - tests/red-tests/server_sse_metadata_guard_e2e.test.ts

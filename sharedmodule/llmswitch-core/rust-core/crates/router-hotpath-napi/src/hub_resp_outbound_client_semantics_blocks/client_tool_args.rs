@@ -1709,6 +1709,7 @@ fn build_standard_tool_call_sse_frames_from_required_action_payload(
         .unwrap_or_default();
     let output = response.get("output").and_then(Value::as_array);
     let mut frames = Vec::<String>::new();
+    let mut terminal_output = Vec::<Value>::new();
     for (index, call) in calls.iter().enumerate() {
         let Some(call_obj) = call.as_object() else {
             continue;
@@ -1832,6 +1833,7 @@ fn build_standard_tool_call_sse_frames_from_required_action_payload(
                 .entry("arguments".to_string())
                 .or_insert_with(|| Value::String(item_arguments));
         }
+        terminal_output.push(done_item.clone());
         frames.push(format!(
             "event: response.output_item.done\ndata: {}\n\n",
             serde_json::json!({
@@ -1844,6 +1846,27 @@ fn build_standard_tool_call_sse_frames_from_required_action_payload(
     if frames.is_empty() {
         None
     } else {
+        let mut terminal_response = Value::Object(response);
+        if let Some(terminal_response_obj) = terminal_response.as_object_mut() {
+            terminal_response_obj.remove("required_action");
+            terminal_response_obj.insert("status".to_string(), Value::String("completed".to_string()));
+            terminal_response_obj.insert("output".to_string(), Value::Array(terminal_output));
+        }
+        frames.push(format!(
+            "event: response.completed\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.completed",
+                "response": terminal_response.clone()
+            })
+        ));
+        frames.push(format!(
+            "event: response.done\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.done",
+                "response": terminal_response
+            })
+        ));
+        frames.push("data: [DONE]\n\n".to_string());
         Some(frames.join(""))
     }
 }

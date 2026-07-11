@@ -169,7 +169,7 @@ const checks = [
   },
   {
     file: 'src/server/handlers/handler-response-sse.ts',
-    allowedImport: '../../modules/llmswitch/bridge/native-exports.js',
+    allowedImport: '../../modules/llmswitch/bridge/sse-projection-host.js',
     requiredImports: [],
     forbiddenLocalTokens: [
       "from '../utils/finish-reason.js'",

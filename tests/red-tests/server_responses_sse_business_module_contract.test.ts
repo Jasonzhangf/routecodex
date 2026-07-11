@@ -10,7 +10,7 @@ describe('server responses SSE business module contract', () => {
     const nativeExports = readFileSync(join(root, 'src/modules/llmswitch/bridge/native-exports.ts'), 'utf8');
 
     expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts'))).toBe(false);
-    expect(handler).toContain("from '../../modules/llmswitch/bridge/native-exports.js'");
+    expect(handler).toContain("from '../../modules/llmswitch/bridge/sse-projection-host.js'");
     expect(handler).toContain('projectResponsesSseFrameForClientNative');
     expect(nativeExports).toContain('projectResponsesSseFrameForClientNative');
     expect(handler).toContain('function buildClientSseKeepaliveFrameForHttp(');

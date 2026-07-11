@@ -26,7 +26,7 @@ import { buildSseErrorEventFrame } from '../utils/http-error-mapper.js';
 import {
   projectResponsesSseFrameForClientNative,
   updateResponsesSseTransportTerminalStateNative,
-} from '../../modules/llmswitch/bridge/native-exports.js';
+} from '../../modules/llmswitch/bridge/sse-projection-host.js';
 
 // feature_id: server.responses_sse_bridge_surface
 type FlushableResponse = Response & {
