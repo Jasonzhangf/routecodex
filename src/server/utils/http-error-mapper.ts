@@ -1,4 +1,4 @@
-import { projectSseErrorEventPayloadNative } from '../../modules/llmswitch/bridge/native-exports.js';
+import { projectSseErrorEventPayloadNative } from '../../modules/llmswitch/bridge/error-projection-host.js';
 
 export interface HttpErrorPayload {
   status: number;

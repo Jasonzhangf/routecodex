@@ -2539,6 +2539,7 @@ verification:
     change_risk: medium
     unit:
       - src/server/utils/http-error-mapper.ts
+      - src/modules/llmswitch/bridge/error-projection-host.ts
     contract:
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts

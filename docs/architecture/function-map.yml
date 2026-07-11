@@ -4333,6 +4333,7 @@ owners:
       - projectSseErrorEventPayload
     allowed_paths:
       - src/server/utils/http-error-mapper.ts
+      - src/modules/llmswitch/bridge/error-projection-host.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - src/server/handlers/handler-utils.ts
