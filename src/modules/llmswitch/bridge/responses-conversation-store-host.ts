@@ -335,10 +335,6 @@ export function releaseResponsesConversationRequestPayload(requestId?: string): 
   executeStoreOperation<null>('release_request_payload', { requestId });
 }
 
-export function deleteResponsesConversationResponseIndexForDebug(responseId?: string): void {
-  executeStoreOperation<null>('debug_delete_response_index', { responseId });
-}
-
 export function hasResponsesConversationRequestForDebug(requestId?: string): boolean {
   return executeStoreOperation<boolean>('debug_has_request', { requestId });
 }

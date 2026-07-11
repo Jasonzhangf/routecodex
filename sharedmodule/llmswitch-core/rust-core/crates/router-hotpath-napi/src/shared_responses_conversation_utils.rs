@@ -4762,15 +4762,6 @@ fn execute_responses_conversation_store_operation(input: &Value) -> Value {
         }
         "get_last_prune_at" => responses_store_ok(serde_json::json!(store.last_prune_at)),
         "debug_stats" => responses_store_ok(store.debug_stats()),
-        "debug_delete_response_index" => {
-            if let Some(response_id) = payload
-                .as_object()
-                .and_then(|row| read_trimmed_string(row.get("responseId")))
-            {
-                store.response_index.remove(&response_id);
-            }
-            responses_store_ok(Value::Null)
-        }
         "debug_has_request" => {
             let exists = payload
                 .as_object()
