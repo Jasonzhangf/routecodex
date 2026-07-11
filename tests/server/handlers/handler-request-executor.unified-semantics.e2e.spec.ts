@@ -369,7 +369,7 @@ const mockNativeExportsModule = () => ({
     payload: {}
   })),
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
-  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: any) => ({
+  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: any) => ({
     input: Array.isArray(args?.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args?.rawRequest?.tools) ? args.rawRequest.tools : undefined
   })),

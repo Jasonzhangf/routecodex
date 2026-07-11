@@ -41,10 +41,6 @@ const createNativeExportsMock = () => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
   })),
-  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
   planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, entryEndpoint: string, responseIdFromPath?: string) => ({
     mode: entryEndpoint === '/v1/responses.submit_tool_outputs' ? 'submit_tool_outputs' : 'none',
     payload: {

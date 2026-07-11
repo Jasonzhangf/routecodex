@@ -19,7 +19,7 @@ import {
   resumeResponsesConversation,
 } from './runtime-integrations.js';
 import {
-  captureReqInboundResponsesContextSnapshot,
+  captureReqInboundResponsesContextSnapshotJson,
   buildResponsesConversationPortScopeForHttpNative,
   buildResponsesResumeControlForContinuationContextForHttpNative,
   buildResponsesResumeClientErrorForHttpNative,
@@ -336,7 +336,7 @@ async function buildCapturedRelayResumeRequestContextForHttp(args: {
     args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
       ? (args.payload.metadata as Record<string, unknown>)
       : undefined;
-  const captured = await captureReqInboundResponsesContextSnapshot({
+  const captured = captureReqInboundResponsesContextSnapshotJson({
     rawRequest: args.payload,
     requestId: args.requestId,
     toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
@@ -419,7 +419,7 @@ export async function buildResponsesRequestContextForHttp(args: {
   if (!payloadForPersistence || typeof payloadForPersistence !== 'object' || Array.isArray(payloadForPersistence)) {
     throw new Error('Responses request context planner returned invalid capture payload');
   }
-  const captured = await captureReqInboundResponsesContextSnapshot({
+  const captured = captureReqInboundResponsesContextSnapshotJson({
     rawRequest: payloadForPersistence as AnyRecord,
     requestId: args.requestId,
     toolCallIdStyle: (payloadForPersistence as AnyRecord).toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,

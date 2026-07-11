@@ -49,10 +49,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 
 const createNativeExportsMock = () => ({
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
-  captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],

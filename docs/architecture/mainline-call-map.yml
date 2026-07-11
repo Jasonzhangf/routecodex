@@ -324,7 +324,7 @@ chains:
       - step_id: req-02
         from_node: HubReqInbound02Standardized
         to_node: HubReqChatProcess03Governed
-        caller_symbol: captureReqInboundResponsesContextSnapshot
+        caller_symbol: captureReqInboundResponsesContextSnapshotJson
         caller_file: src/modules/llmswitch/bridge/native-exports.ts
         callee_symbol: capture_req_inbound_responses_context_snapshot_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
@@ -489,7 +489,7 @@ chains:
         to_node: ChatProcReqContinuation04HookRestored
         caller_symbol: buildCapturedRelayResumeRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        callee_symbol: captureReqInboundResponsesContextSnapshot
+        callee_symbol: captureReqInboundResponsesContextSnapshotJson
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "canonical restored current-turn request truth including payload/input/tools and request-scoped continuation metadata"
@@ -499,7 +499,7 @@ chains:
       - step_id: rct-04
         from_node: ChatProcReqContinuation04HookRestored
         to_node: ChatProcReqContinuation05Governed
-        caller_symbol: captureReqInboundResponsesContextSnapshot
+        caller_symbol: captureReqInboundResponsesContextSnapshotJson
         caller_file: src/modules/llmswitch/bridge/native-exports.ts
         callee_symbol: capture_req_inbound_responses_context_snapshot_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs

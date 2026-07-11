@@ -5,7 +5,7 @@ import {
   finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
-const mockCaptureReqInboundResponsesContextSnapshot = jest.fn();
+const mockCaptureReqInboundResponsesContextSnapshotJson = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();
 const mockMaterializeProviderOwnedSubmitContext = jest.fn();
 const mockPlanResponsesRequestContext = jest.fn();
@@ -71,7 +71,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
+  captureReqInboundResponsesContextSnapshotJson: mockCaptureReqInboundResponsesContextSnapshotJson,
   extractSessionIdentifiersFromMetadataNative: mockExtractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
   planResponsesRequestBodyForHttpNative: mockPlanResponsesRequestBodyForHttpNative,
@@ -170,7 +170,7 @@ const {
 
 describe('responses-request-bridge relay request-context normalization', () => {
   beforeEach(() => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockReset();
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReset();
     mockPlanResponsesHandlerEntry.mockReset();
     mockPlanResponsesHandlerEntry.mockResolvedValue({
       payload: undefined,
@@ -197,7 +197,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [
         {
           type: 'function_call',
@@ -249,7 +249,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
-    expect(mockCaptureReqInboundResponsesContextSnapshot).toHaveBeenCalledWith(
+    expect(mockCaptureReqInboundResponsesContextSnapshotJson).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'req_relay_context_normalized_1',
       }),
@@ -262,7 +262,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('RED: relay request context keeps only the latest output when an identical tool-call batch repeats', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [
         {
           type: 'function_call',
@@ -326,11 +326,11 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('RED: relay request context does not fall back to raw input when native capture rejects orphan tool_result', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockRejectedValue(
-      new Error(
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockImplementation(() => {
+      throw new Error(
         'orphan_tool_result: bridge tool_result item references unknown or already-consumed call_id: call_JyD0R31sWoSfsvEtKsqHJkRh'
-      )
-    );
+      );
+    });
 
     await expect(
       buildResponsesRequestContextForHttp({
@@ -404,7 +404,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
-    expect(mockCaptureReqInboundResponsesContextSnapshot).not.toHaveBeenCalled();
+    expect(mockCaptureReqInboundResponsesContextSnapshotJson).not.toHaveBeenCalled();
     expect(mockMaterializeProviderOwnedSubmitContext).not.toHaveBeenCalled();
     expect(mockPlanResponsesRequestContext).toHaveBeenCalledWith({
       payload: {
@@ -672,7 +672,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
         tools: restoredTools,
       }
     });
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [
         {
           type: 'message',
@@ -730,7 +730,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555',
     });
 
-    expect(mockCaptureReqInboundResponsesContextSnapshot).toHaveBeenCalledWith(
+    expect(mockCaptureReqInboundResponsesContextSnapshotJson).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'req_stopless_resume_context_1',
         rawRequest: expect.objectContaining({
@@ -767,7 +767,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('persists normalized stopless payload instead of raw exec_command and tool message shape', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [
         {
           type: 'message',
@@ -853,7 +853,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('materializes request context session truth from factual Codex client headers', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [],
       toolsRaw: []
     });
@@ -885,7 +885,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('materializes request context session truth from request body metadata inside the bridge', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [],
       toolsRaw: []
     });
@@ -919,7 +919,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('strips request body metadata before persisting relay request context payload', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [],
       toolsRaw: []
     });
@@ -939,7 +939,7 @@ describe('responses-request-bridge relay request-context normalization', () => {
   });
 
   it('keeps relay request context toolsRaw as an empty array when no tools are captured', async () => {
-    mockCaptureReqInboundResponsesContextSnapshot.mockResolvedValue({
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
       input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
     });
 

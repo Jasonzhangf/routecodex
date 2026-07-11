@@ -621,14 +621,6 @@ export function captureReqInboundResponsesContextSnapshotJson(input: {
   return assertNativeObject('captureReqInboundResponsesContextSnapshotJson', parsed);
 }
 
-export async function captureReqInboundResponsesContextSnapshot(input: {
-  rawRequest: Record<string, unknown>;
-  requestId?: string;
-  toolCallIdStyle?: unknown;
-}): Promise<AnyRecord> {
-  return captureReqInboundResponsesContextSnapshotJson(input);
-}
-
 export async function planResponsesHandlerEntry(
   payload: unknown,
   entryEndpoint?: string,

@@ -119,7 +119,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
   const fake: AnyRecord = {
     buildResponsesPayloadFromChatNative: (payload: unknown) => payload,
     buildRequestStageRuntimeControlWritePlanNative: () => ({}),
-    captureReqInboundResponsesContextSnapshot: async () => ({}),
     captureReqInboundResponsesContextSnapshotJson: () => ({}),
     classifyEmptyResponseSignalNative: () => ({ kind: 'none' }),
     classifyProviderFailure: () => ({ code: 'UNKNOWN', retryable: false }),
