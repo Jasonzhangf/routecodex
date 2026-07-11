@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { loadRouteCodexConfig } from '../../src/config/routecodex-config-loader.js';
 import { serializeTomlRecord } from '../../src/config/toml-basic.js';
-import { loadRouteCodexConfigNativeSync } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { loadRouteCodexConfigWithNative } from '../sharedmodule/helpers/config-direct-native.js';
 
 type EnvSnapshot = Record<
   | 'RCC_HOME'
@@ -143,7 +143,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     await writeUserConfig(configPath, userConfig());
 
     const legacy = await loadRouteCodexConfig(configPath);
-    const native = loadRouteCodexConfigNativeSync({ explicitPath: configPath }) as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
+    const native = loadRouteCodexConfigWithNative({ explicitPath: configPath }) as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
 
     expect(stableLoadedView(native)).toEqual(stableLoadedView(legacy));
   });
@@ -162,7 +162,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     await writeUserConfig(configPath, userConfig());
 
     const legacy = await loadRouteCodexConfig(configPath);
-    const native = loadRouteCodexConfigNativeSync({ explicitPath: configPath }) as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
+    const native = loadRouteCodexConfigWithNative({ explicitPath: configPath }) as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
 
     expect(stableLoadedView(native)).toEqual(stableLoadedView(legacy));
     expect(stableLoadedView(native).providerBaseURL).toBe('https://external-provider-root.example.test/anthropic');
@@ -179,7 +179,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     await writeUserConfig(path.join(rootA, 'config.toml'), userConfig(5555, 'route-a', 'ali-coding-plan.glm-5'));
 
     const legacyA = await loadRouteCodexConfig();
-    const nativeA = loadRouteCodexConfigNativeSync() as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
+    const nativeA = loadRouteCodexConfigWithNative() as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
     expect(stableLoadedView(nativeA)).toEqual(stableLoadedView(legacyA));
 
     const rootB = await mkTmp('routecodex-loader-native-auto-b-');
@@ -190,7 +190,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     await writeUserConfig(path.join(rootB, 'config.toml'), userConfig(6666, 'route-b', 'ali-coding-plan.qwen3.5-plus'));
 
     const legacyB = await loadRouteCodexConfig();
-    const nativeB = loadRouteCodexConfigNativeSync() as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
+    const nativeB = loadRouteCodexConfigWithNative() as Awaited<ReturnType<typeof loadRouteCodexConfig>>;
     expect(stableLoadedView(nativeB)).toEqual(stableLoadedView(legacyB));
   });
 
@@ -210,7 +210,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     });
 
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow('v2 config disallows top-level field "providers"');
-    expect(() => loadRouteCodexConfigNativeSync({ explicitPath: configPath })).toThrow(
+    expect(() => loadRouteCodexConfigWithNative({ explicitPath: configPath })).toThrow(
       'v2 config disallows top-level field "providers"'
     );
   });
@@ -226,7 +226,7 @@ describe('loadRouteCodexConfig native loader parity before wiring', () => {
     await fs.writeFile(configPath, '{"version":"2.0.0"}\n', 'utf8');
 
     await expect(loadRouteCodexConfig(configPath)).rejects.toThrow('user config JSON support removed');
-    expect(() => loadRouteCodexConfigNativeSync({ explicitPath: configPath })).toThrow(
+    expect(() => loadRouteCodexConfigWithNative({ explicitPath: configPath })).toThrow(
       'user config JSON support removed'
     );
   });

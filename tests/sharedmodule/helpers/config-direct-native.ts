@@ -374,3 +374,43 @@ export function updateRouteCodexUserConfigStringScalarWithNative(input: {
     'user config scalar update'
   );
 }
+
+export function loadRouteCodexConfigWithNative(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+} = {}): {
+  configPath: string;
+  userConfig: AnyRecord;
+  providerProfiles: AnyRecord;
+} {
+  const output = callConfigObject('loadRouteCodexConfigJson', {
+    explicitPath: input.explicitPath,
+    routecodexProviderDir: input.routecodexProviderDir ?? process.env.ROUTECODEX_PROVIDER_DIR,
+    rccProviderDir: input.rccProviderDir ?? process.env.RCC_PROVIDER_DIR,
+    cwd: process.cwd(),
+    homeDir: process.env.HOME,
+    execPath: process.execPath,
+    routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+    routecodexConfig: process.env.ROUTECODEX_CONFIG,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  });
+  if (
+    typeof output.configPath !== 'string' ||
+    !output.userConfig ||
+    typeof output.userConfig !== 'object' ||
+    Array.isArray(output.userConfig) ||
+    !output.providerProfiles ||
+    typeof output.providerProfiles !== 'object' ||
+    Array.isArray(output.providerProfiles)
+  ) {
+    throw new Error('[config-direct-native] RouteCodex config loader returned invalid shape');
+  }
+  return output as {
+    configPath: string;
+    userConfig: AnyRecord;
+    providerProfiles: AnyRecord;
+  };
+}
