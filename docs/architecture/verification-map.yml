@@ -1394,7 +1394,7 @@ verification:
       - tests/sharedmodule/responses-openai-bridge-metadata-boundary.spec.ts
       - sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs
     integration:
-      - tests/modules/llmswitch/bridge/responses-openai-bridge.spec.ts
+      - tests/responses/responses-openai-bridge.spec.ts
       - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract
@@ -1484,7 +1484,7 @@ verification:
       - tests/servertool/stopless-metadata-center.spec.ts
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract
       - npm run verify:function-map-compile-gate
@@ -2271,7 +2271,7 @@ verification:
     change_risk: high
     unit:
       - src/modules/llmswitch/bridge/native-exports.ts
-      - tests/server/handlers/handler-response-utils.responses-conversation.spec.ts
+      - tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
