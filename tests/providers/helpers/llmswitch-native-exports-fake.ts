@@ -133,7 +133,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     describeHubPipelineContractsNative: () => ({}),
     describeHubPipelineContractsWithNative: () => ({}),
     describeMetaCarrierContractsNative: () => ({}),
-    describeMetaCarrierContractsWithNative: () => ({}),
     describePipelineContractNative: () => ({}),
     describePipelineContractWithNative: () => ({}),
     describeServerContractsWithNative: () => ({}),

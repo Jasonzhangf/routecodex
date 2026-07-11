@@ -133,7 +133,7 @@ describe('Hub Pipeline request type topology contract', () => {
     for (const token of [
       'describeHubPipelineContractsWithNative',
       'describeVirtualRouterContractsWithNative',
-      'describeMetaCarrierContractsWithNative',
+      'describeMetaCarrierContractsNative',
       'describePipelineContractWithNative',
       'validatePipelineNodeContractBoundaryWithNative',
     ]) {

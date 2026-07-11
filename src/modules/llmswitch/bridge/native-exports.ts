@@ -307,7 +307,7 @@ type NativeRouterHotpathJsonBinding = {
 type NativeHubVrNodeContracts = {
   describeHubPipelineContractsWithNative?: () => AnyRecord;
   describeVirtualRouterContractsWithNative?: () => AnyRecord;
-  describeMetaCarrierContractsWithNative?: () => AnyRecord;
+  describeMetaCarrierContractsNative?: () => AnyRecord;
   describePipelineContractWithNative?: (nodeId: string) => AnyRecord;
   describeServerContractsWithNative?: () => AnyRecord;
   describeServerModuleHelpWithNative?: (moduleId: string) => AnyRecord;
@@ -407,7 +407,7 @@ function buildHubVrNodeContractsFromRouterHotpathBinding(
       invoke('describeHubPipelineContractsJson'),
     describeVirtualRouterContractsWithNative: () =>
       invoke('describeVirtualRouterContractsJson'),
-    describeMetaCarrierContractsWithNative: () =>
+    describeMetaCarrierContractsNative: () =>
       invoke('describeMetaCarrierContractsJson'),
     describePipelineContractWithNative: (nodeId: string) =>
       invoke('describePipelineContractJson', [String(nodeId || '')]),
@@ -1112,15 +1112,11 @@ export function describeVirtualRouterContractsWithNative(): AnyRecord {
 }
 
 export function describeMetaCarrierContractsNative(): AnyRecord {
-  const fn = getHubVrNodeContracts().describeMetaCarrierContractsWithNative;
+  const fn = getHubVrNodeContracts().describeMetaCarrierContractsNative;
   if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] describeMetaCarrierContractsWithNative not available');
+    throw new Error('[llmswitch-bridge] describeMetaCarrierContractsNative not available');
   }
   return fn();
-}
-
-export function describeMetaCarrierContractsWithNative(): AnyRecord {
-  return describeMetaCarrierContractsNative();
 }
 
 export function describePipelineContractNative(nodeId: string): AnyRecord {
