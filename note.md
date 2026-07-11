@@ -28883,3 +28883,10 @@ Pure Rust NAPI candidates:
 - Change: `RuntimeErrorGroup`, `MAX_STAGE_TRACE_ENTRIES`, `MAX_STAGE_TRACE_PAYLOAD_CHARS`, and `clipText` in `snapshot-recorder-runtime.ts` are now file-private; exact scans showed they are only consumed inside the same file.
 - Evidence: export-pattern scan now has zero hits for those names; focused Jest passed 4 suites / 31 tests (`snapshot-recorder-native-plan`, runtime-error errorsample write scopes); `verify:architecture-snapshot-stage-contract`, `verify:architecture-snapshot-stage-owners`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:function-map-compile-gate`, `npx tsc --noEmit`, `npm run build:base`, and touched-file `git diff --check` passed.
 - Architecture review: this does not add JS semantics, fallback, or a second runtime owner; it only removes external export surface from helpers that remain TS host IO/observation support.
+
+# 2026-07-11: V2 stale snapshot recorder reference removed
+
+- Scope: continue source-tracked external reference convergence for deleted `conversion/hub/snapshot-recorder` mirror.
+- Change: rewrote `src/v2/README.md` to remove the stale `SnapshotRecorder` class import example and old hub conversion subpath; removed unused `export type { SnapshotRecorder }` from the active host bridge.
+- Evidence: exact scan now finds no `src/v2` active old snapshot recorder import/class refs and no `export type { SnapshotRecorder }`; focused Jest passed 6 suites / 33 tests; `verify:architecture-snapshot-stage-contract`, `verify:architecture-snapshot-stage-owners`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, `npx tsc --noEmit`, and touched-file `git diff --check` passed.
+- Non-target blocker: `verify:function-map-compile-gate` and `build:base` currently fail on dirty Rust/function-map work where `planResponsesHandlerStreamForHttp` appears in forbidden path `shared_responses_conversation_utils.rs`; this slice did not touch that owner.

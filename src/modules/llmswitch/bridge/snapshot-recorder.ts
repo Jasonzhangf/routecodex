@@ -530,5 +530,3 @@ export async function createSnapshotRecorder(
     }
   } as SnapshotRecorder;
 }
-
-export type { SnapshotRecorder };
