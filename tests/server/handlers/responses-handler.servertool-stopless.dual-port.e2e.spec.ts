@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
-const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge/routing-integrations.js');
+const { bootstrapVirtualRouterConfig } = await import('../../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js');
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../../../tests/helpers/native-hub-pipeline-test-wrapper.js');
 const { createRequestExecutor } = await import('../../../src/server/runtime/http-server/request-executor.js');
 const { StatsManager } = await import('../../../src/server/runtime/http-server/stats-manager.js');

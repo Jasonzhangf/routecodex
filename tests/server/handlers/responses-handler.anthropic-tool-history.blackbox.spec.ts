@@ -8,7 +8,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 
 import { handleResponses } from '../../../src/server/handlers/responses-handler.js';
-import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
 import {
   clearAllResponsesConversationState,
   resetResponsesConversationStateForRestartSimulation

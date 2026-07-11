@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { bootstrapVirtualRouterConfig } from '../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { bootstrapVirtualRouterConfig } from '../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
 import { NativeHubPipelineTestWrapper as HubPipeline } from '../helpers/native-hub-pipeline-test-wrapper.js';
 
 function loadFixture(name: string): Record<string, unknown> {

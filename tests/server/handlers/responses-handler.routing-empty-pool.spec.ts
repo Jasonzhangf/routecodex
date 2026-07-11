@@ -10,7 +10,7 @@ import {
   buildMetadataCenterTransportSnapshot,
   writeMetadataCenterSlot
 } from '../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js';
-import { bootstrapVirtualRouterConfig } from '../../../src/modules/llmswitch/bridge/routing-integrations.js';
+import { bootstrapVirtualRouterConfig } from '../../sharedmodule/helpers/virtual-router-bootstrap-direct-native.js';
 import { NativeHubPipelineTestWrapper as HubPipeline } from '../../helpers/native-hub-pipeline-test-wrapper.js';
 
 const TEST_RUNTIME_CONTROL_WRITER = {
