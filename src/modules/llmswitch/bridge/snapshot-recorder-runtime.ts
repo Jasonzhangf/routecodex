@@ -28,7 +28,7 @@ export interface StageTraceEntry {
   stage: string;
   payload: unknown;
 }
-export interface ClientToolTraceSummaryEntry {
+interface ClientToolTraceSummaryEntry {
   at: string;
   stage: string;
 }

@@ -6,7 +6,6 @@
 
 import {
   type StageTraceEntry,
-  type ClientToolTraceSummaryEntry,
   MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
 } from './snapshot-recorder-runtime.js';
 import {
