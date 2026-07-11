@@ -264,7 +264,7 @@ Out of scope:
    - Add required NAPI export names to `native-router-hotpath-loader.ts` gates.
 
 2. Host native export:
-   - Add `buildResponsesRequestFromChatNative` and, if needed, `captureResponsesContextNative` to `src/modules/llmswitch/bridge/native-exports.ts`.
+   - Historical intermediate step only: `buildResponsesRequestFromChatNative` was temporarily added to `src/modules/llmswitch/bridge/native-exports.ts`, then retired after script/test consumers moved to direct native helper `scripts/helpers/responses-codec-direct-native.mjs`.
    - Keep host wrappers as JSON invocation/parse only; no TS semantic reconstruction.
 
 3. External reference migration:
@@ -313,7 +313,7 @@ Additional gates if touched paths require them:
 
 - `buildResponsesRequestFromChatJson` is now the Rust/native owner for the remaining Chat -> Responses request-builder script surface needed by the first deletion wave.
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs` now covers the legacy bridge parity required by external scripts: `parameters` flattening, chat-parameter precedence for `tool_choice` / `parallel_tool_calls`, `toolCallIdStyle=fc|preserve`, bridge-history input merge, and oversized Responses input id compaction.
-- These scripts now import root host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesRequestFromChatNative` instead of `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js`:
+- These scripts were first moved off `sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js` and now use the test/script-only direct native helper `scripts/helpers/responses-codec-direct-native.mjs::buildResponsesRequestFromChatNative`, not the root host `native-exports.js` wrapper:
   - `sharedmodule/llmswitch-core/scripts/tests/responses-request-no-parameters-wrapper.mjs`
   - `sharedmodule/llmswitch-core/scripts/tests/responses-create-parameters-single-source.mjs`
   - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-choice-single-source.mjs`
@@ -347,7 +347,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: overlong function-name script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and composes Rust/native `captureReqInboundResponsesContextSnapshotJson`, `convertResponsesRequestToChatNative`, and `buildResponsesRequestFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs` and only keeps root host `native-exports.js` for other still-live host wrappers such as `captureReqInboundResponsesContextSnapshotJson` / `convertResponsesRequestToChatNative`.
 - The script still proves overlong Responses function calls are removed from captured context, Responses -> Chat messages, and Chat -> Responses roundtrip payload while valid `exec_command` calls survive.
 - Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 6/6.
 - Remaining active script blockers for deleting the bridge are:
@@ -364,7 +364,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: cross-protocol matrix script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and uses Rust/native `buildResponsesRequestFromChatNative` plus `convertResponsesRequestToChatNative` for the Chat -> Responses -> Chat leg instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; root host `native-exports.js` remains only for the still-live `convertResponsesRequestToChatNative` host wrapper.
 - Source-tracked exact scan now shows no active script references to `responses-openai-bridge.js`; remaining references are goal/history docs and residue/deleted-path tests.
 - Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`; script execution preserved its existing no-sample behavior and skipped because `~/.routecodex/codex-samples/openai-chat` had no qualifying tool-call sample in this environment.
 - Remaining deletion blockers are no longer script imports; next step is to audit active test/runtime/source imports for `responses-openai-bridge.ts` itself, then delete only after exact source/test/package scans prove no active consumer remains.
@@ -372,7 +372,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: roundtrip script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js` and uses Rust/native `convertResponsesRequestToChatNative` plus `buildResponsesRequestFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; root host `native-exports.js` remains only for the still-live `convertResponsesRequestToChatNative` host wrapper.
 - `buildResponsesRequestFromChatJson` now restores `instructions` from explicit Chat payload instructions first and `context.systemInstruction` second, closing the roundtrip parity gap in the Rust Chat -> Responses owner instead of script-side patching.
 - Verification passed: direct native fixture probe 1/1, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 8/8, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `npm run build:native-hotpath`.
 - Remaining active script blockers for deleting the bridge are:

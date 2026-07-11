@@ -234,9 +234,22 @@ const responsesBridge = await import(
   ).href
 );
 const {
-  buildResponsesRequestFromChatNative,
   convertResponsesRequestToChatNative
 } = responsesBridge;
+const {
+  buildResponsesRequestFromChatNative
+} = await import(
+  pathToFileURL(
+    path.join(
+      REPO_ROOT,
+      '..',
+      '..',
+      'scripts',
+      'helpers',
+      'responses-codec-direct-native.mjs'
+    )
+  ).href
+);
 
 const {
   buildAnthropicRequestFromOpenAIChat,

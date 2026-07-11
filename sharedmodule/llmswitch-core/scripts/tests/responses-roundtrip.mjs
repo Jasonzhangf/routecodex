@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildResponsesRequestFromChatNative } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), '..', '..');
@@ -36,7 +37,6 @@ async function loadFixtures() {
 async function runRoundtripTests() {
   const bridge = await import(pathToFileURL(nativeBridge).href);
   const {
-    buildResponsesRequestFromChatNative,
     convertResponsesRequestToChatNative
   } = bridge;
 

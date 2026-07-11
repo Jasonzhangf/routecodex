@@ -8,20 +8,9 @@
  */
 
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '..', '..');
-
-async function loadBridge() {
-  return import(pathToFileURL(path.resolve(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
-}
+import { buildResponsesRequestFromChatNative as buildResponsesRequestFromChat } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 async function main() {
-  const { buildResponsesRequestFromChatNative: buildResponsesRequestFromChat } = await loadBridge();
-
   const chatPayload = {
     model: 'gpt-test',
     messages: [{ role: 'user', content: 'hi' }],

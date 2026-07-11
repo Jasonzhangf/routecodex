@@ -1,19 +1,9 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import path from 'node:path';
-
-const projectRoot = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  '..',
-  '..',
-);
+import { buildResponsesRequestFromChatNative } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 async function main() {
-  const mod = await import(
-    path.join(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')
-  );
-
   const chat = {
     model: 'gpt-5.4',
     messages: [{ role: 'user', content: 'hello' }],
@@ -72,7 +62,7 @@ async function main() {
     }
   };
 
-  const result = mod.buildResponsesRequestFromChatNative(chat, context);
+  const result = buildResponsesRequestFromChatNative(chat, context);
   assert.equal(result.request.tool_choice, 'required');
   assert.equal(result.request.parallel_tool_calls, true);
   assert.deepEqual(result.request.response_format, chat.parameters.response_format);

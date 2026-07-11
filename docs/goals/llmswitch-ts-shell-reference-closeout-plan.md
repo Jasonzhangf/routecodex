@@ -969,3 +969,11 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Exact source scan shows the deleted path only in historical docs and the residue gate; active source/test imports now point at `native-exports`.
 - Verification passed: focused native semantics spec; focused residue audit; `npx tsc --noEmit --pretty false`.
 - Non-target observation: broad `request-executor.spec.ts` and `request-executor-preselected-route.blackbox.spec.ts` still fail in the current dirty worktree on pre-existing `Hub pipeline runtime is not initialized`; they were not used as closeout evidence for this leaf wrapper deletion.
+
+### 2026-07-11 zero-consumer Responses request-from-chat host wrapper deleted
+
+- Deleted `buildResponsesRequestFromChatNative` from `src/modules/llmswitch/bridge/native-exports.ts`; production import scan showed zero active runtime consumers.
+- Script/regression consumers now call the existing direct native helper `scripts/helpers/responses-codec-direct-native.mjs`, which invokes Rust/NAPI `buildResponsesRequestFromChatJson` directly.
+- Kept the raw Rust/NAPI capability and binding type entry; only the host `native-exports.ts` wrapper was removed.
+- `hub-pipeline-stage-residue-audit` now rejects reintroducing the host wrapper and rejects the migrated scripts using `nativeExports.buildResponsesRequestFromChatNative`, `responsesBridge.buildResponsesRequestFromChatNative`, or `mod.buildResponsesRequestFromChatNative`.
+- Exact source scan after deletion shows `buildResponsesRequestFromChatNative` only in the direct native helper, scripts that import that helper, historical docs, and the residue gate; active production code has no host-wrapper consumer.

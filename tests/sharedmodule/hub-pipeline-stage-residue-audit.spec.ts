@@ -754,6 +754,32 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('createMapper');
   });
 
+  it('zero-consumer responses request-from-chat host wrapper must stay deleted', () => {
+    const repoRoot = process.cwd();
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/native-exports.ts'),
+      'utf8',
+    );
+    const scriptSources = [
+      'scripts/tools/responses-provider-replay.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-create-parameters-single-source.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-request-no-parameters-wrapper.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-tool-choice-single-source.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs',
+    ].map((relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
+
+    expect(hostSource).not.toContain('export function buildResponsesRequestFromChatNative');
+    expect(hostSource).toContain('buildResponsesRequestFromChatJson?:');
+    for (const source of scriptSources) {
+      expect(source).toContain('responses-codec-direct-native.mjs');
+      expect(source).not.toContain('nativeExports.buildResponsesRequestFromChatNative');
+      expect(source).not.toContain('responsesBridge.buildResponsesRequestFromChatNative');
+      expect(source).not.toContain('mod.buildResponsesRequestFromChatNative');
+    }
+  });
+
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
     const repoRoot = process.cwd();
     const retiredPaths = [

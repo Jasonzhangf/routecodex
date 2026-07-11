@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { buildOpenAIChatFromAnthropic } from '../helpers/anthropic-codec-direct-native.mjs';
+import { buildResponsesRequestFromChatNative } from '../helpers/responses-codec-direct-native.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -133,13 +134,12 @@ function resolveEntryEndpoint(doc, fallback = '/v1/messages') {
 async function loadCoreModules() {
   const nativeExportsPath = path.join(ROOT, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
   const nativeExports = await import(pathToFileURL(nativeExportsPath).href);
-  if (typeof nativeExports.buildResponsesRequestFromChatNative !== 'function' ||
-      typeof nativeExports.convertResponsesRequestToChatNative !== 'function') {
+  if (typeof nativeExports.convertResponsesRequestToChatNative !== 'function') {
     throw new Error('Responses bridge helpers missing');
   }
   return {
     buildOpenAIChatFromAnthropic,
-    buildResponsesRequestFromChat: nativeExports.buildResponsesRequestFromChatNative,
+    buildResponsesRequestFromChat: buildResponsesRequestFromChatNative,
     convertResponsesRequestToChatNative: nativeExports.convertResponsesRequestToChatNative
   };
 }
