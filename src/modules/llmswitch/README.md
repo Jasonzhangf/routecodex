@@ -8,11 +8,13 @@ semantics belong to Rust/native owners under
 
 ## Source Surface
 
-- `bridge.ts`: root host export surface for server/runtime callers.
 - `bridge/*.ts`: thin host IO, native binding, routing, snapshot, SSE, and
   continuation store shells.
 - `core-loader.ts`: package/dist path resolution for explicit llmswitch-core
   dist modules when a remaining approved loader path needs it.
+
+The broad `bridge.ts` and `bridge/index.ts` barrels are retired. Server/runtime
+callers must import the concrete leaf bridge module they own.
 
 Do not add checked-in side-by-side `.js` or `.d.ts` mirrors under this tree.
 Runtime JavaScript belongs in `dist` after build; tests may keep ESM `.js`

@@ -880,3 +880,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Deleted `tests/server/handlers/handler-response-utils.responses-store-integration.spec.ts` after current function map, verification map, and `responses.continuation.mainline` confirmed it is not a continuation owner gate.
 - The deleted spec's failing assertions expected `sendPipelineResponse` / SSE/handler closeout to save or repair Responses continuation state, which conflicts with the immutable interval and transport-only handler/SSE boundary.
 - Remaining valid continuation/store coverage stays with the Rust/bridge owner gates: `tests/sharedmodule/responses-continuation-store.spec.ts`, `tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts`, `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts`, and `npm run verify:responses-history-protocol-contract`.
+
+### 2026-07-11 root host bridge barrels deleted
+
+- Deleted `src/modules/llmswitch/bridge.ts` and `src/modules/llmswitch/bridge/index.ts` after source-tracked exact import scans found no active runtime/test imports; remaining references were residue/contract tests reading file contents and historical docs.
+- Updated contract tests to assert the broad barrels stay physically absent and to verify the concrete leaf owners directly (`responses-sse-bridge.ts`, `responses-response-bridge.ts`, `routing-integrations.ts`).
+- Updated host bridge docs to describe leaf bridge modules as the active source surface. Runtime/server callers must import the leaf bridge they own instead of the retired broad barrel.

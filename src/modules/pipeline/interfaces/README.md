@@ -4,7 +4,7 @@
 
 ## 作用
 - 提供 Host 与共享模块之间的类型声明。
-- 供 `llmswitch/bridge.ts` 在编译时进行类型检查。
+- 供 llmswitch leaf bridge modules 在编译时进行类型检查。
 - 保持老版本插件的最小兼容（类型层面）。
 
 ## 维护规则

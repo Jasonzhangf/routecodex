@@ -4216,11 +4216,16 @@ describe('hub pipeline stage residue audit', () => {
 
   it('routing integrations bridge must not re-export legacy base-dir resolver', () => {
     const repoRoot = process.cwd();
-    const bridgeFiles = [
-      'src/modules/llmswitch/bridge/routing-integrations.ts',
+    const deletedBarrels = [
       'src/modules/llmswitch/bridge.ts',
       'src/modules/llmswitch/bridge/index.ts',
     ];
+    const bridgeFiles = [
+      'src/modules/llmswitch/bridge/routing-integrations.ts',
+    ];
+    const restoredBarrels = deletedBarrels.filter((relativePath) =>
+      fs.existsSync(path.join(repoRoot, relativePath)),
+    );
     const findings = bridgeFiles.flatMap((relativePath) => {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
       return collectMatches(source, [
@@ -4228,6 +4233,7 @@ describe('hub pipeline stage residue audit', () => {
       ]);
     });
 
+    expect(restoredBarrels).toEqual([]);
     expect(findings).toEqual([]);
   });
 
@@ -4235,7 +4241,6 @@ describe('hub pipeline stage residue audit', () => {
     const repoRoot = process.cwd();
     const bridgeFiles = [
       'src/modules/llmswitch/bridge/routing-integrations.ts',
-      'src/modules/llmswitch/bridge.ts',
     ];
     const retiredNames = [
       'parseRouteCodexTomlRecord',

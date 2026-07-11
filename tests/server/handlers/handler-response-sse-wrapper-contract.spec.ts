@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
@@ -39,9 +39,10 @@ describe('response SSE wrapper contract', () => {
   it('does not expose a body-level sseStream predicate as a canonical bridge builder', () => {
     const responseBridge = readRepoFile('src/modules/llmswitch/bridge/responses-response-bridge.ts');
     const sseBridge = readRepoFile('src/modules/llmswitch/bridge/responses-sse-bridge.ts');
-    const bridgeIndex = readRepoFile('src/modules/llmswitch/bridge/index.ts');
 
-    for (const source of [responseBridge, sseBridge, bridgeIndex]) {
+    expect(existsSync(resolve(root, 'src/modules/llmswitch/bridge/index.ts'))).toBe(false);
+
+    for (const source of [responseBridge, sseBridge]) {
       expect(source).not.toContain('hasResponsesSsePayloadForHttp');
       expect(source).not.toContain('hasSsePayload:');
       expect(source).not.toContain('args.hasSsePayload');
