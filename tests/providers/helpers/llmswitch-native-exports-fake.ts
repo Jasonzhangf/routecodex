@@ -118,7 +118,6 @@ export function finalizeResponsesHandlerPayloadForHttpFake(args: {
 export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyRecord {
   const fake: AnyRecord = {
     buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
-    buildChatResponseFromResponsesNative: (payload: unknown) => payload,
     buildResponsesPayloadFromChatNative: (payload: unknown) => payload,
     buildResponsesRequestFromChatNative: (payload: unknown) => payload,
     buildRequestStageRuntimeControlWritePlanNative: () => ({}),

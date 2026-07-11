@@ -12,7 +12,7 @@ import {
   buildOpenAIChatFromAnthropic,
 } from './helpers/anthropic-codec-direct-native.mjs';
 import {
-  buildChatResponseFromResponsesNative,
+  buildChatResponseFromResponsesDirectNative,
   buildResponsesRequestFromChatNative,
 } from './helpers/responses-codec-direct-native.mjs';
 
@@ -37,7 +37,7 @@ async function getConversions() {
     buildAnthropicRequestFromOpenAIChat,
     buildOpenAIChatFromAnthropic,
     buildResponsesRequestFromChat: buildResponsesRequestFromChatNative,
-    buildChatResponseFromResponses: buildChatResponseFromResponsesNative
+    buildChatResponseFromResponses: buildChatResponseFromResponsesDirectNative
   };
   return conversionsLoaded;
 }

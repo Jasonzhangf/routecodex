@@ -74,7 +74,7 @@ export function buildResponsesRequestFromChatNative(payload, context = {}, extra
   return parsed;
 }
 
-export function buildChatResponseFromResponsesNative(payload) {
+export function buildChatResponseFromResponsesDirectNative(payload) {
   return parseNativeRecord(
     nativeFn('buildChatResponseFromResponsesJson')(stringifyArg(payload)),
     'buildChatResponseFromResponsesJson',

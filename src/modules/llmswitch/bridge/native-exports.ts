@@ -843,15 +843,6 @@ export function buildResponsesRequestFromChatNative(
   };
 }
 
-export function buildChatResponseFromResponsesNative(
-  payload: unknown
-): Record<string, unknown> {
-  const parsed = invokeRouterHotpathJsonCapability('buildChatResponseFromResponsesJson', [
-    payload ?? null,
-  ]);
-  return assertNativeObject('buildChatResponseFromResponsesJson', parsed);
-}
-
 export function buildRequestStageRuntimeControlWritePlanNative(input: {
   outputMetadata: Record<string, unknown>;
 }): {

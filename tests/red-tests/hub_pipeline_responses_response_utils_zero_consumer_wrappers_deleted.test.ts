@@ -42,7 +42,8 @@ describe('Hub Pipeline responses response utils Rust-only boundary', () => {
     expect(existsSync(sourcePath)).toBe(false);
     expect(existsSync(bridgePath)).toBe(false);
     expect(existsSync(nativeBarrelPath)).toBe(false);
-    expect(hostNativeExports).toContain('buildChatResponseFromResponsesNative');
+    expect(hostNativeExports).not.toContain('buildChatResponseFromResponsesNative');
+    expect(readFileSync(requiredExportsPath, 'utf8')).toContain('buildChatResponseFromResponsesJson');
     expect(hostNativeExports).not.toContain('collectToolCallsFromResponsesWithNative');
     expect(hostNativeExports).not.toContain('resolveFinishReasonWithNative');
   });

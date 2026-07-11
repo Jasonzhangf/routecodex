@@ -8,7 +8,7 @@ import { pathToFileURL } from 'url';
 import OpenAI from 'openai';
 import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
 import {
-  buildChatResponseFromResponsesNative,
+  buildChatResponseFromResponsesDirectNative,
   buildResponsesRequestFromChatNative,
 } from './helpers/responses-codec-direct-native.mjs';
 
@@ -110,7 +110,7 @@ async function main() {
   const cfg = { type: provEntry.type, config: provEntry.config };
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const buildChatResponseFromResponses = buildChatResponseFromResponsesNative;
+  const buildChatResponseFromResponses = buildChatResponseFromResponsesDirectNative;
 
   // headers
   const headers = { 'Content-Type': 'application/json', 'OpenAI-Beta': 'responses-2024-12-17' };

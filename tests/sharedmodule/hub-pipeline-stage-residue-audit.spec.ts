@@ -806,7 +806,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(retiredPath)).toBe(false);
     expect(fs.existsSync(retiredNativePath)).toBe(false);
     expect(fs.existsSync(path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts'))).toBe(false);
-    expect(hostNativeSource).toContain('buildChatResponseFromResponsesNative');
+    expect(hostNativeSource).not.toContain('buildChatResponseFromResponsesNative');
   });
 
   it('native exports must not restore the Phase 3 servertool wrapper fan-out', () => {

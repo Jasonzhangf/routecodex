@@ -7,7 +7,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
-import { buildChatResponseFromResponsesNative } from './helpers/responses-codec-direct-native.mjs';
+import { buildChatResponseFromResponsesDirectNative } from './helpers/responses-codec-direct-native.mjs';
 import {
   buildAnthropicRequestFromOpenAIChat,
   buildOpenAIChatFromAnthropic,
@@ -107,7 +107,7 @@ async function runResponses(providerId) {
     model: String(body.model||'unknown'),
   });
   fs.writeFileSync(jsonOut, JSON.stringify(json, null, 2));
-  const chat = buildChatResponseFromResponsesNative(json);
+  const chat = buildChatResponseFromResponsesDirectNative(json);
   fs.writeFileSync(chatOut, JSON.stringify(chat, null, 2));
   const tc = chat?.choices?.[0]?.message?.tool_calls || [];
   const ok = Array.isArray(tc) && tc.length>0;

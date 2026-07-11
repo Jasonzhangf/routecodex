@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildJsonFromSseWithNative } from './helpers/sse-direct-native.mjs';
-import { buildChatResponseFromResponsesNative } from './helpers/responses-codec-direct-native.mjs';
+import { buildChatResponseFromResponsesDirectNative } from './helpers/responses-codec-direct-native.mjs';
 
 const DEFAULT_BASE = process.env.RCC_REPLAY_BASE || 'http://127.0.0.1:5555';
 const DEFAULT_KEY =
@@ -166,7 +166,7 @@ async function convertSseFramesToJson(frames, requestId, model) {
       requestId,
       model: typeof model === 'string' && model.length ? model : 'unknown'
     });
-    const chat = buildChatResponseFromResponsesNative(json);
+    const chat = buildChatResponseFromResponsesDirectNative(json);
     return { json, chat };
   } catch {
     return { json: null, chat: null };
