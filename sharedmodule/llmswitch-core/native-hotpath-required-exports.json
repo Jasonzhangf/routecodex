@@ -85,6 +85,8 @@
   "classifyRuntimeErrorSignalFromTextJson",
   "classifyRuntimeErrorSignalJson",
   "shouldLogClientToolErrorToConsoleJson",
+  "shouldInspectRuntimeErrorJson",
+  "summarizeClientToolObservationJson",
   "buildResponsesPayloadFromChatJson",
   "planResponsesPayloadFromChatCloseoutJson",
   "normalizeChatUsageJson",

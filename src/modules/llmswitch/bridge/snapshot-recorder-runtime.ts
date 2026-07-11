@@ -4,7 +4,9 @@ import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
   classifyRuntimeErrorSignalNative,
   detectToolExecutionFailuresNative,
+  shouldInspectRuntimeErrorNative,
   shouldLogClientToolErrorToConsoleNative,
+  summarizeClientToolObservationNative,
 } from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
@@ -152,30 +154,7 @@ export function shouldLogRuntimeErrorSignalToConsole(signal: RuntimeErrorSignal)
 }
 
 export function shouldInspectRuntimeError(stage: string, payload: AnyRecord): boolean {
-  if (stage === 'chat_process.resp.stage1.sse_decode') {
-    return true;
-  }
-  if (stage.startsWith('chat_process.req.') || stage.startsWith('chat_process.resp.')) {
-    if (
-      stage.includes('format_parse') ||
-      stage.includes('semantic_map') ||
-      stage.includes('format_build') ||
-      stage.includes('tool_governance')
-    ) {
-      return true;
-    }
-  }
-  if (stage.includes('tool_governance')) {
-    return true;
-  }
-  if (stage.startsWith('servertool.') || stage.startsWith('hub_followup.')) {
-    return true;
-  }
-  return (
-    typeof payload.error === 'string' ||
-    typeof payload.message === 'string' ||
-    typeof payload.reason === 'string'
-  );
+  return shouldInspectRuntimeErrorNative(stage, payload);
 }
 
 export function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeErrorSignal | null {
@@ -298,22 +277,5 @@ export function summarizeClientToolObservation(
   payload: AnyRecord,
   failures: ToolExecutionFailureSignal[]
 ): Record<string, unknown> {
-  return {
-    topLevelKeys: Object.keys(payload || {}).slice(0, 20),
-    failureCount: failures.length,
-    toolMessageCount: failures.length,
-    failures: failures.slice(-4).map((failure) => ({
-      toolName: failure.toolName,
-      errorType: failure.errorType,
-      toolCallId: failure.toolCallId,
-      callId: failure.callId,
-      matchedPreview: clipText(failure.matchedText, 180)
-    })),
-    toolMessages: failures.slice(-4).map((failure) => ({
-      name: failure.toolName,
-      tool_call_id: failure.toolCallId,
-      call_id: failure.callId,
-      contentPreview: clipText(failure.matchedText, 180)
-    }))
-  };
+  return summarizeClientToolObservationNative(payload, failures);
 }

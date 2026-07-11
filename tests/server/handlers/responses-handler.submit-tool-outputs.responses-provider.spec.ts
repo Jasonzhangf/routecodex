@@ -220,6 +220,14 @@ const createNativeExportsMock = () => ({
   classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
   classifyRuntimeErrorSignalNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  shouldInspectRuntimeErrorNative: jest.fn(() => false),
+  summarizeClientToolObservationNative: jest.fn(() => ({
+    topLevelKeys: [],
+    failureCount: 0,
+    toolMessageCount: 0,
+    failures: [],
+    toolMessages: [],
+  })),
   updateResponsesContractProbeFromSseChunkNative: jest.fn((_chunk: unknown, probe?: Record<string, unknown>) => probe ?? {}),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
     request?: Record<string, unknown>;

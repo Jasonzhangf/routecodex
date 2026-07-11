@@ -333,6 +333,119 @@ fn collect_runtime_signal_texts(payload: &Value) -> Vec<String> {
     candidates
 }
 
+fn has_direct_runtime_error_hint(payload: &Value) -> bool {
+    let Some(record) = payload.as_object() else {
+        return false;
+    };
+    ["error", "message", "reason"].iter().any(|key| {
+        record
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
+    })
+}
+
+fn should_inspect_runtime_error_value(stage: &str, payload: &Value) -> bool {
+    if stage == "chat_process.resp.stage1.sse_decode" {
+        return true;
+    }
+    if (stage.starts_with("chat_process.req.") || stage.starts_with("chat_process.resp."))
+        && (stage.contains("format_parse")
+            || stage.contains("semantic_map")
+            || stage.contains("format_build")
+            || stage.contains("tool_governance"))
+    {
+        return true;
+    }
+    if stage.contains("tool_governance") {
+        return true;
+    }
+    if stage.starts_with("servertool.") || stage.starts_with("hub_followup.") {
+        return true;
+    }
+    has_direct_runtime_error_hint(payload)
+}
+
+fn read_optional_string(record: &Map<String, Value>, key: &str) -> Option<Value> {
+    let text = read_trimmed(record.get(key));
+    if text.is_empty() {
+        None
+    } else {
+        Some(Value::String(text))
+    }
+}
+
+fn summarize_client_tool_observation_value(payload: &Value, failures: &Value) -> Value {
+    let top_level_keys = payload
+        .as_object()
+        .map(|record| {
+            record
+                .keys()
+                .take(20)
+                .map(|key| Value::String(key.clone()))
+                .collect::<Vec<Value>>()
+        })
+        .unwrap_or_default();
+    let failure_rows = failures.as_array().cloned().unwrap_or_default();
+    let failure_count = failure_rows.len();
+    let tail_start = failure_count.saturating_sub(4);
+    let failures_tail = failure_rows
+        .iter()
+        .skip(tail_start)
+        .filter_map(Value::as_object)
+        .map(|failure| {
+            let mut row = Map::new();
+            if let Some(value) = read_optional_string(failure, "toolName") {
+                row.insert("toolName".to_string(), value);
+            }
+            if let Some(value) = read_optional_string(failure, "errorType") {
+                row.insert("errorType".to_string(), value);
+            }
+            if let Some(value) = read_optional_string(failure, "toolCallId") {
+                row.insert("toolCallId".to_string(), value);
+            }
+            if let Some(value) = read_optional_string(failure, "callId") {
+                row.insert("callId".to_string(), value);
+            }
+            row.insert(
+                "matchedPreview".to_string(),
+                Value::String(clip_text(&read_trimmed(failure.get("matchedText")), 180)),
+            );
+            Value::Object(row)
+        })
+        .collect::<Vec<Value>>();
+    let tool_messages = failure_rows
+        .iter()
+        .skip(tail_start)
+        .filter_map(Value::as_object)
+        .map(|failure| {
+            let mut row = Map::new();
+            if let Some(value) = read_optional_string(failure, "toolName") {
+                row.insert("name".to_string(), value);
+            }
+            if let Some(value) = read_optional_string(failure, "toolCallId") {
+                row.insert("tool_call_id".to_string(), value);
+            }
+            if let Some(value) = read_optional_string(failure, "callId") {
+                row.insert("call_id".to_string(), value);
+            }
+            row.insert(
+                "contentPreview".to_string(),
+                Value::String(clip_text(&read_trimmed(failure.get("matchedText")), 180)),
+            );
+            Value::Object(row)
+        })
+        .collect::<Vec<Value>>();
+
+    json_object(vec![
+        ("topLevelKeys", Value::Array(top_level_keys)),
+        ("failureCount", Value::from(failure_count as u64)),
+        ("toolMessageCount", Value::from(failure_count as u64)),
+        ("failures", Value::Array(failures_tail)),
+        ("toolMessages", Value::Array(tool_messages)),
+    ])
+}
+
 fn json_object(entries: Vec<(&str, Value)>) -> Value {
     let mut object = Map::new();
     for (key, value) in entries {
@@ -669,6 +782,26 @@ pub fn classify_runtime_error_signal_json(
     Ok("null".to_string())
 }
 
+pub fn should_inspect_runtime_error_json(stage: String, payload_json: String) -> NapiResult<bool> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(should_inspect_runtime_error_value(&stage, &payload))
+}
+
+pub fn summarize_client_tool_observation_json(
+    payload_json: String,
+    failures_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let failures: Value = serde_json::from_str(&failures_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    serde_json::to_string(&summarize_client_tool_observation_value(
+        &payload, &failures,
+    ))
+    .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 pub fn should_log_client_tool_error_to_console_json(failure_json: String) -> NapiResult<bool> {
     let failure: Value =
         serde_json::from_str(&failure_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -772,6 +905,44 @@ mod tests {
         .unwrap();
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert!(parsed.is_null());
+    }
+
+    #[test]
+    fn decides_runtime_error_inspection_from_stage_and_direct_error() {
+        assert!(should_inspect_runtime_error_json(
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({}).to_string(),
+        )
+        .unwrap());
+        assert!(should_inspect_runtime_error_json(
+            "provider.send".to_string(),
+            json!({"message":"transport failed"}).to_string(),
+        )
+        .unwrap());
+        assert!(!should_inspect_runtime_error_json(
+            "provider.send".to_string(),
+            json!({"content":"missing field `cmd`"}).to_string(),
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn summarizes_client_tool_observation_from_native_truth() {
+        let raw = summarize_client_tool_observation_json(
+            json!({"input": [], "model": "gpt-test", "extra": true}).to_string(),
+            json!([
+                {"toolName":"exec_command","errorType":"exec_command_args_missing_cmd","matchedText":"missing field `cmd`","toolCallId":"call_1","callId":"call_1"}
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["failureCount"], 1);
+        assert_eq!(parsed["toolMessageCount"], 1);
+        assert_eq!(parsed["failures"][0]["toolName"], "exec_command");
+        assert_eq!(parsed["toolMessages"][0]["name"], "exec_command");
+        assert_eq!(parsed["toolMessages"][0]["tool_call_id"], "call_1");
+        assert_eq!(parsed["topLevelKeys"].as_array().unwrap().len(), 3);
     }
 
     #[test]

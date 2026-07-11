@@ -61,6 +61,8 @@ type NativeChatProcessNodeResultSemantics = {
   classifyRuntimeErrorSignalFromTextJson?: (stage: string, message: string) => string;
   classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
+  shouldInspectRuntimeErrorJson?: (stage: string, payloadJson: string) => boolean;
+  summarizeClientToolObservationJson?: (payloadJson: string, failuresJson: string) => string;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
   updateResponsesSseTransportTerminalStateJson?: (
     chunkJson: string,
@@ -1570,6 +1572,30 @@ export function shouldLogClientToolErrorToConsoleNative(failure: ToolExecutionFa
     throw new Error('[llmswitch-bridge] shouldLogClientToolErrorToConsoleJson not available');
   }
   return fn(JSON.stringify(failure ?? null));
+}
+
+export function shouldInspectRuntimeErrorNative(stage: string, payload: unknown): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldInspectRuntimeErrorJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldInspectRuntimeErrorJson not available');
+  }
+  return fn(String(stage || ''), JSON.stringify(payload ?? null));
+}
+
+export function summarizeClientToolObservationNative(
+  payload: unknown,
+  failures: ToolExecutionFailureSignal[]
+): Record<string, unknown> {
+  const fn = getChatProcessNodeResultSemantics().summarizeClientToolObservationJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] summarizeClientToolObservationJson not available');
+  }
+  const raw = fn(JSON.stringify(payload ?? null), JSON.stringify(failures ?? []));
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] summarizeClientToolObservationJson returned invalid payload');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function resolveProviderResponseRequestSemanticsNative(

@@ -3044,6 +3044,22 @@ pub fn should_log_client_tool_error_to_console_json_bridge(
     snapshot_tool_failures::should_log_client_tool_error_to_console_json(failure_json)
 }
 
+#[napi(js_name = "shouldInspectRuntimeErrorJson")]
+pub fn should_inspect_runtime_error_json_bridge(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<bool> {
+    snapshot_tool_failures::should_inspect_runtime_error_json(stage, payload_json)
+}
+
+#[napi(js_name = "summarizeClientToolObservationJson")]
+pub fn summarize_client_tool_observation_json_bridge(
+    payload_json: String,
+    failures_json: String,
+) -> NapiResult<String> {
+    snapshot_tool_failures::summarize_client_tool_observation_json(payload_json, failures_json)
+}
+
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)

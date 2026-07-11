@@ -70,6 +70,14 @@ const createNativeExportsMock = () => ({
   classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
   classifyRuntimeErrorSignalNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  shouldInspectRuntimeErrorNative: jest.fn(() => false),
+  summarizeClientToolObservationNative: jest.fn(() => ({
+    topLevelKeys: [],
+    failureCount: 0,
+    toolMessageCount: 0,
+    failures: [],
+    toolMessages: [],
+  })),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
