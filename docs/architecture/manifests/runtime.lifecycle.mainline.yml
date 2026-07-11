@@ -11,8 +11,11 @@ entrypoint:
 node_ids:
   - DaemonRestartLoop
   - DaemonSupervisorLoop
+  - RestartProcessHttpRequest
+  - RestartProcessSignal
   - RuntimeInstanceRecord
   - ServerPidCacheRecord
+  - ServerRestartCommand
   - ServerStartCommand
   - ServerStopCommand
   - StartShutdownHandler
@@ -44,6 +47,20 @@ edges:
     to_node: StopIntentRecord
     status: anchored
     owner_feature_id: runtime.lifecycle.stop_intent
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-05
+    from_node: ServerRestartCommand
+    to_node: RestartProcessHttpRequest
+    status: anchored
+    owner_feature_id: runtime.lifecycle.restart_command
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-06
+    from_node: ServerRestartCommand
+    to_node: RestartProcessSignal
+    status: anchored
+    owner_feature_id: runtime.lifecycle.restart_command
     binding_pending: null
     split_binding_id: null
   - step_id: rtl-07

@@ -72,6 +72,16 @@ chains:
     note: >
       Debug unified surface is still an M0/M1 governance shell; one pending
       edge is intentionally budgeted until deeper runtime/module splits land.
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Pipeline dry-run loop is fully anchored: provider-request dry-run stops at
+      final transport request construction, captured request replay re-enters
+      the same API route, and captured provider responses reuse the existing
+      response converter.
   - chain_id: internal_error_numbering.mainline
     expected_total_edges: 6
     min_anchored_edges: 6
@@ -94,11 +104,11 @@ chains:
     max_binding_pending_edges: 0
     note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; remaining mtc-01..mtc-07 stay locked.
   - chain_id: runtime.lifecycle.mainline
-    expected_total_edges: 10
-    min_anchored_edges: 10
+    expected_total_edges: 12
+    min_anchored_edges: 12
     max_partial_edges: 0
     max_binding_pending_edges: 0
-    note: Runtime lifecycle chain is fully anchored and locked.
+    note: Runtime lifecycle chain is fully anchored and locked, including restart-process HTTP and SIGUSR2 in-session restart edges.
   - chain_id: stopless.session.mainline
     expected_total_edges: 8
     min_anchored_edges: 8

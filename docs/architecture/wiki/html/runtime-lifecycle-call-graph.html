@@ -143,6 +143,9 @@
           DaemonRestartLoop[&quot;DaemonRestartLoop&quot;]
           DaemonSupervisorLoop[&quot;DaemonSupervisorLoop&quot;]
           RuntimeInstanceRecord[&quot;RuntimeInstanceRecord&quot;]
+          RestartProcessSignal[&quot;RestartProcessSignal&quot;]
+          RestartProcessHttpRequest[&quot;RestartProcessHttpRequest&quot;]
+          ServerRestartCommand[&quot;ServerRestartCommand&quot;]
           StopIntentRecord[&quot;StopIntentRecord&quot;]
           ServerStopCommand[&quot;ServerStopCommand&quot;]
           ServerPidCacheRecord[&quot;ServerPidCacheRecord&quot;]
@@ -151,6 +154,8 @@
           ServerStartCommand --&gt;|rtl-02| ServerPidCacheRecord
           ServerStopCommand --&gt;|rtl-03| StopIntentRecord
           ServerStartCommand --&gt;|rtl-04| StopIntentRecord
+          ServerRestartCommand --&gt;|rtl-05| RestartProcessHttpRequest
+          ServerRestartCommand --&gt;|rtl-06| RestartProcessSignal
           ServerStartCommand --&gt;|rtl-07| RuntimeInstanceRecord
           DaemonSupervisorLoop --&gt;|rtl-08| RuntimeInstanceRecord
           DaemonRestartLoop --&gt;|rtl-09| RuntimeInstanceRecord
@@ -164,6 +169,9 @@
           class ServerPidCacheRecord anchored;
           class ServerStopCommand anchored;
           class StopIntentRecord anchored;
+          class ServerRestartCommand anchored;
+          class RestartProcessHttpRequest anchored;
+          class RestartProcessSignal anchored;
           class RuntimeInstanceRecord anchored;
           class DaemonSupervisorLoop anchored;
           class DaemonRestartLoop anchored;
@@ -176,6 +184,8 @@
         <tr><td>rtl-02</td><td><code>ServerStartCommand -&gt; ServerPidCacheRecord</code></td><td>anchored</td><td><code>writeServerPidCache -&gt; writeServerPidCache</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
         <tr><td>rtl-03</td><td><code>ServerStopCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>writeDaemonStopIntent -&gt; writeServerStopIntent</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
         <tr><td>rtl-04</td><td><code>ServerStartCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>consumeDaemonStopIntent -&gt; consumeServerStopIntent</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
+        <tr><td>rtl-05</td><td><code>ServerRestartCommand -&gt; RestartProcessHttpRequest</code></td><td>anchored</td><td><code>requestProcessRestartViaHttp -&gt; registerRestartRoutes</code></td><td></td><td><code>runtime.lifecycle.restart_command</code>&lt;br/&gt;CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session</td></tr>
+        <tr><td>rtl-06</td><td><code>ServerRestartCommand -&gt; RestartProcessSignal</code></td><td>anchored</td><td><code>requestInPlaceRestart -&gt; sendSignal</code></td><td></td><td><code>runtime.lifecycle.restart_command</code>&lt;br/&gt;CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session</td></tr>
         <tr><td>rtl-07</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-08</td><td><code>DaemonSupervisorLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-09</td><td><code>DaemonRestartLoop -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>writeRuntimeInstance -&gt; writeRuntimeInstance</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
@@ -185,7 +195,7 @@
         </tbody>
         </table>
         <h2>Other Chains</h2>
-        <p>[config.user_config_materialization.mainline](docs/architecture/wiki/mainline-call-graph.md) · [webui.config_editor_surface.mainline](docs/architecture/wiki/webui-config_editor_surface-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [responses.direct_passthrough.mainline](docs/architecture/wiki/responses-direct_passthrough-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [vr.hit_log_projection.mainline](docs/architecture/wiki/vr-hit_log_projection-mainline.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)</p>
+        <p>[config.user_config_materialization.mainline](docs/architecture/wiki/mainline-call-graph.md) · [webui.config_editor_surface.mainline](docs/architecture/wiki/webui-config_editor_surface-mainline.md) · [servertool.hook_skeleton.mainline](docs/architecture/wiki/servertool-hook_skeleton-mainline.md) · [request.mainline](docs/architecture/wiki/request-mainline-call-graph.md) · [responses.direct_passthrough.mainline](docs/architecture/wiki/responses-direct_passthrough-mainline.md) · [response.mainline](docs/architecture/wiki/response-mainline-call-graph.md) · [responses.continuation.mainline](docs/architecture/wiki/responses-continuation-mainline.md) · [debug.unified_surface.mainline](docs/architecture/wiki/debug-unified_surface-mainline.md) · [debug.pipeline_dry_run_loop.mainline](docs/architecture/wiki/debug-pipeline_dry_run_loop-mainline.md) · [internal_error_numbering.mainline](docs/architecture/wiki/internal_error_numbering-mainline.md) · [error.mainline](docs/architecture/wiki/error-mainline-call-graph.md) · [vr.route_availability.mainline](docs/architecture/wiki/vr-route_availability-mainline.md) · [vr.online_diagnostics.mainline](docs/architecture/wiki/vr-online_diagnostics-mainline.md) · [vr.hit_log_projection.mainline](docs/architecture/wiki/vr-hit_log_projection-mainline.md) · [stopless.session.mainline](docs/architecture/wiki/runtime-lifecycle-call-graph.md) · [metadata.center.mainline](docs/architecture/wiki/metadata-center-mainline-source.md) · [sse.chat_stream_projection.mainline](docs/architecture/wiki/sse-chat_stream_projection-mainline.md) · [stage_a.p0_rust_migration.mainline](docs/architecture/wiki/stage_a-p0_rust_migration-mainline.md)</p>
       </article>
     </section>
   </main>
