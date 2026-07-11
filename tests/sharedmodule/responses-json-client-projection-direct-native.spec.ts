@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   planResponsesJsonClientDispatchWithNative,
   projectResponsesClientPayloadForClientWithNative,
-} from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
+} from './helpers/resp-semantics-direct-native.js';
 
 describe('Responses JSON direct native protocol guard', () => {
   it('router-direct JSON dispatch bypasses Responses client projection without requestContext', async () => {

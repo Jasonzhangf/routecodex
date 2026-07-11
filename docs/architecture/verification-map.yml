@@ -1159,7 +1159,7 @@ verification:
       - src/server/handlers/handler-response-utils.ts
     contract:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_tests.rs
-      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
+      - tests/sharedmodule/responses-json-client-projection-direct-native.spec.ts
       - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
@@ -1480,7 +1480,7 @@ verification:
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
-      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts
+      - tests/sharedmodule/responses-json-client-projection-direct-native.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
