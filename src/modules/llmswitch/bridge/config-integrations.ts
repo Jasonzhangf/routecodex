@@ -1,0 +1,811 @@
+/**
+ * Config Integrations Bridge
+ *
+ * Thin host shell for Rust-owned RouteCodex config/path/profile codecs.
+ */
+
+import { getRouterHotpathJsonBindingSync } from './native-exports.js';
+
+type AnyRecord = Record<string, unknown>;
+
+function loadNativeConfigBinding(): AnyRecord {
+  return getRouterHotpathJsonBindingSync() as unknown as AnyRecord;
+}
+
+function parseNativeJsonResult(raw: unknown): unknown {
+  const text = String(raw);
+  if (text.startsWith('Error:')) {
+    throw new Error(text.slice('Error:'.length).trimStart());
+  }
+  return JSON.parse(text) as unknown;
+}
+
+function safeBridgeCwd(): string | undefined {
+  try {
+    const cwd = process.cwd();
+    return typeof cwd === 'string' && cwd.trim() ? cwd : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseNativeTomlRecord(raw: string): AnyRecord {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex TOML parser returned invalid payload');
+  }
+  return parsed as AnyRecord;
+}
+
+function parseDetectedConfigFormatOutput(output: unknown, kind: string): 'toml' {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(`[llmswitch-config-bridge] RouteCodex ${kind} config format detector returned invalid payload`);
+  }
+  const format = (output as AnyRecord).format;
+  if (format !== 'toml') {
+    throw new Error(`[llmswitch-config-bridge] RouteCodex ${kind} config format detector returned invalid format`);
+  }
+  return 'toml';
+}
+
+function parseDecodedConfigTextOutput(output: unknown, kind: 'user' | 'provider'): {
+  format: 'toml';
+  parsed: AnyRecord;
+} {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(`[llmswitch-config-bridge] RouteCodex ${kind} config text decoder returned invalid payload`);
+  }
+  const record = output as AnyRecord;
+  if (record.format !== 'toml' ||
+      !record.parsed ||
+      typeof record.parsed !== 'object' ||
+      Array.isArray(record.parsed)) {
+    throw new Error(`[llmswitch-config-bridge] RouteCodex ${kind} config text decoder returned invalid shape`);
+  }
+  return {
+    format: 'toml',
+    parsed: record.parsed as AnyRecord,
+  };
+}
+
+function validatePersistedConfigFileOutput(output: unknown, label: string): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error(`[llmswitch-config-bridge] ${label} writer returned invalid payload`);
+  }
+  const persisted = output as AnyRecord;
+  if (
+    typeof persisted.path !== 'string' ||
+    persisted.format !== 'toml' ||
+    typeof persisted.raw !== 'string' ||
+    !persisted.parsed ||
+    typeof persisted.parsed !== 'object' ||
+    Array.isArray(persisted.parsed)
+  ) {
+    throw new Error(`[llmswitch-config-bridge] ${label} writer returned invalid shape`);
+  }
+  return persisted as {
+    path: string;
+    format: 'toml';
+    raw: string;
+    parsed: AnyRecord;
+  };
+}
+
+export async function compileRouteCodexRuntimeManifest(input: AnyRecord): Promise<AnyRecord> {
+  return compileRouteCodexRuntimeManifestSync(input);
+}
+
+export function compileRouteCodexRuntimeManifestSync(input: AnyRecord): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.compileRouteCodexRuntimeManifestJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] compileRouteCodexRuntimeManifestJson not available');
+  }
+  const raw = String(fn(JSON.stringify(input ?? {})));
+  if (raw.startsWith('Error:') || raw.startsWith('VIRTUAL_ROUTER_ERROR:')) {
+    throw new Error(raw);
+  }
+  const output = JSON.parse(raw) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex runtime config compiler returned invalid payload');
+  }
+  const manifest = output as AnyRecord;
+  if (manifest.manifestVersion !== 'routecodex.runtime-config.v1' ||
+      !manifest.virtualRouterBootstrapInput ||
+      typeof manifest.virtualRouterBootstrapInput !== 'object' ||
+      Array.isArray(manifest.virtualRouterBootstrapInput) ||
+      !manifest.pipelineRuntimeConfig ||
+      typeof manifest.pipelineRuntimeConfig !== 'object' ||
+      Array.isArray(manifest.pipelineRuntimeConfig)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex runtime config compiler returned invalid manifest');
+  }
+  return manifest;
+}
+
+export function collectRouteCodexV2ConfigSourceErrorsSync(userConfig: AnyRecord): string[] {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.collectRouteCodexV2ConfigSourceErrorsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] collectRouteCodexV2ConfigSourceErrorsJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify({ userConfig: userConfig ?? {} })))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config source validator returned invalid payload');
+  }
+  const errors = (output as AnyRecord).errors;
+  if (!Array.isArray(errors) || !errors.every((item) => typeof item === 'string')) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config source validator returned invalid errors');
+  }
+  return errors;
+}
+
+export function normalizeRouteCodexV2RuntimeSourceSync(userConfig: AnyRecord): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.normalizeRouteCodexV2RuntimeSourceJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] normalizeRouteCodexV2RuntimeSourceJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify({ userConfig: userConfig ?? {} })))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex runtime source normalizer returned invalid payload');
+  }
+  const normalized = (output as AnyRecord).userConfig;
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex runtime source normalizer returned invalid userConfig');
+  }
+  return normalized as AnyRecord;
+}
+
+export function resolvePrimaryRouteCodexRoutingPolicyGroupSync(userConfig: AnyRecord): string | undefined {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolvePrimaryRouteCodexRoutingPolicyGroupJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolvePrimaryRouteCodexRoutingPolicyGroupJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify({ userConfig: userConfig ?? {} })))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex routingPolicyGroup resolver returned invalid payload');
+  }
+  const group = (output as AnyRecord).routingPolicyGroup;
+  if (group === null || typeof group === 'undefined') {
+    return undefined;
+  }
+  if (typeof group !== 'string') {
+    throw new Error('[llmswitch-config-bridge] RouteCodex routingPolicyGroup resolver returned invalid group');
+  }
+  return group;
+}
+
+export function extractRouteCodexMaterializedProviderConfigsSync(userConfig: AnyRecord): AnyRecord | null {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.extractRouteCodexMaterializedProviderConfigsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] extractRouteCodexMaterializedProviderConfigsJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify({ userConfig: userConfig ?? {} })))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex materialized provider extractor returned invalid payload');
+  }
+  const providerConfigs = (output as AnyRecord).providerConfigs;
+  if (providerConfigs === null || typeof providerConfigs === 'undefined') {
+    return null;
+  }
+  if (!providerConfigs || typeof providerConfigs !== 'object' || Array.isArray(providerConfigs)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex materialized provider extractor returned invalid providerConfigs');
+  }
+  return providerConfigs as AnyRecord;
+}
+
+export function materializeRouteCodexUserConfigFromManifestSync(userConfig: AnyRecord, manifest: AnyRecord): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.materializeRouteCodexUserConfigFromManifestJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] materializeRouteCodexUserConfigFromManifestJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify({
+    userConfig: userConfig ?? {},
+    manifest: manifest ?? {}
+  })))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex user config materializer returned invalid payload');
+  }
+  const materialized = (output as AnyRecord).userConfig;
+  if (!materialized || typeof materialized !== 'object' || Array.isArray(materialized)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex user config materializer returned invalid userConfig');
+  }
+  return materialized as AnyRecord;
+}
+
+export function buildRouteCodexProviderProfilesSync(userConfig: AnyRecord): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.buildRouteCodexProviderProfilesJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] buildRouteCodexProviderProfilesJson not available');
+  }
+  const raw = String(fn(JSON.stringify({ userConfig: userConfig ?? {} })));
+  if (raw.startsWith('Error:') || raw.startsWith('VIRTUAL_ROUTER_ERROR:')) {
+    throw new Error(raw);
+  }
+  const output = JSON.parse(raw) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider profile builder returned invalid payload');
+  }
+  const providerProfiles = (output as AnyRecord).providerProfiles;
+  if (!providerProfiles || typeof providerProfiles !== 'object' || Array.isArray(providerProfiles)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider profile builder returned invalid providerProfiles');
+  }
+  return providerProfiles as AnyRecord;
+}
+
+export function buildRouteCodexForwarderProfilesSync(userConfig: AnyRecord, knownProviderIds: Set<string> | string[]): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.buildRouteCodexForwarderProfilesJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] buildRouteCodexForwarderProfilesJson not available');
+  }
+  const providerIds = Array.isArray(knownProviderIds) ? knownProviderIds : Array.from(knownProviderIds ?? []);
+  const raw = String(fn(JSON.stringify({ userConfig: userConfig ?? {}, knownProviderIds: providerIds })));
+  if (raw.startsWith('Error:') || raw.startsWith('VIRTUAL_ROUTER_ERROR:')) {
+    throw new Error(raw);
+  }
+  const output = JSON.parse(raw) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex forwarder profile builder returned invalid payload');
+  }
+  const forwarderProfiles = (output as AnyRecord).forwarderProfiles;
+  if (!forwarderProfiles || typeof forwarderProfiles !== 'object' || Array.isArray(forwarderProfiles)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex forwarder profile builder returned invalid forwarderProfiles');
+  }
+  return forwarderProfiles as AnyRecord;
+}
+
+export function parseRouteCodexTomlRecordSync(raw: string): AnyRecord {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.parseRouteCodexTomlRecordJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] parseRouteCodexTomlRecordJson not available');
+  }
+  return parseNativeTomlRecord(String(fn(String(raw ?? ''))));
+}
+
+export function serializeRouteCodexTomlRecordSync(record: AnyRecord): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.serializeRouteCodexTomlRecordJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] serializeRouteCodexTomlRecordJson not available');
+  }
+  return String(fn(JSON.stringify(record ?? {})));
+}
+
+export function updateRouteCodexTomlStringScalarInTableSync(input: {
+  raw: string;
+  tablePath: string[];
+  key: string;
+  value: string;
+}): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.updateRouteCodexTomlStringScalarInTableJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] updateRouteCodexTomlStringScalarInTableJson not available');
+  }
+  return String(fn(JSON.stringify({
+    raw: String(input.raw ?? ''),
+    tablePath: Array.isArray(input.tablePath) ? input.tablePath.map(String) : [],
+    key: String(input.key ?? ''),
+    value: String(input.value ?? '')
+  })));
+}
+
+export function decodeRouteCodexUserConfigTextSync(input: {
+  raw: string;
+  configPath?: string;
+}): {
+  format: 'toml';
+  parsed: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.decodeRouteCodexUserConfigTextJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] decodeRouteCodexUserConfigTextJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    raw: String(input.raw ?? ''),
+    ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
+  }))) as unknown;
+  return parseDecodedConfigTextOutput(output, 'user');
+}
+
+export function decodeRouteCodexProviderConfigTextSync(input: {
+  raw: string;
+  configPath?: string;
+}): {
+  format: 'toml';
+  parsed: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.decodeRouteCodexProviderConfigTextJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] decodeRouteCodexProviderConfigTextJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    raw: String(input.raw ?? ''),
+    ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
+  }))) as unknown;
+  return parseDecodedConfigTextOutput(output, 'provider');
+}
+
+export function detectRouteCodexUserConfigFormatSync(configPath: string): 'toml' {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.detectRouteCodexUserConfigFormatJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] detectRouteCodexUserConfigFormatJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
+  return parseDetectedConfigFormatOutput(output, 'user');
+}
+
+export function detectRouteCodexProviderConfigFormatSync(configPath: string): 'toml' {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.detectRouteCodexProviderConfigFormatJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] detectRouteCodexProviderConfigFormatJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
+  return parseDetectedConfigFormatOutput(output, 'provider');
+}
+
+export function writeRouteCodexUserConfigFileNativeSync(input: {
+  configPath: string;
+  parsed: AnyRecord;
+  format?: 'toml';
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.writeRouteCodexUserConfigFileJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] writeRouteCodexUserConfigFileJson not available');
+  }
+  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+    configPath: input.configPath,
+    parsed: input.parsed ?? {},
+    format: input.format
+  }))), 'User config');
+}
+
+export function writeRouteCodexProviderConfigFileNativeSync(input: {
+  configPath: string;
+  parsed: AnyRecord;
+  format?: 'toml';
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.writeRouteCodexProviderConfigFileJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] writeRouteCodexProviderConfigFileJson not available');
+  }
+  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+    configPath: input.configPath,
+    parsed: input.parsed ?? {},
+    format: input.format
+  }))), 'Provider config');
+}
+
+export function updateRouteCodexUserConfigStringScalarNativeSync(input: {
+  configPath: string;
+  tablePath: string[];
+  key: string;
+  value: string;
+}): {
+  path: string;
+  format: 'toml';
+  raw: string;
+  parsed: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.updateRouteCodexUserConfigStringScalarJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] updateRouteCodexUserConfigStringScalarJson not available');
+  }
+  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+    configPath: input.configPath,
+    tablePath: input.tablePath,
+    key: input.key,
+    value: input.value
+  }))), 'User config scalar update');
+}
+
+export function loadRouteCodexConfigNativeSync(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+} = {}): {
+  configPath: string;
+  userConfig: AnyRecord;
+  providerProfiles: AnyRecord;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.loadRouteCodexConfigJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] loadRouteCodexConfigJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    explicitPath: input.explicitPath,
+    routecodexProviderDir: input.routecodexProviderDir ?? process.env.ROUTECODEX_PROVIDER_DIR,
+    rccProviderDir: input.rccProviderDir ?? process.env.RCC_PROVIDER_DIR,
+    cwd: safeBridgeCwd(),
+    homeDir: process.env.HOME,
+    execPath: process.execPath,
+    routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+    routecodexConfig: process.env.ROUTECODEX_CONFIG,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config loader returned invalid payload');
+  }
+  const loaded = output as AnyRecord;
+  if (
+    typeof loaded.configPath !== 'string' ||
+    !loaded.userConfig ||
+    typeof loaded.userConfig !== 'object' ||
+    Array.isArray(loaded.userConfig) ||
+    !loaded.providerProfiles ||
+    typeof loaded.providerProfiles !== 'object' ||
+    Array.isArray(loaded.providerProfiles)
+  ) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config loader returned invalid shape');
+  }
+  return loaded as {
+    configPath: string;
+    userConfig: AnyRecord;
+    providerProfiles: AnyRecord;
+  };
+}
+
+export function coerceRouteCodexProviderConfigV2Sync(
+  parsed: AnyRecord,
+  fallbackProviderId?: string
+): AnyRecord | null {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.coerceRouteCodexProviderConfigV2Json;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] coerceRouteCodexProviderConfigV2Json not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    parsed: parsed ?? {},
+    fallbackProviderId: String(fallbackProviderId ?? '')
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config coercer returned invalid payload');
+  }
+  const config = (output as AnyRecord).config;
+  if (config === null) {
+    return null;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config coercer returned invalid config');
+  }
+  return config as AnyRecord;
+}
+
+export function planRouteCodexProviderConfigV2FilesSync(fileNames: string[]): Array<{
+  fileName: string;
+  isBaseFile: boolean;
+}> {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.planRouteCodexProviderConfigV2FilesJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] planRouteCodexProviderConfigV2FilesJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ fileNames }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config file planner returned invalid payload');
+  }
+  const files = (output as AnyRecord).files;
+  if (!Array.isArray(files)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config file planner returned invalid files');
+  }
+  return files.map((file) => {
+    if (!file || typeof file !== 'object' || Array.isArray(file)) {
+      throw new Error('[llmswitch-config-bridge] RouteCodex provider config file planner returned invalid file entry');
+    }
+    const record = file as AnyRecord;
+    if (typeof record.fileName !== 'string' || typeof record.isBaseFile !== 'boolean') {
+      throw new Error('[llmswitch-config-bridge] RouteCodex provider config file planner returned invalid file shape');
+    }
+    return {
+      fileName: record.fileName,
+      isBaseFile: record.isBaseFile
+    };
+  });
+}
+
+export function resolveRouteCodexProviderConfigV2IdentitySync(input: {
+  dirId: string;
+  fileName: string;
+  filePath: string;
+  isBaseFile: boolean;
+  parsed: AnyRecord;
+  provider: AnyRecord;
+}): { providerId: string; provider: AnyRecord } {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveRouteCodexProviderConfigV2IdentityJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveRouteCodexProviderConfigV2IdentityJson not available');
+  }
+  const output = JSON.parse(String(fn(JSON.stringify(input)))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config identity resolver returned invalid payload');
+  }
+  const record = output as AnyRecord;
+  if (typeof record.providerId !== 'string' ||
+      !record.provider ||
+      typeof record.provider !== 'object' ||
+      Array.isArray(record.provider)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config identity resolver returned invalid shape');
+  }
+  return {
+    providerId: record.providerId,
+    provider: record.provider as AnyRecord
+  };
+}
+
+export function loadRouteCodexProviderConfigsV2FromRootSync(rootDir: string): Record<string, AnyRecord> {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.loadRouteCodexProviderConfigsV2FromRootJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] loadRouteCodexProviderConfigsV2FromRootJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir: String(rootDir ?? '') }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config root loader returned invalid payload');
+  }
+  const configs = (output as AnyRecord).configs;
+  if (!configs || typeof configs !== 'object' || Array.isArray(configs)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex provider config root loader returned invalid configs');
+  }
+  return configs as Record<string, AnyRecord>;
+}
+
+export function resolveRccUserDirNativeSync(homeDir?: string): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveRccUserDirJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveRccUserDirJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME,
+    ...(typeof homeDir === 'string' ? { homeDir } : {})
+  }))) as unknown;
+  if (typeof output !== 'string' || !output.trim()) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex user dir resolver returned invalid path');
+  }
+  return output;
+}
+
+export function resolveRccPathNativeSync(segments: string[], homeDir?: string): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveRccPathJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveRccPathJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    segments: Array.isArray(segments) ? segments.map(String) : [],
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME,
+    ...(typeof homeDir === 'string' ? { homeDir } : {})
+  }))) as unknown;
+  if (typeof output !== 'string' || !output.trim()) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex path resolver returned invalid path');
+  }
+  return output;
+}
+
+export function resolveRccSnapshotsDirNativeSync(homeDir?: string): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveRccSnapshotsDirJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveRccSnapshotsDirJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    homeDir,
+    rccSnapshotDir: process.env.RCC_SNAPSHOT_DIR,
+    routecodexSnapshotDir: process.env.ROUTECODEX_SNAPSHOT_DIR,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex snapshots dir resolver returned invalid payload');
+  }
+  const snapshotsDir = (output as AnyRecord).snapshotsDir;
+  if (typeof snapshotsDir !== 'string' || !snapshotsDir.trim()) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex snapshots dir resolver returned invalid path');
+  }
+  return snapshotsDir;
+}
+
+export function planAuthFileResolutionNativeSync(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value?: string;
+  filePath?: string;
+  cacheKey?: string;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.planAuthFileResolutionJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] planAuthFileResolutionJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] AuthFile resolver returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (plan.kind !== 'literal' && plan.kind !== 'authFile') {
+    throw new Error('[llmswitch-config-bridge] AuthFile resolver returned invalid kind');
+  }
+  if (plan.kind === 'literal' && typeof plan.value !== 'string') {
+    throw new Error('[llmswitch-config-bridge] AuthFile resolver returned invalid literal value');
+  }
+  if (plan.kind === 'authFile' &&
+      (typeof plan.filePath !== 'string' || typeof plan.cacheKey !== 'string')) {
+    throw new Error('[llmswitch-config-bridge] AuthFile resolver returned invalid authFile plan');
+  }
+  return plan as {
+    kind: 'literal' | 'authFile';
+    value?: string;
+    filePath?: string;
+    cacheKey?: string;
+  };
+}
+
+export function resolveAuthFileKeyNativeSync(input: {
+  keyId: string;
+  authDir?: string;
+  homeDir?: string;
+}): {
+  kind: 'literal' | 'authFile';
+  value: string;
+  cacheKey?: string;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveAuthFileKeyJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveAuthFileKeyJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    keyId: String(input.keyId ?? ''),
+    authDir: input.authDir,
+    homeDir: input.homeDir,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] AuthFile key resolver returned invalid payload');
+  }
+  const resolved = output as AnyRecord;
+  if ((resolved.kind !== 'literal' && resolved.kind !== 'authFile') || typeof resolved.value !== 'string') {
+    throw new Error('[llmswitch-config-bridge] AuthFile key resolver returned invalid shape');
+  }
+  if (typeof resolved.cacheKey !== 'undefined' && typeof resolved.cacheKey !== 'string') {
+    throw new Error('[llmswitch-config-bridge] AuthFile key resolver returned invalid cache key');
+  }
+  return resolved as {
+    kind: 'literal' | 'authFile';
+    value: string;
+    cacheKey?: string;
+  };
+}
+
+export function planRouteCodexConfigLoaderPathsNativeSync(input: {
+  explicitPath?: string;
+  routecodexProviderDir?: string;
+  rccProviderDir?: string;
+}): {
+  explicitPath?: string;
+  providerRootDir?: string;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.planRouteCodexConfigLoaderPathsJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] planRouteCodexConfigLoaderPathsJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    explicitPath: input.explicitPath,
+    routecodexProviderDir: input.routecodexProviderDir,
+    rccProviderDir: input.rccProviderDir
+  }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config loader path planner returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (typeof plan.explicitPath !== 'undefined' && typeof plan.explicitPath !== 'string') {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config loader path planner returned invalid explicitPath');
+  }
+  if (typeof plan.providerRootDir !== 'undefined' && typeof plan.providerRootDir !== 'string') {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config loader path planner returned invalid providerRootDir');
+  }
+  return plan as {
+    explicitPath?: string;
+    providerRootDir?: string;
+  };
+}
+
+export function planProviderConfigRootNativeSync(rootDir?: string): {
+  rootDir?: string;
+} {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.planProviderConfigRootJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] planProviderConfigRootJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir }))) as unknown;
+  if (!output || typeof output !== 'object' || Array.isArray(output)) {
+    throw new Error('[llmswitch-config-bridge] Provider config root planner returned invalid payload');
+  }
+  const plan = output as AnyRecord;
+  if (typeof plan.rootDir !== 'undefined' && typeof plan.rootDir !== 'string') {
+    throw new Error('[llmswitch-config-bridge] Provider config root planner returned invalid rootDir');
+  }
+  return plan as { rootDir?: string };
+}
+
+export function resolveRouteCodexConfigPathNativeSync(options: {
+  preferredPath?: string;
+  configName?: string;
+  allowDirectoryScan?: boolean;
+  baseDir?: string;
+} = {}): string {
+  const binding = loadNativeConfigBinding();
+  const fn = binding.resolveRouteCodexConfigPathJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-config-bridge] resolveRouteCodexConfigPathJson not available');
+  }
+  const output = parseNativeJsonResult(fn(JSON.stringify({
+    preferredPath: options.preferredPath,
+    configName: options.configName,
+    allowDirectoryScan: options.allowDirectoryScan ?? true,
+    baseDir: options.baseDir,
+    cwd: safeBridgeCwd(),
+    homeDir: process.env.HOME,
+    execPath: process.execPath,
+    routecodexConfigPath: process.env.ROUTECODEX_CONFIG_PATH,
+    routecodexConfig: process.env.ROUTECODEX_CONFIG,
+    rccHome: process.env.RCC_HOME,
+    routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
+    routecodexHome: process.env.ROUTECODEX_HOME
+  }))) as unknown;
+  if (typeof output !== 'string' || !output.trim()) {
+    throw new Error('[llmswitch-config-bridge] RouteCodex config path resolver returned invalid path');
+  }
+  return output;
+}

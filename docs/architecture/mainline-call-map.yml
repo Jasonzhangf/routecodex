@@ -19,7 +19,7 @@ chains:
         caller_symbol: loadRouteCodexConfig
         caller_file: src/config/routecodex-config-loader.ts
         callee_symbol: loadRouteCodexConfigNativeSync
-        callee_file: src/modules/llmswitch/bridge/routing-integrations.ts
+        callee_file: src/modules/llmswitch/bridge/config-integrations.ts
         owner_feature_id: config.user_config_materialization
         semantic_input: "optional explicit config path plus current host env provider/root overrides"
         semantic_output: "native loader input with cwd/home/exec and RouteCodex/RCC env snapshot"
@@ -28,7 +28,7 @@ chains:
         from_node: ConfigLoad02NativeBridge
         to_node: ConfigLoad03RustLoader
         caller_symbol: loadRouteCodexConfigNativeSync
-        caller_file: src/modules/llmswitch/bridge/routing-integrations.ts
+        caller_file: src/modules/llmswitch/bridge/config-integrations.ts
         callee_symbol: load_route_codex_config_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
         owner_feature_id: config.user_config_materialization

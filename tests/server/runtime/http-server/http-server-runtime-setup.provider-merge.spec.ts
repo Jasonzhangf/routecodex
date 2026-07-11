@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 
 const PROVIDER_V2_LOADER_PATH = '../../../../src/config/provider-v2-loader.ts';
 const BOOTSTRAP_MODULE_PATH = '../../../../src/server/runtime/http-server/http-server-bootstrap.ts';
+const CONFIG_INTEGRATIONS_PATH = '../../../../src/modules/llmswitch/bridge/config-integrations.js';
 const ROUTING_INTEGRATIONS_PATH = '../../../../src/modules/llmswitch/bridge/routing-integrations.js';
 const RUNTIME_INTEGRATIONS_PATH = '../../../../src/modules/llmswitch/bridge/runtime-integrations.js';
 const RUNTIME_MANIFEST_SYMBOL = Symbol.for('routecodex.runtimeConfigManifest');
@@ -34,8 +35,7 @@ function unwrapProviderConfigs(providerConfigs: Record<string, unknown> = {}): R
   );
 }
 
-jest.unstable_mockModule(ROUTING_INTEGRATIONS_PATH, () => ({
-  bootstrapVirtualRouterConfig: (input: Record<string, unknown>) => input,
+const mockConfigIntegrationsModule = {
   compileRouteCodexRuntimeManifest: async (input: any) => {
     const routingPolicyGroups = input?.userConfig?.virtualrouter?.routingPolicyGroups ?? {};
     const group =
@@ -104,6 +104,13 @@ jest.unstable_mockModule(ROUTING_INTEGRATIONS_PATH, () => ({
   resolveRccPathNativeSync: (segments: string[] = []) => ['/tmp/.rcc', ...segments].join('/'),
   resolveRccSnapshotsDirNativeSync: () => '/tmp/.rcc/snapshots',
   resolveRccUserDirNativeSync: () => '/tmp/.rcc',
+};
+
+jest.unstable_mockModule(CONFIG_INTEGRATIONS_PATH, () => mockConfigIntegrationsModule);
+
+jest.unstable_mockModule(ROUTING_INTEGRATIONS_PATH, () => ({
+  ...mockConfigIntegrationsModule,
+  bootstrapVirtualRouterConfig: (input: Record<string, unknown>) => input,
   createHubPipelineNative: mockCreateHubPipelineNative,
   executeHubPipelineNative: mockExecuteHubPipelineNative,
   updateHubPipelineVirtualRouterConfigNative: mockUpdateHubPipelineVirtualRouterConfigNative,
@@ -249,7 +256,7 @@ describe('http server runtime setup provider merge', () => {
     expect(capturedInputs[0]?.providers?.openai?.auth?.type).toBe('apiKey');
     expect(mockCreateHubPipelineNative).toHaveBeenCalledTimes(1);
     const primaryHubConfig = mockCreateHubPipelineNative.mock.calls[0]?.[0] as any;
-    expect(typeof server.hubPipeline?.getVirtualRouter).toBe('function');
+    expect(server.hubPipeline).toEqual(expect.stringMatching(/^hp_/));
     expect(primaryHubConfig?.pipelineRuntimeConfig).toMatchObject({
       applyPatch: { mode: 'client', allow: ['apply_patch'] },
       routingProviderIds: ['openai'],
@@ -627,8 +634,8 @@ describe('http server runtime setup provider merge', () => {
     capturedScopes.push(server.routingProviderScope);
 
     expect(capturedArtifacts).toHaveLength(1);
-    expect(typeof server.hubPipeline?.getVirtualRouter).toBe('function');
-    expect(typeof server.hubPipelinesByRoutingPolicyGroup.get('gateway_priority_5520')?.getVirtualRouter).toBe('function');
+    expect(server.hubPipeline).toEqual(expect.stringMatching(/^hp_/));
+    expect(server.hubPipelinesByRoutingPolicyGroup.get('gateway_priority_5520')).toEqual(expect.stringMatching(/^hp_/));
     expect(capturedArtifacts[0]?.config?.routing).toMatchObject({
       provider: [
         expect.objectContaining({ targets: ['tokenrelay.key1.deepseek-v4-pro'] }),

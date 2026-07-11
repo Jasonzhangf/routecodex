@@ -1,7 +1,7 @@
 // feature_id: config.user_config_materialization
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import type { UnknownRecord } from './user-config-codec.js';
-import { loadRouteCodexConfigNativeSync } from '../modules/llmswitch/bridge/routing-integrations.js';
+import { loadRouteCodexConfigNativeSync } from '../modules/llmswitch/bridge/config-integrations.js';
 
 export interface LoadedRouteCodexConfig {
   configPath: string;

@@ -4,7 +4,7 @@
 import {
   parseRouteCodexTomlRecordSync,
   serializeRouteCodexTomlRecordSync
-} from '../modules/llmswitch/bridge/routing-integrations.js';
+} from '../modules/llmswitch/bridge/config-integrations.js';
 
 export type TomlPrimitive = string | number | boolean;
 export interface TomlTable {

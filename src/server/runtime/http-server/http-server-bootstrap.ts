@@ -9,10 +9,8 @@ import { buildInfo } from '../../../build-info.js';
 import {
   compileRouteCodexRuntimeConfigManifest,
 } from '../../../config/user-config-loader.js';
-import {
-  bootstrapVirtualRouterConfig,
-  resolvePrimaryRouteCodexRoutingPolicyGroupSync
-} from '../../../modules/llmswitch/bridge/routing-integrations.js';
+import { resolvePrimaryRouteCodexRoutingPolicyGroupSync } from '../../../modules/llmswitch/bridge/config-integrations.js';
+import { bootstrapVirtualRouterConfig } from '../../../modules/llmswitch/bridge/routing-integrations.js';
 import type { VirtualRouterArtifacts } from './types.js';
 import { resolveProviderIdentity } from './provider-utils.js';
 import { initializeRouteErrorHub as initializeRouteErrorHubImpl } from '../../../error-handling/route-error-hub.js';

@@ -1792,7 +1792,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/user-data-paths.ts
       - src/config/auth-file-resolver.ts
       - src/config/unified-config-paths.ts
@@ -1817,7 +1817,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/user-config-codec.ts
     contract:
       - tests/config/config-file-codec-rust.spec.ts
@@ -1837,7 +1837,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/toml-basic.ts
       - src/config/toml-comment-preserving.ts
     contract:
@@ -1860,7 +1860,7 @@ verification:
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
     contract:
       - tests/config/config-file-codec-rust.spec.ts
       - tests/config/config-format-detect-rust.spec.ts
@@ -1882,7 +1882,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
       - src/cli/commands/init/basic.ts
@@ -1940,7 +1940,7 @@ verification:
       - src/providers/profile/provider-profile-loader.ts
       - src/providers/profile/provider-profile.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
     contract:
       - src/providers/profile/__tests__/provider-profile-loader.spec.ts
       - tests/providers/profile/provider-profile-loader.entries.unit.spec.ts
@@ -1962,7 +1962,7 @@ verification:
       - src/providers/profile/forwarder-types.ts
       - src/providers/profile/forwarder-types-adapter.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
     contract:
       - tests/providers/forwarder-selection.spec.ts
       - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
@@ -1979,7 +1979,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/user-config-writer.ts
       - src/config/toml-comment-preserving.ts
     contract:
@@ -2001,7 +2001,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-writer.ts
     contract:
       - tests/config/config-writer-rust.spec.ts

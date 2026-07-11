@@ -2,7 +2,7 @@ import {
   resolveRccPathNativeSync,
   resolveRccSnapshotsDirNativeSync,
   resolveRccUserDirNativeSync
-} from '../modules/llmswitch/bridge/routing-integrations.js';
+} from '../modules/llmswitch/bridge/config-integrations.js';
 
 const SNAPSHOT_DIR_ENV_KEYS = ['RCC_SNAPSHOT_DIR', 'ROUTECODEX_SNAPSHOT_DIR'] as const;
 export const RCC_SUBDIRS = {

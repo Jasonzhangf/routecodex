@@ -2777,7 +2777,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/unified-config-paths.ts
       - src/config/config-paths.ts
       - src/config/user-data-paths.ts
@@ -2824,7 +2824,7 @@ owners:
       - update_toml_string_scalar_in_table_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/toml-basic.ts
       - src/config/toml-comment-preserving.ts
     forbidden_paths:
@@ -2856,7 +2856,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/user-config-codec.ts
       - src/config/routecodex-config-loader.ts
       - src/server/handlers/config-admin-handler.ts
@@ -2901,7 +2901,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-config-writer.ts
     forbidden_paths:
@@ -2942,7 +2942,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
       - src/cli/commands/init/basic.ts
@@ -2991,7 +2991,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/server/runtime/http-server/runtime-config-manifest-carrier.ts
       - src/server/runtime/http-server/http-server-bootstrap.ts
       - src/server/runtime/http-server/http-server-runtime-setup.ts
@@ -3037,7 +3037,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/providers/profile/provider-profile-loader.ts
       - src/providers/profile/provider-profile.ts
     forbidden_paths:
@@ -3074,7 +3074,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/providers/profile/provider-profile-loader.ts
       - src/providers/profile/forwarder-types.ts
       - src/providers/profile/forwarder-types-adapter.ts
@@ -3111,7 +3111,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/user-config-writer.ts
       - src/config/toml-comment-preserving.ts
       - src/server/handlers/config-admin-handler.ts
@@ -3146,7 +3146,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-writer.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/cli/commands/init/basic.ts

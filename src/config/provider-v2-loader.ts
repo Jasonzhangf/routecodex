@@ -1,7 +1,7 @@
 import {
   loadRouteCodexProviderConfigsV2FromRootSync,
   planProviderConfigRootNativeSync
-} from '../modules/llmswitch/bridge/routing-integrations.js';
+} from '../modules/llmswitch/bridge/config-integrations.js';
 import { resolveRccProviderDir } from './user-data-paths.js';
 
 type UnknownRecord = Record<string, unknown>;

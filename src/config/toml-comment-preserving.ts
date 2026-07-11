@@ -1,6 +1,6 @@
 // feature_id: config.toml_codec
 // feature_id: config.user_config_write_surface
-import { updateRouteCodexTomlStringScalarInTableSync } from '../modules/llmswitch/bridge/routing-integrations.js';
+import { updateRouteCodexTomlStringScalarInTableSync } from '../modules/llmswitch/bridge/config-integrations.js';
 
 // Rust owner anchor: update_toml_string_scalar_in_table_json.
 export function updateTomlStringScalarInTable(

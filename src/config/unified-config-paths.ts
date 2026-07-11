@@ -1,5 +1,5 @@
 // feature_id: config.path_resolution_surface
-import { resolveRouteCodexConfigPathNativeSync } from '../modules/llmswitch/bridge/routing-integrations.js';
+import { resolveRouteCodexConfigPathNativeSync } from '../modules/llmswitch/bridge/config-integrations.js';
 
 export interface ConfigPathOptions {
   preferredPath?: string;
