@@ -143,6 +143,7 @@ type NativeRouterHotpathJsonBinding = {
   planResponsesRequestBodyForHttpJson?: (payloadJson: string) => string;
   shouldManageResponsesConversationForHttpJson?: (entryEndpoint: string) => boolean;
   buildResponsesConversationPortScopeForHttpJson?: (portContextJson: string) => string;
+  buildResponsesResumeControlForContinuationContextForHttpJson?: (resumeMetaJson: string) => string;
   buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
   buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
   shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
@@ -1326,6 +1327,20 @@ export function buildResponsesConversationPortScopeForHttpNative(portContext: {
       ? { routingPolicyGroup: record.routingPolicyGroup.trim() }
       : {}),
   };
+}
+
+export function buildResponsesResumeControlForContinuationContextForHttpNative(
+  resumeMeta: Record<string, unknown>
+): Record<string, unknown> {
+  const fn = getRouterHotpathJsonBindingSync().buildResponsesResumeControlForContinuationContextForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesResumeControlForContinuationContextForHttpJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(resumeMeta))) as unknown;
+  return assertNativeObject(
+    'buildResponsesResumeControlForContinuationContextForHttpJson',
+    parsed
+  );
 }
 
 export function buildResponsesScopeContinuationExpiredErrorForHttpNative(): {

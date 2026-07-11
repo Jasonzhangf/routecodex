@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+} from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockResumeResponsesConversation = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
@@ -152,6 +155,9 @@ const createNativeExportsMock = () => ({
   })),
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
     typeof origin === 'string' && origin.trim() === 'client'
+  ),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
   ),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {

@@ -1,4 +1,7 @@
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -78,6 +81,9 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   })),
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
     (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
+  ),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
   ),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;

@@ -5740,6 +5740,96 @@ pub fn build_responses_conversation_port_scope_for_http_json(
     serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+fn copy_trimmed_string_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = read_trimmed_string(input.get(key)) {
+        output.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn copy_boolean_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = input.get(key).and_then(Value::as_bool) {
+        output.insert(key.to_string(), Value::Bool(value));
+    }
+}
+
+fn copy_number_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = input.get(key).filter(|value| value.is_number()) {
+        output.insert(key.to_string(), value.clone());
+    }
+}
+
+fn first_trimmed_field(input: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| read_trimmed_string(input.get(*key)))
+}
+
+#[napi_derive::napi(js_name = "buildResponsesResumeControlForContinuationContextForHttpJson")]
+pub fn build_responses_resume_control_for_continuation_context_for_http_json(
+    resume_meta_json: String,
+) -> NapiResult<String> {
+    let resume_meta: Value = serde_json::from_str(&resume_meta_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input = resume_meta
+        .as_object()
+        .ok_or_else(|| napi::Error::from_reason("resumeMeta must be object"))?;
+    let mut output = serde_json::Map::new();
+
+    for key in [
+        "responseId",
+        "restoredFromResponseId",
+        "previousRequestId",
+        "requestId",
+        "scopeKey",
+        "entryKind",
+        "continuationOwner",
+        "materializedMode",
+    ] {
+        copy_trimmed_string_field(input, &mut output, key);
+    }
+    if matches!(
+        output.get("continuationOwner").and_then(Value::as_str),
+        Some("direct")
+    ) {
+        copy_trimmed_string_field(input, &mut output, "providerKey");
+    }
+    for key in ["restored", "materialized"] {
+        copy_boolean_field(input, &mut output, key);
+    }
+    for key in [
+        "deltaInputItems",
+        "toolOutputs",
+        "incomingInputItems",
+        "continuationDeltaItems",
+        "fullInputItems",
+    ] {
+        copy_number_field(input, &mut output, key);
+    }
+    if let Some(items) = input.get("toolOutputsDetailed").and_then(Value::as_array) {
+        let tool_outputs: Vec<Value> = items
+            .iter()
+            .filter_map(|item| {
+                let row = item.as_object()?;
+                let call_id = first_trimmed_field(
+                    row,
+                    &["callId", "originalId", "call_id", "tool_call_id", "id"],
+                )?;
+                let output_text = first_trimmed_field(row, &["outputText", "output_text", "output"])?;
+                let mut item_output = serde_json::Map::new();
+                item_output.insert("callId".to_string(), Value::String(call_id));
+                if let Some(original_id) = first_trimmed_field(row, &["originalId", "original_id"]) {
+                    item_output.insert("originalId".to_string(), Value::String(original_id));
+                }
+                item_output.insert("outputText".to_string(), Value::String(output_text));
+                Some(Value::Object(item_output))
+            })
+            .collect();
+        if !tool_outputs.is_empty() {
+            output.insert("toolOutputsDetailed".to_string(), Value::Array(tool_outputs));
+        }
+    }
+
+    serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "buildResponsesScopeContinuationExpiredErrorForHttpJson")]
 pub fn build_responses_scope_continuation_expired_error_for_http_json() -> NapiResult<String> {
     let output = serde_json::json!({
@@ -6224,6 +6314,7 @@ mod tests {
         plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
         build_responses_conversation_port_scope_for_http_json, plan_responses_handler_entry,
+        build_responses_resume_control_for_continuation_context_for_http_json,
         plan_responses_handler_stream_for_http_json, plan_responses_persisted_entry,
         plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
         plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
@@ -9645,5 +9736,106 @@ mod tests {
         .expect("local port scope json");
         assert_eq!(from_local["matchedPort"], json!(5520));
         assert!(from_local.get("routingPolicyGroup").is_none());
+    }
+
+    #[test]
+    fn build_responses_resume_control_strips_relay_pins_and_payload_mirrors() {
+        let output: Value = serde_json::from_str(
+            &build_responses_resume_control_for_continuation_context_for_http_json(
+                json!({
+                    "responseId": " resp_relay_1 ",
+                    "continuationOwner": "relay",
+                    "providerKey": "provider.key1.gpt-5.5",
+                    "routeHint": "search",
+                    "sessionId": "sess_ignored",
+                    "conversationId": "conv_ignored",
+                    "fullInput": [{"type": "message"}],
+                    "restored": true,
+                    "deltaInputItems": 2,
+                    "toolOutputsDetailed": [
+                        {
+                            "call_id": " call_1 ",
+                            "output_text": " ok ",
+                            "output": {"must": "not copy"},
+                            "rawPayload": {"must": "not copy"}
+                        },
+                        {
+                            "tool_call_id": " call_2 ",
+                            "output": " text output "
+                        },
+                        {
+                            "id": "missing_output"
+                        },
+                        {
+                            "outputText": "missing call id"
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .expect("resume control"),
+        )
+        .expect("resume control json");
+
+        assert_eq!(output["responseId"], json!("resp_relay_1"));
+        assert_eq!(output["continuationOwner"], json!("relay"));
+        assert_eq!(output["restored"], json!(true));
+        assert_eq!(output["deltaInputItems"], json!(2));
+        assert!(output.get("providerKey").is_none());
+        assert!(output.get("routeHint").is_none());
+        assert!(output.get("sessionId").is_none());
+        assert!(output.get("conversationId").is_none());
+        assert!(output.get("fullInput").is_none());
+        assert_eq!(
+            output["toolOutputsDetailed"],
+            json!([
+                {"callId": "call_1", "outputText": "ok"},
+                {"callId": "call_2", "outputText": "text output"}
+            ])
+        );
+    }
+
+    #[test]
+    fn build_responses_resume_control_preserves_direct_provider_pin_only() {
+        let output: Value = serde_json::from_str(
+            &build_responses_resume_control_for_continuation_context_for_http_json(
+                json!({
+                    "responseId": "resp_direct_1",
+                    "continuationOwner": " direct ",
+                    "providerKey": " provider.key1.gpt-5.5 ",
+                    "materialized": true,
+                    "materializedMode": " submit_tool_outputs ",
+                    "toolOutputs": 1,
+                    "incomingInputItems": 3,
+                    "toolOutputsDetailed": [
+                        {
+                            "originalId": " original_call_1 ",
+                            "outputText": " stdout "
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .expect("direct resume control"),
+        )
+        .expect("direct resume control json");
+
+        assert_eq!(output["responseId"], json!("resp_direct_1"));
+        assert_eq!(output["continuationOwner"], json!("direct"));
+        assert_eq!(output["providerKey"], json!("provider.key1.gpt-5.5"));
+        assert_eq!(output["materialized"], json!(true));
+        assert_eq!(output["materializedMode"], json!("submit_tool_outputs"));
+        assert_eq!(output["toolOutputs"], json!(1));
+        assert_eq!(output["incomingInputItems"], json!(3));
+        assert_eq!(
+            output["toolOutputsDetailed"],
+            json!([
+                {
+                    "callId": "original_call_1",
+                    "originalId": "original_call_1",
+                    "outputText": "stdout"
+                }
+            ])
+        );
     }
 }

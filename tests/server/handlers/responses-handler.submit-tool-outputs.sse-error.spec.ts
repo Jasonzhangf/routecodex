@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+} from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockResumeResponsesConversation = jest.fn();
 const mockCaptureResponsesRequestContextForRequest = jest.fn();
@@ -124,6 +127,9 @@ const createNativeExportsMock = () => ({
   })),
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
     typeof origin === 'string' && origin.trim() === 'client'
+  ),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
   ),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import {
+  buildResponsesResumeControlForContinuationContextForHttpFake,
+} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockWriteErrorsampleJson = jest.fn(async () => '/tmp/errorsample.json');
 
@@ -63,6 +66,9 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   })),
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
     (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
+  ),
+  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
+    buildResponsesResumeControlForContinuationContextForHttpFake
   ),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {

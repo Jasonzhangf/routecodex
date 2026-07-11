@@ -202,6 +202,7 @@
   "planResponsesRequestBodyForHttpJson",
   "shouldManageResponsesConversationForHttpJson",
   "buildResponsesConversationPortScopeForHttpJson",
+  "buildResponsesResumeControlForContinuationContextForHttpJson",
   "buildResponsesScopeContinuationExpiredErrorForHttpJson",
   "buildResponsesResumeClientErrorForHttpJson",
   "shouldProjectResponsesResumeClientErrorForHttpJson",

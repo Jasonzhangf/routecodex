@@ -22,6 +22,7 @@ import {
 import {
   captureReqInboundResponsesContextSnapshot,
   buildResponsesConversationPortScopeForHttpNative,
+  buildResponsesResumeControlForContinuationContextForHttpNative,
   buildResponsesResumeClientErrorForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
@@ -141,7 +142,7 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
   const responsesResume = args.resumeMeta
-    ? buildResponsesResumeControlForContinuationContextForHttp(args.resumeMeta)
+    ? buildResponsesResumeControlForContinuationContextForHttpNative(args.resumeMeta)
     : undefined;
   const metadata: Record<string, unknown> = {
     clientRequestId: args.clientRequestId,
@@ -201,85 +202,6 @@ export function buildResponsesPipelineMetadataForHttp(args: {
     }
   }
   return metadata;
-}
-
-function buildResponsesResumeControlForContinuationContextForHttp(
-  resumeMeta: Record<string, unknown>
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const copyString = (from: string, to = from): void => {
-    const value = resumeMeta[from];
-    if (typeof value === 'string' && value.trim()) {
-      out[to] = value.trim();
-    }
-  };
-  const copyBoolean = (key: string): void => {
-    if (typeof resumeMeta[key] === 'boolean') {
-      out[key] = resumeMeta[key];
-    }
-  };
-  const copyNumber = (key: string): void => {
-    if (typeof resumeMeta[key] === 'number' && Number.isFinite(resumeMeta[key])) {
-      out[key] = resumeMeta[key];
-    }
-  };
-  const copyToolOutputsDetailed = (): void => {
-    const raw = resumeMeta.toolOutputsDetailed;
-    if (!Array.isArray(raw)) {
-      return;
-    }
-    const readRowString = (row: Record<string, unknown>, keys: string[]): string | undefined => {
-      for (const key of keys) {
-        const value = row[key];
-        if (typeof value === 'string' && value.trim()) {
-          return value.trim();
-        }
-      }
-      return undefined;
-    };
-    const toolOutputsDetailed = raw.flatMap((item): Array<Record<string, string>> => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return [];
-      }
-      const row = item as Record<string, unknown>;
-      const callId = readRowString(row, ['callId', 'originalId', 'call_id', 'tool_call_id', 'id']);
-      const outputText = readRowString(row, ['outputText', 'output_text', 'output']);
-      if (!callId || !outputText) {
-        return [];
-      }
-      const originalId = readRowString(row, ['originalId', 'original_id']);
-      return [
-        {
-          callId,
-          ...(originalId ? { originalId } : {}),
-          outputText,
-        },
-      ];
-    });
-    if (toolOutputsDetailed.length > 0) {
-      out.toolOutputsDetailed = toolOutputsDetailed;
-    }
-  };
-  copyString('responseId');
-  copyString('restoredFromResponseId');
-  copyString('previousRequestId');
-  copyString('requestId');
-  copyString('scopeKey');
-  copyString('entryKind');
-  copyString('continuationOwner');
-  if (out.continuationOwner === 'direct') {
-    copyString('providerKey');
-  }
-  copyString('materializedMode');
-  copyBoolean('restored');
-  copyBoolean('materialized');
-  copyNumber('deltaInputItems');
-  copyNumber('toolOutputs');
-  copyNumber('incomingInputItems');
-  copyNumber('continuationDeltaItems');
-  copyNumber('fullInputItems');
-  copyToolOutputsDetailed();
-  return out;
 }
 
 export function buildResponsesConversationPortScopeForHttp(
