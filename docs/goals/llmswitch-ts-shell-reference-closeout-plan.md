@@ -960,3 +960,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Extended the residue gate so the forwarding shell must stay physically absent and the host wrapper cannot return while the Rust raw export remains required.
 - Red/green evidence: the gate first failed on both the existing wrapper and existing shell, then passed after deletion.
 - Verification passed: focused Jest 2 suites / 227 tests; exact source scan; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`; `npm run build:base`.
+
+### 2026-07-11 request-executor request-semantics leaf wrapper deleted
+
+- Deleted `src/server/runtime/http-server/executor/request-executor-request-semantics.ts`, which only forwarded four request-semantics checks to `native-exports`.
+- `request-executor.ts` and `request-executor-response-contract.ts` now consume `hasRequestedToolsInSemanticsNative`, `isRequiredToolCallTurnNative`, `isToolResultFollowupTurnNative`, and `isProviderNativeResumeContinuationNative` directly from the host native bridge.
+- Replaced the old focused wrapper spec with `request-executor-native-semantics.spec.ts`, which calls the native bridge directly, and changed the residue gate from “no TS classification inside the wrapper” to “the wrapper must stay physically deleted.”
+- Exact source scan shows the deleted path only in historical docs and the residue gate; active source/test imports now point at `native-exports`.
+- Verification passed: focused native semantics spec; focused residue audit; `npx tsc --noEmit --pretty false`.
+- Non-target observation: broad `request-executor.spec.ts` and `request-executor-preselected-route.blackbox.spec.ts` still fail in the current dirty worktree on pre-existing `Hub pipeline runtime is not initialized`; they were not used as closeout evidence for this leaf wrapper deletion.

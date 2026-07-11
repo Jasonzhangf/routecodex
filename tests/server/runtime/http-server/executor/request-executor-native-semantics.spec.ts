@@ -1,60 +1,60 @@
 import { describe, expect, it } from '@jest/globals';
 import {
-  isProviderNativeResumeContinuation,
-  isToolResultFollowupTurn
-} from '../../../../../src/server/runtime/http-server/executor/request-executor-request-semantics.js';
+  isProviderNativeResumeContinuationNative,
+  isToolResultFollowupTurnNative,
+} from '../../../../../src/modules/llmswitch/bridge/native-exports.js';
 
-describe('request executor request semantics', () => {
-  it('does not mark inline function_call_output history as provider-owned resume', async () => {
-    await expect(isProviderNativeResumeContinuation({
+describe('request executor native request semantics', () => {
+  it('does not mark inline function_call_output history as provider-owned resume', () => {
+    expect(isProviderNativeResumeContinuationNative({
       toolOutputs: [{ call_id: 'call_1', output: 'ok', type: 'function_call_output' }]
-    })).resolves.toBe(false);
+    })).toBe(false);
   });
 
-  it('does not mark relay previous response resume as provider-owned continuation', async () => {
-    await expect(isProviderNativeResumeContinuation({
+  it('does not mark relay previous response resume as provider-owned continuation', () => {
+    expect(isProviderNativeResumeContinuationNative({
       continuation: {
         continuationOwner: 'relay',
         resumeFrom: {
           previousResponseId: 'resp_relay_1'
         }
       }
-    })).resolves.toBe(false);
+    })).toBe(false);
   });
 
-  it('does not mark relay submit_tool_outputs response id resume as provider-owned continuation', async () => {
-    await expect(isProviderNativeResumeContinuation({
+  it('does not mark relay submit_tool_outputs response id resume as provider-owned continuation', () => {
+    expect(isProviderNativeResumeContinuationNative({
       continuation: {
         continuationOwner: 'relay',
         mode: 'submit_tool_outputs',
         responseId: 'resp_relay_1'
       }
-    })).resolves.toBe(false);
+    })).toBe(false);
   });
 
-  it('marks previous response resume as provider-owned continuation', async () => {
-    await expect(isProviderNativeResumeContinuation({
+  it('marks previous response resume as provider-owned continuation', () => {
+    expect(isProviderNativeResumeContinuationNative({
       continuation: {
         continuationOwner: 'direct',
         resumeFrom: {
           previousResponseId: 'resp_1'
         }
       }
-    })).resolves.toBe(true);
+    })).toBe(true);
   });
 
-  it('marks submit_tool_outputs response id resume as provider-owned continuation', async () => {
-    await expect(isProviderNativeResumeContinuation({
+  it('marks submit_tool_outputs response id resume as provider-owned continuation', () => {
+    expect(isProviderNativeResumeContinuationNative({
       continuation: {
         continuationOwner: 'direct',
         mode: 'submit_tool_outputs',
         responseId: 'resp_1'
       }
-    })).resolves.toBe(true);
+    })).toBe(true);
   });
 
-  it('marks multi-turn assistant tool_calls plus tool-result history as a tool-result followup turn', async () => {
-    await expect(isToolResultFollowupTurn({
+  it('marks multi-turn assistant tool_calls plus tool-result history as a tool-result followup turn', () => {
+    expect(isToolResultFollowupTurnNative({
       messages: [
         {
           role: 'system',
@@ -114,6 +114,6 @@ describe('request executor request semantics', () => {
           content: 'pub mod orchestration;'
         }
       ]
-    })).resolves.toBe(true);
+    })).toBe(true);
   });
 });

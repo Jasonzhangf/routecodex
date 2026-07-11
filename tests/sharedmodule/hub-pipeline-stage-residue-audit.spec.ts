@@ -1714,20 +1714,12 @@ describe('hub pipeline stage residue audit', () => {
     expect({ existingDeletedFiles, findings }).toEqual({ existingDeletedFiles: [], findings: [] });
   });
 
-  it('request executor must not classify tool request semantics in TS', () => {
+  it('request executor request-semantics leaf wrapper must stay physically deleted', () => {
     const filePath = path.join(
       process.cwd(),
       'src/server/runtime/http-server/executor/request-executor-request-semantics.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
-      { label: 'reads tool continuation mode in TS', pattern: /toolContinuation|submit_tool_outputs/ },
-      { label: 'classifies tool result followup in TS', pattern: /toolOutputs|tool_outputs|__captured_tool_results/ },
-      { label: 'scans messages for tool results in TS', pattern: /message\.tool_call_id|role === ['"]tool['"]|function_call_output|tool_result|tool_message/ },
-      { label: 'classifies required tool call in TS', pattern: /tool_choice|toolChoice|toolsNode|clientToolsRaw|baselineTools/ },
-    ]);
-
-    expect(findings).toEqual([]);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('request executor response contract must not classify response tool semantics in TS', () => {

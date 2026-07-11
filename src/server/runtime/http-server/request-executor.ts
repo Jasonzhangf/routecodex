@@ -96,11 +96,11 @@ import { deriveFinishReason } from '../../utils/finish-reason.js';
 import { allowSnapshotLocalDiskWrite } from '../../../utils/snapshot-local-disk-gate.js';
 import { writeProviderSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import {
-  hasRequestedToolsInSemantics,
-  isRequiredToolCallTurn,
-  isProviderNativeResumeContinuation,
-  isToolResultFollowupTurn
-} from './executor/request-executor-request-semantics.js';
+  hasRequestedToolsInSemanticsNative,
+  isProviderNativeResumeContinuationNative,
+  isRequiredToolCallTurnNative,
+  isToolResultFollowupTurnNative,
+} from '../../../modules/llmswitch/bridge/native-exports.js';
 import {
   extractRequestExecutorProviderErrorStage,
   isHostRequestExecutorErrorStage,
@@ -115,6 +115,22 @@ import {
   logNonBlockingError as logRequestExecutorNonBlockingError,
   resetErrorReportStateForTests
 } from './executor/request-executor-error-report.js';
+
+async function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return hasRequestedToolsInSemanticsNative(requestSemantics);
+}
+
+async function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return isRequiredToolCallTurnNative(requestSemantics);
+}
+
+async function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return isToolResultFollowupTurnNative(requestSemantics);
+}
+
+async function isProviderNativeResumeContinuation(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return isProviderNativeResumeContinuationNative(requestSemantics);
+}
 
 function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)

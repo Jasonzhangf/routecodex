@@ -28925,3 +28925,12 @@ Pure Rust NAPI candidates:
 - Added/extended red-green residue gate in `hub-pipeline-stage-residue-audit`: before deletion it failed on both the wrapper and the file, after deletion it passed.
 - Evidence: post-delete exact scan shows only `native-hotpath-required-exports.json`, native binding interface typing, direct native test helper, and gate text.
 - Verification PASS: focused Jest 2 suites / 227 tests; strict shell audit; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`; `npm run build:base`.
+
+# 2026-07-11: request-executor request-semantics leaf wrapper retired
+
+- Scope: continue llmswitch/native external reference closeout in server executor leaf wrappers.
+- Deleted `src/server/runtime/http-server/executor/request-executor-request-semantics.ts`; active callers now import the four Rust-owned request-semantics checks from `src/modules/llmswitch/bridge/native-exports.ts`.
+- Replaced the old wrapper spec with `request-executor-native-semantics.spec.ts`, which calls native bridge functions directly, and changed `hub-pipeline-stage-residue-audit` to require the deleted leaf wrapper to remain absent.
+- Evidence: exact tracked-source scan shows the deleted path only in historical docs and the residue gate; active source/test imports are on `native-exports`.
+- Verification PASS: focused native request-semantics spec; focused residue audit; request-executor metadata-center contract; `npx tsc --noEmit --pretty false`; strict llmswitch shell audit; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `git diff --check`; `npm run build:native-hotpath`; `npm run build:base`.
+- Architecture review: no JS backfill, no fallback, no duplicate TS semantic owner; host executor keeps only local async call-shape wrappers around native bridge functions.

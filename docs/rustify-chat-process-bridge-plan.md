@@ -30,10 +30,10 @@ TS Caller (tool-registry.ts, request-executor-*.ts, servertool/*.ts, ...)
 
 | TS Export | Calls Rust NAPI | Consumers |
 |-----------|----------------|-----------|
-| `hasRequestedToolsInSemanticsWithNative` | `hasRequestedToolsInSemanticsJson` | `request-executor-request-semantics.ts` |
-| `isRequiredToolCallTurnWithNative` | `isRequiredToolCallTurnJson` | `request-executor-request-semantics.ts` |
-| `isToolResultFollowupTurnWithNative` | `isToolResultFollowupTurnJson` | `request-executor-request-semantics.ts` |
-| `isProviderNativeResumeContinuationWithNative` | `isProviderNativeResumeContinuationJson` | `request-executor-request-semantics.ts` |
+| `hasRequestedToolsInSemanticsWithNative` | `hasRequestedToolsInSemanticsJson` | `request-executor.ts` / `request-executor-response-contract.ts` via `native-exports` |
+| `isRequiredToolCallTurnWithNative` | `isRequiredToolCallTurnJson` | `request-executor.ts` / `request-executor-response-contract.ts` via `native-exports` |
+| `isToolResultFollowupTurnWithNative` | `isToolResultFollowupTurnJson` | `request-executor.ts` / `request-executor-response-contract.ts` via `native-exports` |
+| `isProviderNativeResumeContinuationWithNative` | `isProviderNativeResumeContinuationJson` | `request-executor.ts` via `native-exports` |
 | `detectRetryableEmptyAssistantResponseWithNative` | `detectRetryableEmptyAssistantResponseJson` | `request-executor-response-contract.ts` |
 | `isToolCallContinuationResponseWithNative` | `isToolCallContinuationResponseJson` | (unused?) |
 

@@ -1,5 +1,10 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
-import { detectRetryableEmptyAssistantResponseNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  detectRetryableEmptyAssistantResponseNative,
+  hasRequestedToolsInSemanticsNative,
+  isRequiredToolCallTurnNative,
+  isToolResultFollowupTurnNative,
+} from '../../../../modules/llmswitch/bridge/native-exports.js';
 import {
   containsEmptyAssistantSanitizedPlaceholder,
   valueHasNonEmptyPayloadContent,
@@ -26,13 +31,19 @@ type ProviderSnapshotWriteArgs = {
   metadata?: Record<string, unknown>;
 };
 
-import {
-  hasRequestedToolsInSemantics,
-  isRequiredToolCallTurn,
-  isToolResultFollowupTurn
-} from './request-executor-request-semantics.js';
 import { formatUnknownError } from '../../../../utils/common-utils.js';
-export { hasRequestedToolsInSemantics, isRequiredToolCallTurn, isToolResultFollowupTurn };
+
+export async function hasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return hasRequestedToolsInSemanticsNative(requestSemantics);
+}
+
+export async function isRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return isRequiredToolCallTurnNative(requestSemantics);
+}
+
+export async function isToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): Promise<boolean> {
+  return isToolResultFollowupTurnNative(requestSemantics);
+}
 
 export type PayloadContractSignal = {
   reason: string;

@@ -41,7 +41,7 @@
 
 已验证命令：
 - `node scripts/build-core.mjs`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand`
+- `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts tests/sharedmodule/hub-pipeline-preselected-route.spec.ts tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts tests/server/runtime/http-server/executor/request-executor-native-semantics.spec.ts tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand`
 - `npx tsc --noEmit --pretty false`
 - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
 - `git diff --check`
@@ -352,7 +352,7 @@
 
 | 候选项 | Owner | 当前状态 | 处置 | 证据 | 风险与验证 |
 | --- | --- | --- | --- | --- | --- |
-| `request-executor-request-semantics.ts` provider-native continuation 判定 | Rust/native chat node result semantics | 已从 TS 本地 parser 收敛到 native wrapper | 已改 | `isProviderNativeResumeContinuation(...)` 现在调用 `isProviderNativeResumeContinuationWithNative`；定向 Jest 覆盖 inline tool output negative、previous response positive、submit_tool_outputs positive | 验证：`request-executor-request-semantics.spec.ts`、`tsc`、`build-core` |
+| `request-executor-request-semantics.ts` provider-native continuation 判定 | Rust/native chat node result semantics | TS leaf wrapper 已物理删除，host 直接调用 `native-exports` | 已改 | `isProviderNativeResumeContinuationNative(...)` 覆盖 inline tool output negative、previous response positive、submit_tool_outputs positive | 验证：`request-executor-native-semantics.spec.ts`、`tsc`、`build-core` |
 | `finish-reason.ts` visible-success/tool-call fallback | native finish reason derivation | fallback 残名已物理删除，只保留 native `deriveFinishReason(...)` | 已改 | 生产代码调用点已统一改回 `deriveFinishReason(...)`；`verify:architecture-deleted-path` 禁止 `deriveFinishReasonWithVisibleSuccessFallback` 在 `src/tests/scripts` 复活 | 验证：`finish-reason.spec.ts`、`finish-reason.visible-success.spec.ts`、submit_tool_outputs handler focused tests、`verify:architecture-deleted-path`、`tsc`、`architecture-ci`、`build:min` |
 | `hub-pipeline-execute-chat-process-entry.ts` | `hub.runtime_ingress_bridge` | 与 `hub-pipeline-execute-request-stage.ts` 同构 | 已删并合并 | 文件已删除；chat_process 入口通过 `entryMode: "chat_process"` 复用 request-stage executor | 验证：`hub-pipeline-preselected-route.spec.ts`、`hub-pipeline-stage-residue-audit.spec.ts`、sharedmodule `tsc` |
 | `responses-response-bridge.ts::rebindResponsesConversationRequestIdsToResponseIdForHttp` | `server.responses_response_handler_bridge_surface` | zero-consumer export | 已删 | 精确 grep 仅定义处命中；删除后 `tsc` 与 residue gate 通过 | 验证：`hub-pipeline-stage-residue-audit.spec.ts`、`tsc` |
@@ -520,7 +520,7 @@ Hub Pipeline 定向：
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/sharedmodule/chat-semantics-stage1.spec.ts tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts --runInBand`
 
 Host/handler 定向：
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/request-executor-request-semantics.spec.ts --runInBand`
+- `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/runtime/http-server/executor/request-executor-native-semantics.spec.ts --runInBand`
 - `node --experimental-vm-modules ./node_modules/.bin/jest tests/server/utils/finish-reason.spec.ts tests/server/utils/finish-reason.visible-success.spec.ts --runInBand`
 
 Native/Rust 变更时追加：
