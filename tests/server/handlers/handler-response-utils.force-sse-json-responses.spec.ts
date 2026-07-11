@@ -524,9 +524,7 @@ const mockBridgeModule = async () => ({
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-sse-bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', mockBridgeModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.ts', mockBridgeModule);
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__stream_log_finish_reason',
   deriveFinishReason: (body: unknown) => {

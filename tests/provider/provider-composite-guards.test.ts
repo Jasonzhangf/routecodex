@@ -5,7 +5,7 @@ describe('Provider error reporting', () => {
     jest.resetModules();
 
     const reportProviderErrorToRouterPolicy = jest.fn(async (event) => event);
-    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.ts', () => ({
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
       reportProviderErrorToRouterPolicy,
       reportProviderSuccessToRouterPolicy: jest.fn(async (event) => event)
     }));
@@ -44,7 +44,7 @@ describe('Provider error reporting', () => {
     jest.resetModules();
 
     const reportProviderErrorToRouterPolicy = jest.fn(async (event) => event);
-    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.ts', () => ({
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
       reportProviderErrorToRouterPolicy,
       reportProviderSuccessToRouterPolicy: jest.fn(async (event) => event)
     }));

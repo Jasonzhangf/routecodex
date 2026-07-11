@@ -30,9 +30,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-r
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder
 }));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.ts', () => ({
-  createSnapshotRecorder: mockCreateSnapshotRecorder
-}));
 
 describe('provider-response-converter unified semantics handoff', () => {
   it('live 10000 direct chat sample returns a tool_calls terminal SSE frame for the current turn', () => {

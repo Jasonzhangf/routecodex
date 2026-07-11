@@ -23,9 +23,6 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-r
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
   createSnapshotRecorder: mockCreateSnapshotRecorder
 }));
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.ts', () => ({
-  createSnapshotRecorder: mockCreateSnapshotRecorder
-}));
 
 const TEST_METADATA_WRITER = {
   module: 'tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts',

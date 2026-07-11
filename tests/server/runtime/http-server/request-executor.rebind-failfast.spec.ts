@@ -129,9 +129,7 @@ const mockRoutingIntegrationsModule = () => ({
 });
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', mockRoutingIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.ts', mockRoutingIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockBridgeModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockBridgeModule);
 
 
 const mockProviderRequestContextModule = () => ({

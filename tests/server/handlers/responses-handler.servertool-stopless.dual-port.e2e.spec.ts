@@ -18,19 +18,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integratio
   getLlmsStatsSnapshot: jest.fn(() => null)
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/state-integrations.ts', () => ({
-  loadRoutingInstructionStateSync: jest.fn(() => undefined),
-  saveRoutingInstructionStateAsync: jest.fn(() => undefined),
-  saveRoutingInstructionStateSync: jest.fn(() => undefined),
-  extractSessionIdentifiersFromMetadata: jest.fn((metadata?: Record<string, unknown>) => ({
-    sessionId: typeof metadata?.session_id === 'string' ? metadata.session_id : undefined,
-    conversationId: typeof metadata?.conversation_id === 'string' ? metadata.conversation_id : undefined
-  })),
-  extractContinuationContextSessionIdentifiersFromMetadata: jest.fn(() => ({})),
-  getStatsCenterSafe: jest.fn(() => ({ getSnapshot: () => null, recordProviderUsage: () => {} })),
-  getLlmsStatsSnapshot: jest.fn(() => null)
-}));
-
 const { handleResponses } = await import('../../../src/server/handlers/responses-handler.js');
 const { bootstrapVirtualRouterConfig } = await import('../../../src/modules/llmswitch/bridge/routing-integrations.js');
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../../../tests/helpers/native-hub-pipeline-test-wrapper.js');
