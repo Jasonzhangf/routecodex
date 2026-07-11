@@ -205,7 +205,6 @@ const createNativeExportsMock = () => ({
     state: input.state ?? {},
     observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
   })),
-  validatePipelineNodeContractBoundaryNative: jest.fn(() => ({ ok: true })),
   writeSnapshotViaHooksNative: jest.fn(() => undefined),
 });
 

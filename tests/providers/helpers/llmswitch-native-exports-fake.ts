@@ -167,7 +167,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     hasRequestedToolsInSemanticsNative: () => false,
     injectMcpToolsForChatJson: async (payload: unknown) => payload,
     injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
-    isEmptyClientResponsePayloadNative: () => false,
     isProviderNativeResumeContinuationNative: () => false,
     isRequiredToolCallTurnNative: () => false,
     isToolCallContinuationResponseNative: () => false,
@@ -281,7 +280,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     updateResponsesContractProbeFromSseChunkNative: () => ({}),
     updateResponsesSseTransportTerminalStateNative: (input: unknown) => input,
     validateCanonicalClientToolCall: () => ({ ok: true }),
-    validatePipelineNodeContractBoundaryNative: () => ({ ok: true }),
     writeSnapshotViaHooksNative: () => undefined,
   };
   return { ...fake, ...overrides };

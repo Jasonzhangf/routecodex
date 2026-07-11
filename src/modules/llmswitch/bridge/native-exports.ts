@@ -309,11 +309,6 @@ type NativeHubVrNodeContracts = {
   describePipelineContractWithNative?: (nodeId: string) => AnyRecord;
   describeServerContractsWithNative?: () => AnyRecord;
   describeServerModuleHelpWithNative?: (moduleId: string) => AnyRecord;
-  validatePipelineNodeContractBoundaryWithNative?: (
-    nodeId: string,
-    before: unknown,
-    after: unknown
-  ) => AnyRecord;
 };
 
 let cachedFailurePolicyModule: NativeFailurePolicyModule | null | undefined;
@@ -376,7 +371,6 @@ function buildHubVrNodeContractsFromRouterHotpathBinding(
     'describeVirtualRouterContractsJson',
     'describeMetaCarrierContractsJson',
     'describePipelineContractJson',
-    'validatePipelineNodeContractBoundaryJson',
   ];
   if (!required.every((name) => typeof (binding as Record<string, unknown>)[name] === 'function')) {
     return null;
@@ -406,16 +400,6 @@ function buildHubVrNodeContractsFromRouterHotpathBinding(
       invoke('describeServerContractsJson'),
     describeServerModuleHelpWithNative: (moduleId: string) =>
       invoke('describeServerModuleHelpJson', [String(moduleId || '')]),
-    validatePipelineNodeContractBoundaryWithNative: (
-      nodeId: string,
-      before: unknown,
-      after: unknown
-    ) =>
-      invoke('validatePipelineNodeContractBoundaryJson', [
-        String(nodeId || ''),
-        JSON.stringify(before ?? null),
-        JSON.stringify(after ?? null),
-      ]),
   };
 }
 
@@ -1144,18 +1128,6 @@ export function writeSnapshotViaHooksNative(options: AnyRecord): void {
   fn(JSON.stringify(options ?? null));
 }
 
-export function validatePipelineNodeContractBoundaryNative(
-  nodeId: string,
-  before: unknown,
-  after: unknown
-): AnyRecord {
-  const fn = getHubVrNodeContracts().validatePipelineNodeContractBoundaryWithNative;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] validatePipelineNodeContractBoundaryWithNative not available');
-  }
-  return fn(nodeId, before, after);
-}
-
 export function classifyProviderFailure(
   statusCode: number | undefined,
   errorCode: string | undefined,
@@ -1186,15 +1158,6 @@ export function isToolCallContinuationResponseNative(body: unknown): boolean {
   }
   return Boolean(fn(JSON.stringify(body ?? null)));
 }
-
-export function isEmptyClientResponsePayloadNative(body: unknown): boolean {
-  const fn = getChatProcessNodeResultSemantics().isEmptyClientResponsePayloadJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] isEmptyClientResponsePayloadJson not available');
-  }
-  return Boolean(fn(JSON.stringify(body ?? null)));
-}
-
 
 export function hasRequestedToolsInSemanticsNative(requestSemantics?: Record<string, unknown>): boolean {
   const fn = getChatProcessNodeResultSemantics().hasRequestedToolsInSemanticsJson;

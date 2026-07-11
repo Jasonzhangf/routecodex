@@ -36,7 +36,6 @@ TS Caller (tool-registry.ts, request-executor-*.ts, servertool/*.ts, ...)
 | `isProviderNativeResumeContinuationWithNative` | `isProviderNativeResumeContinuationJson` | `request-executor-request-semantics.ts` |
 | `detectRetryableEmptyAssistantResponseWithNative` | `detectRetryableEmptyAssistantResponseJson` | `request-executor-response-contract.ts` |
 | `isToolCallContinuationResponseWithNative` | `isToolCallContinuationResponseJson` | (unused?) |
-| `isEmptyClientResponsePayloadWithNative` | `isEmptyClientResponsePayloadJson` | (unused?) |
 
 **Strategy**: TS callers already wrap via `getNativeSemantics()` — change those wrappers to call `callNativeJson` directly. Delete bridge file.
 

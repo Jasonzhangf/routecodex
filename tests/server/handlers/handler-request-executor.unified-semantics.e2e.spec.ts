@@ -498,15 +498,6 @@ const mockNativeExportsModule = () => ({
   describeVirtualRouterContractsNative: jest.fn(() => ({})),
   describeMetaCarrierContractsNative: jest.fn(() => ({})),
   describePipelineContractNative: jest.fn(() => ({})),
-  validatePipelineNodeContractBoundaryNative: jest.fn(() => ({ valid: true })),
-  isEmptyClientResponsePayloadNative: jest.fn((body: any) => {
-    if (body && typeof body === 'object') {
-      if (Array.isArray(body.output) && body.output.length > 0) return false;
-      if (typeof body.status === 'string') return false;
-      if (Array.isArray(body.content) && body.content.length > 0) return false;
-    }
-    return false;
-  }),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   buildAnthropicResponseFromChatJson: jest.fn(),
