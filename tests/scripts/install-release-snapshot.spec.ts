@@ -52,7 +52,7 @@ describe('install-release-snapshot', () => {
       'llmswitch-core',
       'dist',
       'native',
-      'servertool-wrapper.js'
+      'router_hotpath_napi.node'
     );
 
     expect(fs.existsSync(requiredFile)).toBe(true);

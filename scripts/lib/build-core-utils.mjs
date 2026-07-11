@@ -3,8 +3,7 @@ import path from 'node:path';
 
 export function createRequiredCoreOutputs(outDir) {
   return [
-    path.join(outDir, 'native', 'servertool-wrapper.js'),
-    path.join(outDir, 'native', 'servertool-wrapper.d.ts'),
+    path.join(outDir, 'native', 'router_hotpath_napi.node'),
   ];
 }
 

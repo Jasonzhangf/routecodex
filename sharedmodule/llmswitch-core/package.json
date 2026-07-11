@@ -3,14 +3,9 @@
   "version": "0.2.11",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-native-hotpath.mjs && node ../../scripts/generate-llmswitch-servertool-wrapper.mjs"
+    "build": "node scripts/build-native-hotpath.mjs"
   },
-  "exports": {
-    "./native/servertool-wrapper": {
-      "import": "./dist/native/servertool-wrapper.js",
-      "types": "./dist/native/servertool-wrapper.d.ts"
-    }
-  },
+  "exports": {},
   "dependencies": {
     "tiktoken": "^1.0.22"
   }

@@ -111,8 +111,8 @@ function replaceSnapshotLlmsSymlink(snapshotRoot) {
   if (!fs.existsSync(path.join(targetLinkPath, 'package.json'))) {
     throw new Error(`rcc-llmswitch-core snapshot package.json missing after copy: ${targetLinkPath}`);
   }
-  if (!fs.existsSync(path.join(targetLinkPath, 'dist', 'native', 'servertool-wrapper.js'))) {
-    throw new Error(`rcc-llmswitch-core snapshot native wrapper missing after copy: ${targetLinkPath}`);
+  if (!fs.existsSync(path.join(targetLinkPath, 'dist', 'native', 'router_hotpath_napi.node'))) {
+    throw new Error(`rcc-llmswitch-core snapshot native binding missing after copy: ${targetLinkPath}`);
   }
 }
 

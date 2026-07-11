@@ -8,7 +8,6 @@ const root = process.cwd();
 const skip = String(process.env.ROUTECODEX_SKIP_CORE_BUILD || process.env.SKIP_CORE_BUILD || '').trim().toLowerCase();
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
 const nativeBuildScript = path.join(coreRoot, 'scripts', 'build-native-hotpath.mjs');
-const servertoolWrapperScript = path.join(root, 'scripts', 'generate-llmswitch-servertool-wrapper.mjs');
 const outDir = path.join(coreRoot, 'dist');
 const requiredOutputs = createRequiredCoreOutputs(outDir);
 
@@ -28,16 +27,6 @@ function runNativeBuild() {
   }
 }
 
-function generateServertoolWrapper() {
-  if (!fs.existsSync(servertoolWrapperScript)) {
-    fail(`servertool wrapper generator missing: ${servertoolWrapperScript}`);
-  }
-  const res = spawnSync(process.execPath, [servertoolWrapperScript], { stdio: 'inherit', cwd: root });
-  if ((res.status ?? 0) !== 0) {
-    fail('servertool wrapper generation failed for llmswitch-core');
-  }
-}
-
 if (!fs.existsSync(coreRoot)) {
   console.log('[build-core] llmswitch-core source not found under sharedmodule; skip local core build (依赖包将用于运行/打包)');
   process.exit(0);
@@ -50,7 +39,6 @@ if (skip === '1' || skip === 'true' || skip === 'yes') {
   process.exit(0);
 }
 runNativeBuild();
-generateServertoolWrapper();
 
 if (!distIsValid()) {
   const missingOutputs = requiredOutputs

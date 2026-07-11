@@ -52,7 +52,7 @@ const PACKAGE_CANDIDATES = [
   BUILTIN_SHARED_MODULE_REL,
   path.join('node_modules', 'rcc-llmswitch-core'),
 ];
-const CORE_DIST_PROBE_REL = path.join('native', 'servertool-wrapper.js');
+const CORE_DIST_PROBE_REL = path.join('native', 'router_hotpath_napi.node');
 
 let corePackageDir: string | null = null;
 

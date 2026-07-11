@@ -108,25 +108,23 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
     if (checks.esbuildExists) fail(`${packageName} installed release should not contain esbuild`);
 
     runNodeEval(`
+      import { createRequire } from 'node:module';
+      import { fileURLToPath } from 'node:url';
       const packageDir = ${JSON.stringify(packageDir)};
-      const candidates = [
+      const require = createRequire(new URL('package.json', 'file://' + packageDir.replace(/\\/$/, '') + '/'));
+      const moduleCandidates = [
         'dist/modules/llmswitch/bridge/native-exports.js',
         'dist/modules/llmswitch/bridge/routing-integrations.js',
-        'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
-        'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
       ];
-      for (const relativePath of candidates) {
+      const nativeCandidates = [
+        'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node',
+        'node_modules/rcc-llmswitch-core/dist/native/router_hotpath_napi.node',
+      ];
+      for (const relativePath of moduleCandidates) {
         await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
       }
-      for (const relativePath of [
-        'sharedmodule/llmswitch-core/dist/native/servertool-wrapper.js',
-        'node_modules/rcc-llmswitch-core/dist/native/servertool-wrapper.js',
-      ]) {
-        const mod = await import(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
-        const leakedWrapperExports = Object.keys(mod).filter((name) => name.endsWith('WithNative'));
-        if (leakedWrapperExports.length > 0) {
-          throw new Error(relativePath + ' must not export per-capability servertool wrappers: ' + leakedWrapperExports.join(', '));
-        }
+      for (const relativePath of nativeCandidates) {
+        require(fileURLToPath(new URL(relativePath, 'file://' + packageDir.replace(/\\/$/, '') + '/')));
       }
       const routing = await import(new URL('dist/modules/llmswitch/bridge/routing-integrations.js', 'file://' + packageDir.replace(/\\/$/, '') + '/').href);
       for (const exportName of ['createHubPipelineNative', 'executeHubPipelineNative', 'disposeHubPipelineNative']) {
