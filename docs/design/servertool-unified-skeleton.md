@@ -129,12 +129,11 @@
    - 之前一旦看到 `__sse_responses` 就直接跳过
    - 导致 `finish_reason=stop` + 无 finalized marker 的 wrapper 仍可 200 透传
 
-4. **engine 仍是超大聚合体**
-   - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` ≈ 2317 行
-   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` ≈ 1037 行
-   - `sharedmodule/llmswitch-core/src/servertool/handlers/reasoning-stop-guard.ts` ≈ 705 行
-   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts` ≈ 665 行
-   - 当前并非“薄骨架”，而是 trigger / execution outcome / followup dispatch / finalize / loop guard 混在一起。
+4. **历史 TS engine 聚合体已删除**
+   - `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` 已删除
+   - `sharedmodule/llmswitch-core/src/servertool/server-side-tools.ts` 已删除
+   - 旧 `sharedmodule/llmswitch-core/src/servertool/handlers/*.ts` 业务 handler 已删除
+   - 当前骨架不得恢复 trigger / execution outcome / followup dispatch / finalize / loop guard 的 TS 聚合实现；这些语义必须继续收口在 Rust `servertool-core` / `router-hotpath-napi`。
 
 5. **历史残留必须物理删除**
    - 旧 `server-side-tools.ts.bak~bak6` 与 `handlers/memory/cache-writer.ts.bak` 不应作为当前骨架参考。

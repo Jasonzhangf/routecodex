@@ -112,7 +112,7 @@ WebSearch 命中只有两条路：
 - `classifier.rs`（双命中入口：用户意图 + 工具意图）
 - `req_process_stage1_tool_governance.rs`
 - `chat_servertool_orchestration.rs`
-- `servertool/handlers/web-search.ts`
+- Rust `servertool-core` / `router-hotpath-napi` websearch servertool owner；旧 `sharedmodule/llmswitch-core/src/servertool/handlers/web-search.ts` 已删除，不得恢复为 handler 真源。
 
 允许存在但必须受“单一分流门”控制的 direct 能力桥接：
 - `hub_pipeline.rs` 中 direct builtin websearch 相关逻辑（仅 direct 路径可达）

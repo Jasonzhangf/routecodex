@@ -124,44 +124,38 @@ if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
 - 是否强制 client inject 应由 `decision.clientInjectOnly` 决定。
 - 编排 block 不应再知道 `stop_message_flow` 这个业务名。
 
-### 3. `backend-route-mainline-block.ts` 仍混有 flow-specific 行为编排
+### 3. 历史 `backend-route-mainline-block.ts` 已删除
 
 文件：
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-mainline-block.ts`
 
-当前仍有以下越界：
-- `const isStopMessageFlow = args.execution.flowId === 'stop_message_flow'`
-- stop loop warning 注入、stop-only disable state、requires_action 例外等逻辑直接写在 orchestration 主线
+状态：
+- 该 TS orchestration block 已物理删除，不是当前 mainline。
+- `stop_message_flow` 分支、stop loop warning 注入、stop-only disable state、requires_action 例外等策略不得在 TS mainline 复活。
 
 问题：
-- 这些不是“编排”，而是 **flow policy + state transition + payload transform**。
-- 应拆成独立 block，由 decision/config 驱动是否执行。
+- 这些语义属于 **flow policy + state transition + payload transform**，当前应由 Rust skeleton / profile / effect plan owner 承载。
 
-### 4. `engine.ts` 仍承担 flow-level 叙事与控制分支
+### 4. 历史 `engine.ts` 聚合体已删除
 
 文件：
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts`
 
-表现：
-- stop gateway 观察、tool_flow / passthrough、pending injection、followup mainline 调度都混在一个壳
-- 还带有 stop_message_flow 专属日志语义
+状态：
+- 该 TS execution shell 已物理删除，不能作为当前重构入口或恢复目标。
+- stop gateway 观察、tool_flow / passthrough、pending injection、followup mainline 调度必须继续由 Rust `servertool-core` / `router-hotpath-napi` owner 收口。
 
 问题：
-- `engine.ts` 应只做：
-  1. detect block
-  2. dispatch block
-  3. outcome block
-  4. finalize block
-- 不应继续拥有业务流知识。
+- 若发现这些语义回到 TS 壳层，应视为旧聚合体回潮；修复方式是回 Rust owner 和 residue gate，不是在 TS 中重建 detect / dispatch / outcome / finalize block。
 
-### 5. `execution-shell.ts` 仍承担“半规划 + 半执行 + 半 outcome”混合职责
+### 5. 历史 `execution-shell.ts` 已删除
 
 文件：
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/execution-shell.ts`
 
-问题：
-- dispatch plan input、执行循环、backend 执行、outcome 规划收口仍挤在一起。
-- 虽然比过去薄，但仍未达到 functions + blocks 的边界要求。
+状态：
+- 该 TS execution shell 已物理删除。
+- dispatch plan input、执行循环、backend 执行、outcome 规划收口不得作为 TS 混合职责恢复；如需扩展，必须回 Rust `servertool-core` / `router-hotpath-napi` 的相邻 block。
 
 ---
 
@@ -361,15 +355,15 @@ request_context
 - 因为现在最致命的问题不是 block 数量，而是 **outcome 双真源**。
 - 不先消灭双真源，后续所有拆分都会建立在错骨架上。
 
-### Phase 2：把 flow-specific state mutation 从 mainline 抽成 block
+### Phase 2：已删除的 flow-specific state mutation 不得回到 TS mainline
 
-唯一修改点：
+历史修改点：
 - `backend-route-mainline-block.ts`
-- 新增 `flow-state-policy-block.ts` / `followup-plan-block.ts`
+- `flow-state-policy-block.ts` / `followup-plan-block.ts`
 
 目标：
-1. 把 stop loop warning / clear state / requires_action policy 抽成计划块。
-2. mainline 只消费 `FollowupPlanBlock` 与 `StateMutationBlock`。
+1. stop loop warning / clear state / requires_action policy 只能通过 Rust plan/effect owner 回到 mainline。
+2. 禁止恢复 TS `backend-route-mainline-block.ts` 或新增同义 TS flow-state/followup plan block。
 
 ### Phase 3：补齐 skeleton 对所有已知 flow 的 coverage
 
