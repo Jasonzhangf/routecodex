@@ -13,21 +13,19 @@ import {
   appendStageTrace,
   classifyRuntimeErrorSignal,
   cloneStageTraceSummary,
+  detectToolExecutionFailures,
   isRecordableApplyPatchErrorType,
   logClientToolError,
   logRuntimeErrorSignal,
   resetSnapshotRecorderErrorsampleStateForTests,
   shouldInspectRuntimeError,
+  shouldLogClientToolErrorToConsole,
   shouldLogRuntimeErrorSignalToConsole,
   shouldWriteClientToolErrorsample,
   summarizeClientToolObservation,
   writeBridgeErrorsample,
   type SnapshotRecorder
 } from './snapshot-recorder-runtime.js';
-import {
-  detectToolExecutionFailures,
-  shouldLogClientToolErrorToConsole
-} from './snapshot-recorder-tool-failures.js';
 import {
   classifyEmptyResponseSignalNative,
   getRouterHotpathJsonBindingSync,

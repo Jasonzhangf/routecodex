@@ -2,8 +2,10 @@ import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
-  classifyRuntimeErrorSignalFromText
-} from './snapshot-recorder-tool-failures.js';
+  classifyRuntimeErrorSignalFromTextNative,
+  detectToolExecutionFailuresNative,
+  shouldLogClientToolErrorToConsoleNative,
+} from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
 export type SnapshotRecorder = unknown;
@@ -297,6 +299,21 @@ export function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): R
     }
   }
   return null;
+}
+
+export function detectToolExecutionFailures(payload: AnyRecord): ToolExecutionFailureSignal[] {
+  return detectToolExecutionFailuresNative(payload);
+}
+
+function classifyRuntimeErrorSignalFromText(
+  stage: string,
+  message: string
+): RuntimeErrorSignal | null {
+  return classifyRuntimeErrorSignalFromTextNative(stage, message);
+}
+
+export function shouldLogClientToolErrorToConsole(failure: ToolExecutionFailureSignal): boolean {
+  return shouldLogClientToolErrorToConsoleNative(failure);
 }
 
 function cloneForErrorsample(value: unknown): unknown {
