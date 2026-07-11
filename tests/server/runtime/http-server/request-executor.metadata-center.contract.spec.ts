@@ -48,7 +48,6 @@ const mockNativeExportsModule = () => ({
   getNetworkErrorCodes: jest.fn(() => []),
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     asFlatRecordJson: jest.fn((inputJson: string) => inputJson),
-    buildResponsesTerminalSseFramesFromProbeJson: jest.fn(() => JSON.stringify([])),
     extractBridgeProviderResponsePayloadJson: jest.fn(() => null),
     extractContentTextForStoplessScanJson: jest.fn(() => ''),
     extractFirstBalancedJsonObjectJson: jest.fn(() => null),

@@ -3608,8 +3608,13 @@ owners:
       - prepareResponsesRequestBodyForHttp
       - prepareResponsesHandlerRuntimeForHttp
       - buildResponsesPipelineMetadataForHttp
+      - buildResponsesScopeContinuationExpiredErrorForHttp
+      - buildResponsesResumeClientErrorForHttp
+      - shouldProjectResponsesResumeClientErrorForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - src/server/handlers/responses-handler.ts
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
@@ -3623,6 +3628,10 @@ owners:
       - recordResponsesResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
+      - shouldManageResponsesConversationForHttp
+      - buildResponsesScopeContinuationExpiredErrorForHttp
+      - buildResponsesResumeClientErrorForHttp
+      - shouldProjectResponsesResumeClientErrorForHttp
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts

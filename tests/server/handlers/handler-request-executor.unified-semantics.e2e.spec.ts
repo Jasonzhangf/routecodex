@@ -421,6 +421,41 @@ const mockNativeExportsModule = () => ({
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'none' })),
   planResponsesRequestBodyForHttpNative: jest.fn((payload: Record<string, unknown>) => ({ pipelineBody: payload })),
+  shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
+    entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
+  ),
+  buildResponsesScopeContinuationExpiredErrorForHttpNative: jest.fn(() => ({
+    error: {
+      message: 'Responses continuation expired or not found for local scope materialization',
+      type: 'invalid_request_error',
+      code: 'responses_continuation_expired',
+    },
+  })),
+  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
+    status?: number;
+    code?: string;
+    origin?: string;
+    message?: string;
+  } = {}) => ({
+    status: typeof args.status === 'number' ? args.status : 422,
+    body: {
+      error: {
+        message: typeof args.message === 'string' && args.message.trim()
+          ? args.message
+          : 'Unable to resume Responses conversation',
+        type: 'invalid_request_error',
+        code: typeof args.code === 'string' && args.code.trim()
+          ? args.code
+          : 'responses_resume_failed',
+        origin: typeof args.origin === 'string' && args.origin.trim()
+          ? args.origin
+          : 'client',
+      },
+    },
+  })),
+  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
+    typeof origin === 'string' && origin.trim() === 'client'
+  ),
   buildResponsesPayloadFromChatNative: jest.fn(),
   projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.body ?? args?.payload ?? {}),
   projectResponsesSseFrameForClientNative: jest.fn((args: any) => args?.frame ?? ''),
@@ -560,7 +595,6 @@ const buildResponsesSseBridgeDirectMockModule = () => {
     buildResponsesSseErrorPayloadForHttp: jest.fn((args: any) => ({ error: args })),
     buildResponsesStreamIncompleteErrorPayloadForHttp: jest.fn(() => ({})),
     buildResponsesStructuredSseErrorPayloadForHttp: jest.fn(() => ({})),
-    buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn(() => []),
     buildResponsesPayloadFromChatForHttp: jest.fn((payload: any) => payload),
     buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
     createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({})),

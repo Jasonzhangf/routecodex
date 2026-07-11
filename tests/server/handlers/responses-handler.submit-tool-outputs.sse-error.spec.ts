@@ -90,6 +90,41 @@ const createNativeExportsMock = () => ({
   })),
   planResponsesJsonClientDispatchNative: jest.fn((args: { body?: unknown }) => ({ clientBody: args.body, sanitizedBody: args.body })),
   planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
+  shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
+    entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
+  ),
+  buildResponsesScopeContinuationExpiredErrorForHttpNative: jest.fn(() => ({
+    error: {
+      message: 'Responses continuation expired or not found for local scope materialization',
+      type: 'invalid_request_error',
+      code: 'responses_continuation_expired',
+    },
+  })),
+  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
+    status?: number;
+    code?: string;
+    origin?: string;
+    message?: string;
+  } = {}) => ({
+    status: typeof args.status === 'number' ? args.status : 422,
+    body: {
+      error: {
+        message: typeof args.message === 'string' && args.message.trim()
+          ? args.message
+          : 'Unable to resume Responses conversation',
+        type: 'invalid_request_error',
+        code: typeof args.code === 'string' && args.code.trim()
+          ? args.code
+          : 'responses_resume_failed',
+        origin: typeof args.origin === 'string' && args.origin.trim()
+          ? args.origin
+          : 'client',
+      },
+    },
+  })),
+  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
+    typeof origin === 'string' && origin.trim() === 'client'
+  ),
   planResponsesRequestContext: jest.fn(() => ({ shouldCapture: false, context: {} })),
   projectResponsesClientPayloadForClientNative: jest.fn((payload: unknown) => payload),
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string }) => ({
@@ -248,7 +283,6 @@ const createResponsesBridgeMock = () => ({
     status: args?.status ?? 500,
     error: { message: 'Upstream provider error', code: 'INTERNAL_ERROR' },
   })),
-  buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn(() => []),
   clearResponsesConversationRequestIdsForHttp: jest.fn(async () => undefined),
   createResponsesJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async () => ({})

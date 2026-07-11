@@ -45,14 +45,6 @@ const mockBridgeModule = async () => ({
     ],
     _source: payload
   })),
-  buildResponsesTerminalSseFramesFromProbeForHttp: jest.fn((probe: Record<string, unknown> | undefined) => {
-    if (!probe) return [];
-    const response = { ...probe, status: (probe.status as string | undefined) ?? 'completed' };
-    return [
-      `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
-      `event: response.done\ndata: ${JSON.stringify({ type: 'response.done', response })}\n\n`
-    ];
-  }),
   createChatJsonToSseConverterForHttp: jest.fn(async () => ({
     convertResponseToJsonToSse: async (payload: Record<string, unknown>) => {
       const responseId = typeof payload.id === 'string' ? payload.id : 'chatcmpl_mock';
