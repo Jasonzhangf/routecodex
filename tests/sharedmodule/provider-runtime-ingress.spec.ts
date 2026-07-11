@@ -1,8 +1,10 @@
-import { getRouterHotpathJsonBindingSync } from '../../src/modules/llmswitch/bridge/native-exports.js';
+import {
+  loadNativeRouterHotpathBindingForInternalUse
+} from './helpers/native-router-hotpath-loader.js';
 
 function callProviderRuntimeIngress<TEvent>(name: string, event?: TEvent): TEvent {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
-  const fn = binding[name];
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.[name];
   if (typeof fn !== 'function') {
     throw new Error(`missing native provider runtime ingress export: ${name}`);
   }
@@ -20,8 +22,8 @@ function createNativeVirtualRouterEngine(): {
   getStatus(): any;
   route(request: Record<string, unknown>, metadata?: Record<string, unknown>): any;
 } {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
-  const ProxyCtor = binding.VirtualRouterEngineProxy;
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const ProxyCtor = binding?.VirtualRouterEngineProxy;
   if (typeof ProxyCtor !== 'function') {
     throw new Error('missing native virtual router proxy export: VirtualRouterEngineProxy');
   }

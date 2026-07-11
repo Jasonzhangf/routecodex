@@ -1,18 +1,34 @@
 import { describe, expect, it } from '@jest/globals';
 import {
-  isProviderNativeResumeContinuationNative,
-  isToolResultFollowupTurnNative,
-} from '../../../../../src/modules/llmswitch/bridge/native-exports.js';
+  loadNativeRouterHotpathBindingForInternalUse
+} from '../../../../sharedmodule/helpers/native-router-hotpath-loader.js';
+
+function callNativeBoolean(capability: string, payload: Record<string, unknown>): boolean {
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.[capability];
+  if (typeof fn !== 'function') {
+    throw new Error(`${capability} native export is required`);
+  }
+  return Boolean((fn as (inputJson: string) => boolean)(JSON.stringify(payload)));
+}
+
+function isProviderNativeResumeContinuation(requestSemantics: Record<string, unknown>): boolean {
+  return callNativeBoolean('isProviderNativeResumeContinuationJson', requestSemantics);
+}
+
+function isToolResultFollowupTurn(requestSemantics: Record<string, unknown>): boolean {
+  return callNativeBoolean('isToolResultFollowupTurnJson', requestSemantics);
+}
 
 describe('request executor native request semantics', () => {
   it('does not mark inline function_call_output history as provider-owned resume', () => {
-    expect(isProviderNativeResumeContinuationNative({
+    expect(isProviderNativeResumeContinuation({
       toolOutputs: [{ call_id: 'call_1', output: 'ok', type: 'function_call_output' }]
     })).toBe(false);
   });
 
   it('does not mark relay previous response resume as provider-owned continuation', () => {
-    expect(isProviderNativeResumeContinuationNative({
+    expect(isProviderNativeResumeContinuation({
       continuation: {
         continuationOwner: 'relay',
         resumeFrom: {
@@ -23,7 +39,7 @@ describe('request executor native request semantics', () => {
   });
 
   it('does not mark relay submit_tool_outputs response id resume as provider-owned continuation', () => {
-    expect(isProviderNativeResumeContinuationNative({
+    expect(isProviderNativeResumeContinuation({
       continuation: {
         continuationOwner: 'relay',
         mode: 'submit_tool_outputs',
@@ -33,7 +49,7 @@ describe('request executor native request semantics', () => {
   });
 
   it('marks previous response resume as provider-owned continuation', () => {
-    expect(isProviderNativeResumeContinuationNative({
+    expect(isProviderNativeResumeContinuation({
       continuation: {
         continuationOwner: 'direct',
         resumeFrom: {
@@ -44,7 +60,7 @@ describe('request executor native request semantics', () => {
   });
 
   it('marks submit_tool_outputs response id resume as provider-owned continuation', () => {
-    expect(isProviderNativeResumeContinuationNative({
+    expect(isProviderNativeResumeContinuation({
       continuation: {
         continuationOwner: 'direct',
         mode: 'submit_tool_outputs',
@@ -54,7 +70,7 @@ describe('request executor native request semantics', () => {
   });
 
   it('marks multi-turn assistant tool_calls plus tool-result history as a tool-result followup turn', () => {
-    expect(isToolResultFollowupTurnNative({
+    expect(isToolResultFollowupTurn({
       messages: [
         {
           role: 'system',

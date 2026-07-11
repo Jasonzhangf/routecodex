@@ -1,4 +1,4 @@
-import { getRouterHotpathJsonBindingSync } from '../../../src/modules/llmswitch/bridge/native-exports.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath-loader.js';
 
 type NativeStoreEnvelope<T> =
   | { ok: true; result: T }
@@ -11,8 +11,8 @@ type NativeStoreEnvelope<T> =
     };
 
 function executeResponsesStoreOperation<T>(operation: string, payload: Record<string, unknown>): T {
-  const binding = getRouterHotpathJsonBindingSync() as Record<string, unknown>;
-  const fn = binding.executeResponsesConversationStoreOperationJson;
+  const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
+  const fn = binding?.executeResponsesConversationStoreOperationJson;
   if (typeof fn !== 'function') {
     throw new Error('executeResponsesConversationStoreOperationJson is not available');
   }

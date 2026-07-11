@@ -1,10 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { normalizeAssistantTextToToolCallsJson } from '../../src/modules/llmswitch/bridge/native-exports.js';
+import { normalizeAssistantTextToToolCallsWithNative } from './helpers/native-shared-conversion-direct-native.js';
 
 describe('mimoweb text harvest uses shared native normalizer', () => {
   it('harvests mimoweb tool_call json wrapper through native ssot', async () => {
-    const out = await normalizeAssistantTextToToolCallsJson({
+    const out = normalizeAssistantTextToToolCallsWithNative({
       role: 'assistant',
       content: '<tool_call>\n{"name":"read","arguments":{"filePath":"/tmp/a.txt"}}\n</tool_call>'
     });
@@ -18,7 +18,7 @@ describe('mimoweb text harvest uses shared native normalizer', () => {
   });
 
   it('does not turn think tags into tool calls', async () => {
-    const out = await normalizeAssistantTextToToolCallsJson({
+    const out = normalizeAssistantTextToToolCallsWithNative({
       role: 'assistant',
       content: '<think>I should inspect the request first.</think>我会继续处理。'
     });
@@ -28,7 +28,7 @@ describe('mimoweb text harvest uses shared native normalizer', () => {
   });
 
   it('does not harvest plain function_calls wrapper when inner body is only bash prose', async () => {
-    const out = await normalizeAssistantTextToToolCallsJson({
+    const out = normalizeAssistantTextToToolCallsWithNative({
       role: 'assistant',
       content: '<function_calls>```bash\npwd\n```</function_calls>'
     });
