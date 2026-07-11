@@ -1756,12 +1756,16 @@ describe('hub pipeline stage residue audit', () => {
     const sseFiles = [
       'src/modules/llmswitch/bridge/responses-sse-bridge.ts',
       'src/modules/llmswitch/bridge/responses-sse-transport.ts',
+      'src/modules/llmswitch/bridge/native-exports.ts',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs',
     ];
     const findings: string[] = [];
     for (const relativePath of sseFiles) {
       const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
       findings.push(...collectMatches(source, [
         { label: `${relativePath}: terminal probe frame builder`, pattern: /buildResponsesTerminalSseFramesFromProbe/ },
+        { label: `${relativePath}: terminal probe public NAPI builder`, pattern: /buildResponsesTerminalSseFramesFromProbeJson|build_responses_terminal_sse_frames_from_probe_json/ },
         { label: `${relativePath}: terminal probe state inspector`, pattern: /inspectResponsesTerminalStateFromSseChunk/ },
       ]));
     }

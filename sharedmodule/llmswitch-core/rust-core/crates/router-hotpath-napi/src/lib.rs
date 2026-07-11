@@ -766,17 +766,6 @@ pub fn update_responses_sse_transport_terminal_state_json_bridge(
     )
 }
 
-#[napi(js_name = "buildResponsesTerminalSseFramesFromProbeJson")]
-pub fn build_responses_terminal_sse_frames_from_probe_json_bridge(
-    probe_json: String,
-    request_label: String,
-) -> NapiResult<String> {
-    shared_responses_response_utils::build_responses_terminal_sse_frames_from_probe_json(
-        probe_json,
-        request_label,
-    )
-}
-
 #[napi]
 pub fn validate_tool_arguments_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::validate_tool_arguments_json(input_json)
