@@ -1349,6 +1349,56 @@ export function updateResponsesContractProbeFromSseChunkWithNative(
   }
 }
 
+export function updateResponsesSseTransportTerminalStateWithNative(input: {
+  chunk: unknown;
+  state: Record<string, unknown> | undefined;
+  flushRemainder?: boolean;
+}): { state: Record<string, unknown>; observedTerminal: boolean } {
+  const capability = 'updateResponsesSseTransportTerminalStateJson';
+  const fail = (reason?: string) => failNative<{ state: Record<string, unknown>; observedTerminal: boolean }>(
+    capability,
+    reason
+  );
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const chunkJson = safeStringify(typeof input.chunk === 'string' ? input.chunk : String(input.chunk ?? ''));
+  const stateJson = safeStringify(input.state ?? {});
+  if (!chunkJson || !stateJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(chunkJson, stateJson, input.flushRemainder === true);
+    const nativeErrorMessage = extractNativeErrorMessage(raw);
+    if (nativeErrorMessage) {
+      return fail(nativeErrorMessage);
+    }
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const state = (parsed as { state?: unknown }).state;
+    const sawTerminalEvent = (parsed as { sawTerminalEvent?: unknown }).sawTerminalEvent;
+    if (!state || typeof state !== 'object' || Array.isArray(state) || typeof sawTerminalEvent !== 'boolean') {
+      return fail('invalid shape');
+    }
+    return {
+      state: state as Record<string, unknown>,
+      observedTerminal: sawTerminalEvent
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
 export function projectSseErrorEventPayloadWithNative(input: {
   requestId: string;
   status: number;

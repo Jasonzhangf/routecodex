@@ -1,14 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
-  projectResponsesSseFrameForClientNative,
-  updateResponsesSseTransportTerminalStateNative
-} from '../../../../src/modules/llmswitch/bridge/native-exports.js';
-import { updateResponsesContractProbeFromSseChunkWithNative } from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
+  projectResponsesSseFrameForClientWithNative,
+  updateResponsesContractProbeFromSseChunkWithNative,
+  updateResponsesSseTransportTerminalStateWithNative
+} from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
 
 describe('native-exports responses SSE contract', () => {
   it('calls router_hotpath SSE projection with the native multi-arg contract', () => {
-    const projected = projectResponsesSseFrameForClientNative({
+    const projected = projectResponsesSseFrameForClientWithNative({
       frame: 'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1"}}\n\n',
       eventName: 'response.created',
       data: {
@@ -42,7 +42,7 @@ describe('native-exports responses SSE contract', () => {
   });
 
   it('suppresses apply_patch output_item.added empty-args frames for freeform tools and keeps state', () => {
-    const projected = projectResponsesSseFrameForClientNative({
+    const projected = projectResponsesSseFrameForClientWithNative({
       frame: 'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"function_call","name":"apply_patch","call_id":"call_patch","arguments":""}}\n\n',
       eventName: 'response.output_item.added',
       data: {
@@ -118,13 +118,13 @@ describe('native-exports responses SSE contract', () => {
   });
 
   it('keeps partial Responses terminal blocks in native-owned transport state', () => {
-    const first = updateResponsesSseTransportTerminalStateNative({
+    const first = updateResponsesSseTransportTerminalStateWithNative({
       chunk: 'event: response.com',
       state: undefined,
     });
     expect(first.observedTerminal).toBe(false);
 
-    const second = updateResponsesSseTransportTerminalStateNative({
+    const second = updateResponsesSseTransportTerminalStateWithNative({
       chunk: 'pleted\ndata: {"type":"response.completed","response":{"id":"resp_split_terminal","object":"response","status":"completed"}}\n\n',
       state: first.state,
     });
