@@ -10,7 +10,7 @@ const {
   getResponsesConversationStoreDebugStats,
   resumeLatestResponsesContinuationByScope,
   resumeResponsesConversation,
-} = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.ts');
+} = await import('../../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js');
 
 const TEST_METADATA_ORIGIN = {
   module: 'tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts',
