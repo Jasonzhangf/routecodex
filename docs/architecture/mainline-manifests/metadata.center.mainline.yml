@@ -18,17 +18,16 @@ node_ids:
 step_ids:
   - mtc-01
   - mtc-02
-  - mtc-02-result
   - mtc-03
   - mtc-04
   - mtc-05
   - mtc-06
   - mtc-07
 edge_status_counts:
-  anchored: 8
+  anchored: 7
   partial: 0
   binding_pending: 0
-  total: 8
+  total: 7
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

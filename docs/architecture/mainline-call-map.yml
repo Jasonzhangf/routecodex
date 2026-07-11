@@ -1076,18 +1076,6 @@ chains:
         semantic_output: "responses continuation control attached without redefining request truth and without mirroring request/context payload into MetadataCenter"
         status: anchored
         note: "Pipeline metadata write may attach `responsesResume` and other continuation control only; request truth remains write-once and MetadataCenter must not carry `responsesRequestContext` or any request/context payload mirror. continuation fields must not be promoted back into request identity."
-      - step_id: mtc-02-result
-        from_node: MetaReq02TruthMaterialized
-        to_node: MetaReq03ContinuationAttached
-        caller_symbol: attachResponsesRequestContextToResultForHttp
-        caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
-        callee_symbol: writeContinuationContext
-        callee_file: src/server/runtime/http-server/metadata-center/metadata-center.ts
-        owner_feature_id: hub.metadata_center_mainline
-        semantic_input: "request truth plus responses result continuation control"
-        semantic_output: "result-side continuation control preserved without redefining request truth and without persisting request/context payload in MetadataCenter"
-        status: anchored
-        note: "Result metadata must not attach `responsesRequestContext` into `continuation_context`; tests must lock that continuation control cannot materialize request truth and cannot become a request-context transport path."
       - step_id: mtc-03
         from_node: MetaReq03ContinuationAttached
         to_node: MetaReq04RuntimeControlBound

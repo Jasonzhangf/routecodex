@@ -88,11 +88,11 @@ chains:
     max_binding_pending_edges: 0
     note: Error mainline is fully anchored through explicit ErrorErr04 router-policy application and ErrorErr05 executor consumption.
   - chain_id: metadata.center.mainline
-    expected_total_edges: 8
-    min_anchored_edges: 8
+    expected_total_edges: 7
+    min_anchored_edges: 7
     max_partial_edges: 0
     max_binding_pending_edges: 0
-    note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; bridge-bound metadata carrier split stays anchored.
+    note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; remaining mtc-01..mtc-07 stay locked.
   - chain_id: runtime.lifecycle.mainline
     expected_total_edges: 10
     min_anchored_edges: 10

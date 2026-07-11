@@ -46,7 +46,6 @@ flowchart LR
 
   MetaReq01InboundSeeded -->|mtc-01| MetaReq02TruthMaterialized
   MetaReq02TruthMaterialized -->|mtc-02| MetaReq03ContinuationAttached
-  MetaReq02TruthMaterialized -->|mtc-02-result| MetaReq03ContinuationAttached
   MetaReq03ContinuationAttached -->|mtc-03| MetaReq04RuntimeControlBound
   MetaReq04RuntimeControlBound -->|mtc-04| MetaReq05ProviderObservationProjected
   MetaReq05ProviderObservationProjected -->|mtc-05| MetaResp06ResponseObserved
@@ -60,7 +59,6 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `mtc-01` | inbound seed -> request truth | `ServerReqInbound01ClientRaw` / `HubReqInbound02Standardized` | `request_truth` seed only | handler + req_inbound capture |
 | `mtc-02` | request truth fixed -> continuation attached | `HubReqChatProcess03Governed` | `continuation_context` | responses/chat continuation control only; no request/context payload mirror allowed |
-| `mtc-02-result` | request truth fixed -> result continuation attached | `HubReqChatProcess03Governed` / host result bridge | `continuation_context` | result side may preserve continuation control only; request context transport must stay in local variables, not MetadataCenter |
 | `mtc-03` | continuation attached -> runtime control bound | `HubReqChatProcess03Governed` / request-route owner / `VrRoute04SelectedTarget` | `runtime_control` | route hint / stream / servertool followup / stop-message controls; relay `/v1/responses` restore may carry `responsesResume` + `routeHint` at handler/bridge entry, while effective `retryProviderKey` is finalized later by request-executor request-route owner before Hub execution |
 | `mtc-04` | runtime control -> provider observation | `VrRoute04SelectedTarget` / `HubReqOutbound05ProviderSemantic` | `provider_observation` | `request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -> MetadataCenter.writeProviderObservation`; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat `metadata.target` |
 | `mtc-05` | provider observation -> response observed | `HubRespInbound02Parsed` | `provider_observation` append + `response_observation` | `persistResponsesConversationLifecycleAtChatProcessExitWithinCore -> readMetadataCenterRequestTruth`; response-side continuation save owner is core Chat Process closeout |

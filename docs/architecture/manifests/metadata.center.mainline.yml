@@ -33,13 +33,6 @@ edges:
     owner_feature_id: hub.metadata_center_mainline
     binding_pending: null
     split_binding_id: null
-  - step_id: mtc-02-result
-    from_node: MetaReq02TruthMaterialized
-    to_node: MetaReq03ContinuationAttached
-    status: anchored
-    owner_feature_id: hub.metadata_center_mainline
-    binding_pending: null
-    split_binding_id: null
   - step_id: mtc-03
     from_node: MetaReq03ContinuationAttached
     to_node: MetaReq04RuntimeControlBound

@@ -164,7 +164,6 @@
 
           MetaReq01InboundSeeded --&gt;|mtc-01| MetaReq02TruthMaterialized
           MetaReq02TruthMaterialized --&gt;|mtc-02| MetaReq03ContinuationAttached
-          MetaReq02TruthMaterialized --&gt;|mtc-02-result| MetaReq03ContinuationAttached
           MetaReq03ContinuationAttached --&gt;|mtc-03| MetaReq04RuntimeControlBound
           MetaReq04RuntimeControlBound --&gt;|mtc-04| MetaReq05ProviderObservationProjected
           MetaReq05ProviderObservationProjected --&gt;|mtc-05| MetaResp06ResponseObserved
@@ -177,7 +176,6 @@
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>mtc-01</code></td><td>inbound seed -&gt; request truth</td><td><code>ServerReqInbound01ClientRaw</code> / <code>HubReqInbound02Standardized</code></td><td><code>request_truth</code> seed only</td><td>handler + req_inbound capture</td></tr>
         <tr><td><code>mtc-02</code></td><td>request truth fixed -&gt; continuation attached</td><td><code>HubReqChatProcess03Governed</code></td><td><code>continuation_context</code></td><td>responses/chat continuation control only; no request/context payload mirror allowed</td></tr>
-        <tr><td><code>mtc-02-result</code></td><td>request truth fixed -&gt; result continuation attached</td><td><code>HubReqChatProcess03Governed</code> / host result bridge</td><td><code>continuation_context</code></td><td>result side may preserve continuation control only; request context transport must stay in local variables, not MetadataCenter</td></tr>
         <tr><td><code>mtc-03</code></td><td>continuation attached -&gt; runtime control bound</td><td><code>HubReqChatProcess03Governed</code> / request-route owner / <code>VrRoute04SelectedTarget</code></td><td><code>runtime_control</code></td><td>route hint / stream / servertool followup / stop-message controls; relay <code>/v1/responses</code> restore may carry <code>responsesResume</code> + <code>routeHint</code> at handler/bridge entry, while effective <code>retryProviderKey</code> is finalized later by request-executor request-route owner before Hub execution</td></tr>
         <tr><td><code>mtc-04</code></td><td>runtime control -&gt; provider observation</td><td><code>VrRoute04SelectedTarget</code> / <code>HubReqOutbound05ProviderSemantic</code></td><td><code>provider_observation</code></td><td><code>request-executor-pipeline-attempt.ts::resolveRequestExecutorPipelineAttempt -&gt; MetadataCenter.writeProviderObservation</code>; target / providerKey / assignedModelId / compatibilityProfile now enter center instead of reviving flat <code>metadata.target</code></td></tr>
         <tr><td><code>mtc-05</code></td><td>provider observation -&gt; response observed</td><td><code>HubRespInbound02Parsed</code></td><td><code>provider_observation</code> append + <code>response_observation</code></td><td><code>persistResponsesConversationLifecycleAtChatProcessExitWithinCore -&gt; readMetadataCenterRequestTruth</code>; response-side continuation save owner is core Chat Process closeout</td></tr>
