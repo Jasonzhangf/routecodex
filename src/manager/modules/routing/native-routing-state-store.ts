@@ -1,4 +1,4 @@
-import { getRouterHotpathJsonBindingSync } from '../../../modules/llmswitch/bridge/native-exports.js';
+import { getRouterHotpathJsonBindingSync } from '../../../modules/llmswitch/bridge/routing-state-store-host.js';
 import { formatUnknownError } from '../../../utils/common-utils.js';
 
 type RoutingInstructionState = Record<string, unknown>;

@@ -3233,7 +3233,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
       - src/manager/modules/routing
-      - src/modules/llmswitch/bridge
+      - src/modules/llmswitch/bridge/routing-state-store-host.ts
     forbidden_paths:
       - src/server/runtime/http-server/daemon-admin
       - src/server/runtime/http-server/executor
@@ -3248,6 +3248,7 @@ owners:
     migration_target: rust
     notes:
       - "Routing state persistence truth lives in Rust routing_state_store.rs; TS RoutingStateManagerModule is bridge."
+      - "`src/manager/modules/routing/native-routing-state-store.ts` must use the narrow `routing-state-store-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
       - "Must not duplicate vr.route_selection / vr.route_availability_floor semantics; selection floor stays in Rust."
   - feature_id: manager.health_runtime
     status: active

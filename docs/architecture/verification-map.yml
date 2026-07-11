@@ -2053,6 +2053,8 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
+      - src/modules/llmswitch/bridge/routing-state-store-host.ts
+      - src/manager/modules/routing/native-routing-state-store.ts
     contract:
       - tests/sharedmodule/routing-state-store-observability.spec.ts
       - tests/sharedmodule/routing-state-continuation-matrix.spec.ts
@@ -2065,6 +2067,7 @@ verification:
       - npm run build:base
     notes:
       - "Routing state store truth lives in Rust; TS RoutingStateManagerModule is bridge only."
+      - "The manager routing-state shell must use the narrow `routing-state-store-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
 
   - feature_id: manager.health_runtime
     change_risk: high

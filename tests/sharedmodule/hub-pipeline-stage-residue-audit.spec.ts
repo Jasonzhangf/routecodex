@@ -802,6 +802,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('convertResponsesRequestToChatNative');
   });
 
+  it('manager routing-state store shell must use its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const shellSource = fs.readFileSync(
+      path.join(repoRoot, 'src/manager/modules/routing/native-routing-state-store.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/routing-state-store-host.ts'),
+      'utf8',
+    );
+
+    expect(shellSource).toContain('../../../modules/llmswitch/bridge/routing-state-store-host.js');
+    expect(shellSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('getRouterHotpathJsonBindingSync');
+  });
+
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
     const repoRoot = process.cwd();
     const retiredPaths = [
