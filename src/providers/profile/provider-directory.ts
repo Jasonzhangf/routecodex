@@ -8,7 +8,10 @@ const KNOWN_FAMILIES = new Set([
   'deepseek',
   'glm',
   'lmstudio',
-  'mock'
+  'mock',
+  'grok',
+  'grok-cli',
+  'supergrok'
 ]);
 
 function normalizeToken(value?: string): string | undefined {
@@ -49,6 +52,10 @@ export function resolveProviderFamilyFromDirectory(input: ProviderFamilyLookupIn
     }
     if (KNOWN_FAMILIES.has(candidate)) {
       return candidate;
+    }
+    // grok-* provider ids share the independent grok family profile
+    if (candidate.startsWith('grok-') || candidate.startsWith('grok-cli-')) {
+      return 'grok';
     }
   }
 

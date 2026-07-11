@@ -51,20 +51,6 @@ function mockIsProviderNativeResumeContinuation(requestSemantics?: Record<string
     || (continuation?.mode === 'submit_tool_outputs' && typeof continuation?.responseId === 'string');
 }
 
-jest.unstable_mockModule(
-  '../../../../src/server/runtime/http-server/executor/request-executor-request-semantics.js',
-  () => ({
-    hasRequestedToolsInSemantics: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
-      mockHasRequestedToolsInSemantics(requestSemantics)),
-    isRequiredToolCallTurn: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
-      mockIsRequiredToolCallTurn(requestSemantics)),
-    isProviderNativeResumeContinuation: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
-      mockIsProviderNativeResumeContinuation(requestSemantics)),
-    isToolResultFollowupTurn: jest.fn(async (requestSemantics?: Record<string, unknown>) =>
-      mockIsToolResultFollowupTurn(requestSemantics))
-  })
-);
-
 function createRequestExecutorLocalRuntimeIntegrationsMock() {
   return {
     captureResponsesRequestContextForRequest: async () => undefined,

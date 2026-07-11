@@ -20,6 +20,7 @@ import {
   grokFamilyProfile,
   sanitizeGrokResponsesWireBody
 } from '../../../src/providers/profile/families/grok-profile.js';
+import { getProviderFamilyProfile } from '../../../src/providers/profile/profile-registry.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -180,7 +181,19 @@ describe('GrokAuthProvider (independent provider)', () => {
     expect(headers?.['x-grok-model-override']).toBe('grok-build');
   });
 
-  test('sanitizeGrokResponsesWireBody drops unsupported ModelInput items and tools', () => {
+  test('providerId=grok wins over protocol providerFamily=responses', () => {
+    const profile = getProviderFamilyProfile({
+      providerFamily: 'responses',
+      providerId: 'grok',
+      providerKey: 'grok.key1.grok-build',
+      providerType: 'responses'
+    });
+    expect(profile?.id).toBe('grok/default');
+    expect(profile?.providerFamily).toBe('grok');
+    expect(typeof profile?.buildRequestBody).toBe('function');
+  });
+
+  test('sanitizeGrokResponsesWireBody maps Codex shapes before dropping unmappable', () => {
     const out = sanitizeGrokResponsesWireBody({
       model: 'grok-build',
       stream: true,
@@ -190,26 +203,38 @@ describe('GrokAuthProvider (independent provider)', () => {
       tools: [
         { type: 'function', name: 'shell', parameters: { type: 'object' } },
         { type: 'web_search' },
-        { type: 'custom', name: 'apply_patch' }
+        { type: 'custom', name: 'apply_patch', parameters: { type: 'object' } }
       ],
       input: [
         { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
         { type: 'reasoning', encrypted_content: 'x', summary: [] },
+        {
+          type: 'reasoning',
+          encrypted_content: 'y',
+          summary: [{ type: 'summary_text', text: 'think step' }]
+        },
         { type: 'function_call', name: 'shell', call_id: 'c1', arguments: '{}' },
         { type: 'function_call_output', call_id: 'c1', output: 'ok' },
-        { type: 'custom_tool_call', name: 'apply_patch', call_id: 'c2', input: 'x' },
+        { type: 'custom_tool_call', name: 'apply_patch', call_id: 'c2', input: 'patch-body' },
         { type: 'custom_tool_call_output', call_id: 'c2', output: 'y' }
       ]
     });
     expect(out.client_metadata).toBeUndefined();
     expect(out.include).toBeUndefined();
     expect(out.reasoning).toBeUndefined();
-    expect((out.tools as any[]).map((t) => t.name)).toEqual(['shell']);
-    expect((out.input as any[]).map((i) => i.type)).toEqual([
+    expect((out.tools as any[]).map((t) => t.name)).toEqual(['shell', 'apply_patch']);
+    const types = (out.input as any[]).map((i) => i.type);
+    expect(types).toEqual([
       'message',
+      'message', // mapped from reasoning summary
       'function_call',
-      'function_call_output'
+      'function_call_output',
+      'function_call', // mapped from custom_tool_call
+      'function_call_output' // mapped from custom_tool_call_output
     ]);
+    const mappedPatch = (out.input as any[]).find((i) => i.call_id === 'c2' && i.type === 'function_call');
+    expect(mappedPatch.name).toBe('apply_patch');
+    expect(mappedPatch.arguments).toContain('patch-body');
   });
 
   test('refresh persists into provider auth token file', async () => {

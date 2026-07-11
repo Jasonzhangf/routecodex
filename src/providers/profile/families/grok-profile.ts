@@ -1,9 +1,9 @@
 /**
- * Independent Grok provider family (Responses + cli-chat-proxy headers + wire sanitize).
+ * Independent Grok provider family (Responses + cli-chat-proxy headers + wire compat).
  *
  * Black-box alignment with Grok Build / cli-chat-proxy:
  * - headers: Authorization (auth), X-XAI-Token-Auth, x-grok-model-override, client surface/version
- * - body: OpenAI Responses subset that ModelInput can deserialize (drop Codex-only items/tools)
+ * - body: map Codex Responses shapes onto ModelInput-capable subset first; drop only unmappable
  */
 
 import type {
@@ -14,16 +14,6 @@ import type {
 
 const DEFAULT_CLIENT_SURFACE = 'grok-build';
 const DEFAULT_CLIENT_VERSION = '0.2.93';
-
-/** Input item types accepted by cli-chat-proxy ModelInput (OpenAI responses subset). */
-const ALLOWED_INPUT_TYPES = new Set([
-  'message',
-  'function_call',
-  'function_call_output'
-]);
-
-/** Tool types accepted on wire. */
-const ALLOWED_TOOL_TYPES = new Set(['function']);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -163,7 +153,21 @@ function sanitizeMessageItem(item: Record<string, unknown>): Record<string, unkn
   return null;
 }
 
-function sanitizeFunctionCall(item: Record<string, unknown>): Record<string, unknown> | null {
+function toJsonString(value: unknown, fallback = '{}'): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function mapFunctionCall(item: Record<string, unknown>): Record<string, unknown> | null {
   const name = typeof item.name === 'string' ? item.name.trim() : '';
   const callId = typeof item.call_id === 'string'
     ? item.call_id
@@ -172,15 +176,13 @@ function sanitizeFunctionCall(item: Record<string, unknown>): Record<string, unk
     return null;
   }
   let argumentsValue = item.arguments;
-  if (argumentsValue !== undefined && typeof argumentsValue !== 'string') {
-    try {
-      argumentsValue = JSON.stringify(argumentsValue);
-    } catch {
-      argumentsValue = '{}';
-    }
-  }
-  if (typeof argumentsValue !== 'string') {
-    argumentsValue = '{}';
+  // Codex custom_tool_call freeform uses `input` instead of `arguments`.
+  if (argumentsValue === undefined && typeof item.input === 'string') {
+    argumentsValue = JSON.stringify({ input: item.input });
+  } else if (argumentsValue === undefined && item.input !== undefined) {
+    argumentsValue = toJsonString({ input: item.input });
+  } else {
+    argumentsValue = toJsonString(argumentsValue, '{}');
   }
   return {
     type: 'function_call',
@@ -190,7 +192,7 @@ function sanitizeFunctionCall(item: Record<string, unknown>): Record<string, unk
   };
 }
 
-function sanitizeFunctionCallOutput(item: Record<string, unknown>): Record<string, unknown> | null {
+function mapFunctionCallOutput(item: Record<string, unknown>): Record<string, unknown> | null {
   const callId = typeof item.call_id === 'string'
     ? item.call_id
     : (typeof item.callId === 'string' ? item.callId : '');
@@ -198,15 +200,8 @@ function sanitizeFunctionCallOutput(item: Record<string, unknown>): Record<strin
     return null;
   }
   let output = item.output;
-  if (output !== undefined && typeof output !== 'string') {
-    try {
-      output = JSON.stringify(output);
-    } catch {
-      output = String(output);
-    }
-  }
   if (typeof output !== 'string') {
-    output = '';
+    output = toJsonString(output, '');
   }
   return {
     type: 'function_call_output',
@@ -215,7 +210,40 @@ function sanitizeFunctionCallOutput(item: Record<string, unknown>): Record<strin
   };
 }
 
-function sanitizeInputItem(item: unknown): Record<string, unknown> | null {
+/** Map reasoning summary text into assistant message when possible; encrypted-only is unmappable. */
+function mapReasoningItem(item: Record<string, unknown>): Record<string, unknown> | null {
+  const texts: string[] = [];
+  const summary = item.summary;
+  if (typeof summary === 'string' && summary.trim()) {
+    texts.push(summary.trim());
+  } else if (Array.isArray(summary)) {
+    for (const part of summary) {
+      if (typeof part === 'string' && part.trim()) {
+        texts.push(part.trim());
+        continue;
+      }
+      const row = asRecord(part);
+      if (!row) {
+        continue;
+      }
+      const text = typeof row.text === 'string' ? row.text.trim() : '';
+      if (text) {
+        texts.push(text);
+      }
+    }
+  }
+  if (texts.length === 0) {
+    // encrypted_content / empty summary cannot become ModelInput — last-resort drop.
+    return null;
+  }
+  return {
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'input_text', text: texts.join('\n') }]
+  };
+}
+
+function mapInputItem(item: unknown): Record<string, unknown> | null {
   const row = asRecord(item);
   if (!row) {
     return null;
@@ -225,23 +253,30 @@ function sanitizeInputItem(item: unknown): Record<string, unknown> | null {
     return sanitizeMessageItem({ ...row, type: 'message' });
   }
   const type = typeof row.type === 'string' ? row.type : '';
-  if (!ALLOWED_INPUT_TYPES.has(type)) {
-    // Drop reasoning / custom_tool_call / custom_tool_call_output / item_reference / etc.
-    return null;
-  }
   if (type === 'message') {
     return sanitizeMessageItem(row);
   }
   if (type === 'function_call') {
-    return sanitizeFunctionCall(row);
+    return mapFunctionCall(row);
   }
   if (type === 'function_call_output') {
-    return sanitizeFunctionCallOutput(row);
+    return mapFunctionCallOutput(row);
   }
+  // Capability mapping: Codex custom tool history → ModelInput function_call*
+  if (type === 'custom_tool_call') {
+    return mapFunctionCall(row);
+  }
+  if (type === 'custom_tool_call_output') {
+    return mapFunctionCallOutput(row);
+  }
+  if (type === 'reasoning') {
+    return mapReasoningItem(row);
+  }
+  // Unmappable ModelInput variants — last-resort drop.
   return null;
 }
 
-function sanitizeTools(tools: unknown): unknown[] | undefined {
+function mapTools(tools: unknown): unknown[] | undefined {
   if (!Array.isArray(tools)) {
     return undefined;
   }
@@ -252,31 +287,33 @@ function sanitizeTools(tools: unknown): unknown[] | undefined {
       continue;
     }
     const type = typeof row.type === 'string' ? row.type : (typeof row.name === 'string' ? 'function' : '');
-    if (!ALLOWED_TOOL_TYPES.has(type) && type !== '') {
-      // drop custom / web_search / tool_search / apply_patch freeform
-      continue;
-    }
     const name = typeof row.name === 'string' ? row.name.trim() : '';
-    if (!name) {
+    // Map custom/local tools that still have a callable name+schema into function tools.
+    if (type === 'function' || type === 'custom' || type === '') {
+      if (!name) {
+        continue;
+      }
+      const parameters = row.parameters ?? row.input_schema ?? { type: 'object', properties: {} };
+      const cleaned: Record<string, unknown> = {
+        type: 'function',
+        name,
+        parameters
+      };
+      if (typeof row.description === 'string' && row.description.trim()) {
+        cleaned.description = row.description;
+      }
+      out.push(cleaned);
       continue;
     }
-    const parameters = row.parameters ?? row.input_schema ?? { type: 'object', properties: {} };
-    const cleaned: Record<string, unknown> = {
-      type: 'function',
-      name,
-      parameters
-    };
-    if (typeof row.description === 'string' && row.description.trim()) {
-      cleaned.description = row.description;
-    }
-    out.push(cleaned);
+    // web_search / tool_search / etc. have no ModelInput function equivalent — drop last.
   }
   return out;
 }
 
 /**
- * Sanitize Responses request body for cli-chat-proxy ModelInput compatibility.
+ * Map/sanitize Responses request body for cli-chat-proxy ModelInput compatibility.
  * Provider-local only — does not change Hub semantics.
+ * Policy: map first (custom_tool→function_call, reasoning summary→assistant text); drop only unmappable.
  */
 export function sanitizeGrokResponsesWireBody(defaultBody: Record<string, unknown>): Record<string, unknown> {
   const body: Record<string, unknown> = { ...defaultBody };
@@ -287,10 +324,10 @@ export function sanitizeGrokResponsesWireBody(defaultBody: Record<string, unknow
   delete body.prompt_cache_key;
   delete body.include;
 
-  // ModelInput: keep only supported input items.
+  // ModelInput: map history onto supported item types.
   if (Array.isArray(body.input)) {
     const nextInput = body.input
-      .map((item) => sanitizeInputItem(item))
+      .map((item) => mapInputItem(item))
       .filter((item): item is Record<string, unknown> => item !== null);
     body.input = nextInput.length > 0 ? nextInput : [{ type: 'message', role: 'user', content: 'continue' }];
   } else if (typeof body.input === 'string') {
@@ -299,9 +336,9 @@ export function sanitizeGrokResponsesWireBody(defaultBody: Record<string, unknow
     delete body.input;
   }
 
-  // Tools: only function tools.
+  // Tools: map to function tools when possible.
   if (body.tools !== undefined) {
-    const tools = sanitizeTools(body.tools);
+    const tools = mapTools(body.tools);
     if (tools && tools.length > 0) {
       body.tools = tools;
     } else {

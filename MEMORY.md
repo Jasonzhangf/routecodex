@@ -2231,11 +2231,25 @@
 - Relay-owned continuation must not write `retryProviderKey`. Keeping `responsesResume.providerKey` only in continuation context is not enough for direct provider pin, and reading provider pin from relay or flat legacy metadata is forbidden.
 - Verified regression evidence: direct continuation blackbox hits `["p1","p1"]` with `default/forced`; relay blackbox hits `["p1","p2"]`, proving relay remains unpinned.
 
+# 2026-07-11: WebUI routing targets and live apply truth
+
+- Marker: webui-target-chain-live-apply-20260711.
+- `webui.config_editor_surface` is a thin config editor only: route names are labels, not provider target truth. WebUI target summaries must read configured pool targets from `routing.<route>[][].targets[]` and accept target objects through `providerId`, `provider`, or `target`.
+- WebUI config mutation responses must expose live-apply evidence. Active `httpserver.ports[]` edits call the live port owner and return `portApply`; active config/provider/routing/forwarder edits return `selfReload`; non-active config edits must report explicit saved-only skip instead of claiming runtime application.
+- Frontend tests for this surface should use TOML-shaped user/provider config paths and assert target-chain/live-apply behavior, not legacy `config.json`, route-name-derived targets, or "restart required" UI text.
+
 # 2026-07-11: Process lifecycle logger preserves nested error semantics
 
 - Marker: process-lifecycle-nested-error-20260711.
 - `process-lifecycle.jsonl` failure records with `details.error={}` are silent-failure bugs in the lifecycle logger, not acceptable evidence. The unique owner is `src/utils/process-lifecycle-logger.ts`; fix recursive serialization there rather than adding caller-specific message fields.
 - Verified fixed behavior: installed `0.90.3872` recursively serializes nested `Error` values with `name`, `message`, `stack`, `cause`, and extra fields such as `code`. Focused logger/port-utils tests, TypeScript, runtime lifecycle gate, function-map gate, `build:base`, global install, live health on 5555/5520/10000, and installed-dist logger probe passed.
+
+# 2026-07-11: Responses direct model compat is bounded, not recursive fallback
+
+- Responses direct path may restore client-visible model for non-ChatGPT provider compat, but only at protocol-visible top-level response `model` and SSE/JSON `response.model`; nested diagnostic/tool/metadata `model` fields must remain provider payload truth.
+- Router-direct SSE compat must fail fast when `sseStream` is not a real readable stream. Returning an empty stream is forbidden because it converts malformed provider/runtime output into a false successful SSE.
+- Response dry-run snapshots containing serialized live readable state must be rejected unless they also include materialized `bodyText`, `raw`, `text`, or `sseBodyText`; offline dry-run cannot replay a captured live stream object.
+- Verification evidence: router-direct focused Jest passed 34/34; pipeline dry-run Jest passed 4/4; temp serialized `sseStream` sample through `dry-run:codex-response` failed with the explicit unreplayable-stream error.
 
 # 2026-07-11: install-release must not use start --restart takeover
 

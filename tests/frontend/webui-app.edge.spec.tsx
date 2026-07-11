@@ -227,14 +227,14 @@ describe('webui edge coverage', () => {
       // Routing page
       if (path === '/config/routing/sources' && method === 'GET') {
         return responseJson({
-          activePath: '/tmp/config.json',
-          sources: [{ path: '/tmp/config.json', label: '/tmp/config.json', kind: 'config', location: 'virtualrouter.routing' }]
+          activePath: '/tmp/config.toml',
+          sources: [{ path: '/tmp/config.toml', label: '/tmp/config.toml', kind: 'config', location: 'virtualrouter.routing' }]
         });
       }
       if (path === '/config/editor' && method === 'GET') {
         return responseJson({
           ok: true,
-          path: '/tmp/config.json',
+          path: '/tmp/config.toml',
           ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' }],
           routingPolicyGroups: {
             default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } },
@@ -251,7 +251,7 @@ describe('webui edge coverage', () => {
           },
           activeGroupId: 'default',
           location: 'virtualrouter.routing',
-          path: '/tmp/config.json'
+          path: '/tmp/config.toml'
         });
       }
       if (path === '/config/routing/groups/default' && method === 'PUT') {
@@ -264,7 +264,7 @@ describe('webui edge coverage', () => {
           },
           activeGroupId: 'default',
           location: 'virtualrouter.routing',
-          path: '/tmp/config.json'
+          path: '/tmp/config.toml'
         });
       }
       if (path === '/config/routing/groups/activate' && method === 'POST') {
@@ -272,7 +272,7 @@ describe('webui edge coverage', () => {
         if (routingActivateCalls === 1) {
           return responseJson({ error: { message: 'activate local failed' } }, 500);
         }
-        return responseJson({ ok: true, activeGroupId: 'default', groups: { default: { routing: {} } }, path: '/tmp/config.json' });
+        return responseJson({ ok: true, activeGroupId: 'default', groups: { default: { routing: {} } }, path: '/tmp/config.toml' });
       }
 
       return responseJson({});
@@ -345,7 +345,7 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(hasToast('save group failed') || hasToast('No routing group selected.')).toBe(true));
 
     onToast.mockClear();
-    fireEvent.click(within(routingPanel).getByText('Activate Local'));
+    fireEvent.click(within(routingPanel).getByText('Apply Active Group'));
     await waitFor(() => expect(hasToast('activate local failed') || hasToast('No routing group selected.')).toBe(true));
 
     routingView.unmount();

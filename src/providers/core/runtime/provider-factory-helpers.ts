@@ -23,6 +23,32 @@ function isOpenCodeZenProviderId(providerId?: string): boolean {
   );
 }
 
+function isGrokAuthRuntime(
+  auth: ProviderRuntimeAuth,
+  runtime?: ProviderRuntimeProfile
+): boolean {
+  const rawType = isNonEmptyString(auth.rawType) ? auth.rawType.trim().toLowerCase() : '';
+  if (rawType === 'grok' || rawType === 'grok-cli' || rawType === 'grok-cli-session' || rawType === 'supergrok') {
+    return true;
+  }
+  const providerId = typeof runtime?.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
+  if (
+    providerId === 'grok'
+    || providerId === 'grok-cli'
+    || providerId === 'supergrok'
+    || providerId.startsWith('grok-')
+  ) {
+    return true;
+  }
+  const tokenFile = isNonEmptyString(auth.tokenFile) ? auth.tokenFile.trim().toLowerCase() : '';
+  return (
+    tokenFile.includes('/provider/grok/')
+    || tokenFile.includes('provider/grok/auth')
+    || tokenFile.includes('.grok/auth.json')
+    || tokenFile.endsWith('grok/auth.json')
+  );
+}
+
 function isOpenCodeZenPlaceholderApiKey(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized === 'free-access-token' || normalized === 'placeholder';
@@ -101,6 +127,7 @@ export function mapRuntimeAuthToConfig(
 ): RuntimeFactoryAuthConfig {
   if (auth.type === 'apikey') {
     const isOpenCodeZen = isOpenCodeZenProviderId(runtime?.providerId);
+    const isGrok = isGrokAuthRuntime(auth, runtime);
     const rawType = isNonEmptyString(auth.rawType) ? auth.rawType.trim().toLowerCase() : undefined;
     const openCodeZenResolved = isOpenCodeZen ? resolveOpenCodeZenApiKey(auth.value) : null;
     const resolvedApiKey = openCodeZenResolved
@@ -114,17 +141,20 @@ export function mapRuntimeAuthToConfig(
           : runtime && typeof (runtime as any).endpoint === 'string'
             ? String((runtime as any).endpoint).trim()
             : '';
-      const allowEmpty = isLocalBaseUrl(baseUrl);
+      // Independent grok provider loads tokens from ~/.rcc/provider/grok/auth (tokenFile).
+      // Inert placeholder values are allowed; real credentials never come from inline apiKey.
+      const allowEmpty = isLocalBaseUrl(baseUrl) || isGrok;
       if (!allowEmpty) {
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
     }
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
-      apiKey: resolvedApiKey,
-      rawType: openCodeZenResolved?.rawType ?? (rawType || auth.rawType),
+      // Grok credentials live only in token files; keep an inert non-secret placeholder for generic apikey plumbing.
+      apiKey: isGrok ? 'grok-token-file-mode' : resolvedApiKey,
+      rawType: openCodeZenResolved?.rawType ?? (isGrok ? (rawType || 'grok') : (rawType || auth.rawType)),
       accountAlias: auth.accountAlias,
-      tokenFile: auth.tokenFile,
+      tokenFile: auth.tokenFile || (isGrok ? '~/.rcc/provider/grok/auth/token-1.json' : undefined),
       mobile: auth.mobile,
       account: (auth as ApiKeyAuthExtended & { account?: string }).account,
       username: (auth as ApiKeyAuthExtended & { username?: string }).username,

@@ -28907,6 +28907,86 @@ Pure Rust NAPI candidates:
 - Evidence: MemPalace search located the prior candidate note; focused Rust test `build_responses_conversation_port_scope_for_http_matches_handler_contract` passed; focused Jest passed 5 suites / 33 tests; `verify:function-map-compile-gate`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `npx tsc --noEmit`, `npm run build:base`, and touched-file `git diff --check` passed.
 - Architecture review: no JS backfill, no fallback, no duplicate TS semantic owner. Remaining active bridge references are `provider-response-converter-host.ts` and snapshot recorder host IO files; they are not deletion candidates without deeper owner migration.
 - Known non-target gap: broad `handler-request-executor.unified-semantics.e2e.spec.ts` still fails legacy/mock expectations when run directly; it was not used as closeout evidence for this pure port-scope native slice.
+## 2026-07-11 grok/xAI opencode align (auth headers stay Grok Build)
+- Decision: wire headers keep cli-chat-proxy (Authorization + X-XAI-Token-Auth + x-grok-*); OAuth/refresh/multi-token align opencode xAI plugin.
+- Changed: src/providers/auth/grok-auth.ts (+ OAuth constants, PKCE, device-code helpers, JWT exp skew 120s, writeGrokOAuthTokenFile); README; unit tests 12 green.
+- Unchanged: grok-profile headers/sanitize, config baseURL cli-chat-proxy, multi-token rotate.
+- Verify: pnpm exec jest tests/providers/auth/grok-auth.unit.spec.ts --no-coverage (12 pass).
+- Next: optional CLI login entry that calls writeGrokOAuthTokenFile into auth/*.json; live smoke with existing token.
+
+# 2026-07-11: snapshot recorder tool-failure classification moved native
+
+- Scope: continue llmswitch host bridge closeout without deleting active snapshot recorder factory/IO owner.
+- Change: moved `classifyRuntimeErrorSignalFromText` and `shouldLogClientToolErrorToConsole` semantics from `snapshot-recorder-tool-failures.ts` into Rust `snapshot_tool_failures`; TS file now only delegates to native helpers alongside existing `detectToolExecutionFailuresNative`.
+- Evidence: Rust focused test `snapshot_tool_failures` passed 6/6; native hotpath build required exports OK; focused Jest passed 7 suites / 51 tests; `hub-pipeline-stage-residue-audit` passed 211/211; strict llmswitch shell audit, minimal TS surface, rustification audit, deleted-path, thin-wrapper, snapshot-stage gates, function-map gate, `npx tsc --noEmit`, `git diff --check`, and `npm run build:base` passed.
+- Architecture review: no JS backfill, no fallback, no duplicate TS classifier; remaining snapshot recorder files are active host IO/observation and not deletion candidates without a larger owner move.
+
+# 2026-07-11: WebUI routing target chain and live apply closeout
+
+- Marker: webui-target-chain-live-apply-20260711.
+- Scope: `webui.config_editor_surface`; allowed files only (`webui/src/App.tsx`, `webui/src/styles.css`, frontend WebUI tests, daemon admin provider handler test/route).
+- Change: WebUI routing summary now reads `routing.*[].targets[]` (`providerId|provider|target|string`) and explicitly does not treat route names as provider target truth. Selected port shows group target-chain rows for pool targets such as `demo.default.demo-max` / `fwd.gpt.gpt-5.5`.
+- Change: active config writes now return explicit live-apply evidence (`portApply`, `selfReload`). Active port edits call the live port owner via `applyPortConfig`; active config/provider/routing/forwarder writes call runtime reload from disk; non-active config edits report explicit saved-only skip instead of pretending runtime applied.
+- Change: WebUI styling was de-noised: no radial/orb background, max 8px radius, low shadow, target-chain table, muted nested sections.
+- Verification PASS: `npm run test:webui`; focused daemon admin route Jest; `npm run build:webui`; `npm run verify:config-ssot`; `npm run verify:function-map-compile-gate`; `npm run verify:runtime-lifecycle-loop-gate-matrix`; focused config writer/loader gates; `git diff --check`; headless Chrome mock visual smoke clicked Routing and verified target-chain, no `default.default`, no radial background, 8px panel radius.
+- Non-target blockers: latest full `npx tsc -p tsconfig.json --noEmit --pretty false` fails in unrelated dirty `src/modules/llmswitch/bridge/snapshot-recorder-runtime.ts`; `npm run build:base` fails before build on unrelated `debug.pipeline_dry_run_loop.mainline` missing binding budget. No live production config/restart/global install was run.
+
+# 2026-07-11: WebUI closeout verification correction
+
+- Marker: webui-target-chain-live-apply-20260711.
+- Correction: current rerun of `npx tsc -p tsconfig.json --noEmit --pretty false` passes; the earlier `snapshot-recorder-runtime.ts` TypeScript blocker is no longer current in this working tree.
+- Remaining non-target blocker: `npm run build:base` still fails before build on unrelated `debug.pipeline_dry_run_loop.mainline` missing budget in `docs/architecture/mainline-binding-budget.yml`.
+- Current verification rerun PASS: `npm run test:webui`; focused daemon-admin route Jest; `npm run build:webui`; `npm run verify:config-ssot`; `npm run verify:function-map-compile-gate`; `npm run verify:runtime-lifecycle-loop-gate-matrix`; `git diff --check`.
+
+# 2026-07-11: Restart command in-session correction
+
+- Marker: restart-in-session-20260711.
+- User-reported issue: `rcc restart` stops the originally started server/session and starts a new session; desired behavior is restart inside the original session.
+- Root cause: `src/cli/commands/restart.ts` had release-version adoption logic that compared live `/health.version` to current CLI version and spawned `start --restart --port <target>`. That bypassed the existing process/original start supervisor restart path.
+- Red test: changed `tests/cli/restart-command.spec.ts` to require a lagging live version to request in-session restart via `SIGUSR2` without spawn/start context; current code failed with `current runtime adoption is unavailable`.
+- Change: physically deleted `adoptCurrentRuntimeViaStart`, version comparison helpers, `observedVersion`, and restart context `nodeBin/cliEntryPath/spawn/getExpectedVersion`; `restart` now only uses `/daemon/restart-process` or explicit `SIGUSR2` and waits for readiness.
+- Map/docs: added `runtime.lifecycle.restart_command` to function/verification maps, added mainline edges `rtl-05`/`rtl-06`, and corrected `docs/design/server-runtime-lifecycle-ssot.md`.
+- Local skill: added L93-120 and marked old L93-68 adoption rule superseded.
+- Global install evidence: `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_VERIFY_PORT=5555 ROUTECODEX_INSTALL_VERIFY_HOST=127.0.0.1 npm run install:release` exited 0; installed `routecodex --version` = `0.90.3868`, `rcc --version` = `0.90.3868`, `~/.rcc/install/current` -> `releases/routecodex-0.90.3868-2026-07-11T125522Z`, installed package version `0.90.3868`.
+- Installed dist evidence: `rg -n "adoptCurrentRuntimeViaStart|targetsNeedRuntimeAdoption|getExpectedVersion|start --restart" ~/.rcc/install/current/dist/cli.js ~/.rcc/install/current/dist/cli/commands/restart.js ~/.rcc/install/current/dist/cli/commands` returned 0 matches; installed `restart.js` still contains `feature_id: runtime.lifecycle.restart_command`, `/daemon/restart-process`, and `SIGUSR2`.
+- Live restart evidence: before explicit global `rcc restart --port 5555 --host 127.0.0.1`, original start parent was PID `85830` (`start --snap`) and server child was PID `23167`; command output was `Used in-place signal restart for 127.0.0.1:5555`; after restart parent remained PID `85830` and new child PID `24868` had PPID `85830`.
+- Live health evidence: `curl -fsS` `/health` for `127.0.0.1:5555`, `5520`, and `10000` all returned `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3868`; `routecodex port status 5555 --json` returned `ok:true`, `localPort:5555`, `routingPolicyGroup:"gateway_priority_5555"`.
+- Non-target observation: legacy `rcc status --port 5555` returned `Server status unknown`; this was not used as restart closeout evidence because `/health`, `port status`, installed dist scan, and parent/child PID evidence all matched the restart contract.
+
+# 2026-07-11: Restart in-session final global install correction
+
+- Marker: restart-in-session-20260711-final-global-install.
+- Correction: the earlier `0.90.3868` global install evidence was real at the time, but `~/.rcc/install/current` was later overwritten by another install to `0.90.3879`, whose installed `restart.js` still contained the deleted adoption path. That invalidated the final global state, so no completion was reported from the `0.90.3868` pass.
+- Final global install evidence: reran `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_VERIFY_PORT=5555 ROUTECODEX_INSTALL_VERIFY_HOST=127.0.0.1 npm run install:release`; it exited 0 and installed `~/.rcc/install/current -> releases/routecodex-0.90.3869-2026-07-11T131712Z`.
+- Final version truth: installed `routecodex --version` = `0.90.3869`, `rcc --version` = `0.90.3869`, and `~/.rcc/install/current/package.json` version = `0.90.3869`.
+- Final installed dist evidence: `rg -n 'adoptCurrentRuntimeViaStart|targetsNeedRuntimeAdoption|getExpectedVersion|start --restart' ~/.rcc/install/current/dist/cli.js ~/.rcc/install/current/dist/cli/commands/restart.js ~/.rcc/install/current/dist/cli/commands` returned 0 matches.
+- Final live restart evidence: before explicit installed `rcc restart --port 5555 --host 127.0.0.1`, parent was PID `49609` (`start --snap`) and child was PID `82268`; command output was `Used in-place signal restart for 127.0.0.1:5555`; after restart parent remained PID `49609` and new child PID `85819` had PPID `49609`.
+- Final live health evidence: `/health` for `127.0.0.1:5555`, `5520`, and `10000` all returned `status=ok`, `ready=true`, `pipelineReady=true`, version `0.90.3869`; `routecodex port status 5555 --json` returned `ok:true`, `serverId:"127.0.0.1:5520"`, `localPort:5555`, `routingPolicyGroup:"gateway_priority_5555"`.
+
+# 2026-07-11: cc provider direct check for gpt-5.6-luna
+
+- Scope: inspect whether `cc` supports `gpt-5.6-luna` without using provider config as evidence.
+- Live RouteCodex observation: 5520 request body `model=gpt-5.6-luna` routed to `cc.key1.gpt-5.5`; sample `~/.rcc/codex-samples/openai-chat/ports/5520/req_1783772709671_eec8793b/` shows provider response model `gpt-5.5`, so this route does not test `cc + gpt-5.6-luna`.
+- Provider direct test: POST `https://api.anyint.ai/openai/v1/responses` with `CC_OAI_KEY` and `model=gpt-5.6-luna` returned HTTP 403 `permission_denied`, message `This API key is scoped to model gpt-5.5`.
+- Control direct test: same endpoint/key with `model=gpt-5.5` returned HTTP 200, status `completed`, response model `gpt-5.5-anyint`.
+- Conclusion: current `cc` credential does not support `gpt-5.6-luna`; the limitation is upstream key/model scope, not config, routing, or network.
+
+# 2026-07-11: asxs default model restored to gpt-5.5
+
+- Scope: user requested config change to remove 5.6 default from `asxs` and restore standard `gpt-5.5`.
+- Changed active runtime config only: `~/.rcc/provider/asxs/config.v2.toml` defaultModel is now `gpt-5.5`; `gpt-5.6-luna` / `gpt-5.6-terra` / `gpt-5.6-sol` model blocks removed from asxs provider config.
+- Changed active router config only: `~/.rcc/config.toml` forwarder `fwd.asxs.gpt-5.6-luna` renamed to `fwd.asxs.gpt-5.5` with model `gpt-5.5`; 5520 and 5555 routing targets/weights updated to the new forwarder.
+- Verification PASS: active config scan found zero `gpt-5.6` in `~/.rcc/config.toml` and `~/.rcc/provider/asxs/config.v2.toml`; `routecodex config validate` passed; `routecodex restart --port 5520` used in-place signal restart; `/health` passed on 5520/5555/4444/10000; live `routecodex port status` for 5520 and 5555 shows `fwd.asxs.gpt-5.5 -> asxs.crsa.gpt-5.5/asxs.crsb.gpt-5.5` and `has56=false`.
+
+# 2026-07-11: responses direct dryrun compat review fixes
+
+- Scope: after review, keep responses direct model compat for non-ChatGPT providers, but remove fallback/silent and over-broad rewrite behavior.
+- Changed `src/server/runtime/http-server/router-direct-pipeline.ts`: response model restore now only touches protocol-visible top-level `model` and SSE/JSON `response.model`; nested diagnostic/tool/metadata `model` fields are preserved.
+- Changed `src/server/runtime/http-server/router-direct-pipeline.ts`: unknown/non-readable `sseStream` now throws `router-direct response contains sseStream that is not a readable stream` instead of returning an empty successful stream.
+- Changed `scripts/dry-run-codex-response.ts`: serialized readable detection now rejects samples with `_readableState` OR `_writableState` OR readable state booleans, forcing complete `bodyText/raw/text/sseBodyText` capture for offline response dry-run.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts --runInBand` passed 34/34.
+- Verification PASS: serialized `sseStream` temp sample through `npm run dry-run:codex-response -- --sample <sample>` exited non-zero and printed `serialized sseStream but no bodyText/raw/text` plus `cannot be replayed offline`.
+- Verification PASS: `npm run test:pipeline-dry-run -- --runInBand` passed 4/4.
 
 # 2026-07-11: shared conversion host wrappers retired
 
@@ -28932,5 +29012,18 @@ Pure Rust NAPI candidates:
 - Deleted `src/server/runtime/http-server/executor/request-executor-request-semantics.ts`; active callers now import the four Rust-owned request-semantics checks from `src/modules/llmswitch/bridge/native-exports.ts`.
 - Replaced the old wrapper spec with `request-executor-native-semantics.spec.ts`, which calls native bridge functions directly, and changed `hub-pipeline-stage-residue-audit` to require the deleted leaf wrapper to remain absent.
 - Evidence: exact tracked-source scan shows the deleted path only in historical docs and the residue gate; active source/test imports are on `native-exports`.
-- Verification PASS: focused native request-semantics spec; focused residue audit; request-executor metadata-center contract; `npx tsc --noEmit --pretty false`; strict llmswitch shell audit; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; `git diff --check`; `npm run build:native-hotpath`; `npm run build:base`.
-- Architecture review: no JS backfill, no fallback, no duplicate TS semantic owner; host executor keeps only local async call-shape wrappers around native bridge functions.
+- Verification PASS: focused native request-semantics spec; focused residue audit; `npx tsc --noEmit --pretty false`.
+- Non-target observation: broad request-executor suites still fail in current dirty worktree on existing `Hub pipeline runtime is not initialized`; not used as evidence for this leaf deletion.
+
+# 2026-07-11: process lifecycle nested error logging fixed
+
+- Marker: process-lifecycle-nested-error-20260711.
+- Log evidence: `~/.rcc/logs/process-lifecycle.jsonl` showed `2026-07-11T13:28:59.182Z` `port_http_shutdown` from `cli.ensurePortAvailable` with `host=127.0.0.1`, `port=4444`, `result=failed`, and `error={}`; next `localhost` shutdown succeeded, so the silent part was failure serialization.
+- Root cause: `src/utils/process-lifecycle-logger.ts` preserved top-level `Error` objects but serialized nested `details.error` through `JSON.stringify`, which turns `Error` into `{}`.
+- Change: lifecycle logger now recursively serializes objects, arrays, nested `Error`, `cause`, extra fields such as `code`, `Date`, and circular references; callers do not need per-site fallback fields.
+- Red/green: added `tests/utils/process-lifecycle-logger.spec.ts` coverage that failed before the source fix and passed after.
+- Verification PASS: focused lifecycle logger test; focused `tests/cli/port-utils.spec.ts`; root TypeScript; `verify:runtime-lifecycle-pid-rebase`; `verify:function-map-compile-gate`; `build:base`; touched-file `git diff --check`.
+- Global install PASS: `PATH=/opt/homebrew/opt/node@22/bin:$PATH ROUTECODEX_INSTALL_VERIFY_PORT=5555 ROUTECODEX_INSTALL_VERIFY_HOST=127.0.0.1 npm run install:release` exited 0 and installed `0.90.3872`.
+- Live/install evidence: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on 5555/5520/10000 all report `0.90.3872`; installed dist contains recursive `serializeUnknown` and no restart adoption strings.
+- Installed semantic probe: importing `~/.rcc/install/current/dist/utils/process-lifecycle-logger.js` wrote a nested error record with `message`, `cause.message`, and `code=ABORT_ERR`, proving the installed logger no longer emits `{}` for this class.
+- Session evidence: parent PID `6357` (`start --snap`) remained, new child PID `36589` had PPID/PGID `6357`, so install restart stayed in the original start session.

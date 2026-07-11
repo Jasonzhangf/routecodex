@@ -38,9 +38,15 @@ describe('webui integration flows (feature coverage)', () => {
     }
   };
   let configPorts: JsonRecord[] = [];
+  const liveApplied = () => ({
+    ok: true,
+    reloadedAt: 1710000000000,
+    configPath: '/tmp/config.toml'
+  });
+
   const configEditorSnapshot = () => ({
     ok: true,
-    path: '/tmp/config.json',
+    path: '/tmp/config.toml',
     ports: configPorts,
     routingPolicyGroups: routingGroups,
     activeRoutingPolicyGroup: state.activeGroupId,
@@ -222,13 +228,13 @@ describe('webui integration flows (feature coverage)', () => {
         const id = typeof body.providerId === 'string' ? body.providerId : '';
         const detail = (body.provider as JsonRecord) || {};
         providers.set(id, detail);
-        return json({ ok: true, id, path: `/tmp/provider/${id}/config.v2.json` });
+        return json({ ok: true, id, path: `/tmp/provider/${id}/config.v2.toml`, selfReload: liveApplied() });
       }
 
       if (path.startsWith('/config/providers/v2/') && method === 'DELETE') {
         const id = decodeURIComponent(path.split('/').pop() || '');
         providers.delete(id);
-        return json({ ok: true, id, path: `/tmp/provider/${id}/config.v2.json` });
+        return json({ ok: true, id, path: `/tmp/provider/${id}/config.v2.toml`, selfReload: liveApplied() });
       }
 
       if (path === '/config/providers' && method === 'GET') {
@@ -247,13 +253,13 @@ describe('webui integration flows (feature coverage)', () => {
         const id = decodeURIComponent(path.split('/').pop() || '');
         const detail = (body.provider as JsonRecord) || {};
         providers.set(id, detail);
-        return json({ ok: true, id, path: '/tmp/config.json' });
+        return json({ ok: true, id, path: '/tmp/config.toml', selfReload: liveApplied() });
       }
 
       if (path.startsWith('/config/providers/') && method === 'DELETE') {
         const id = decodeURIComponent(path.split('/').pop() || '');
         providers.delete(id);
-        return json({ ok: true, id, path: '/tmp/config.json' });
+        return json({ ok: true, id, path: '/tmp/config.toml', selfReload: liveApplied() });
       }
 
       if (path === '/providers/runtimes' && method === 'GET') {
@@ -295,8 +301,8 @@ describe('webui integration flows (feature coverage)', () => {
       if (path === '/config/routing/sources' && method === 'GET') {
         return json({
           ok: true,
-          activePath: '/tmp/config.json',
-          sources: [{ path: '/tmp/config.json', label: '/tmp/config.json', kind: 'config', location: 'virtualrouter.routing' }]
+          activePath: '/tmp/config.toml',
+          sources: [{ path: '/tmp/config.toml', label: '/tmp/config.toml', kind: 'config', location: 'virtualrouter.routing' }]
         });
       }
 
@@ -311,23 +317,24 @@ describe('webui integration flows (feature coverage)', () => {
 
       if (path === '/config/editor/forwarders' && method === 'PUT') {
         const forwarders = (body.forwarders as JsonRecord) || {};
-        return json({ ...configEditorSnapshot(), forwarders });
+        return json({ ...configEditorSnapshot(), forwarders, selfReload: liveApplied() });
       }
 
       if (path === '/config/routing/groups' && method === 'GET') {
         return json({
           ok: true,
-          path: '/tmp/config.json',
+          path: '/tmp/config.toml',
           groups: routingGroups,
           activeGroupId: state.activeGroupId,
-          location: 'virtualrouter.routing'
+          location: 'virtualrouter.routing',
+          selfReload: liveApplied()
         });
       }
 
       if (path.startsWith('/config/routing/groups/') && method === 'PUT' && !path.endsWith('/activate')) {
         const groupId = decodeURIComponent(path.split('/').pop() || 'default');
         routingGroups[groupId] = (body.policy as JsonRecord) || { routing: {} };
-        return json({ ok: true, path: '/tmp/config.json', groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing' });
+        return json({ ok: true, path: '/tmp/config.toml', groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing', selfReload: liveApplied() });
       }
 
       if (path.startsWith('/config/routing/groups/') && method === 'DELETE') {
@@ -336,14 +343,14 @@ describe('webui integration flows (feature coverage)', () => {
           return json({ error: { message: 'cannot delete active group' } }, 409);
         }
         delete routingGroups[groupId];
-        return json({ ok: true, path: '/tmp/config.json', groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing' });
+        return json({ ok: true, path: '/tmp/config.toml', groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing', selfReload: liveApplied() });
       }
 
       if (path === '/config/routing/groups/activate' && method === 'POST') {
         const groupId = typeof body.groupId === 'string' ? body.groupId : 'default';
         state.activeGroupId = groupId;
         if (!routingGroups[groupId]) routingGroups[groupId] = { routing: {} };
-        return json({ ok: true, groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing', path: '/tmp/config.json' });
+        return json({ ok: true, groups: routingGroups, activeGroupId: state.activeGroupId, location: 'virtualrouter.routing', path: '/tmp/config.toml', selfReload: liveApplied() });
       }
 
       if (path === '/config/routing' && method === 'GET') {
@@ -503,8 +510,9 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/Routing group saved\./)).toBeTruthy());
     hit('routing.group_save');
 
-    fireEvent.click(screen.getByText('Activate Local'));
+    fireEvent.click(screen.getByText('Apply Active Group'));
     await waitFor(() => expect(screen.getByText(/Routing group activated locally\./)).toBeTruthy());
+    expect(screen.getByText(/runtime: applied/)).toBeTruthy();
     hit('routing.activate_local');
 
     fireEvent.click(screen.getByText('Logout'));

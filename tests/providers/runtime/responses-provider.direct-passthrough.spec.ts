@@ -45,6 +45,7 @@ import type { ModuleDependencies } from '../../../src/modules/pipeline/interface
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
 import { createProviderContext } from '../../../src/providers/core/runtime/base-provider-runtime-helpers.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
+import { attachPipelineDryRunControl } from '../../../src/debug/pipeline-dry-run.js';
 
 const writeProviderSnapshot = jest.fn(async () => undefined);
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
@@ -76,6 +77,265 @@ describe('ResponsesProvider direct passthrough', () => {
     }));
     sanitizeProviderOutboundPayloadMock.mockClear();
     captureProviderSseSnapshots = false;
+  });
+
+  test('direct JSON provider-request dry-run stops before upstream send', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-json-dry-run',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    const post = jest.fn(async () => {
+      throw new Error('SHOULD_NOT_SEND');
+    });
+    provider.httpClient = {
+      post
+    };
+
+    const metadata: Record<string, unknown> = {
+      entryEndpoint: '/v1/responses',
+      __responsesDirectPassthrough: true,
+      entryPort: 5520
+    };
+    attachPipelineDryRunControl(metadata, {
+      enabled: true,
+      kind: 'provider_request',
+      source: 'sample_replay',
+      requestedAtMs: 1
+    });
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      stream: false
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      requestId: 'dry_run_direct_json',
+      providerId: 'test',
+      providerKey: 'test.key1.gpt-5.5',
+      providerType: 'responses',
+      providerFamily: 'test',
+      providerProtocol: 'openai-responses',
+      metadata
+    } as any);
+
+    const response = await provider.processIncomingDirect(inbound) as any;
+
+    expect(post).not.toHaveBeenCalled();
+    expect(writeProviderSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'provider-request',
+      requestId: 'dry_run_direct_json',
+      entryEndpoint: '/v1/responses',
+      url: 'https://example.invalid/v1/responses'
+    }));
+    expect(response.body).toMatchObject({
+      object: 'routecodex.pipeline_dry_run',
+      kind: 'provider_request',
+      dryRun: true,
+      entryPort: 5520,
+      providerRequest: {
+        method: 'POST',
+        endpoint: '/responses',
+        url: 'https://example.invalid/v1/responses',
+        wantsSse: false,
+        body: {
+          model: 'gpt-5.5',
+          stream: false
+        }
+      },
+      evidence: {
+        stoppedBeforeProviderSend: true,
+        providerRequestSnapshotWritten: true
+      }
+    });
+    expect(response.body.providerRequest.headers.Authorization).toBe('[REDACTED]');
+  });
+
+  test('direct SSE provider-request dry-run stops before upstream send', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-sse-dry-run',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    const postStreamOrResponse = jest.fn(async () => {
+      throw new Error('SHOULD_NOT_SEND');
+    });
+    const postStream = jest.fn(async () => {
+      throw new Error('SHOULD_NOT_SEND');
+    });
+    provider.httpClient = {
+      postStreamOrResponse,
+      postStream
+    };
+
+    const metadata: Record<string, unknown> = {
+      entryEndpoint: '/v1/responses',
+      __responsesDirectPassthrough: true,
+      entryPort: 5520
+    };
+    attachPipelineDryRunControl(metadata, {
+      enabled: true,
+      kind: 'provider_request',
+      source: 'sample_replay',
+      requestedAtMs: 1
+    });
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      requestId: 'dry_run_direct_sse',
+      providerId: 'test',
+      providerKey: 'test.key1.gpt-5.5',
+      providerType: 'responses',
+      providerFamily: 'test',
+      providerProtocol: 'openai-responses',
+      metadata
+    } as any);
+
+    const response = await provider.processIncomingDirect(inbound) as any;
+
+    expect(postStreamOrResponse).not.toHaveBeenCalled();
+    expect(postStream).not.toHaveBeenCalled();
+    expect(writeProviderSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'provider-request',
+      requestId: 'dry_run_direct_sse',
+      entryEndpoint: '/v1/responses',
+      url: 'https://example.invalid/v1/responses'
+    }));
+    expect(response.body).toMatchObject({
+      object: 'routecodex.pipeline_dry_run',
+      kind: 'provider_request',
+      dryRun: true,
+      providerRequest: {
+        endpoint: '/responses',
+        url: 'https://example.invalid/v1/responses',
+        wantsSse: true,
+        body: {
+          model: 'gpt-5.5',
+          stream: true
+        }
+      },
+      evidence: {
+        stoppedBeforeProviderSend: true,
+        providerRequestSnapshotWritten: true
+      }
+    });
+  });
+
+  test('grok direct request applies wire compat and matching model headers before upstream send', async () => {
+    const refreshCredentials = jest.fn(async () => undefined);
+    const config: OpenAIStandardConfig = {
+      id: 'test-grok-direct-wire-compat',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'grok',
+        auth: { type: 'apikey', apiKey: 'grok-token-file-mode' },
+        overrides: { baseUrl: 'https://cli-chat-proxy.grok.com/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.authProvider = {
+      refreshCredentials,
+      buildHeaders: () => ({
+        Authorization: 'Bearer grok-access-token',
+        'X-XAI-Token-Auth': 'xai-grok-cli'
+      })
+    };
+
+    let capturedUrl: string | undefined;
+    let capturedBody: any;
+    let capturedHeaders: Record<string, string> | undefined;
+    provider.httpClient = {
+      postStream: async (url: string, body: any, headers: Record<string, string>) => {
+        capturedUrl = url;
+        capturedBody = body;
+        capturedHeaders = headers;
+        throw new Error('STOP_AFTER_CAPTURE');
+      }
+    };
+
+    const inbound = {
+      model: 'grok-build',
+      stream: true,
+      client_metadata: { session_id: 'must-not-leak' },
+      include: ['reasoning.encrypted_content'],
+      reasoning: { effort: 'high' },
+      tools: [
+        { type: 'custom', name: 'apply_patch', parameters: { type: 'object', properties: {} } },
+        { type: 'web_search' }
+      ],
+      input: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+        { type: 'custom_tool_call', name: 'apply_patch', call_id: 'call_patch', input: '*** Begin Patch' },
+        { type: 'custom_tool_call_output', call_id: 'call_patch', output: 'ok' },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'kept summary' }] }
+      ]
+    } as any;
+    attachProviderRuntimeMetadata(inbound, {
+      providerId: 'grok',
+      providerKey: 'grok.key1.grok-build',
+      providerType: 'responses',
+      providerFamily: 'grok',
+      target: { modelId: 'gpt-5.5' },
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    } as any);
+
+    await expect(provider.processIncomingDirect(inbound)).rejects.toThrow('STOP_AFTER_CAPTURE');
+
+    expect(refreshCredentials).toHaveBeenCalledTimes(1);
+    expect(capturedUrl).toBe('https://cli-chat-proxy.grok.com/v1/responses');
+    expect(capturedHeaders).toMatchObject({
+      Authorization: 'Bearer grok-access-token',
+      'X-XAI-Token-Auth': 'xai-grok-cli',
+      'x-grok-model-override': 'grok-build',
+      'x-grok-client-surface': 'grok-build',
+      'x-grok-client-version': '0.2.93',
+      Accept: 'text/event-stream'
+    });
+    expect(capturedBody.model).toBe('grok-build');
+    expect(capturedBody.client_metadata).toBeUndefined();
+    expect(capturedBody.include).toBeUndefined();
+    expect(capturedBody.reasoning).toBeUndefined();
+    expect(capturedBody.tools).toEqual([
+      { type: 'function', name: 'apply_patch', parameters: { type: 'object', properties: {} } }
+    ]);
+    expect(capturedBody.input.map((item: any) => item.type)).toEqual([
+      'message',
+      'function_call',
+      'function_call_output',
+      'message'
+    ]);
+    expect(capturedBody.input[1]).toMatchObject({
+      type: 'function_call',
+      name: 'apply_patch',
+      call_id: 'call_patch'
+    });
+    expect(sanitizeProviderOutboundPayloadMock).not.toHaveBeenCalled();
   });
 
   test('sends direct request as provider wire body with protocol metadata payload fields', async () => {

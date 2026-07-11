@@ -9,6 +9,7 @@ import {
   prettyJson,
   resolveRoutedProviderKeys,
   resolveTargetToProviderKeys,
+  summarizeRoutingTargetChain,
   readSessionValue,
   statusClass,
   textOf,
@@ -59,21 +60,43 @@ describe('webui App utilities', () => {
     expect(prettyJson({ a: 1 })).toContain('"a": 1');
   });
 
-  it('extractRoutingTargets and resolver map targets to provider keys', () => {
+  it('extractRoutingTargets and resolver map config targets, not route names, to provider keys', () => {
     const routing = {
       default: [
         { targets: ['demo', 'tab.work.gpt-4'] },
         { targets: ['tab'] }
       ],
+      thinking: [{ targets: [{ target: 'fwd.gpt.gpt-5.5', priority: 200 }] }],
       tools: [{ targets: ['mock.provider.model-a'] }]
     };
 
     const targets = extractRoutingTargets(routing);
     expect(Array.from(targets).sort()).toEqual([
       'demo',
+      'fwd.gpt.gpt-5.5',
       'mock.provider.model-a',
       'tab',
       'tab.work.gpt-4'
+    ]);
+    expect(targets.has('thinking')).toBe(false);
+
+    expect(summarizeRoutingTargetChain(routing)).toEqual([
+      expect.objectContaining({
+        routeName: 'default',
+        targets: ['demo', 'tab.work.gpt-4']
+      }),
+      expect.objectContaining({
+        routeName: 'default',
+        targets: ['tab']
+      }),
+      expect.objectContaining({
+        routeName: 'thinking',
+        targets: ['fwd.gpt.gpt-5.5']
+      }),
+      expect.objectContaining({
+        routeName: 'tools',
+        targets: ['mock.provider.model-a']
+      })
     ]);
 
     const providers: ProviderRuntimeKeyItem[] = [

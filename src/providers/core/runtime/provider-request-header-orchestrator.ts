@@ -115,6 +115,10 @@ export async function buildProviderRequestHeaders(options: {
     RequestHeaderBuilder.buildGeminiDefaultHeaders(baseHeaders, runtimeMetadata);
   }
 
+  // Session/token auth providers (e.g. grok-cli) refresh here before headers are built.
+  if (authProvider && typeof authProvider.refreshCredentials === 'function') {
+    await authProvider.refreshCredentials();
+  }
   const authHeaders = authProvider?.buildHeaders() || {};
 
   return RequestHeaderBuilder.buildHeaders({

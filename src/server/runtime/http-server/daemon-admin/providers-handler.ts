@@ -6,6 +6,7 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { resolveRccAuthDir } from '../../../../config/user-data-paths.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
+import type { PortConfig } from '../port-config-types.js';
 import { writeProviderConfigFile } from '../../../../config/provider-config-writer.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
 import type { ProviderConfigV2 } from '../../../../config/provider-v2-loader.js';
@@ -197,6 +198,111 @@ function mapRoutingGroupErrorToStatus(error: unknown): number {
   return 500;
 }
 
+function normalizePathForCompare(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
+  }
+  return path.resolve(value.trim());
+}
+
+function isActiveRuntimeConfigPath(configPath: string, options: DaemonAdminRouteOptions): boolean {
+  const activePath =
+    typeof options.getConfigPath === 'function'
+      ? normalizePathForCompare(options.getConfigPath())
+      : normalizePathForCompare(pickUserConfigPath());
+  return Boolean(activePath) && normalizePathForCompare(configPath) === activePath;
+}
+
+async function reloadActiveRuntimeFromDisk(
+  configPath: string,
+  options: DaemonAdminRouteOptions
+): Promise<Record<string, unknown>> {
+  if (!isActiveRuntimeConfigPath(configPath, options)) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'edited_config_is_not_active_runtime_config'
+    };
+  }
+  if (typeof options.restartRuntimeFromDisk !== 'function') {
+    throw new Error('active config write requires restartRuntimeFromDisk for live apply');
+  }
+  const result = await options.restartRuntimeFromDisk();
+  return { ok: true, ...result };
+}
+
+function indexPortsByNumber(ports: Array<Record<string, unknown>> | PortConfig[]): Map<number, Record<string, unknown>> {
+  const out = new Map<number, Record<string, unknown>>();
+  for (const port of ports) {
+    if (!isRecord(port)) {
+      continue;
+    }
+    const portNumber = Number(port.port);
+    if (Number.isInteger(portNumber) && portNumber > 0 && portNumber <= 65535) {
+      out.set(portNumber, { ...port, port: portNumber });
+    }
+  }
+  return out;
+}
+
+function stableJson(value: unknown): string {
+  if (!isRecord(value)) {
+    return JSON.stringify(value);
+  }
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
+    sorted[key] = value[key];
+  }
+  return JSON.stringify(sorted);
+}
+
+async function applyActivePortConfigDiff(args: {
+  before: PortConfig[];
+  after: Array<Record<string, unknown>>;
+  configPath: string;
+  options: DaemonAdminRouteOptions;
+}): Promise<Record<string, unknown>> {
+  if (!isActiveRuntimeConfigPath(args.configPath, args.options)) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'edited_config_is_not_active_runtime_config'
+    };
+  }
+  if (typeof args.options.applyPortConfig !== 'function') {
+    throw new Error('active port config write requires applyPortConfig for live apply');
+  }
+
+  const beforeByPort = indexPortsByNumber(args.before);
+  const afterByPort = indexPortsByNumber(args.after);
+  const actions: Array<{ action: 'add' | 'update' | 'remove'; port: number }> = [];
+
+  for (const [port] of beforeByPort.entries()) {
+    if (!afterByPort.has(port)) {
+      const result = await args.options.applyPortConfig('remove', port);
+      if (!result.ok) {
+        throw new Error(`port live remove failed for ${port}: ${result.error || 'unknown_error'}`);
+      }
+      actions.push({ action: 'remove', port });
+    }
+  }
+
+  for (const [port, nextConfig] of afterByPort.entries()) {
+    const previousConfig = beforeByPort.get(port);
+    const action = previousConfig ? 'update' : 'add';
+    if (previousConfig && stableJson(previousConfig) === stableJson(nextConfig)) {
+      continue;
+    }
+    const result = await args.options.applyPortConfig(action, port, nextConfig as unknown as PortConfig);
+    if (!result.ok) {
+      throw new Error(`port live ${action} failed for ${port}: ${result.error || 'unknown_error'}`);
+    }
+    actions.push({ action, port });
+  }
+
+  return { ok: true, actions };
+}
+
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
@@ -286,13 +392,26 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const decoded = await decodeUserConfigFile(configPath);
       const ports = cloneConfigEditorPorts(body?.ports);
       const next = applyConfigEditorPorts(decoded.parsed, ports);
+      const beforePorts =
+        typeof options.getPortConfigs === 'function'
+          ? options.getPortConfigs()
+          : buildConfigEditorSnapshot(decoded.parsed).ports as unknown as PortConfig[];
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
+      const portApply = await applyActivePortConfigDiff({
+        before: beforePorts,
+        after: ports,
+        configPath,
+        options
+      });
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       const snapshot = buildConfigEditorSnapshot(next);
       res.status(200).json({
         ok: true,
         path: configPath,
         format: decoded.format,
+        portApply,
+        selfReload,
         ...snapshot
       });
     } catch (error: unknown) {
@@ -323,11 +442,13 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const next = applyConfigEditorForwarders(decoded.parsed, forwarders);
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       const snapshot = buildConfigEditorSnapshot(next);
       res.status(200).json({
         ok: true,
         path: configPath,
         format: decoded.format,
+        selfReload,
         ...snapshot
       });
     } catch (error: unknown) {
@@ -475,7 +596,9 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         provider: normalizedProvider.provider
       };
       await writeProviderConfigFile(filePath, payload as unknown as Record<string, unknown>);
-      res.status(200).json({ ok: true, providerId, path: filePath });
+      const activeConfigPath = typeof options.getConfigPath === 'function' ? options.getConfigPath() : pickUserConfigPath();
+      const selfReload = await reloadActiveRuntimeFromDisk(activeConfigPath || pickUserConfigPath(), options);
+      res.status(200).json({ ok: true, providerId, path: filePath, selfReload });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
       if (code === 'forbidden_path') {
@@ -499,7 +622,9 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const rootDir = pickProviderRootDir();
       const filePath = await resolveProviderConfigFilePath(rootDir, id);
       await fs.unlink(filePath);
-      res.status(200).json({ ok: true, id });
+      const activeConfigPath = typeof options.getConfigPath === 'function' ? options.getConfigPath() : pickUserConfigPath();
+      const selfReload = await reloadActiveRuntimeFromDisk(activeConfigPath || pickUserConfigPath(), options);
+      res.status(200).json({ ok: true, id, selfReload });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
       if (code === 'forbidden_path') {
@@ -568,13 +693,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
-      const selfReload =
-        typeof options.restartRuntimeFromDisk === 'function'
-          ? await options.restartRuntimeFromDisk().catch((e: unknown) => ({
-            ok: false,
-            message: e instanceof Error ? e.message : String(e)
-          }))
-          : null;
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       res.status(200).json({
         ok: true,
         path: configPath,
@@ -626,13 +745,15 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       res.status(200).json({
         ok: true,
         path: configPath,
         location: groupsSnapshot.location,
         activeGroupId: groupsSnapshot.activeGroupId,
         hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
-        groups: groupsSnapshot.groups
+        groups: groupsSnapshot.groups,
+        selfReload
       });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
@@ -668,13 +789,15 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
       const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       res.status(200).json({
         ok: true,
         path: configPath,
         location: groupsSnapshot.location,
         activeGroupId: groupsSnapshot.activeGroupId,
         hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
-        groups: groupsSnapshot.groups
+        groups: groupsSnapshot.groups,
+        selfReload
       });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
@@ -752,13 +875,15 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       await backupFile(configPath);
       await writeUserConfigFile(configPath, next);
       const snapshot = extractRoutingSnapshot(next);
+      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
       res.status(200).json({
         ok: true,
         path: configPath,
         location: snapshot.location,
         routing: snapshot.routing,
         loadBalancing: snapshot.loadBalancing,
-        hasLoadBalancing: snapshot.hasLoadBalancing
+        hasLoadBalancing: snapshot.hasLoadBalancing,
+        selfReload
       });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;

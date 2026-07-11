@@ -28,6 +28,7 @@ import {
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import { resolveProviderFamilyProfile } from './provider-family-profile-utils.js';
 import { emitProviderErrorAndWait, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
 import {
   buildSubmitToolOutputsEndpoint,
@@ -55,6 +56,12 @@ import {
   bindRuntimeCarrierFromSource,
   readRuntimeRequestTruthPortNumber
 } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
+import {
+  buildProviderRequestDryRunResponse,
+  propagatePipelineDryRunControl,
+  shouldRunProviderRequestDryRun
+} from '../../../debug/pipeline-dry-run.js';
+import type { PreparedHttpRequest } from './http-request-executor.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
 
@@ -206,6 +213,7 @@ function applyRequestRuntimeMetadataToProviderContext(
       }
     }
     bindRuntimeCarrierFromSource({ target: mergedMetadata, source: runtimeMetadataRecord });
+    propagatePipelineDryRunControl(runtimeMetadataRecord, mergedMetadata);
     context.metadata = mergedMetadata;
   }
   context.runtimeMetadata = {
@@ -591,12 +599,29 @@ export class ResponsesProvider extends HttpTransportProvider {
     const defaultModel = typeof this.serviceProfile?.defaultModel === 'string'
       ? this.serviceProfile.defaultModel.trim()
       : '';
-    const model = targetModel || runtimeModelId || routeModel || defaultModel;
+    const directRequestModel = typeof builtBody.model === 'string' ? builtBody.model.trim() : '';
+    const model = directRequestModel || targetModel || runtimeModelId || routeModel || defaultModel;
     if (model) {
       builtBody.model = model;
     }
     const normalizedDirectBodyResult = normalizeResponsesDirectCurrentRequestPayload(builtBody);
-    const directBody = normalizedDirectBodyResult.changed ? normalizedDirectBodyResult.payload : builtBody;
+    let directBody = normalizedDirectBodyResult.changed ? normalizedDirectBodyResult.payload : builtBody;
+    // Provider-family wire compat (e.g. grok ModelInput mapping) must also run on direct.
+    const familyProfile = resolveProviderFamilyProfile({
+      runtimeMetadata,
+      runtimeProfile: this.getRuntimeProfile(),
+      configProviderId: (this.config?.config as { providerId?: unknown } | undefined)?.providerId,
+      configProviderType: (this.config?.config as { providerType?: unknown } | undefined)?.providerType,
+      providerType: this.providerType
+    });
+    const profileBody = familyProfile?.buildRequestBody?.({
+      request: directRequest,
+      defaultBody: directBody,
+      runtimeMetadata
+    });
+    if (profileBody && typeof profileBody === 'object' && !Array.isArray(profileBody)) {
+      directBody = profileBody as Record<string, unknown>;
+    }
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
         ? extractSubmitToolOutputsPayload(directBody)
@@ -640,6 +665,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     try {
       if (explicitStream === true) {
         return await this.sendDirectSsePassthroughRequest({
+          endpoint,
           body: directBody,
           headers,
           context,
@@ -681,6 +707,7 @@ export class ResponsesProvider extends HttpTransportProvider {
    * keep upstream SSE stream as-is for client bridge (no provider-side SSE->JSON conversion).
    */
   private async sendDirectSsePassthroughRequest(options: {
+    endpoint: string;
     body: Record<string, unknown>;
     headers: Record<string, string>;
     context: ProviderContext;
@@ -688,7 +715,22 @@ export class ResponsesProvider extends HttpTransportProvider {
     entryEndpoint?: string;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const dryRunResponse = await this.maybeBuildProviderRequestDryRunResponse({
+      endpoint,
+      body,
+      headers: {
+        ...headers,
+        Accept: 'text/event-stream'
+      },
+      context,
+      targetUrl,
+      entryEndpoint,
+      wantsSse: true
+    });
+    if (dryRunResponse) {
+      return dryRunResponse;
+    }
     const semanticTimeouts = {
       noContentTimeoutMs: this.resolveNoContentTimeoutMs(context),
       contentIdleTimeoutMs: this.resolveContentIdleTimeoutMs(context)
@@ -748,11 +790,15 @@ export class ResponsesProvider extends HttpTransportProvider {
       entryEndpoint
     );
 
+    // Client-facing transport headers only (not upstream auth/provider wire headers).
     return {
       sseStream: streamForHost,
       status: 200,
       statusText: 'OK',
       headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
         'x-upstream-mode': 'sse',
         'x-provider-stream-requested': '1'
       },
@@ -781,7 +827,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url,
         entryEndpoint,
-          entryPort: readProviderContextSnapshotEntryPort(context),
+        entryPort: readProviderContextSnapshotEntryPort(context),
         clientRequestId,
         providerKey: context.providerKey,
         providerId: context.providerId,
@@ -797,6 +843,7 @@ export class ResponsesProvider extends HttpTransportProvider {
    * Opens upstream SSE stream, converts to JSON, captures snapshots, reports failures.
    */
   private async executeSseStream(options: {
+    endpoint: string;
     body: Record<string, unknown>;
     headers: Record<string, string>;
     context: ProviderContext;
@@ -805,7 +852,22 @@ export class ResponsesProvider extends HttpTransportProvider {
     providerStream: boolean | undefined;
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
-    const { body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
+    const { endpoint, body, headers, context, targetUrl, entryEndpoint, providerStream, httpClient } = options;
+    const dryRunResponse = await this.maybeBuildProviderRequestDryRunResponse({
+      endpoint,
+      body,
+      headers: {
+        ...headers,
+        Accept: 'text/event-stream'
+      },
+      context,
+      targetUrl,
+      entryEndpoint,
+      wantsSse: true
+    });
+    if (dryRunResponse) {
+      return dryRunResponse;
+    }
     const upstreamResult = await this.postStreamOrResponse(httpClient, targetUrl, body, {
       ...headers,
       Accept: 'text/event-stream'
@@ -921,6 +983,59 @@ export class ResponsesProvider extends HttpTransportProvider {
     };
   }
 
+  private buildPreparedRequestForDryRun(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    wantsSse: boolean;
+  }): PreparedHttpRequest {
+    return {
+      endpoint: options.endpoint,
+      headers: options.headers,
+      targetUrl: options.targetUrl,
+      body: options.body,
+      entryEndpoint: options.entryEndpoint,
+      clientRequestId: extractClientRequestId(options.context),
+      wantsSse: options.wantsSse,
+      abortSignal: options.context.abortSignal
+    };
+  }
+
+  private async maybeBuildProviderRequestDryRunResponse(options: {
+    endpoint: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+    context: ProviderContext;
+    targetUrl: string;
+    entryEndpoint?: string;
+    wantsSse: boolean;
+  }): Promise<unknown | undefined> {
+    if (!shouldRunProviderRequestDryRun(options.context)) {
+      return undefined;
+    }
+    const requestInfo = this.buildPreparedRequestForDryRun(options);
+    await writeProviderSnapshot({
+      phase: 'provider-request',
+      requestId: options.context.requestId,
+      data: requestInfo.body,
+      headers: requestInfo.headers,
+      url: requestInfo.targetUrl,
+      entryEndpoint: requestInfo.entryEndpoint,
+      entryPort: readProviderContextSnapshotEntryPort(options.context),
+      clientRequestId: requestInfo.clientRequestId,
+      providerKey: options.context.providerKey,
+      providerId: options.context.providerId,
+      metadata: options.context.metadata
+    });
+    return buildProviderRequestDryRunResponse({
+      requestInfo,
+      context: options.context
+    });
+  }
+
   private async sendSubmitToolOutputsRequest(options: {
     endpoint: string;
     body: Record<string, unknown>;
@@ -936,6 +1051,18 @@ export class ResponsesProvider extends HttpTransportProvider {
     const body = options.skipSanitize === true
       ? options.body
       : await this.sanitizeResponsesProviderOutboundBody(options.body, context);
+    const dryRunResponse = await this.maybeBuildProviderRequestDryRunResponse({
+      endpoint: options.endpoint,
+      body,
+      headers,
+      context,
+      targetUrl,
+      entryEndpoint,
+      wantsSse: options.providerStream === true
+    });
+    if (dryRunResponse) {
+      return dryRunResponse;
+    }
     try {
       return await this.executeSseStream({ ...options, body });
     } catch (error) {
@@ -966,6 +1093,21 @@ export class ResponsesProvider extends HttpTransportProvider {
     httpClient: ResponsesHttpClient;
   }): Promise<unknown> {
     const { endpoint, body, headers, context, targetUrl, entryEndpoint, httpClient } = options;
+    const dryRunResponse = await this.maybeBuildProviderRequestDryRunResponse({
+      endpoint,
+      body,
+      headers: {
+        ...headers,
+        Accept: 'application/json'
+      },
+      context,
+      targetUrl,
+      entryEndpoint,
+      wantsSse: false
+    });
+    if (dryRunResponse) {
+      return dryRunResponse;
+    }
     const response = await httpClient.post(endpoint, body, {
       ...headers,
       Accept: 'application/json'

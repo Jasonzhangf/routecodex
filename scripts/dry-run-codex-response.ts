@@ -167,8 +167,13 @@ function isSerializedReadable(value: unknown): boolean {
   const record = asRecord(value);
   return Boolean(
     record
-    && asRecord(record._readableState)
-    && asRecord(record._writableState)
+    && (
+      asRecord(record._readableState)
+      || asRecord(record._writableState)
+      || typeof record.readable === 'boolean'
+      || typeof record.readableEnded === 'boolean'
+      || typeof record.readableFlowing === 'boolean'
+    )
   );
 }
 
@@ -184,7 +189,13 @@ function maybeWrapSseBody(record: Record<string, unknown> | undefined): Record<s
     };
   }
   if (isSerializedReadable(record.sseStream)) {
-    throw new Error('provider-response sample contains serialized sseStream but no materializable bodyText/raw field');
+    throw new Error(
+      'provider-response sample contains a serialized sseStream but no bodyText/raw/text field.\n'
+      + 'This snapshot was captured as a live Readable and cannot be replayed offline.\n'
+      + 'Re-capture with snapshots enabled (ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS=1) or '
+      + 'point --sample at a provider-response file whose body.bodyText is a complete SSE log '
+      + '(see attachProviderSseSnapshotStream in src/debug/snapshot/provider-sse.ts).'
+    );
   }
   return undefined;
 }

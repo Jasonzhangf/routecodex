@@ -23,7 +23,7 @@
  * projection.
  */
 
-import { PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
+import { Readable, Transform, type TransformCallback } from 'node:stream';
 import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
@@ -356,22 +356,29 @@ function applyDirectRouteHooks(
 // Hook: Response model restore + client-facing SSE headers (symmetric)
 // ---------------------------------------------------------------------------
 
-function rewriteModelFieldsDeep(value: unknown, clientModel: string): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => rewriteModelFieldsDeep(item, clientModel));
-  }
-  if (!value || typeof value !== 'object') {
+function rewriteDirectResponseModelCompat(value: unknown, clientModel: string): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return value;
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    if (key === 'model' && typeof nested === 'string' && nested.trim()) {
-      out[key] = clientModel;
-      continue;
-    }
-    out[key] = rewriteModelFieldsDeep(nested, clientModel);
+
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const out: Record<string, unknown> = { ...record };
+  if (typeof record.model === 'string' && record.model.trim()) {
+    out.model = clientModel;
+    changed = true;
   }
-  return out;
+
+  const response = record.response;
+  if (response && typeof response === 'object' && !Array.isArray(response)) {
+    const responseRecord = response as Record<string, unknown>;
+    if (typeof responseRecord.model === 'string' && responseRecord.model.trim()) {
+      out.response = { ...responseRecord, model: clientModel };
+      changed = true;
+    }
+  }
+
+  return changed ? out : value;
 }
 
 function rewriteSseFrameClientModel(frame: string, clientModel: string): string {
@@ -388,7 +395,7 @@ function rewriteSseFrameClientModel(frame: string, clientModel: string): string 
       }
       try {
         const parsed = JSON.parse(raw) as unknown;
-        const rewritten = rewriteModelFieldsDeep(parsed, clientModel);
+        const rewritten = rewriteDirectResponseModelCompat(parsed, clientModel);
         return `data: ${JSON.stringify(rewritten)}`;
       } catch {
         return line;
@@ -429,10 +436,7 @@ function wrapDirectSseStreamWithClientModel(stream: unknown, clientModel: string
     source.on('error', (error) => transform.destroy(error));
     return source.pipe(transform);
   }
-  // Fallback: materialize unknown stream-like values as empty passthrough.
-  const empty = new PassThrough();
-  empty.end();
-  return empty.pipe(transform);
+  throw new Error('router-direct response contains sseStream that is not a readable stream');
 }
 
 function ensureDirectClientSseHeaders(headers: unknown): Record<string, string> {
@@ -488,11 +492,11 @@ export function applyDirectRouteResponseHooks(
   }
 
   if (record.body && typeof record.body === 'object' && !Array.isArray(record.body)) {
-    record.body = rewriteModelFieldsDeep(record.body, clientModel) as Record<string, unknown>;
+    record.body = rewriteDirectResponseModelCompat(record.body, clientModel) as Record<string, unknown>;
     return record;
   }
 
-  return rewriteModelFieldsDeep(record, clientModel);
+  return rewriteDirectResponseModelCompat(record, clientModel);
 }
 
 // ---------------------------------------------------------------------------

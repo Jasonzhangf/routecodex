@@ -1,8 +1,10 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
+import { Readable } from 'node:stream';
 import type { PortConfig } from '../../../../src/server/runtime/http-server/port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from '../../../../src/server/runtime/http-server/types.js';
 
 const {
+  applyDirectRouteResponseHooks,
   executeRouterDirectPipeline,
   isRouterDirectEligible,
   resolveRouterSameProtocolBehavior,
@@ -76,6 +78,92 @@ describe('router-direct-pipeline', () => {
         providerBinding: 'openai.gpt-4', protocolBehavior: 'auto',
       };
       expect(resolveRouterSameProtocolBehavior(config)).toBe('relay');
+    });
+  });
+
+  describe('applyDirectRouteResponseHooks (symmetric to request model override)', () => {
+    it('restores client model on JSON body', () => {
+      const out = applyDirectRouteResponseHooks(
+        {
+          status: 200,
+          body: { id: 'r1', object: 'response', model: 'grok-build', status: 'completed' },
+        },
+        { originalClientModel: 'gpt-5.5' }
+      ) as { body: { model: string } };
+      expect(out.body.model).toBe('gpt-5.5');
+    });
+
+    it('does not rewrite nested non-protocol model fields on JSON body', () => {
+      const out = applyDirectRouteResponseHooks(
+        {
+          status: 200,
+          body: {
+            id: 'r1',
+            object: 'response',
+            model: 'grok-build',
+            response: {
+              model: 'grok-build',
+              diagnostics: { model: 'provider-diagnostic-model' },
+            },
+            output: [
+              { type: 'message', model: 'tool-owned-model' },
+            ],
+            metadata: { model: 'provider-metadata-model' },
+          },
+        },
+        { originalClientModel: 'gpt-5.5' }
+      ) as {
+        body: {
+          model: string;
+          response: { model: string; diagnostics: { model: string } };
+          output: Array<{ model: string }>;
+          metadata: { model: string };
+        };
+      };
+      expect(out.body.model).toBe('gpt-5.5');
+      expect(out.body.response.model).toBe('gpt-5.5');
+      expect(out.body.response.diagnostics.model).toBe('provider-diagnostic-model');
+      expect(out.body.output[0]?.model).toBe('tool-owned-model');
+      expect(out.body.metadata.model).toBe('provider-metadata-model');
+    });
+
+    it('restores client model in SSE frames and ensures stream headers', async () => {
+      const upstream = Readable.from([
+        'event: response.created\n',
+        `data: ${JSON.stringify({ type: 'response.created', response: { model: 'grok-build', status: 'in_progress' } })}\n\n`,
+        'event: response.completed\n',
+        `data: ${JSON.stringify({ type: 'response.completed', response: { model: 'grok-build', status: 'completed' } })}\n\n`,
+      ]);
+      const out = applyDirectRouteResponseHooks(
+        {
+          status: 200,
+          headers: { 'x-upstream-mode': 'sse' },
+          sseStream: upstream,
+        },
+        { originalClientModel: 'gpt-5.5' }
+      ) as { headers: Record<string, string>; sseStream: Readable };
+
+      expect(out.headers['Content-Type'] || out.headers['content-type']).toMatch(/text\/event-stream/);
+      expect(out.headers['Cache-Control'] || out.headers['cache-control']).toBeTruthy();
+
+      const chunks: string[] = [];
+      for await (const chunk of out.sseStream) {
+        chunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      }
+      const text = chunks.join('');
+      expect(text).toContain('"model":"gpt-5.5"');
+      expect(text).not.toContain('"model":"grok-build"');
+    });
+
+    it('rejects non-readable SSE stream values instead of returning an empty stream', () => {
+      expect(() => applyDirectRouteResponseHooks(
+        {
+          status: 200,
+          headers: { 'x-upstream-mode': 'sse' },
+          sseStream: { serialized: true },
+        },
+        { originalClientModel: 'gpt-5.5' }
+      )).toThrow(/not a readable stream/);
     });
   });
 
@@ -522,6 +610,98 @@ describe('router-direct-pipeline', () => {
       expect(requestPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
     });
 
+    it('restores original client model on direct response after request model override', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'grok',
+        providerFamily: 'grok',
+      } as ProviderHandle;
+      (handle.instance.processIncomingDirect as jest.Mock).mockImplementation(async (payload: Record<string, unknown>) => ({
+        status: 200,
+        body: {
+          id: 'resp_direct_model_restore',
+          object: 'response',
+          status: 'completed',
+          model: payload.model,
+          output: [],
+        },
+      }));
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      };
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'grok-build' },
+        requestPayload,
+        target: {
+          providerKey: 'grok.key1.grok-build',
+          providerType: 'responses',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'grok-build',
+        },
+        routingDecision: { routeName: 'search' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload.model).toBe('grok-build');
+      expect(result.auditContext.originalClientModel).toBe('gpt-5.5');
+      expect((result.response as { body?: { model?: string } }).body?.model).toBe('gpt-5.5');
+    });
+
+    it('restores original client model on direct SSE response after request model override', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'grok',
+        providerFamily: 'grok',
+      } as ProviderHandle;
+      (handle.instance.processIncomingDirect as jest.Mock).mockImplementation(async (payload: Record<string, unknown>) => ({
+        status: 200,
+        headers: { 'x-upstream-mode': 'sse' },
+        sseStream: Readable.from([
+          'event: response.created\n',
+          `data: ${JSON.stringify({ type: 'response.created', response: { model: payload.model, status: 'in_progress' } })}\n\n`,
+          'event: response.completed\n',
+          `data: ${JSON.stringify({ type: 'response.completed', response: { model: payload.model, status: 'completed' } })}\n\n`,
+        ]),
+      }));
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      };
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'grok-build' },
+        requestPayload,
+        target: {
+          providerKey: 'grok.key1.grok-build',
+          providerType: 'responses',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'grok-build',
+        },
+        routingDecision: { routeName: 'search' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload.model).toBe('grok-build');
+      expect(result.auditContext.originalClientModel).toBe('gpt-5.5');
+      const response = result.response as { headers?: Record<string, string>; sseStream?: Readable };
+      expect(response.headers?.['Content-Type'] || response.headers?.['content-type']).toMatch(/text\/event-stream/);
+      const chunks: string[] = [];
+      for await (const chunk of response.sseStream as AsyncIterable<Buffer | string>) {
+        chunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      }
+      const text = chunks.join('');
+      expect(text).toContain('"model":"gpt-5.5"');
+      expect(text).not.toContain('"model":"grok-build"');
+    });
+
     it('preserves real image input on direct even when target lacks visual capability', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
@@ -715,7 +895,7 @@ describe('router-direct-pipeline', () => {
       expect(onProviderError).toHaveBeenCalledTimes(1);
     });
 
-    it('passes direct provider response body through without model rewrite', async () => {
+    it('restores client model on direct response body after request-side model override', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
         providerId: 'openai',
@@ -727,7 +907,7 @@ describe('router-direct-pipeline', () => {
           processIncomingDirect: jest.fn(async () => ({
             status: 200,
             body: {
-              id: 'resp_router_direct_body_passthrough_model',
+              id: 'resp_router_direct_body_restore_model',
               model: 'gpt-5.3-codex-spark',
               output_text: 'ok',
             },
@@ -756,7 +936,9 @@ describe('router-direct-pipeline', () => {
       const result = await executeRouterDirectPipeline(input);
 
       expect(result.used).toBe(true);
-      expect((result as any).response.body.model).toBe('gpt-5.3-codex-spark');
+      // Request hook rewrote model to provider wire; response hook restores client model.
+      expect(result.auditContext.originalClientModel).toBe('gpt-5.5');
+      expect((result as any).response.body.model).toBe('gpt-5.5');
     });
 
     it('keeps reasoning.summary by default for direct responses target models', async () => {

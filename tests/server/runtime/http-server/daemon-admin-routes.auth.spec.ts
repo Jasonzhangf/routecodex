@@ -48,29 +48,30 @@ describe('daemon admin auth gate shell', () => {
   it('allows config editor writes from a non-config socket port because the UI edits one config file', async () => {
     const previousConfigPath = process.env.ROUTECODEX_CONFIG_PATH;
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-admin-config-editor-'));
-    const configPath = path.join(tmp, 'config.json');
+    const configPath = path.join(tmp, 'config.toml');
     await fs.writeFile(
       configPath,
-      JSON.stringify(
-        {
-          version: '1.0.0',
-          httpserver: {
-            host: '127.0.0.1',
-            port: 5520,
-            ports: [
-              { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default' }
-            ]
-          },
-          virtualrouter: {
-            routingPolicyGroups: {
-              default: { routing: { default: [{ targets: ['demo.default.model'] }] } }
-            },
-            activeRoutingPolicyGroup: 'default'
-          }
-        },
-        null,
-        2
-      ),
+      [
+        'version = "2.0.0"',
+        'virtualrouterMode = "v2"',
+        '',
+        '[httpserver]',
+        'host = "127.0.0.1"',
+        'port = 5520',
+        '',
+        '[[httpserver.ports]]',
+        'port = 5520',
+        'host = "0.0.0.0"',
+        'mode = "router"',
+        'routingPolicyGroup = "default"',
+        '',
+        '[virtualrouter]',
+        'activeRoutingPolicyGroup = "default"',
+        '',
+        '[[virtualrouter.routingPolicyGroups.default.routing.default]]',
+        'targets = ["demo.default.model"]',
+        ''
+      ].join('\n'),
       'utf8'
     );
 
@@ -86,7 +87,12 @@ describe('daemon admin auth gate shell', () => {
         getVirtualRouterArtifacts: () => null,
         getConfigPath: () => configPath,
         getServerHost: () => '127.0.0.1',
-        getServerPort: () => 5520
+        getServerPort: () => 5520,
+        getPortConfigs: () => [
+          { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default' }
+        ],
+        applyPortConfig: async () => ({ ok: true }),
+        restartRuntimeFromDisk: async () => ({ reloadedAt: Date.now(), configPath })
       });
 
       server = http.createServer(app);
@@ -112,10 +118,99 @@ describe('daemon admin auth gate shell', () => {
         path: configPath,
         ports: [expect.objectContaining({ port: 7777 })]
       }));
-      const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
-      expect(written.httpserver.ports).toEqual([
+      const written = await fs.readFile(configPath, 'utf8');
+      expect(written).toContain('port = 7777');
+      expect(written).toContain('routingPolicyGroup = "default"');
+    } finally {
+      if (previousConfigPath === undefined) {
+        delete process.env.ROUTECODEX_CONFIG_PATH;
+      } else {
+        process.env.ROUTECODEX_CONFIG_PATH = previousConfigPath;
+      }
+      if (server) {
+        await new Promise<void>((resolve, reject) => {
+          server!.close((error) => error ? reject(error) : resolve());
+        });
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('hot-applies config editor port writes through the live port owner', async () => {
+    const previousConfigPath = process.env.ROUTECODEX_CONFIG_PATH;
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-admin-config-editor-live-'));
+    const configPath = path.join(tmp, 'config.toml');
+    await fs.writeFile(
+      configPath,
+      [
+        'version = "2.0.0"',
+        'virtualrouterMode = "v2"',
+        '',
+        '[httpserver]',
+        'host = "127.0.0.1"',
+        'port = 5520',
+        '',
+        '[[httpserver.ports]]',
+        'port = 5520',
+        'host = "0.0.0.0"',
+        'mode = "router"',
+        'routingPolicyGroup = "default"',
+        '',
+        '[virtualrouter]',
+        'activeRoutingPolicyGroup = "default"',
+        '',
+        '[[virtualrouter.routingPolicyGroups.default.routing.default]]',
+        'targets = ["demo.default.model"]',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    process.env.ROUTECODEX_CONFIG_PATH = configPath;
+    const applyPortConfig = jest.fn(async () => ({ ok: true }));
+    let server: http.Server | null = null;
+    try {
+      const app = express();
+      app.use(express.json());
+      registerDaemonAdminRoutes({
+        app,
+        getManagerDaemon: () => null,
+        getServerId: () => '127.0.0.1:5520',
+        getVirtualRouterArtifacts: () => null,
+        getConfigPath: () => configPath,
+        getServerHost: () => '127.0.0.1',
+        getServerPort: () => 5520,
+        getPortConfigs: () => [
+          { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default' }
+        ],
+        applyPortConfig,
+        restartRuntimeFromDisk: async () => ({ reloadedAt: Date.now(), configPath })
+      });
+
+      server = http.createServer(app);
+      await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+      const addr = server.address() as AddressInfo;
+      const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+      const res = await fetch(`${baseUrl}/config/editor/ports?path=${encodeURIComponent(configPath)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ports: [
+            { port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default' },
+            { port: 7777, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default' }
+          ]
+        })
+      });
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(applyPortConfig).toHaveBeenCalledWith(
+        'add',
+        7777,
         expect.objectContaining({ port: 7777, routingPolicyGroup: 'default' })
-      ]);
+      );
+      expect(body).toHaveProperty('selfReload.ok', true);
     } finally {
       if (previousConfigPath === undefined) {
         delete process.env.ROUTECODEX_CONFIG_PATH;

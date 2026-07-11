@@ -142,6 +142,40 @@ function buildProviderPickerItems(v2Raw: unknown, v1Raw: unknown): ConfigProvide
 }
 
 
+function describeLiveApply(value: unknown, label: string): string {
+  const rec = recordOf(value);
+  if (!Object.keys(rec).length) {
+    return `${label}: not reported`;
+  }
+  if (rec.ok === true) {
+    const reloadedAt = typeof rec.reloadedAt === 'number' ? ` @ ${formatTs(rec.reloadedAt)}` : '';
+    return `${label}: applied${reloadedAt}`;
+  }
+  if (rec.skipped === true) {
+    return `${label}: saved only (${textOf(rec.reason || 'not active')})`;
+  }
+  return `${label}: failed${rec.message ? ` (${textOf(rec.message)})` : ''}`;
+}
+
+function describePortApply(value: unknown): string {
+  const rec = recordOf(value);
+  if (!Object.keys(rec).length) {
+    return 'ports: not reported';
+  }
+  if (rec.ok !== true) {
+    return `ports: failed${rec.reason ? ` (${textOf(rec.reason)})` : ''}`;
+  }
+  const actions = arrayOf(rec.actions)
+    .map((item) => {
+      const action = recordOf(item);
+      const kind = textOf(action.action || '').trim();
+      const port = textOf(action.port || '').trim();
+      return kind && port ? `${kind}:${port}` : '';
+    })
+    .filter(Boolean);
+  return actions.length ? `ports: ${actions.join(', ')}` : 'ports: no listener changes';
+}
+
 export async function apiFetch<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers = new Headers(opts.headers || {});
   if (opts.body && !headers.has('content-type')) {
@@ -262,6 +296,14 @@ export function parseJsonObject(raw: string): { ok: true; value: Record<string, 
   }
 }
 
+function readRoutingTargetId(target: unknown): string {
+  if (typeof target === 'string') {
+    return target.trim();
+  }
+  const rec = recordOf(target);
+  return textOf(rec.providerId || rec.provider || rec.target).trim();
+}
+
 export function extractRoutingTargets(routing: unknown): Set<string> {
   const result = new Set<string>();
   if (!routing || typeof routing !== 'object' || Array.isArray(routing)) {
@@ -274,13 +316,47 @@ export function extractRoutingTargets(routing: unknown): Set<string> {
       const targets = (pool as Record<string, unknown>).targets;
       if (!Array.isArray(targets)) continue;
       for (const target of targets) {
-        if (typeof target === 'string' && target.trim()) {
-          result.add(target.trim());
+        const targetId = readRoutingTargetId(target);
+        if (targetId) {
+          result.add(targetId);
         }
       }
     }
   }
   return result;
+}
+
+export type RoutingTargetChainItem = {
+  routeName: string;
+  poolId: string;
+  mode: string;
+  priority: string;
+  backup: boolean;
+  targets: string[];
+};
+
+export function summarizeRoutingTargetChain(routing: unknown): RoutingTargetChainItem[] {
+  const rows: RoutingTargetChainItem[] = [];
+  const routingRecord = recordOf(routing);
+  for (const [routeName, poolsNode] of Object.entries(routingRecord)) {
+    const pools = Array.isArray(poolsNode) ? poolsNode : [];
+    pools.forEach((poolNode, index) => {
+      const pool = recordOf(poolNode);
+      const targets = arrayOf(pool.targets).map(readRoutingTargetId).filter(Boolean);
+      rows.push({
+        routeName,
+        poolId: textOf(pool.id || `${routeName}-${index + 1}`),
+        mode: textOf(pool.mode || 'priority'),
+        priority: textOf(pool.priority || '—'),
+        backup: pool.backup === true,
+        targets
+      });
+    });
+  }
+  return rows.sort((a, b) => {
+    const routeCompare = a.routeName.localeCompare(b.routeName);
+    return routeCompare || a.poolId.localeCompare(b.poolId);
+  });
 }
 
 export function resolveTargetToProviderKeys(target: string, providers: ProviderRuntimeKeyItem[]): string[] {
@@ -1020,9 +1096,9 @@ export function ProviderPage({
         provider.models = {};
       }
 
-      let out: { path?: string } | null = null;
+      let out: { path?: string; selfReload?: unknown } | null = null;
       if (source === 'v2') {
-        out = await apiFetch<{ path?: string }>('/config/providers/v2', {
+        out = await apiFetch<{ path?: string; selfReload?: unknown }>('/config/providers/v2', {
           method: 'POST',
           body: JSON.stringify({
             providerId: id,
@@ -1031,14 +1107,14 @@ export function ProviderPage({
           })
         });
       } else {
-        out = await apiFetch<{ path?: string }>(`/config/providers/${encodeURIComponent(id)}`, {
+        out = await apiFetch<{ path?: string; selfReload?: unknown }>(`/config/providers/${encodeURIComponent(id)}`, {
           method: 'PUT',
           body: JSON.stringify({ provider })
         });
       }
 
       setSelectedId(id);
-      setLog(`Saved provider ${id} (${source}). path=${out?.path || '—'}\nRestart required to apply runtime.`);
+      setLog(`Saved provider ${id} (${source}). path=${out?.path || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Provider saved.', 'ok');
       await refreshProviders();
     } catch (error) {
@@ -1059,9 +1135,9 @@ export function ProviderPage({
     if (!window.confirm(`Delete provider "${id}"?`)) return;
     try {
       const out = source === 'v2'
-        ? await apiFetch<{ path?: string }>(`/config/providers/v2/${encodeURIComponent(id)}`, { method: 'DELETE' })
-        : await apiFetch<{ path?: string }>(`/config/providers/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      setLog(`Deleted provider ${id} (${source}). path=${out?.path || '—'}\nRestart required to apply runtime.`);
+        ? await apiFetch<{ path?: string; selfReload?: unknown }>(`/config/providers/v2/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        : await apiFetch<{ path?: string; selfReload?: unknown }>(`/config/providers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setLog(`Deleted provider ${id} (${source}). path=${out?.path || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Provider deleted.', 'ok');
       if (selectedId === id) resetNewProvider();
       await refreshProviders();
@@ -1116,8 +1192,9 @@ export function ProviderPage({
     try {
       const provider: Record<string, unknown> = structuredClone(backup.provider);
       provider.id = id;
+      let out: { path?: string; selfReload?: unknown } | null = null;
       if (backup.source === 'v2') {
-        await apiFetch<{ path?: string }>('/config/providers/v2', {
+        out = await apiFetch<{ path?: string; selfReload?: unknown }>('/config/providers/v2', {
           method: 'POST',
           body: JSON.stringify({
             providerId: id,
@@ -1126,7 +1203,7 @@ export function ProviderPage({
           })
         });
       } else {
-        await apiFetch<{ path?: string }>(`/config/providers/${encodeURIComponent(id)}`, {
+        out = await apiFetch<{ path?: string; selfReload?: unknown }>(`/config/providers/${encodeURIComponent(id)}`, {
           method: 'PUT',
           body: JSON.stringify({ provider })
         });
@@ -1134,7 +1211,7 @@ export function ProviderPage({
       setDraft(provider);
       setProviderIdInput(id);
       setSelectedId(id);
-      setLog(`Restored provider ${id} (${backup.source}) from session backup.`);
+      setLog(`Restored provider ${id} (${backup.source}) from session backup. path=${out?.path || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Provider restored from backup.', 'ok');
       await refreshProviders();
     } catch (error) {
@@ -1792,6 +1869,8 @@ export function RoutingPage({
     const out = await apiFetch<{
       path?: string;
       ports?: ConfigPortView[];
+      portApply?: unknown;
+      selfReload?: unknown;
     }>(`/config/editor/ports${currentSourceQuery()}`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -1805,7 +1884,11 @@ export function RoutingPage({
     if (savedPath) setSourcePath(savedPath);
     const keys = savedPorts.map(makePortKey);
     setSelectedPortKey(preferredKey && keys.includes(preferredKey) ? preferredKey : keys[0] || '');
-    setLog(`${successMessage} path=${out?.path || sourcePath || '—'}`);
+    setLog([
+      `${successMessage} path=${out?.path || sourcePath || '—'}`,
+      describePortApply(out?.portApply),
+      describeLiveApply(out?.selfReload, 'runtime')
+    ].join('\n'));
     onToast(successMessage, 'ok');
   };
 
@@ -1879,6 +1962,7 @@ export function RoutingPage({
         activeGroupId?: string;
         location?: string;
         path?: string;
+        selfReload?: unknown;
       }>(`/config/routing/groups/${encodeURIComponent(groupId)}${currentSourceQuery()}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -1890,7 +1974,7 @@ export function RoutingPage({
       setGroups((out?.groups || {}) as Record<string, unknown>);
       setActiveGroupId(textOf(out?.activeGroupId || activeGroupId).trim());
       setLocation(textOf(out?.location || location).trim());
-      setLog(`Saved group ${groupId}. path=${out?.path || sourcePath || '—'}`);
+      setLog(`Saved group ${groupId}. path=${out?.path || sourcePath || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Routing group saved.', 'ok');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -1913,6 +1997,7 @@ export function RoutingPage({
         activeGroupId?: string;
         location?: string;
         path?: string;
+        selfReload?: unknown;
       }>(`/config/routing/groups/${encodeURIComponent(groupId)}${currentSourceQuery()}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -1926,7 +2011,7 @@ export function RoutingPage({
       setActiveGroupId(textOf(out?.activeGroupId || activeGroupId).trim());
       setLocation(textOf(out?.location || location).trim());
       setNewGroupId('');
-      setLog(`Created/updated group ${groupId}. path=${out?.path || sourcePath || '—'}`);
+      setLog(`Created/updated group ${groupId}. path=${out?.path || sourcePath || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Routing group created.', 'ok');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -1951,6 +2036,7 @@ export function RoutingPage({
         activeGroupId?: string;
         location?: string;
         path?: string;
+        selfReload?: unknown;
       }>(`/config/routing/groups/${encodeURIComponent(groupId)}${queryBase}${locationPart}`, {
         method: 'DELETE'
       });
@@ -1962,7 +2048,7 @@ export function RoutingPage({
       setActiveGroupId(textOf(out?.activeGroupId || nextSelected).trim());
       setLocation(textOf(out?.location || location).trim());
       setPolicyDraft(toRecord(nextGroups[nextSelected] || { routing: {} }));
-      setLog(`Deleted group ${groupId}.`);
+      setLog(`Deleted group ${groupId}.\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Routing group deleted.', 'ok');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -1980,7 +2066,7 @@ export function RoutingPage({
     }
     if (!window.confirm(`Activate group "${groupId}" and reload local runtime?`)) return;
     try {
-      const out = await apiFetch<{ activeGroupId?: string; groups?: Record<string, unknown>; path?: string }>(
+      const out = await apiFetch<{ activeGroupId?: string; groups?: Record<string, unknown>; path?: string; selfReload?: unknown }>(
         `/config/routing/groups/activate${currentSourceQuery()}`,
         {
           method: 'POST',
@@ -1989,7 +2075,7 @@ export function RoutingPage({
       );
       setGroups((out?.groups || {}) as Record<string, unknown>);
       setActiveGroupId(textOf(out?.activeGroupId || groupId).trim());
-      setLog(`Activated local group ${groupId}. path=${out?.path || sourcePath || '—'}`);
+      setLog(`Applied active group ${groupId}. path=${out?.path || sourcePath || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Routing group activated locally.', 'ok');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -2169,6 +2255,9 @@ export function RoutingPage({
     groupId: textOf(port.routingPolicyGroup || '').trim()
   }));
   const selectedPort = portTabs.find((item) => item.key === selectedPortKey) || portTabs[0];
+  const selectedPortGroupId = textOf(selectedPort?.groupId || selectedGroupId || activeGroupId).trim();
+  const selectedPortPolicy = toRecord(groups[selectedPortGroupId] || (selectedPortGroupId === selectedGroupId ? normalizedPolicy : {}));
+  const selectedPortTargetChain = summarizeRoutingTargetChain(selectedPortPolicy.routing);
   const providerTargetOptions = providerPickerItems.flatMap((item) => item.targets.map((target) => ({ providerId: item.id, target })));
 
   return (
@@ -2206,6 +2295,27 @@ export function RoutingPage({
                 <span className="pill mono">group: {textOf(selectedPort.port.routingPolicyGroup || '—')}</span>
                 <span className="pill mono">provider: {textOf(selectedPort.port.providerBinding || '—')}</span>
                 <span className="pill mono">same-protocol: {textOf(selectedPort.port.sameProtocolBehavior || '—')}</span>
+              </div>
+              <div className="target-chain" aria-label="selected port target chain">
+                <div className="target-chain-head">
+                  <span className="mono">group {selectedPortGroupId || '—'}</span>
+                  <span className="muted mono">{selectedPortTargetChain.length} pools</span>
+                </div>
+                {selectedPortTargetChain.map((pool) => (
+                  <div key={`${pool.routeName}.${pool.poolId}`} className="target-chain-row">
+                    <span className="mono strong">{pool.routeName}</span>
+                    <span className="muted mono">{pool.mode}{pool.backup ? ' backup' : ''}</span>
+                    <div className="target-list">
+                      {pool.targets.map((target) => (
+                        <span key={`${pool.routeName}.${pool.poolId}.${target}`} className="target-pill mono">
+                          {target}
+                        </span>
+                      ))}
+                      {!pool.targets.length ? <span className="muted">none</span> : null}
+                    </div>
+                  </div>
+                ))}
+                {!selectedPortTargetChain.length ? <AppNotice>No route targets in selected group.</AppNotice> : null}
               </div>
               <div className="row" style={{ marginTop: 8 }}>
                 <label htmlFor="port-routing-group">routing group</label>
@@ -2314,7 +2424,7 @@ export function RoutingPage({
               Save Group
             </button>
             <button className="warn" onClick={() => void activateLocal()} disabled={!authenticated}>
-              Activate Local
+              Apply Active Group
             </button>
             <span className="pill mono">location: {location}</span>
           </div>
@@ -2576,7 +2686,7 @@ export function ForwardersPage({
       [id]: draft
     };
     try {
-      const out = await apiFetch<{ path?: string; forwarders?: Record<string, unknown> }>(
+      const out = await apiFetch<{ path?: string; forwarders?: Record<string, unknown>; selfReload?: unknown }>(
         `/config/editor/forwarders${path.trim() ? `?path=${encodeURIComponent(path.trim())}` : ''}`,
         {
           method: 'PUT',
@@ -2588,7 +2698,7 @@ export function ForwardersPage({
       setForwarderRaw(raw);
       setForwarders(next);
       setPath(textOf(out?.path || path).trim());
-      setLog(`Forwarder saved. path=${out?.path || path || '—'}`);
+      setLog(`Forwarder saved. path=${out?.path || path || '—'}\n${describeLiveApply(out?.selfReload, 'runtime')}`);
       onToast('Forwarder saved.', 'ok');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

@@ -27,6 +27,11 @@ function installPageFetchMock() {
           text: async () => JSON.stringify(obj)
         } as Response
       );
+    const liveApplied = () => ({
+      ok: true,
+      reloadedAt: 1710000000000,
+      configPath: '/tmp/config.toml'
+    });
 
     if (path === '/config/providers/v2' && method === 'GET') {
       return json([
@@ -58,10 +63,10 @@ function installPageFetchMock() {
       });
     }
     if (path === '/config/providers/v2' && method === 'POST') {
-      return json({ ok: true, path: '/tmp/provider/demo/config.v2.json' });
+      return json({ ok: true, path: '/tmp/provider/demo/config.v2.toml', selfReload: liveApplied() });
     }
     if (path === '/config/providers/v2/demo' && method === 'DELETE') {
-      return json({ ok: true, path: '/tmp/provider/demo/config.v2.json' });
+      return json({ ok: true, path: '/tmp/provider/demo/config.v2.toml', selfReload: liveApplied() });
     }
     if (path === '/providers/runtimes' && method === 'GET') {
       return json([
@@ -104,10 +109,10 @@ function installPageFetchMock() {
       });
     }
     if (path.startsWith('/config/providers/') && method === 'PUT') {
-      return json({ ok: true, path: '/tmp/config.json' });
+      return json({ ok: true, path: '/tmp/config.toml', selfReload: liveApplied() });
     }
     if (path.startsWith('/config/providers/') && method === 'DELETE') {
-      return json({ ok: true, path: '/tmp/config.json' });
+      return json({ ok: true, path: '/tmp/config.toml', selfReload: liveApplied() });
     }
     if (path === '/daemon/credentials/apikey' && method === 'POST') {
       return json({ ok: true, secretRef: `authfile-${body.provider || 'x'}-${body.alias || 'default'}` });
@@ -117,14 +122,14 @@ function installPageFetchMock() {
     }
     if (path === '/config/routing/sources' && method === 'GET') {
       return json({
-        activePath: '/tmp/config.json',
-        sources: [{ path: '/tmp/config.json', label: '/tmp/config.json', kind: 'config', location: 'virtualrouter.routing' }]
+        activePath: '/tmp/config.toml',
+        sources: [{ path: '/tmp/config.toml', label: '/tmp/config.toml', kind: 'config', location: 'virtualrouter.routing' }]
       });
     }
     if (path === '/config/editor' && method === 'GET') {
       return json({
         ok: true,
-        path: '/tmp/config.json',
+        path: '/tmp/config.toml',
         ports: [{ port: 5520, host: '0.0.0.0', mode: 'router', routingPolicyGroup: 'default', sameProtocolBehavior: 'direct' }],
         routingPolicyGroups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         forwarders: {
@@ -140,8 +145,17 @@ function installPageFetchMock() {
     if (path === '/config/editor/ports' && method === 'PUT') {
       return json({
         ok: true,
-        path: '/tmp/config.json',
+        path: '/tmp/config.toml',
         ports: Array.isArray(body.ports) ? body.ports : [],
+        portApply: {
+          ok: true,
+          actions: [{ action: 'add', port: 7777 }]
+        },
+        selfReload: {
+          ok: true,
+          reloadedAt: 1710000000000,
+          configPath: '/tmp/config.toml'
+        },
         routingPolicyGroups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         forwarders: {}
       });
@@ -149,7 +163,8 @@ function installPageFetchMock() {
     if (path === '/config/editor/forwarders' && method === 'PUT') {
       return json({
         ok: true,
-        path: '/tmp/config.json',
+        path: '/tmp/config.toml',
+        selfReload: liveApplied(),
         forwarders: (body.forwarders as JsonRecord) || {}
       });
     }
@@ -158,7 +173,12 @@ function installPageFetchMock() {
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
-        path: '/tmp/config.json'
+        path: '/tmp/config.toml',
+        selfReload: {
+          ok: true,
+          reloadedAt: 1710000000000,
+          configPath: '/tmp/config.toml'
+        }
       });
     }
     if (path.startsWith('/config/routing/groups/') && method === 'PUT') {
@@ -166,7 +186,8 @@ function installPageFetchMock() {
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
-        path: '/tmp/config.json'
+        path: '/tmp/config.toml',
+        selfReload: liveApplied()
       });
     }
     if (path === '/config/routing/groups/activate' && method === 'POST') {
@@ -174,7 +195,8 @@ function installPageFetchMock() {
         groups: { default: { routing: { default: [{ targets: ['demo.default.demo-max'] }] } } },
         activeGroupId: 'default',
         location: 'virtualrouter.routing',
-        path: '/tmp/config.json'
+        path: '/tmp/config.toml',
+        selfReload: liveApplied()
       });
     }
     if (path === '/config/routing' && method === 'GET') {
@@ -231,10 +253,15 @@ describe('webui page-level coverage', () => {
     providerView.unmount();
     const routingView = render(<RoutingPage authenticated authEpoch={1} onToast={onToast} />);
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
+    const targetChain = await screen.findByLabelText('selected port target chain');
+    expect(within(targetChain).getByText('demo.default.demo-max')).toBeTruthy();
+    expect(within(targetChain).queryByText('default.default')).toBeNull();
     fireEvent.change(screen.getByLabelText('new port'), { target: { value: '7777' } });
     fireEvent.change(screen.getByLabelText('new port provider binding'), { target: { value: 'demo' } });
     fireEvent.click(screen.getByText('Add Port Config'));
     await waitFor(() => expect(hasToast('Port config saved.')).toBe(true));
+    await waitFor(() => expect(screen.getByText(/ports: add:7777/)).toBeTruthy());
+    expect(screen.getByText(/runtime: applied/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('provider target picker'), { target: { value: 'demo.default.demo-max' } });
     expect((screen.getByLabelText('pool targets') as HTMLTextAreaElement).value).toContain('demo.default.demo-max');
     routingView.unmount();

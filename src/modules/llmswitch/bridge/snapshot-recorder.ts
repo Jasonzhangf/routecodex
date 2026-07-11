@@ -5,30 +5,25 @@
  */
 
 import {
-  type StageTraceEntry,
-  MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
-} from './snapshot-recorder-runtime.js';
+  buildInfo
+} from '../../../build-info.js';
+import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
+import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
-  appendStageTrace,
-  cloneStageTraceSummary,
-  logClientToolError,
-  logRuntimeErrorSignal,
-  resetSnapshotRecorderErrorsampleStateForTests,
-  shouldWriteClientToolErrorsample,
-  writeBridgeErrorsample,
-  type SnapshotRecorder
-} from './snapshot-recorder-runtime.js';
-import {
+  appendSnapshotStageTraceNative,
   classifyRuntimeErrorSignalNative,
   classifyEmptyResponseSignalNative,
   detectToolExecutionFailuresNative,
   getRouterHotpathJsonBindingSync,
+  resetSnapshotRecorderErrorsampleStateNative,
   resolveRequestTailSummaryNative,
   shouldInspectRuntimeErrorFastNative,
   shouldInspectToolFailuresNative,
   shouldLogClientToolErrorToConsoleNative,
   shouldLogRuntimeErrorSignalToConsoleNative,
   shouldRecordSnapshotsNative,
+  shouldWriteClientToolErrorsampleNative,
+  summarizeSnapshotStageTraceNative,
   summarizeClientToolObservationNative,
   writeSnapshotViaHooksNative
 } from './native-exports.js';
@@ -36,16 +31,43 @@ import {
 export { resetSnapshotRecorderErrorsampleStateForTests };
 
 type AnyRecord = Record<string, unknown>;
+type SnapshotRecorder = unknown;
 type EmptyResponseSignal = {
   errorType: string;
   matchedText: string;
   responseSummary: Record<string, unknown>;
+};
+type ToolExecutionFailureSignal = {
+  toolName: 'exec_command' | 'apply_patch' | 'shell_command';
+  errorType: string;
+  matchedText: string;
+  toolCallId?: string;
+  callId?: string;
+};
+type StageTraceEntry = {
+  at: string;
+  stage: string;
+  payload: unknown;
+};
+type ClientToolTraceSummaryEntry = {
+  at: string;
+  stage: string;
 };
 
 type RequestTailSummary = {
   stage: string;
   preview: string;
 } | null;
+
+const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
+const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
+const truthy = new Set(['1', 'true', 'yes', 'on']);
+let cachedTracePayloadCaptureEnabled: boolean | null = null;
+
+function resetSnapshotRecorderErrorsampleStateForTests(): void {
+  resetSnapshotRecorderErrorsampleStateNative();
+  cachedTracePayloadCaptureEnabled = null;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -68,6 +90,171 @@ function resolveRequestTailFromPayload(stage: string, payload: Record<string, un
 
 function classifyEmptyResponseSignal(stage: string, payload: Record<string, unknown>): EmptyResponseSignal | null {
   return classifyEmptyResponseSignalNative(stage, payload);
+}
+
+function isTracePayloadCaptureEnabled(): boolean {
+  if (cachedTracePayloadCaptureEnabled !== null) {
+    return cachedTracePayloadCaptureEnabled;
+  }
+  const raw = String(
+    process.env.ROUTECODEX_STAGE_TRACE_CAPTURE_PAYLOAD
+    ?? process.env.RCC_STAGE_TRACE_CAPTURE_PAYLOAD
+    ?? ''
+  ).trim().toLowerCase();
+  cachedTracePayloadCaptureEnabled = truthy.has(raw);
+  return cachedTracePayloadCaptureEnabled;
+}
+
+function clipText(input: string, max = 320): string {
+  const text = String(input || '').trim();
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function getRecorderMetadata(context: AnyRecord): Record<string, unknown> {
+  if (!context || typeof context !== 'object') {
+    return {};
+  }
+  return {
+    requestId: (context as any).requestId,
+    providerProtocol: (context as any).providerProtocol,
+    runtime: (context as any).runtime
+  };
+}
+
+function writeBridgeErrorsample(args: {
+  group: string;
+  kind: string;
+  sampleKind: string;
+  endpoint: string;
+  stage: string;
+  context: AnyRecord;
+  observation: unknown;
+  extras?: Record<string, unknown>;
+}): void {
+  void writeErrorsampleJson({
+    group: args.group,
+    kind: args.kind,
+    payload: {
+      kind: args.sampleKind,
+      timestamp: new Date().toISOString(),
+      endpoint: args.endpoint,
+      stage: args.stage,
+      versions: {
+        routecodex: buildInfo.version,
+        llms: resolveLlmswitchCoreVersion(),
+        node: process.version
+      },
+      ...getRecorderMetadata(args.context),
+      ...(args.extras ?? {}),
+      observation: args.observation
+    }
+  }).catch((error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[snapshot-recorder] writeBridgeErrorsample failed group=${args.group} kind=${args.kind} stage=${args.stage}: ${reason}`
+    );
+  });
+}
+
+function logClientToolError(args: {
+  requestId?: string;
+  stage: string;
+  toolName: string;
+  errorType: string;
+  matchedText: string;
+  condensed?: boolean;
+}): void {
+  const req = args.requestId && args.requestId.trim().length ? args.requestId.trim() : 'unknown';
+  const stage = args.stage && args.stage.trim().length ? args.stage.trim() : 'unknown';
+  const tool = args.toolName && args.toolName.trim().length ? args.toolName.trim() : 'unknown';
+  const errorType = args.errorType && args.errorType.trim().length ? args.errorType.trim() : 'unknown';
+  const detail = clipText(args.matchedText || '', 240);
+  const detailPart = detail ? ` detail=${detail}` : '';
+  const condensedPart = args.condensed
+    ? ' (more client-tool errors suppressed for this request; see ~/.rcc/errorsamples/client-tool-error/)'
+    : '';
+  console.error(
+    `\x1b[31m[client-tool-error] requestId=${req} stage=${stage} tool=${tool} errorType=${errorType}${detailPart}${condensedPart}\x1b[0m`
+  );
+}
+
+function logRuntimeErrorSignal(args: {
+  requestId?: string;
+  stage: string;
+  group: 'parse-error' | 'exec-error';
+  errorType: string;
+  matchedText: string;
+}): void {
+  const req = args.requestId && args.requestId.trim().length ? args.requestId.trim() : 'unknown';
+  const stage = args.stage && args.stage.trim().length ? args.stage.trim() : 'unknown';
+  const detail = clipText(args.matchedText || '', 240);
+  const detailPart = detail ? ` detail=${detail}` : '';
+  console.error(
+    `\x1b[31m[runtime-error] requestId=${req} group=${args.group} stage=${stage} errorType=${args.errorType}${detailPart}\x1b[0m`
+  );
+}
+
+function appendStageTrace(trace: StageTraceEntry[], stage: string, payload: AnyRecord): void {
+  const capturePayload = isTracePayloadCaptureEnabled();
+  let payloadJson = 'null';
+  let serializeError = '';
+  if (capturePayload) {
+    try {
+      payloadJson = JSON.stringify(payload) ?? 'null';
+    } catch (error) {
+      serializeError = error instanceof Error ? error.message : String(error ?? 'unknown');
+    }
+  }
+  const nextTrace = appendSnapshotStageTraceNative({
+    trace,
+    stage,
+    payloadJson,
+    capturePayload,
+    timestamp: new Date().toISOString(),
+    serializeError,
+  }) as StageTraceEntry[];
+  trace.splice(0, trace.length, ...nextTrace);
+}
+
+function cloneStageTraceSummary(
+  trace: StageTraceEntry[],
+  limit = MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
+): ClientToolTraceSummaryEntry[] {
+  return summarizeSnapshotStageTraceNative(trace, limit).map((item) => {
+    if (typeof item.at !== 'string' || typeof item.stage !== 'string') {
+      throw new Error('[snapshot-recorder] summarizeSnapshotStageTraceNative returned invalid trace summary');
+    }
+    return {
+      at: item.at,
+      stage: item.stage,
+    };
+  });
+}
+
+function resolveClientToolErrorSampleWindowMs(): number {
+  const raw =
+    process.env.ROUTECODEX_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS ||
+    process.env.RCC_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS;
+  }
+  return Math.floor(parsed);
+}
+
+function shouldWriteClientToolErrorsample(args: {
+  endpoint: string;
+  stage: string;
+  failure: ToolExecutionFailureSignal;
+}): boolean {
+  return shouldWriteClientToolErrorsampleNative({
+    endpoint: args.endpoint,
+    stage: args.stage,
+    failure: args.failure,
+    windowMs: resolveClientToolErrorSampleWindowMs(),
+    nowMs: Date.now(),
+  });
 }
 
 const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');

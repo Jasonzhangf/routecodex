@@ -1,9 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
-use servertool_core::stop_visible_text::{
-    strip_stop_schema_control_text,
-};
+use servertool_core::stop_visible_text::strip_stop_schema_control_text;
 
 // feature_id: hub.response_responses_chat_projection
 

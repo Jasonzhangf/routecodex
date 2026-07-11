@@ -29,16 +29,6 @@ jest.unstable_mockModule(
   })
 );
 
-jest.unstable_mockModule(
-  '../../../../src/server/runtime/http-server/executor/request-executor-request-semantics.js',
-  () => ({
-    hasRequestedToolsInSemantics: jest.fn(async () => false),
-    isRequiredToolCallTurn: jest.fn(async () => false),
-    isProviderNativeResumeContinuation: jest.fn(async () => false),
-    isToolResultFollowupTurn: jest.fn(async () => false)
-  })
-);
-
 const { createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
 const { StatsManager } = await import('../../../../src/server/runtime/http-server/stats-manager');
 const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
