@@ -1,19 +1,9 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import path from 'node:path';
-
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
-
-async function importRootDistModule(relativePath) {
-  return import(path.resolve(repoRoot, '..', '..', relativePath));
-}
+import { buildResponsesRequestFromChatNative as buildResponsesRequestFromChat } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 async function main() {
-  const {
-    buildResponsesRequestFromChatNative: buildResponsesRequestFromChat
-  } = await importRootDistModule('dist/modules/llmswitch/bridge/native-exports.js');
-
   // Route-selected style must override captured context to prevent cross-provider leakage:
   // LM Studio "preserve" must not contaminate OpenAI `/v1/responses` which requires `fc_*` ids.
   {

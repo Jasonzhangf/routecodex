@@ -7,6 +7,10 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import OpenAI from 'openai';
 import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
+import {
+  buildChatResponseFromResponsesNative,
+  buildResponsesRequestFromChatNative,
+} from './helpers/responses-codec-direct-native.mjs';
 
 const BASEDIR = process.cwd();
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
@@ -106,8 +110,6 @@ async function main() {
   const cfg = { type: provEntry.type, config: provEntry.config };
   const httpPath = pathToFileURL(path.join(BASEDIR, 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const nativeExportsPath = pathToFileURL(path.join(BASEDIR, 'dist/modules/llmswitch/bridge/native-exports.js')).href;
-  const { buildResponsesRequestFromChatNative, buildChatResponseFromResponsesNative } = await import(nativeExportsPath);
   const buildChatResponseFromResponses = buildChatResponseFromResponsesNative;
 
   // headers

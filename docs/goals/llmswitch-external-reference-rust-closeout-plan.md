@@ -172,3 +172,15 @@ Then replay the same endpoint/sample that proves the installed runtime consumes 
 - `verify:llmswitch-zero-ts-closeout`, `verify:llmswitch-minimal-ts-surface -- --json`, and `verify:llmswitch-rustification-audit -- --json` all pass with zero production/non-native TS metrics.
 - Architecture and build closure passed: function-map compile, mainline call-map, mainline manifest sync, deleted-path, thin-wrapper-only, VR no-TS runtime, servertool Rust-only, Responses history protocol contract, `build:native-hotpath`, sharedmodule/root TypeScript, and `build:base`.
 - Runtime install evidence is consistent at `0.90.3789` across CLI entrypoints, current release package, and health checks on the managed port group.
+
+## 2026-07-11 Leaf script host bridge dist refs contracted
+
+- Added `scripts/helpers/responses-codec-direct-native.mjs` as a script-only direct NAPI helper for Responses request/response codec calls. It loads `router_hotpath_napi.node` directly and does not create a production TS/JS semantic owner.
+- Migrated leaf scripts off host `dist/modules/llmswitch/bridge/native-exports.js` for Responses codec calls:
+  - `scripts/batch-toolcall-report.mjs`
+  - `scripts/outbound-regression-codex-samples.mjs`
+  - `scripts/responses-sse-capture.mjs`
+  - `scripts/responses-sse-replay-golden.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-call-id-style-route-wins.mjs`
+- Exact source scan for those five touched scripts now returns zero `dist/modules/llmswitch/bridge/native-exports.js` references.
+- Remaining `dist/modules/llmswitch/bridge/native-exports.js` source references are docs/memory history plus release-install surface verification; no new runtime semantic owner was introduced.

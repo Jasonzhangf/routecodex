@@ -6,12 +6,15 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { pathToFileURL } from 'url';
 import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
 import {
   buildAnthropicRequestFromOpenAIChat,
   buildOpenAIChatFromAnthropic,
 } from './helpers/anthropic-codec-direct-native.mjs';
+import {
+  buildChatResponseFromResponsesNative,
+  buildResponsesRequestFromChatNative,
+} from './helpers/responses-codec-direct-native.mjs';
 
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
 const RESPONSES_SAMPLE_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
@@ -26,22 +29,15 @@ const TARGET_PROTOCOLS = new Set(
     .filter(Boolean)
 );
 
-const baseDir = process.cwd();
-const nativeExportsPath = pathToFileURL(path.resolve(baseDir, 'dist/modules/llmswitch/bridge/native-exports.js')).href;
-
 let conversionsLoaded = null;
 let responsesInstructionsCache = null;
 async function getConversions() {
   if (conversionsLoaded) return conversionsLoaded;
-  const nativeExports = await import(nativeExportsPath).catch(() => null);
-  if (!nativeExports) {
-    throw new Error('Conversion module missing. 请先构建 sharedmodule/llmswitch-core');
-  }
   conversionsLoaded = {
     buildAnthropicRequestFromOpenAIChat,
     buildOpenAIChatFromAnthropic,
-    buildResponsesRequestFromChat: nativeExports.buildResponsesRequestFromChatNative,
-    buildChatResponseFromResponses: nativeExports.buildChatResponseFromResponsesNative
+    buildResponsesRequestFromChat: buildResponsesRequestFromChatNative,
+    buildChatResponseFromResponses: buildChatResponseFromResponsesNative
   };
   return conversionsLoaded;
 }

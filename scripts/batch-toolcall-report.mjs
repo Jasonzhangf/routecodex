@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { buildJsonFromSseWithNative, collectSseBodyText } from './helpers/sse-direct-native.mjs';
+import { buildChatResponseFromResponsesNative } from './helpers/responses-codec-direct-native.mjs';
 import {
   buildAnthropicRequestFromOpenAIChat,
   buildOpenAIChatFromAnthropic,
@@ -87,8 +88,6 @@ async function runResponses(providerId) {
 
   const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
   const { HttpClient } = await import(httpPath);
-  const nativeExportsPath = pathToFileURL(path.join(process.cwd(), 'dist/modules/llmswitch/bridge/native-exports.js')).href;
-  const { buildChatResponseFromResponsesNative } = await import(nativeExportsPath);
 
   ensureDir(RESP_OUT_DIR);
   const base = path.join(RESP_OUT_DIR, `${providerId}_batch_${nowStamp()}`);
