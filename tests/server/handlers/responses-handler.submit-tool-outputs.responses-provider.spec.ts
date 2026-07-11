@@ -28,10 +28,14 @@ const planResponsesRequestBodyForHttpMock = (payload: Record<string, unknown>) =
 
 const createNativeExportsMock = () => ({
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    resolveRccPathJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson || '{}') as { segments?: unknown[] };
+      const parts = Array.isArray(input.segments) ? input.segments.map(String) : [];
+      return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
+    }),
     resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
     resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
-  getNetworkErrorCodes: jest.fn(() => []),
   mapChatToolsToBridgeJson: jest.fn(async (rawTools: unknown) => Array.isArray(rawTools) ? rawTools : []),
   injectMcpToolsForChatJson: jest.fn(async (input: unknown) => input),
   injectMcpToolsForResponsesJson: jest.fn(async (input: unknown) => input),

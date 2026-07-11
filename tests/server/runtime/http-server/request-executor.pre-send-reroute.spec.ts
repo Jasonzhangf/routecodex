@@ -46,7 +46,6 @@ const mockBridgeModule = () => ({
   hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   projectSseErrorEventPayloadNative: jest.fn(() => ({})),
   classifyProviderFailure: jest.fn(() => ({ code: 'UNKNOWN', retryable: false })),
-  getNetworkErrorCodes: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn(() => undefined),
 });
 

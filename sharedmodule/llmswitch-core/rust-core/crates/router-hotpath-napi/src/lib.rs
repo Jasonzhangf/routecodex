@@ -3583,21 +3583,6 @@ pub fn classify_provider_failure_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?)
 }
 
-#[napi(js_name = "networkErrorSetJson")]
-pub fn network_error_set_json() -> NapiResult<String> {
-    serde_json::to_string(&[
-        "ECONNRESET",
-        "ECONNREFUSED",
-        "EHOSTUNREACH",
-        "ENOTFOUND",
-        "EAI_AGAIN",
-        "EPIPE",
-        "ETIMEDOUT",
-        "ECONNABORTED",
-    ])
-    .map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 #[napi(js_name = "isProviderFailureBlockingRecoverableJson")]
 pub fn is_provider_failure_blocking_recoverable_json(
     classification_json: String,

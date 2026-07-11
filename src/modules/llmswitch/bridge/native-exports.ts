@@ -44,7 +44,6 @@ type NativeFailurePolicyModule = {
     excludeCurrentProvider: boolean;
     reason: string;
   };
-  getNetworkErrorCodes?: () => string[];
 };
 
 type NativeChatProcessNodeResultSemantics = {
@@ -231,7 +230,6 @@ type NativeRouterHotpathJsonBinding = {
   resolveProviderRetryExecutionPolicyJson?: (
     inputJson: string
   ) => string;
-  networkErrorSetJson?: () => string;
   hasDeclaredApplyPatchToolJson?: (payloadJson: string) => string;
   buildResponsesPayloadFromChatJson?: (
     payloadJson: string,
@@ -347,13 +345,6 @@ function buildFailurePolicyModuleFromRouterHotpathBinding(
       JSON.parse(String(binding.resolveProviderRetryExecutionPolicyJson!(
         JSON.stringify(input)
       ))) as { excludeCurrentProvider: boolean; reason: string },
-    getNetworkErrorCodes: () => {
-      const fn = binding.networkErrorSetJson;
-      if (typeof fn !== 'function') {
-        throw new Error('[llmswitch-bridge] networkErrorSetJson not available');
-      }
-      return JSON.parse(String(fn())) as string[];
-    },
   };
 }
 
@@ -1791,14 +1782,6 @@ export function resolveProviderRetryExecutionPolicyNative(input: {
     throw new Error('[llmswitch-bridge] resolveProviderRetryExecutionPolicyNative not available');
   }
   return fn(input);
-}
-
-export function getNetworkErrorCodes(): string[] {
-  const fn = getFailurePolicyModule().getNetworkErrorCodes;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] getNetworkErrorCodes not available');
-  }
-  return fn();
 }
 
 // ---------------------------------------------------------------------------

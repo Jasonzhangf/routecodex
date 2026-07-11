@@ -66,7 +66,6 @@ const mockNativeExportsModule = () => ({
   deriveFinishReasonNative: jest.fn(() => undefined),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
-  getNetworkErrorCodes: jest.fn(() => []),
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     asFlatRecordJson: jest.fn((inputJson: string) => inputJson),
     extractBridgeProviderResponsePayloadJson: jest.fn(() => null),

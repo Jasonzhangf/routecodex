@@ -162,7 +162,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
       conversationId: metadata.conversationId ?? metadata.conversation_id,
     }),
     extractServertoolCliResultRouteHintFromRequestNative: () => undefined,
-    getNetworkErrorCodes: () => [],
     getRouterHotpathJsonBindingSync: () => ({}),
     hasDeclaredApplyPatchToolNative: () => false,
     hasRequestedToolsInSemanticsNative: () => false,

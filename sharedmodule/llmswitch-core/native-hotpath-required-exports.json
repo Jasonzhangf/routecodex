@@ -569,7 +569,6 @@
   "stripChatProcessHistoricalImagesJson",
   "stripResponsesStoredContextInputMediaJson",
   "classifyProviderFailureJson",
-  "networkErrorSetJson",
   "resolveProviderRetryExecutionPolicyJson",
   "registerResponsesPayloadSnapshotJson",
   "consumeResponsesPayloadSnapshotJson",

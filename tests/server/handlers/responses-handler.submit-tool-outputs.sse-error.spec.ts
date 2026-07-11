@@ -90,8 +90,13 @@ const createNativeExportsMock = () => ({
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,
   })),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
-  getNetworkErrorCodes: jest.fn(() => []),
-  getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    resolveRccPathJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson || '{}') as { segments?: unknown[] };
+      const parts = Array.isArray(input.segments) ? input.segments.map(String) : [];
+      return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
+    }),
+  })),
   hasDeclaredApplyPatchToolNative: jest.fn(() => false),
   injectMcpToolsForChatJson: jest.fn((payload: unknown) => payload),
   injectMcpToolsForResponsesJson: jest.fn((payload: unknown) => payload),

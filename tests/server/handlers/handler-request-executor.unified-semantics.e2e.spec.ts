@@ -413,7 +413,6 @@ const mockNativeExportsModule = () => ({
   })),
   sanitizeFollowupText: jest.fn(async (raw: unknown) => (typeof raw === 'string' ? raw : '')),
   classifyProviderFailure: jest.fn(() => 'non_recoverable'),
-  getNetworkErrorCodes: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn((body: any) => detectToolCallFinishReason(body)),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
