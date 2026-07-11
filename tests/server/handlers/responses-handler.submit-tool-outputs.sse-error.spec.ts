@@ -67,6 +67,8 @@ const createNativeExportsMock = () => ({
   describeVirtualRouterContractsNative: jest.fn(() => ({})),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   evaluateResponsesDirectRouteDecisionNative: jest.fn(() => ({ mode: 'relay' })),
+  classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
+  shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,

@@ -201,6 +201,67 @@ fn classify_apply_patch_verification_failure(content: &str) -> (String, String) 
     )
 }
 
+fn classify_runtime_error_signal_from_text_value(message: &str) -> Option<Value> {
+    let raw = message;
+    let lower = raw.to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    if lower.contains("apply_patch verification failed") {
+        let (error_type, matched_text) = classify_apply_patch_verification_failure(raw);
+        return Some(json_object(vec![
+            ("group", Value::String("exec-error".to_string())),
+            ("errorType", Value::String(error_type)),
+            ("matchedText", Value::String(matched_text)),
+        ]));
+    }
+    for (needle, error_type) in [
+        (
+            "apply_patch verification failed",
+            "apply_patch_verification_failed",
+        ),
+        ("followup failed for flow", "followup_execution_failed"),
+        ("tool execution failed", "tool_execution_failed"),
+    ] {
+        if lower.contains(needle) {
+            return Some(json_object(vec![
+                ("group", Value::String("exec-error".to_string())),
+                ("errorType", Value::String(error_type.to_string())),
+                ("matchedText", Value::String(needle.to_string())),
+            ]));
+        }
+    }
+    for (needle, error_type) in [
+        (
+            "failed to parse function arguments",
+            "tool_args_parse_failed",
+        ),
+        ("missing field `cmd`", "tool_args_missing_cmd"),
+        ("missing field `input`", "tool_args_missing_input"),
+        ("missing field `command`", "tool_args_missing_command"),
+        ("failed to decode sse payload", "sse_decode_failed"),
+        ("upstream sse terminated", "sse_upstream_terminated"),
+        ("does not support sse decoding", "sse_protocol_unsupported"),
+    ] {
+        if lower.contains(needle) {
+            return Some(json_object(vec![
+                ("group", Value::String("parse-error".to_string())),
+                ("errorType", Value::String(error_type.to_string())),
+                ("matchedText", Value::String(needle.to_string())),
+            ]));
+        }
+    }
+    None
+}
+
+fn json_object(entries: Vec<(&str, Value)>) -> Value {
+    let mut object = Map::new();
+    for (key, value) in entries {
+        object.insert(key.to_string(), value);
+    }
+    Value::Object(object)
+}
+
 fn extract_invalid_hunk_header_token(raw: &str) -> Option<String> {
     let lower = raw.to_ascii_lowercase();
     let marker = "invalid hunk at line";
@@ -487,6 +548,39 @@ pub fn detect_tool_execution_failures_json(payload_json: String) -> NapiResult<S
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn classify_runtime_error_signal_from_text_json(
+    _stage: String,
+    message: String,
+) -> NapiResult<String> {
+    let value = classify_runtime_error_signal_from_text_value(&message).unwrap_or(Value::Null);
+    serde_json::to_string(&value).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+pub fn should_log_client_tool_error_to_console_json(failure_json: String) -> NapiResult<bool> {
+    let failure: Value =
+        serde_json::from_str(&failure_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let Some(record) = failure.as_object() else {
+        return Ok(false);
+    };
+    let tool_name = read_trimmed(record.get("toolName"));
+    let error_type = read_trimmed(record.get("errorType"));
+    Ok(match tool_name.as_str() {
+        "apply_patch" => matches!(
+            error_type.as_str(),
+            "apply_patch_args_missing_input"
+                | "apply_patch_args_missing_patch"
+                | "apply_patch_args_parse_failed"
+        ),
+        "exec_command" => matches!(
+            error_type.as_str(),
+            "exec_command_args_missing_cmd"
+                | "exec_command_args_missing_input"
+                | "exec_command_args_parse_failed"
+        ),
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,5 +610,42 @@ mod tests {
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed[0]["toolName"], "apply_patch");
         assert_eq!(parsed[0]["errorType"], "apply_patch_args_missing_input");
+    }
+
+    #[test]
+    fn classifies_runtime_apply_patch_verification_text() {
+        let raw = classify_runtime_error_signal_from_text_json(
+            "provider.send".to_string(),
+            "apply_patch verification failed: Failed to find expected lines in src/main.rs"
+                .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["group"], "exec-error");
+        assert_eq!(parsed["errorType"], "apply_patch_expected_lines_not_found");
+    }
+
+    #[test]
+    fn ignores_runtime_text_without_known_failure_signal() {
+        let raw = classify_runtime_error_signal_from_text_json(
+            "provider.send".to_string(),
+            "ordinary provider response".to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert!(parsed.is_null());
+    }
+
+    #[test]
+    fn decides_client_tool_console_logging_from_native_truth() {
+        assert!(should_log_client_tool_error_to_console_json(
+            json!({"toolName":"exec_command","errorType":"exec_command_args_missing_cmd"})
+                .to_string()
+        )
+        .unwrap());
+        assert!(!should_log_client_tool_error_to_console_json(
+            json!({"toolName":"exec_command","errorType":"exec_command_non_zero_exit"}).to_string()
+        )
+        .unwrap());
     }
 }

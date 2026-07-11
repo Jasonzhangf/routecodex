@@ -3021,6 +3021,21 @@ pub fn detect_tool_execution_failures_json_bridge(payload_json: String) -> NapiR
     snapshot_tool_failures::detect_tool_execution_failures_json(payload_json)
 }
 
+#[napi(js_name = "classifyRuntimeErrorSignalFromTextJson")]
+pub fn classify_runtime_error_signal_from_text_json_bridge(
+    stage: String,
+    message: String,
+) -> NapiResult<String> {
+    snapshot_tool_failures::classify_runtime_error_signal_from_text_json(stage, message)
+}
+
+#[napi(js_name = "shouldLogClientToolErrorToConsoleJson")]
+pub fn should_log_client_tool_error_to_console_json_bridge(
+    failure_json: String,
+) -> NapiResult<bool> {
+    snapshot_tool_failures::should_log_client_tool_error_to_console_json(failure_json)
+}
+
 #[napi(js_name = "normalizeToolCallIdsJson")]
 pub fn normalize_tool_call_ids_json(payload_json: String) -> NapiResult<String> {
     shared_response_compat::normalize_tool_call_ids_json(payload_json)

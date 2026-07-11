@@ -46,6 +46,8 @@ const mockNativeExportsModule = () => ({
   detectRetryableEmptyAssistantResponseNative: jest.fn(() => null),
   detectToolExecutionFailuresNative: jest.fn(() => []),
   deriveFinishReasonNative: jest.fn(() => undefined),
+  classifyRuntimeErrorSignalFromTextNative: jest.fn(() => null),
+  shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => undefined),
   extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
   getNetworkErrorCodes: jest.fn(() => []),

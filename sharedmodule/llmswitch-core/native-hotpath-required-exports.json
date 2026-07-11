@@ -82,6 +82,8 @@
   "isEmptyClientResponsePayloadJson",
   "classifyEmptyResponseSignalJson",
   "detectToolExecutionFailuresJson",
+  "classifyRuntimeErrorSignalFromTextJson",
+  "shouldLogClientToolErrorToConsoleJson",
   "buildResponsesPayloadFromChatJson",
   "planResponsesPayloadFromChatCloseoutJson",
   "normalizeChatUsageJson",

@@ -19,6 +19,11 @@ type ToolExecutionFailureSignal = {
   toolCallId?: string;
   callId?: string;
 };
+type RuntimeErrorSignal = {
+  group: 'parse-error' | 'exec-error';
+  errorType: string;
+  matchedText: string;
+};
 type NativeFailureClassification = unknown;
 type NativeFailurePolicyModule = {
   classifyProviderFailure?: (
@@ -53,6 +58,8 @@ type NativeChatProcessNodeResultSemantics = {
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
+  classifyRuntimeErrorSignalFromTextJson?: (stage: string, message: string) => string;
+  shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
   updateResponsesSseTransportTerminalStateJson?: (
     chunkJson: string,
@@ -1516,6 +1523,33 @@ export function resolveProviderResponseRequestSemanticsNative(
     throw new Error('[llmswitch-bridge] resolveProviderResponseRequestSemanticsJson returned invalid payload');
   }
   return parsed as Record<string, unknown>;
+}
+
+export function classifyRuntimeErrorSignalFromTextNative(
+  stage: string,
+  message: string
+): RuntimeErrorSignal | null {
+  const fn = getChatProcessNodeResultSemantics().classifyRuntimeErrorSignalFromTextJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalFromTextJson not available');
+  }
+  const raw = fn(String(stage || ''), String(message || ''));
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalFromTextJson returned invalid payload');
+  }
+  return parsed as RuntimeErrorSignal;
+}
+
+export function shouldLogClientToolErrorToConsoleNative(failure: ToolExecutionFailureSignal): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldLogClientToolErrorToConsoleJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldLogClientToolErrorToConsoleJson not available');
+  }
+  return fn(JSON.stringify(failure ?? null));
 }
 
 export function updateResponsesContractProbeFromSseChunkNative(
