@@ -3052,6 +3052,27 @@ pub fn should_inspect_runtime_error_json_bridge(
     snapshot_tool_failures::should_inspect_runtime_error_json(stage, payload_json)
 }
 
+#[napi(js_name = "shouldInspectRuntimeErrorFastJson")]
+pub fn should_inspect_runtime_error_fast_json_bridge(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<bool> {
+    snapshot_tool_failures::should_inspect_runtime_error_fast_json(stage, payload_json)
+}
+
+#[napi(js_name = "shouldInspectToolFailuresJson")]
+pub fn should_inspect_tool_failures_json_bridge(stage: String) -> NapiResult<bool> {
+    snapshot_tool_failures::should_inspect_tool_failures_json(stage)
+}
+
+#[napi(js_name = "resolveRequestTailSummaryJson")]
+pub fn resolve_request_tail_summary_json_bridge(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<String> {
+    snapshot_tool_failures::resolve_request_tail_summary_json(stage, payload_json)
+}
+
 #[napi(js_name = "summarizeClientToolObservationJson")]
 pub fn summarize_client_tool_observation_json_bridge(
     payload_json: String,

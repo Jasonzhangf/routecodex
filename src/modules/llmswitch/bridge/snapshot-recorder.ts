@@ -18,7 +18,6 @@ import {
   logClientToolError,
   logRuntimeErrorSignal,
   resetSnapshotRecorderErrorsampleStateForTests,
-  shouldInspectRuntimeError,
   shouldLogClientToolErrorToConsole,
   shouldLogRuntimeErrorSignalToConsole,
   shouldWriteClientToolErrorsample,
@@ -29,6 +28,9 @@ import {
 import {
   classifyEmptyResponseSignalNative,
   getRouterHotpathJsonBindingSync,
+  resolveRequestTailSummaryNative,
+  shouldInspectRuntimeErrorFastNative,
+  shouldInspectToolFailuresNative,
   shouldRecordSnapshotsNative,
   writeSnapshotViaHooksNative
 } from './native-exports.js';
@@ -54,157 +56,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function readTrimmedString(value: unknown): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
-}
-
-function clipPreviewText(value: string, max = 240): string {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-  return text.length <= max ? text : `${text.slice(0, max)}...`;
-}
-
-function summarizeContentText(value: unknown, max = 220): string {
-  if (typeof value === 'string') {
-    return clipPreviewText(value, max);
-  }
-  if (Array.isArray(value)) {
-    const parts: string[] = [];
-    for (const item of value.slice(0, 3)) {
-      const row = asRecord(item);
-      if (!row) {
-        if (typeof item === 'string') {
-          parts.push(clipPreviewText(item, Math.floor(max / 2)));
-        }
-        continue;
-      }
-      for (const key of ['text', 'output_text', 'input_text']) {
-        const text = readTrimmedString(row[key]);
-        if (text) {
-          parts.push(clipPreviewText(text, Math.floor(max / 2)));
-        }
-      }
-      const nestedText = summarizeContentText(row.content, Math.floor(max / 2));
-      if (nestedText) {
-        parts.push(nestedText);
-      }
-      if (parts.length >= 3) {
-        break;
-      }
-    }
-    return clipPreviewText(parts.filter(Boolean).join(' | '), max);
-  }
-  const row = asRecord(value);
-  if (!row) {
-    return '';
-  }
-  const role = readTrimmedString(row.role);
-  const type = readTrimmedString(row.type);
-  const name = readTrimmedString(row.name);
-  const tool = readTrimmedString(row.tool_name);
-  const text =
-    summarizeContentText(row.content, Math.floor(max / 2))
-    || summarizeContentText(row.text, Math.floor(max / 2))
-    || summarizeContentText(row.input, Math.floor(max / 2))
-    || summarizeContentText(row.output_text, Math.floor(max / 2))
-    || summarizeContentText(row.input_text, Math.floor(max / 2));
-  const prefix = [role, type, name || tool].filter(Boolean).join('/');
-  return clipPreviewText(prefix ? `${prefix}:${text || '-'}` : text, max);
-}
-
-function summarizeTail(value: unknown, max = 3200): string {
-  if (typeof value === 'string') {
-    return clipPreviewText(value, max);
-  }
-  if (Array.isArray(value)) {
-    const tail = value.slice(-2);
-    const parts = tail
-      .map((item) => summarizeContentText(item, Math.floor(max / 2)))
-      .filter(Boolean);
-    return clipPreviewText(parts.join(' || '), max);
-  }
-  return summarizeContentText(value, max);
-}
-
-function readDirectErrorHint(payload: Record<string, unknown>): string {
-  for (const key of ['error', 'message', 'reason', 'detail', 'failureReason']) {
-    const value = payload[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-    if (value && typeof value === 'object') {
-      const row = value as Record<string, unknown>;
-      for (const nestedKey of ['message', 'error', 'reason', 'detail']) {
-        const nested = row[nestedKey];
-        if (typeof nested === 'string' && nested.trim()) {
-          return nested.trim();
-        }
-      }
-    }
-  }
-  return '';
-}
-
 function shouldInspectToolFailures(stage: string): boolean {
-  if (!stage) {
-    return false;
-  }
-  if (stage.startsWith('chat_process.req.')) {
-    return true;
-  }
-  return stage.startsWith('chat_process.resp.')
-    || stage.startsWith('hub_followup.')
-    || stage.startsWith('servertool.');
+  return shouldInspectToolFailuresNative(stage);
 }
 
 function shouldInspectRuntimeErrorFast(stage: string, payload: Record<string, unknown>): boolean {
-  if (!shouldInspectRuntimeError(stage, payload)) {
-    return false;
-  }
-  if (stage.toLowerCase().includes('error') || stage.toLowerCase().includes('fail')) {
-    return true;
-  }
-  return Boolean(readDirectErrorHint(payload));
+  return shouldInspectRuntimeErrorFastNative(stage, payload);
 }
 
 function resolveRequestTailFromPayload(stage: string, payload: Record<string, unknown>): RequestTailSummary {
-  const messagesPreview = summarizeTail(payload.messages, 3200);
-  if (messagesPreview) {
-    return {
-      stage,
-      preview: `messages_tail=${messagesPreview}`
-    };
-  }
-  const inputPreview = summarizeTail(payload.input, 3200);
-  if (inputPreview) {
-    return {
-      stage,
-      preview: `input_tail=${inputPreview}`
-    };
-  }
-  const nestedPayload = asRecord(payload.payload);
-  if (nestedPayload) {
-    const nestedMessagesPreview = summarizeTail(nestedPayload.messages, 3200);
-    if (nestedMessagesPreview) {
-      return {
-        stage,
-        preview: `payload.messages_tail=${nestedMessagesPreview}`
-      };
-    }
-    const nestedInputPreview = summarizeTail(nestedPayload.input, 3200);
-    if (nestedInputPreview) {
-      return {
-        stage,
-        preview: `payload.input_tail=${nestedInputPreview}`
-      };
-    }
-  }
-  return null;
+  return resolveRequestTailSummaryNative(stage, payload);
 }
 
 function classifyEmptyResponseSignal(stage: string, payload: Record<string, unknown>): EmptyResponseSignal | null {

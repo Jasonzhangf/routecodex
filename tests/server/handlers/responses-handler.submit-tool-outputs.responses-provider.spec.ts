@@ -221,6 +221,9 @@ const createNativeExportsMock = () => ({
   classifyRuntimeErrorSignalNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
   shouldInspectRuntimeErrorNative: jest.fn(() => false),
+  shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
+  shouldInspectToolFailuresNative: jest.fn(() => false),
+  resolveRequestTailSummaryNative: jest.fn(() => null),
   summarizeClientToolObservationNative: jest.fn(() => ({
     topLevelKeys: [],
     failureCount: 0,

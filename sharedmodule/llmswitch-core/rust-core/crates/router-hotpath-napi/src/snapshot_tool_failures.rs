@@ -366,6 +366,215 @@ fn should_inspect_runtime_error_value(stage: &str, payload: &Value) -> bool {
     has_direct_runtime_error_hint(payload)
 }
 
+fn read_direct_runtime_error_hint(payload: &Value) -> String {
+    let Some(record) = payload.as_object() else {
+        return String::new();
+    };
+    for key in ["error", "message", "reason", "detail", "failureReason"] {
+        let value = record.get(key);
+        let text = read_trimmed(value);
+        if !text.is_empty() {
+            return text;
+        }
+        if let Some(row) = value.and_then(Value::as_object) {
+            for nested_key in ["message", "error", "reason", "detail"] {
+                let nested = read_trimmed(row.get(nested_key));
+                if !nested.is_empty() {
+                    return nested;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn should_inspect_runtime_error_fast_value(stage: &str, payload: &Value) -> bool {
+    if !should_inspect_runtime_error_value(stage, payload) {
+        return false;
+    }
+    let stage_lower = stage.to_ascii_lowercase();
+    stage_lower.contains("error")
+        || stage_lower.contains("fail")
+        || !read_direct_runtime_error_hint(payload).is_empty()
+}
+
+fn should_inspect_tool_failures_value(stage: &str) -> bool {
+    !stage.is_empty()
+        && (stage.starts_with("chat_process.req.")
+            || stage.starts_with("chat_process.resp.")
+            || stage.starts_with("hub_followup.")
+            || stage.starts_with("servertool."))
+}
+
+fn clip_preview_text(input: &str, max: usize) -> String {
+    let text = input.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    if text.len() <= max {
+        text.to_string()
+    } else {
+        format!("{}...", &text[..max])
+    }
+}
+
+fn summarize_content_text(value: &Value, max: usize) -> String {
+    match value {
+        Value::String(text) => clip_preview_text(text, max),
+        Value::Array(items) => {
+            let mut parts: Vec<String> = Vec::new();
+            for item in items.iter().take(3) {
+                if let Some(row) = item.as_object() {
+                    for key in ["text", "output_text", "input_text"] {
+                        let text = read_trimmed(row.get(key));
+                        if !text.is_empty() {
+                            parts.push(clip_preview_text(&text, max / 2));
+                        }
+                    }
+                    let nested = row
+                        .get("content")
+                        .map(|content| summarize_content_text(content, max / 2))
+                        .unwrap_or_default();
+                    if !nested.is_empty() {
+                        parts.push(nested);
+                    }
+                    if parts.len() >= 3 {
+                        break;
+                    }
+                } else if let Some(text) = item.as_str() {
+                    parts.push(clip_preview_text(text, max / 2));
+                }
+            }
+            clip_preview_text(
+                &parts
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<String>>()
+                    .join(" | "),
+                max,
+            )
+        }
+        Value::Object(row) => {
+            let role = read_trimmed(row.get("role"));
+            let item_type = read_trimmed(row.get("type"));
+            let name = read_trimmed(row.get("name"));
+            let tool_name = read_trimmed(row.get("tool_name"));
+            let text = row
+                .get("content")
+                .map(|content| summarize_content_text(content, max / 2))
+                .filter(|text| !text.is_empty())
+                .or_else(|| {
+                    row.get("text")
+                        .map(|value| summarize_content_text(value, max / 2))
+                        .filter(|text| !text.is_empty())
+                })
+                .or_else(|| {
+                    row.get("input")
+                        .map(|value| summarize_content_text(value, max / 2))
+                        .filter(|text| !text.is_empty())
+                })
+                .or_else(|| {
+                    row.get("output_text")
+                        .map(|value| summarize_content_text(value, max / 2))
+                        .filter(|text| !text.is_empty())
+                })
+                .or_else(|| {
+                    row.get("input_text")
+                        .map(|value| summarize_content_text(value, max / 2))
+                        .filter(|text| !text.is_empty())
+                })
+                .unwrap_or_default();
+            let prefix = [
+                role,
+                item_type,
+                if name.is_empty() { tool_name } else { name },
+            ]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<String>>()
+            .join("/");
+            if prefix.is_empty() {
+                clip_preview_text(&text, max)
+            } else if text.is_empty() {
+                clip_preview_text(&format!("{prefix}:-"), max)
+            } else {
+                clip_preview_text(&format!("{prefix}:{text}"), max)
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn summarize_tail(value: Option<&Value>, max: usize) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    match value {
+        Value::String(text) => clip_preview_text(text, max),
+        Value::Array(items) => {
+            let start = items.len().saturating_sub(2);
+            let parts = items
+                .iter()
+                .skip(start)
+                .map(|item| summarize_content_text(item, max / 2))
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<String>>();
+            clip_preview_text(&parts.join(" || "), max)
+        }
+        _ => summarize_content_text(value, max),
+    }
+}
+
+fn resolve_request_tail_summary_value(stage: &str, payload: &Value) -> Value {
+    let Some(record) = payload.as_object() else {
+        return Value::Null;
+    };
+    let messages_preview = summarize_tail(record.get("messages"), 3200);
+    if !messages_preview.is_empty() {
+        return json_object(vec![
+            ("stage", Value::String(stage.to_string())),
+            (
+                "preview",
+                Value::String(format!("messages_tail={messages_preview}")),
+            ),
+        ]);
+    }
+    let input_preview = summarize_tail(record.get("input"), 3200);
+    if !input_preview.is_empty() {
+        return json_object(vec![
+            ("stage", Value::String(stage.to_string())),
+            (
+                "preview",
+                Value::String(format!("input_tail={input_preview}")),
+            ),
+        ]);
+    }
+    let nested_payload = record.get("payload").and_then(Value::as_object);
+    if let Some(nested) = nested_payload {
+        let nested_messages_preview = summarize_tail(nested.get("messages"), 3200);
+        if !nested_messages_preview.is_empty() {
+            return json_object(vec![
+                ("stage", Value::String(stage.to_string())),
+                (
+                    "preview",
+                    Value::String(format!("payload.messages_tail={nested_messages_preview}")),
+                ),
+            ]);
+        }
+        let nested_input_preview = summarize_tail(nested.get("input"), 3200);
+        if !nested_input_preview.is_empty() {
+            return json_object(vec![
+                ("stage", Value::String(stage.to_string())),
+                (
+                    "preview",
+                    Value::String(format!("payload.input_tail={nested_input_preview}")),
+                ),
+            ]);
+        }
+    }
+    Value::Null
+}
+
 fn read_optional_string(record: &Map<String, Value>, key: &str) -> Option<Value> {
     let text = read_trimmed(record.get(key));
     if text.is_empty() {
@@ -788,6 +997,29 @@ pub fn should_inspect_runtime_error_json(stage: String, payload_json: String) ->
     Ok(should_inspect_runtime_error_value(&stage, &payload))
 }
 
+pub fn should_inspect_runtime_error_fast_json(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<bool> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(should_inspect_runtime_error_fast_value(&stage, &payload))
+}
+
+pub fn should_inspect_tool_failures_json(stage: String) -> NapiResult<bool> {
+    Ok(should_inspect_tool_failures_value(&stage))
+}
+
+pub fn resolve_request_tail_summary_json(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    serde_json::to_string(&resolve_request_tail_summary_value(&stage, &payload))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 pub fn summarize_client_tool_observation_json(
     payload_json: String,
     failures_json: String,
@@ -943,6 +1175,47 @@ mod tests {
         assert_eq!(parsed["toolMessages"][0]["name"], "exec_command");
         assert_eq!(parsed["toolMessages"][0]["tool_call_id"], "call_1");
         assert_eq!(parsed["topLevelKeys"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn resolves_request_tail_summary_from_latest_messages() {
+        let raw = resolve_request_tail_summary_json(
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({
+                "messages": [
+                    {"role": "system", "content": "old"},
+                    {"role": "user", "content": [{"type":"input_text","text":"hello"}]},
+                    {"role": "assistant", "content": "world"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["stage"], "chat_process.req.stage2.semantic_map");
+        assert_eq!(
+            parsed["preview"],
+            "messages_tail=user:hello || assistant:world"
+        );
+    }
+
+    #[test]
+    fn decides_tool_and_runtime_fast_inspection_in_native() {
+        assert!(should_inspect_tool_failures_json(
+            "chat_process.req.stage2.semantic_map".to_string()
+        )
+        .unwrap());
+        assert!(!should_inspect_tool_failures_json("provider.send".to_string()).unwrap());
+        assert!(should_inspect_runtime_error_fast_json(
+            "provider.send_error".to_string(),
+            json!({"message":"transport failed"}).to_string(),
+        )
+        .unwrap());
+        assert!(!should_inspect_runtime_error_fast_json(
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({}).to_string(),
+        )
+        .unwrap());
     }
 
     #[test]

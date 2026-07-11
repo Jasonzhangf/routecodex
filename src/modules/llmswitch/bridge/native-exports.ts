@@ -62,6 +62,9 @@ type NativeChatProcessNodeResultSemantics = {
   classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
   shouldInspectRuntimeErrorJson?: (stage: string, payloadJson: string) => boolean;
+  shouldInspectRuntimeErrorFastJson?: (stage: string, payloadJson: string) => boolean;
+  shouldInspectToolFailuresJson?: (stage: string) => boolean;
+  resolveRequestTailSummaryJson?: (stage: string, payloadJson: string) => string;
   summarizeClientToolObservationJson?: (payloadJson: string, failuresJson: string) => string;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
   updateResponsesSseTransportTerminalStateJson?: (
@@ -1580,6 +1583,41 @@ export function shouldInspectRuntimeErrorNative(stage: string, payload: unknown)
     throw new Error('[llmswitch-bridge] shouldInspectRuntimeErrorJson not available');
   }
   return fn(String(stage || ''), JSON.stringify(payload ?? null));
+}
+
+export function shouldInspectRuntimeErrorFastNative(stage: string, payload: unknown): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldInspectRuntimeErrorFastJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldInspectRuntimeErrorFastJson not available');
+  }
+  return fn(String(stage || ''), JSON.stringify(payload ?? null));
+}
+
+export function shouldInspectToolFailuresNative(stage: string): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldInspectToolFailuresJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldInspectToolFailuresJson not available');
+  }
+  return fn(String(stage || ''));
+}
+
+export function resolveRequestTailSummaryNative(
+  stage: string,
+  payload: unknown
+): { stage: string; preview: string } | null {
+  const fn = getChatProcessNodeResultSemantics().resolveRequestTailSummaryJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resolveRequestTailSummaryJson not available');
+  }
+  const raw = fn(String(stage || ''), JSON.stringify(payload ?? null));
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] resolveRequestTailSummaryJson returned invalid payload');
+  }
+  return parsed as { stage: string; preview: string };
 }
 
 export function summarizeClientToolObservationNative(
