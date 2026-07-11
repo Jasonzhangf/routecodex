@@ -7,7 +7,6 @@ const responseLayerFiles = [
   'src/server/handlers/handler-response-common.ts',
   'src/server/handlers/handler-response-sse.ts',
   'src/server/handlers/handler-response-utils.ts',
-  'src/modules/llmswitch/bridge/responses-response-bridge.ts',
 ];
 
 const requiredAnchors = [

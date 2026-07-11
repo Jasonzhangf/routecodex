@@ -433,7 +433,7 @@ chains:
         from_node: HubRespChatProcess03Governed
         to_node: HubRespOutbound04ClientSemantic
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
-        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        caller_file: src/server/handlers/handler-response-utils.ts
         callee_symbol: projectResponsesClientPayloadForClientNative
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.response_responses_client_projection
@@ -511,7 +511,7 @@ chains:
         from_node: ChatProcReqContinuation05Governed
         to_node: ChatProcRespContinuation06ResponseGoverned
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
-        caller_file: src/modules/llmswitch/bridge/responses-response-bridge.ts
+        caller_file: src/server/handlers/handler-response-utils.ts
         callee_symbol: planResponsesJsonClientDispatchNative
         callee_file: src/modules/llmswitch/bridge/native-exports.ts
         owner_feature_id: hub.chat_process_responses_continuation

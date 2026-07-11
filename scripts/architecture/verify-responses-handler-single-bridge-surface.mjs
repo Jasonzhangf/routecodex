@@ -6,6 +6,7 @@ const root = process.cwd();
 const staleHandlerProjectionSpec = 'tests/server/handlers/handler-response-utils.apply-patch-freeform-sse.spec.ts';
 const staleHandlerTerminalRepairSpec = 'tests/server/handlers/responses-handler.stream-closed-before-completed.regression.spec.ts';
 const staleSseBridge = 'src/modules/llmswitch/bridge/responses-sse-bridge.ts';
+const staleResponseBridge = 'src/modules/llmswitch/bridge/responses-response-bridge.ts';
 
 if (fs.existsSync(path.join(root, staleHandlerProjectionSpec))) {
   console.error('[verify:responses-handler-single-bridge-surface] failed');
@@ -22,6 +23,12 @@ if (fs.existsSync(path.join(root, staleHandlerTerminalRepairSpec))) {
 if (fs.existsSync(path.join(root, staleSseBridge))) {
   console.error('[verify:responses-handler-single-bridge-surface] failed');
   console.error(`- duplicate SSE bridge facade must stay deleted: ${staleSseBridge}`);
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(root, staleResponseBridge))) {
+  console.error('[verify:responses-handler-single-bridge-surface] failed');
+  console.error(`- duplicate response bridge facade must stay deleted: ${staleResponseBridge}`);
   process.exit(1);
 }
 
@@ -77,43 +84,8 @@ const checks = [
     ],
   },
   {
-    file: 'src/modules/llmswitch/bridge/responses-response-bridge.ts',
-    allowedImport: './runtime-integrations.js',
-    forbiddenLocalTokens: [
-      'export function planResponsesContinuationCloseActionForHttp(',
-      'function isDirectResponsesToolCallContinuationForHttp(',
-      'export async function prepareResponsesJsonBodyForSseBridgeForHttp(',
-      'export function normalizeResponsesJsonBodyForHttp(',
-      'function ensureResponsesJsonToSseRequiredFieldsForHttp(',
-      'export function buildResponsesSseErrorPayloadForHttp(',
-      'export function buildResponsesStructuredSseErrorPayloadForHttp(',
-      'export function buildResponsesMissingSseBridgeErrorPayloadForHttp(',
-      "record.object === 'chat.completion'",
-      'isToolCallContinuationResponseNative(',
-      'export function inspectResponsesTerminalStateFromSseChunkForHttp(',
-      'export function planResponsesStreamEndRepairForHttp(',
-      'export async function createResponsesJsonToSseConverterForHttp(',
-      'export async function projectResponsesSseFrameForClientForHttp(',
-      'export async function normalizeResponsesSseFrameForClientForHttp(',
-      'finishReason: resolveResponsesClientPayloadFinishReasonForHttp(normalizedPayload)',
-      'function shouldSuppressDuplicateApplyPatchSseFrameForHttp(',
-      'function normalizeNestedResponsesPayloadInSseFrameForHttp(',
-      'function collectEmittedApplyPatchDoneCallIdsFromFrameForHttp(',
-      'function readResponsesSseCallIdForHttp(',
-      'function isApplyPatchFunctionCallRecordForHttp(',
-      'function isResponsesRequiredActionFrame(',
-      'function readDirectPassthroughSseEventNames(',
-      'function hasNonResponsesDirectPassthroughEvent(',
-      'stripClientVisibleMetadataDeep',
-      'contextClientToolsRaw',
-      'payloadTools',
-      'requestContext?.payload?.tools',
-    ],
-    forbiddenTokens: [],
-  },
-  {
     file: 'src/server/handlers/handler-response-utils.ts',
-    allowedImport: '../../modules/llmswitch/bridge/responses-response-bridge.js',
+    allowedImport: '../../modules/llmswitch/bridge/native-exports.js',
     requiredImports: [
       './handler-response-sse.js',
       './handler-response-common.js',
@@ -143,7 +115,6 @@ const checks = [
       'const jsonFinishReason = deriveFinishReason(clientBody);',
       'preparedResponsesJsonSseDispatch?.finishReason',
       'bridgePlan.finishReason',
-      'const normalizedJsonBody = await normalizeResponsesClientPayloadForHttp(',
       "reason: 'sse-stream-error'",
       "reason: 'sse-incomplete'",
       "reason: 'json-empty-error'",

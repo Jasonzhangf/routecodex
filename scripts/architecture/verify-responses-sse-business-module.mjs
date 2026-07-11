@@ -8,15 +8,15 @@ const verificationMap = fs.readFileSync(path.join(root, 'docs/architecture/verif
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
 const handlerSource = fs.readFileSync(path.join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 const sseBridgePath = path.join(root, 'src/modules/llmswitch/bridge/responses-sse-bridge.ts');
+const responseBridgePath = path.join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
 const nativeExportsSource = fs.readFileSync(path.join(root, 'src/modules/llmswitch/bridge/native-exports.ts'), 'utf8');
 const rustNapiSource = fs.readFileSync(
   path.join(root, 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs'),
   'utf8'
 );
-const responseLifecycleBridgeSource = fs.readFileSync(
-  path.join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'),
-  'utf8'
-);
+const responseLifecycleBridgeSource = fs.existsSync(responseBridgePath)
+  ? fs.readFileSync(responseBridgePath, 'utf8')
+  : '';
 
 const failures = [];
 
@@ -57,6 +57,9 @@ expectContains(packageJson, 'npm run verify:responses-sse-business-module', 'pac
 
 if (fs.existsSync(sseBridgePath)) {
   failures.push('responses-sse-bridge.ts must stay physically deleted; handler is the transport facade and Rust/NAPI owns SSE projection semantics');
+}
+if (fs.existsSync(responseBridgePath)) {
+  failures.push('responses-response-bridge.ts must stay physically deleted; handler JSON transport and Rust/NAPI own remaining response projection semantics');
 }
 expectContains(handlerSource, "from '../../modules/llmswitch/bridge/native-exports.js'", 'handler-response-sse.ts must call native SSE projection wrappers directly after duplicate facade deletion');
 expectContains(handlerSource, 'function buildClientSseKeepaliveFrameForHttp(', 'handler-response-sse.ts may own transport-only keepalive framing');

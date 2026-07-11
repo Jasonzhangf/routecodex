@@ -3876,24 +3876,24 @@ owners:
       - "Force-SSE JSON/chat body fallback is physically deleted from handler and SSE bridge; server frame writing must consume a Rust/Hub-produced `sseStream` or fail fast with the missing-stream error path."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
-    summary: "/v1/responses response bridge is an opaque response projection/conversation facade; continuation save truth lives in core Chat Process closeout"
-    owner_kind: ts_bridge
-    owner_scope: "/v1/responses response bridge is an opaque response projection/conversation facade; continuation save truth lives in core Chat Process closeout"
-    owner_module: src/modules/llmswitch/bridge/responses-response-bridge.ts
+    summary: "/v1/responses response dispatch is handler-local HTTP IO plus Rust/NAPI response projection; duplicate response bridge facade is deleted"
+    owner_kind: handler_io_plus_rust_ssot
+    owner_scope: "file-scoped /v1/responses response dispatch is handler-local HTTP IO plus Rust/NAPI response projection; continuation save truth lives in core Chat Process closeout"
+    owner_module: src/server/handlers/handler-response-utils.ts
     canonical_types:
-      - ResponsesResponseLifecycleBridgeFacade
+      - ServerRespOutbound05ClientFrame
     canonical_builders:
       - buildResponsesRequestLogContextForHttp
       - normalizeResponsesJsonBodyForHttp
       - prepareResponsesJsonClientDispatchPlanForHttp
-      - rebindResponsesConversationRequestIdForHttp
     allowed_paths:
-      - src/modules/llmswitch/bridge/responses-response-bridge.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
       - docs/architecture
       - scripts/architecture/verify-server-function-map-boundary.mjs
     forbidden_paths:
+      - src/modules/llmswitch/bridge/responses-response-bridge.ts
       - src/server/handlers/responses-handler.ts
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/rust-core
@@ -3903,9 +3903,9 @@ owners:
     required_gates:
       - npm run verify:server-function-map-boundary
       - npm run verify:function-map-compile-gate
-    migration_target: ts
+    migration_target: rust
     notes:
-      - "Response lifecycle bridge may pass opaque continuation/conversation-store IO only."
+      - "Deleted duplicate response bridge facade must stay physically absent; handler may only do HTTP/log/snapshot IO and call native projection wrappers."
       - "Server handler must not keep local response-id rebinding, continuation retention/finalization, or conversation clear-policy semantics."
       - "This lifecycle bridge is explicitly forbidden from owning SSE decode/encode/projection, terminal/probe/repair logic, or SSE frame normalization/projector helpers; those must live in the independent SSE surface or Rust semantic owner."
       - "Responses response->history persistence must not replay provider/client-only reasoning payload fields into next request history; illegal `reasoning.content` must be stripped before continuation/materialize so direct/relay followup requests never send non-empty reasoning content arrays upstream."

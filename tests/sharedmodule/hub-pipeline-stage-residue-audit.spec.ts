@@ -1858,7 +1858,7 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('responses JSON client dispatch plan must be native-owned', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/responses-response-bridge.ts');
+    const filePath = path.join(process.cwd(), 'src/server/handlers/handler-response-utils.ts');
     const source = fs.readFileSync(filePath, 'utf8');
     const findings = collectMatches(source, [
       { label: 'ts direct continuation dispatch branch', pattern: /continuationOwner\s*={0,2}={1,2}\s*['"]direct['"]/ },
@@ -4316,6 +4316,7 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/response-converter.d.ts',
       'src/modules/llmswitch/bridge/responses-conversation-store-host.d.ts',
       'src/modules/llmswitch/bridge/responses-request-bridge.d.ts',
+      'src/modules/llmswitch/bridge/responses-response-bridge.ts',
       'src/modules/llmswitch/bridge/responses-response-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-sse-bridge.d.ts',
       'src/modules/llmswitch/bridge/responses-sse-transport.ts',

@@ -20,9 +20,12 @@ import { getSessionExecutionStateTracker } from '../runtime/http-server/session-
 import { registerRequestLogContext } from '../utils/request-log-color.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
-  buildResponsesRequestLogContextForHttp,
-  prepareResponsesJsonClientDispatchPlanForHttp,
-} from '../../modules/llmswitch/bridge/responses-response-bridge.js';
+  buildResponsesPayloadFromChatNative,
+  planResponsesJsonClientDispatchNative,
+  projectResponsesClientPayloadForClientNative,
+} from '../../modules/llmswitch/bridge/native-exports.js';
+import { readRuntimeRequestTruthIdentifiers } from '../runtime/http-server/metadata-center/request-truth-readers.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 export {
   assertClientResponseHasNoInternalCarriers,
@@ -30,6 +33,163 @@ export {
 
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
+}
+
+type AnyRecord = Record<string, unknown>;
+
+type ResponsesRequestContextForHttp = {
+  payload: AnyRecord;
+  context: AnyRecord;
+  sessionId?: string;
+  conversationId?: string;
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+};
+
+function asRecordForHttp(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function readTrimmedStringForHttp(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function buildResponsesRequestLogContextForHttp(args: {
+  metadata?: unknown;
+  usageLogInfo?: Record<string, unknown> | null;
+}): Record<string, unknown> {
+  const metadata = asRecordForHttp(args.metadata);
+  const usageLogInfo = asRecordForHttp(args.usageLogInfo);
+  const requestTruth = readRuntimeRequestTruthIdentifiers(metadata);
+  const sessionId =
+    readTrimmedStringForHttp(usageLogInfo.sessionId)
+    ?? readTrimmedStringForHttp(usageLogInfo.session_id)
+    ?? readTrimmedStringForHttp(metadata.sessionId)
+    ?? readTrimmedStringForHttp(metadata.session_id)
+    ?? requestTruth.sessionId;
+  const conversationId =
+    readTrimmedStringForHttp(usageLogInfo.conversationId)
+    ?? readTrimmedStringForHttp(usageLogInfo.conversation_id)
+    ?? readTrimmedStringForHttp(metadata.conversationId)
+    ?? readTrimmedStringForHttp(metadata.conversation_id)
+    ?? requestTruth.conversationId;
+  return {
+    logSessionColorKey: usageLogInfo.logSessionColorKey ?? metadata.logSessionColorKey,
+    clientTmuxSessionId: usageLogInfo.clientTmuxSessionId ?? metadata.clientTmuxSessionId,
+    client_tmux_session_id: usageLogInfo.client_tmux_session_id ?? metadata.client_tmux_session_id,
+    tmuxSessionId: usageLogInfo.tmuxSessionId ?? metadata.tmuxSessionId,
+    tmux_session_id: usageLogInfo.tmux_session_id ?? metadata.tmux_session_id,
+    rccSessionClientTmuxSessionId:
+      usageLogInfo.rccSessionClientTmuxSessionId ?? metadata.rccSessionClientTmuxSessionId,
+    rcc_session_client_tmux_session_id:
+      usageLogInfo.rcc_session_client_tmux_session_id ?? metadata.rcc_session_client_tmux_session_id,
+    sessionId,
+    session_id: sessionId,
+    conversationId,
+    conversation_id: conversationId,
+  };
+}
+
+async function normalizeResponsesJsonBodyForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+}): Promise<unknown> {
+  if (args.entryEndpoint !== '/v1/responses') {
+    return args.body;
+  }
+  if (!args.body || typeof args.body !== 'object' || Array.isArray(args.body)) {
+    return args.body;
+  }
+  const body = args.body as Record<string, unknown>;
+  if (body.object !== 'chat.completion') {
+    return args.body;
+  }
+  return buildResponsesPayloadFromChatNative(body, {
+    requestId: args.requestLabel,
+  });
+}
+
+async function normalizeResponsesClientPayloadForHttp(args: {
+  payload: unknown;
+  entryEndpoint?: string;
+  requestContext?: ResponsesRequestContextForHttp;
+  metadata?: Record<string, unknown>;
+}): Promise<unknown> {
+  if (
+    args.entryEndpoint !== '/v1/responses'
+    && args.entryEndpoint !== '/v1/responses.submit_tool_outputs'
+  ) {
+    return args.payload;
+  }
+  if (!args.payload || typeof args.payload !== 'object' || Array.isArray(args.payload)) {
+    return args.payload;
+  }
+  const toolsRaw = args.requestContext?.context?.toolsRaw;
+  if (!Array.isArray(toolsRaw)) {
+    throw new Error('Responses client projection requires requestContext.context.toolsRaw');
+  }
+  return projectResponsesClientPayloadForClientNative({
+    payload: args.payload,
+    toolsRaw,
+    metadata: args.metadata,
+    context: args.requestContext
+      ? {
+          originalRequest: args.requestContext.payload,
+          requestContext: args.requestContext.context,
+        }
+      : undefined,
+  });
+}
+
+async function prepareResponsesJsonClientDispatchPlanForHttp(args: {
+  body: unknown;
+  entryEndpoint?: string;
+  requestLabel?: string;
+  continuationOwner?: string;
+  requestContext?: ResponsesRequestContextForHttp;
+  metadata?: Record<string, unknown>;
+}): Promise<{
+  clientBody: unknown;
+  sanitizedBody: unknown;
+}> {
+  const dispatchPlan = planResponsesJsonClientDispatchNative({
+    entryEndpoint: args.entryEndpoint,
+    continuationOwner: args.continuationOwner,
+    hasRequestContextToolsRaw: Array.isArray(args.requestContext?.context?.toolsRaw),
+  });
+  if (dispatchPlan.action === 'direct_passthrough') {
+    return {
+      clientBody: args.body,
+      sanitizedBody: args.body,
+    };
+  }
+  if (dispatchPlan.action !== 'project_client_payload') {
+    throw new Error(
+      `[responses] unsupported JSON client dispatch action: ${String(dispatchPlan.action ?? 'unknown')}`
+    );
+  }
+  const normalizedJsonBody = await normalizeResponsesJsonBodyForHttp({
+    body: args.body,
+    entryEndpoint: args.entryEndpoint,
+    requestLabel: args.requestLabel,
+  });
+  const clientBody = await normalizeResponsesClientPayloadForHttp({
+    payload: normalizedJsonBody,
+    entryEndpoint: args.entryEndpoint,
+    requestContext: args.requestContext,
+    metadata: args.metadata,
+  });
+  return {
+    clientBody,
+    sanitizedBody: stripInternalKeysDeep(clientBody),
+  };
 }
 
 export async function sendPipelineResponse(

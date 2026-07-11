@@ -25,7 +25,7 @@ describe('server responses SSE surface single owner', () => {
   it('keeps handler-response-utils transport-only without continuation save owner', () => {
     const source = readFileSync(join(root, 'src/server/handlers/handler-response-utils.ts'), 'utf8');
 
-    expect(source).toContain('prepareResponsesJsonClientDispatchPlanForHttp');
+    expect(source).toContain('planResponsesJsonClientDispatchNative');
     expect(source).not.toContain('persistResponsesConversationLifecycleForHttp');
   });
 
@@ -33,7 +33,11 @@ describe('server responses SSE surface single owner', () => {
     expect(existsSync(join(root, 'src/modules/llmswitch/bridge/index.ts'))).toBe(false);
   });
 
-  it('does not let responses-response-bridge own SSE semantic helpers', () => {
+  it('keeps duplicate response bridge facade deleted', () => {
+    expect(existsSync(join(root, 'src/modules/llmswitch/bridge/responses-response-bridge.ts'))).toBe(false);
+  });
+
+  it('does not let handler SSE own response bridge semantic helpers', () => {
     const source = readFileSync(join(root, 'src/server/handlers/handler-response-sse.ts'), 'utf8');
 
     for (const forbiddenExport of [

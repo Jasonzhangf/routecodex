@@ -369,21 +369,6 @@ const mockNativeExportsModule = async () => ({
     && Array.isArray((body as Record<string, unknown>).output)
     && ((body as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
   )),
-  normalizeResponsesClientPayloadForHttp: jest.fn(async ({ payload }: { payload: unknown }) => payload),
-  prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async (args: {
-    body: unknown;
-  }) => ({
-    clientBody: args.body,
-    sanitizedBody: args.body,
-    finishReason:
-      args.body
-      && typeof args.body === 'object'
-      && !Array.isArray(args.body)
-      && Array.isArray((args.body as Record<string, unknown>).output)
-      && ((args.body as Record<string, unknown>).output as unknown[]).some((item) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call')
-        ? 'tool_calls'
-        : 'stop',
-  })),
   shouldDispatchResponsesSseToClientForHttp: jest.fn((args: {
     body: unknown;
     forceSSE: boolean;
@@ -464,7 +449,6 @@ const mockNativeExportsModule = async () => ({
   projectResponsesSseFrameForClientNative: jest.fn(({ frame, state }: { frame: string; state?: unknown }) => ({ emit: true, frame, state })),
   projectResponsesClientPayloadForClientNative: jest.fn(({ payload }: { payload: unknown }) => payload),
   planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
-  rebindResponsesConversationRequestIdForHttp: jest.fn(async () => undefined),
   requireResponsesHandlerCoreDist: jest.fn(() => ({})),
   resolveResponsesClientPayloadFinishReasonForHttp: jest.fn((payload: unknown) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
