@@ -5,18 +5,19 @@ Type definitions for RouteCodex Host and shared module alignment. Focus on DTOs,
 
 ## Core Files
 - `common-types.ts`: Base JSON/logging types
-- `shared-dtos.ts`: Request/response/error data structures shared with `rcc-llmswitch-core`
-- `external-types.ts`: Third-party library type declarations
-- `base-types.ts`: Bridge types between Host and `llmswitch-core`
+- `shared-dtos.ts`: Host-local request/response/error DTOs for app wiring
+- `external-modules.d.ts`: Third-party library type declarations
+- `config-types.ts`: Host config typing for loader and runtime setup
 
 ## Alignment Rule
-Stay in sync with `sharedmodule/llmswitch-core/dist/types`. New DTOs/interfaces should be added to shared module and rebuilt first.
+Host-local types must not become a shadow runtime contract for llmswitch. New Hub Pipeline, routing, tool-governance, continuation, or provider-wire semantics belong in the Rust/native owner first; TypeScript may only keep the minimal host IO shape needed to call that owner.
 
 ## Do / Don't
 **Do**
-- Mirror shared module types to ensure type safety
-- Keep debug types aligned with `src/debug/types.ts`
+- Keep host-only DTOs small and tied to their production caller.
+- Prefer importing concrete app types from the owning source file when possible.
 
 **Don't**
-- Duplicate definitions that exist in shared module
+- Recreate llmswitch-core runtime contracts in `src/types`.
+- Point new code at retired external llmswitch type mirrors.
 - Add business logic or runtime code in type files
