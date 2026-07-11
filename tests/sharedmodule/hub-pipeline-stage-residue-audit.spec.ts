@@ -346,6 +346,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('zero-consumer shared conversion host wrappers must stay retired while Rust exports remain required', () => {
+    const hostPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/native-exports.ts');
+    const requiredExportsPath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
+    const hostSource = fs.readFileSync(hostPath, 'utf8');
+    const requiredExports = JSON.parse(fs.readFileSync(requiredExportsPath, 'utf8')) as string[];
+    const retiredHostWrappers = [
+      'mapChatToolsToBridgeJson',
+      'injectMcpToolsForChatJson',
+      'injectMcpToolsForResponsesJson',
+      'buildAnthropicResponseFromChatJson',
+    ];
+
+    const findings = retiredHostWrappers
+      .filter((symbol) => new RegExp(`export\\s+(?:async\\s+)?function\\s+${symbol}\\b`).test(hostSource));
+    expect(findings).toEqual([]);
+    expect(requiredExports).toEqual(expect.arrayContaining(retiredHostWrappers));
+  });
+
   it('legacy runHubPipelineStageJson Rust export and stage branches must be physically removed', () => {
     const crateRoot = path.join(
       process.cwd(),

@@ -117,7 +117,6 @@ export function finalizeResponsesHandlerPayloadForHttpFake(args: {
 
 export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyRecord {
   const fake: AnyRecord = {
-    buildAnthropicResponseFromChatJson: async (payload: unknown) => payload,
     buildResponsesPayloadFromChatNative: (payload: unknown) => payload,
     buildResponsesRequestFromChatNative: (payload: unknown) => payload,
     buildRequestStageRuntimeControlWritePlanNative: () => ({}),
@@ -156,13 +155,10 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     extractServertoolCliResultRouteHintFromRequestNative: () => undefined,
     getRouterHotpathJsonBindingSync: () => ({}),
     hasRequestedToolsInSemanticsNative: () => false,
-    injectMcpToolsForChatJson: async (payload: unknown) => payload,
-    injectMcpToolsForResponsesJson: async (payload: unknown) => payload,
     isProviderNativeResumeContinuationNative: () => false,
     isRequiredToolCallTurnNative: () => false,
     isToolCallContinuationResponseNative: () => false,
     isToolResultFollowupTurnNative: () => false,
-    mapChatToolsToBridgeJson: async () => [],
     materializeProviderOwnedSubmitContext: async () => ({}),
     mergeObservedRoutePoolChainNative: () => ({}),
     normalizeAssistantTextToToolCallsJson: async () => ({}),

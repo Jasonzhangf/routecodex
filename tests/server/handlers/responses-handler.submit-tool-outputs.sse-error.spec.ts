@@ -48,7 +48,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
 }));
 
 const createNativeExportsMock = () => ({
-  buildAnthropicResponseFromChatJson: jest.fn((payload: unknown) => payload),
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
   captureReqInboundResponsesContextSnapshot: jest.fn(async (args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
@@ -92,10 +91,7 @@ const createNativeExportsMock = () => ({
       return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
     }),
   })),
-  injectMcpToolsForChatJson: jest.fn((payload: unknown) => payload),
-  injectMcpToolsForResponsesJson: jest.fn((payload: unknown) => payload),
   isToolCallContinuationResponseNative: jest.fn(() => false),
-  mapChatToolsToBridgeJson: jest.fn((payload: unknown) => payload),
   materializeProviderOwnedSubmitContext: jest.fn((payload: Record<string, unknown>) => payload),
   normalizeAssistantTextToToolCallsJson: jest.fn((payload: unknown) => payload),
   normalizeResponsesDirectCurrentRequestPayload: jest.fn((payload: unknown) => payload),

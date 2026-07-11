@@ -943,3 +943,12 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - The sharedmodule build surface is now native-only: `sharedmodule/llmswitch-core/package.json` runs native hotpath build plus servertool wrapper generation, and `sharedmodule/llmswitch-core/tsconfig.json` has no included TS authoring files.
 - `verify-llmswitch-zero-ts-closeout.mjs` now gates the stronger final state: zero tracked/filesystem TS-like files under `sharedmodule/llmswitch-core`, zero minimal TS surface entries, zero non-native rustification audit metrics, and zero external code imports/mappers into `sharedmodule/llmswitch-core/src`.
 - Verification passed: zero-TS closeout verifier, `verify:llmswitch-core-tsc`, minimal TS surface audit, rustification audit, focused residue/dead-export Jest 212/212, deleted-path, thin-wrapper-only, function-map compile, native hotpath build, and `build:base`.
+
+### 2026-07-11 shared conversion host wrapper surface narrowed
+
+- Removed zero-consumer host wrappers from `src/modules/llmswitch/bridge/native-exports.ts`: `mapChatToolsToBridgeJson`, `injectMcpToolsForChatJson`, `injectMcpToolsForResponsesJson`, and `buildAnthropicResponseFromChatJson`.
+- Kept the Rust/NAPI raw exports in `sharedmodule/llmswitch-core/native-hotpath-required-exports.json` and the native binding interface typing; tests that need the raw native semantics continue to use direct native helpers.
+- Removed stale test mock fields for those wrappers so tests cannot keep the retired host wrapper shape alive.
+- Added a residue gate in `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` that fails if those public host wrapper functions return while requiring the Rust/NAPI raw exports to remain present.
+- Red/green evidence: the new gate first failed with the four wrapper names present, then passed after deletion.
+- Verification passed: focused Jest 5 suites / 222 tests; strict shell reference audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; direct tool-shape/SSE/handler bridge audits; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`.

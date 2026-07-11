@@ -465,35 +465,6 @@ function getChatProcessNodeResultSemantics(): NativeChatProcessNodeResultSemanti
   return getRouterHotpathJsonBindingSync() as NativeChatProcessNodeResultSemantics;
 }
 
-export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
-  const parsed = invokeRouterHotpathJsonCapability('mapChatToolsToBridgeJson', [
-    Array.isArray(rawTools) ? rawTools : [],
-  ]);
-  return assertNativeArray('mapChatToolsToBridgeJson', parsed) as AnyRecord[];
-}
-
-export async function injectMcpToolsForChatJson(
-  tools: unknown[] | undefined,
-  discoveredServers: string[]
-): Promise<AnyRecord[]> {
-  const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForChatJson', [
-    Array.isArray(tools) ? tools : [],
-    Array.isArray(discoveredServers) ? discoveredServers : [],
-  ]);
-  return assertNativeArray('injectMcpToolsForChatJson', parsed) as AnyRecord[];
-}
-
-export async function injectMcpToolsForResponsesJson(
-  tools: unknown[] | undefined,
-  discoveredServers: string[]
-): Promise<AnyRecord[]> {
-  const parsed = invokeRouterHotpathJsonCapability('injectMcpToolsForResponsesJson', [
-    Array.isArray(tools) ? tools : [],
-    Array.isArray(discoveredServers) ? discoveredServers : [],
-  ]);
-  return assertNativeArray('injectMcpToolsForResponsesJson', parsed) as AnyRecord[];
-}
-
 export async function normalizeAssistantTextToToolCallsJson(
   message: Record<string, unknown>,
   options?: Record<string, unknown>
@@ -604,17 +575,6 @@ export async function planResponsesContinuationRequestAction(input: {
     input,
   ]);
   return assertNativeObject('planResponsesContinuationRequestActionJson', parsed);
-}
-
-export async function buildAnthropicResponseFromChatJson(
-  chatResponse: unknown,
-  aliasMap?: Record<string, string>
-): Promise<AnyRecord> {
-  const parsed = invokeRouterHotpathJsonCapability('buildAnthropicResponseFromChatJson', [
-    chatResponse ?? null,
-    aliasMap ?? null,
-  ]);
-  return assertNativeObject('buildAnthropicResponseFromChatJson', parsed);
 }
 
 export async function sanitizeProviderOutboundPayload(input: {

@@ -28907,3 +28907,12 @@ Pure Rust NAPI candidates:
 - Evidence: MemPalace search located the prior candidate note; focused Rust test `build_responses_conversation_port_scope_for_http_matches_handler_contract` passed; focused Jest passed 5 suites / 33 tests; `verify:function-map-compile-gate`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `npx tsc --noEmit`, `npm run build:base`, and touched-file `git diff --check` passed.
 - Architecture review: no JS backfill, no fallback, no duplicate TS semantic owner. Remaining active bridge references are `provider-response-converter-host.ts` and snapshot recorder host IO files; they are not deletion candidates without deeper owner migration.
 - Known non-target gap: broad `handler-request-executor.unified-semantics.e2e.spec.ts` still fails legacy/mock expectations when run directly; it was not used as closeout evidence for this pure port-scope native slice.
+
+# 2026-07-11: shared conversion host wrappers retired
+
+- Scope: continued llmswitch external reference closeout without adding JS/TS semantics.
+- Deleted public host wrappers `mapChatToolsToBridgeJson`, `injectMcpToolsForChatJson`, `injectMcpToolsForResponsesJson`, and `buildAnthropicResponseFromChatJson` from `src/modules/llmswitch/bridge/native-exports.ts`; kept raw Rust/NAPI required exports and binding interface typing.
+- Removed stale mock fields from native-export test fixtures and request/Responses handler executor tests.
+- Added red/green residue gate: `hub-pipeline-stage-residue-audit` now forbids those public host wrapper functions while asserting the Rust required exports remain present.
+- Evidence: exact tracked-source scan after deletion shows only `native-hotpath-required-exports.json`, binding interface type entries, direct native test helpers, and the new gate text.
+- Verification PASS: focused Jest 5 suites / 222 tests; strict `llmswitch-ts-shell-reference-audit`; deleted-path; thin-wrapper-only; function-map compile; minimal TS surface; rustification audit; direct tool-shape/SSE/handler bridge audits; `npx tsc --noEmit --pretty false`; `npm run build:native-hotpath`.

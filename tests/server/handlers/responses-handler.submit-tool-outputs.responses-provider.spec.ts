@@ -36,9 +36,6 @@ const createNativeExportsMock = () => ({
     resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
     resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
-  mapChatToolsToBridgeJson: jest.fn(async (rawTools: unknown) => Array.isArray(rawTools) ? rawTools : []),
-  injectMcpToolsForChatJson: jest.fn(async (input: unknown) => input),
-  injectMcpToolsForResponsesJson: jest.fn(async (input: unknown) => input),
   normalizeAssistantTextToToolCallsJson: jest.fn(async (input: unknown) => input),
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
@@ -120,7 +117,6 @@ const createNativeExportsMock = () => ({
     }
     return { action: 'none' };
   }),
-  buildAnthropicResponseFromChatJson: jest.fn(async (input: unknown) => input),
   sanitizeProviderOutboundPayload: jest.fn(async (input: unknown) => input),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),

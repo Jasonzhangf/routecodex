@@ -495,11 +495,7 @@ const mockNativeExportsModule = () => ({
   projectResponsesSseFrameForClientNative: jest.fn((args: any) => args?.frame ?? ''),
   classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false })),
   detectToolExecutionFailuresNative: jest.fn(() => []),
-  buildAnthropicResponseFromChatJson: jest.fn(),
   convertResponsesRequestToChatNative: jest.fn(),
-  injectMcpToolsForChatJson: jest.fn(),
-  injectMcpToolsForResponsesJson: jest.fn(),
-  mapChatToolsToBridgeJson: jest.fn(),
   normalizeAssistantTextToToolCallsJson: jest.fn(),
   sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload)
 });
