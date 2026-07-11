@@ -2,11 +2,47 @@ import { PassThrough, Readable } from "node:stream";
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 
 jest.unstable_mockModule(
-  "../../../src/modules/llmswitch/bridge.js",
-  async () => {
-    const store =
-      await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
+  "../../../src/modules/llmswitch/bridge/responses-sse-bridge.js",
+  () => {
+    const projectResponsesSseFrameForClientForHttp = jest.fn((input: {
+      frame: string;
+      eventName?: string;
+      data?: Record<string, unknown>;
+      state: unknown;
+    }) => {
+      const requiredAction = input.data?.required_action as Record<string, unknown> | undefined;
+      const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
+      const calls = Array.isArray(submit?.tool_calls)
+        ? submit.tool_calls as Record<string, unknown>[]
+        : [];
+      if (input.eventName === "response.required_action" && calls.length > 0) {
+        const frames = calls.map((call, index) => {
+          const fn = call.function as Record<string, unknown> | undefined;
+          const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
+          const name = String(fn?.name ?? call.name ?? "function");
+          const args = String(fn?.arguments ?? call.arguments ?? "{}");
+          const itemId = `fc_${callId}`;
+          return [
+            `event: response.output_item.added\ndata: ${JSON.stringify({ type: "response.output_item.added", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: "", status: "in_progress" } })}\n\n`,
+            `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: "response.function_call_arguments.delta", output_index: index, item_id: itemId, call_id: callId, delta: args })}\n\n`,
+            `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: "response.function_call_arguments.done", output_index: index, item_id: itemId, call_id: callId, name, arguments: args })}\n\n`,
+            `event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: args, status: "completed" } })}\n\n`,
+          ].join("");
+        }).join("");
+        return { emit: true, frame: frames, state: input.state };
+      }
+      return { emit: true, frame: input.frame, state: input.state };
+    });
     return {
+      buildClientSseKeepaliveFrameForHttp: jest.fn(() => ":\n\n"),
+      createResponsesSseClientProjectionStateForHttp: jest.fn(() => ({})),
+      projectResponsesSseFrameForClientForHttp,
+      updateResponsesSseTransportTerminalStateForHttp: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
+        state: input.state ?? {},
+        observedTerminal:
+          String(input.chunk ?? "").includes("response.completed")
+          || String(input.chunk ?? "").includes("response.done"),
+      })),
       createResponsesJsonToSseConverter: jest.fn(async () => ({
         convertResponseToJsonToSse: jest.fn(async () =>
           Readable.from(["event: response.completed\n", "data: {}\n\n"]),
@@ -185,44 +221,27 @@ jest.unstable_mockModule(
       }),
       buildResponsesTerminalSseFramesFromProbeNative: jest.fn(() => []),
       projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
-      importCoreDist: jest.fn(async (subpath?: string) => {
-        if (subpath) {
-          return {};
-        }
-        return {
-          projectResponsesSseFrameForClientWithNative: (input: {
-            frame: string;
-            eventName?: string;
-            data?: Record<string, unknown>;
-            state: unknown;
-          }) => {
-            const requiredAction = input.data?.required_action as Record<string, unknown> | undefined;
-            const submit = requiredAction?.submit_tool_outputs as Record<string, unknown> | undefined;
-            const calls = Array.isArray(submit?.tool_calls)
-              ? submit.tool_calls as Record<string, unknown>[]
-              : [];
-            if (input.eventName === "response.required_action" && calls.length > 0) {
-              const frames = calls.map((call, index) => {
-                const fn = call.function as Record<string, unknown> | undefined;
-                const callId = String(call.id ?? call.call_id ?? `call_${index + 1}`);
-                const name = String(fn?.name ?? call.name ?? "function");
-                const args = String(fn?.arguments ?? call.arguments ?? "{}");
-                const itemId = `fc_${callId}`;
-                return [
-                  `event: response.output_item.added\ndata: ${JSON.stringify({ type: "response.output_item.added", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: "", status: "in_progress" } })}\n\n`,
-                  `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: "response.function_call_arguments.delta", output_index: index, item_id: itemId, call_id: callId, delta: args })}\n\n`,
-                  `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: "response.function_call_arguments.done", output_index: index, item_id: itemId, call_id: callId, name, arguments: args })}\n\n`,
-                  `event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", output_index: index, item: { id: itemId, type: "function_call", call_id: callId, name, arguments: args, status: "completed" } })}\n\n`,
-                ].join("");
-              }).join("");
-              return { emit: true, frame: frames, state: input.state };
-            }
-            return { emit: true, frame: input.frame, state: input.state };
-          },
-          projectResponsesClientPayloadForClientWithNative: (payload: unknown) => payload,
-        };
-      }),
-      requireCoreDist: jest.fn(),
+    };
+  },
+);
+
+jest.unstable_mockModule(
+  "../../../src/modules/llmswitch/bridge/responses-response-bridge.js",
+  () => ({
+    buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
+    prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(async ({ body }: { body: unknown }) => ({
+      clientBody: body,
+      sanitizedBody: body,
+    })),
+  }),
+);
+
+jest.unstable_mockModule(
+  "../../../src/modules/llmswitch/bridge/runtime-integrations.js",
+  () => {
+    const importStore = async () =>
+      import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
+    return {
       captureResponsesRequestContextForRequest: jest.fn(
         async (args: {
           requestId: string;
@@ -230,10 +249,15 @@ jest.unstable_mockModule(
           context: Record<string, unknown>;
           sessionId?: string;
           routeHint?: string;
-        }) => store.captureResponsesRequestContext(args),
+        }) => {
+          const store = await importStore();
+          store.captureResponsesRequestContext(args);
+          return undefined;
+        },
       ),
       clearResponsesConversationByRequestId: jest.fn(
         async (requestId?: string) => {
+          const store = await importStore();
           store.clearResponsesConversationByRequestId(requestId);
           return undefined;
         },
@@ -243,6 +267,7 @@ jest.unstable_mockModule(
           requestId?: string,
           options?: { keepForSubmitToolOutputs?: boolean },
         ) => {
+          const store = await importStore();
           store.finalizeResponsesConversationRequestRetention(
             requestId,
             options,
@@ -256,12 +281,14 @@ jest.unstable_mockModule(
           response: Record<string, unknown>;
           routeHint?: string;
         }) => {
+          const store = await importStore();
           store.recordResponsesResponse(args);
           return undefined;
         },
       ),
       rebindResponsesConversationRequestId: jest.fn(
         async (oldId?: string, newId?: string) => {
+          const store = await importStore();
           store.rebindResponsesConversationRequestId(oldId, newId);
           return undefined;
         },
@@ -415,14 +442,14 @@ describe("sendPipelineResponse responses store integration", () => {
   ];
 
   afterEach(async () => {
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
-    (bridge.captureResponsesRequestContextForRequest as jest.Mock).mockClear();
-    (bridge.recordResponsesResponseForRequest as jest.Mock).mockClear();
-    (bridge.clearResponsesConversationByRequestId as jest.Mock).mockClear();
+    const runtime = await import("../../../src/modules/llmswitch/bridge/runtime-integrations.js");
+    (runtime.captureResponsesRequestContextForRequest as jest.Mock).mockClear();
+    (runtime.recordResponsesResponseForRequest as jest.Mock).mockClear();
+    (runtime.clearResponsesConversationByRequestId as jest.Mock).mockClear();
     (
-      bridge.finalizeResponsesConversationRequestRetention as jest.Mock
+      runtime.finalizeResponsesConversationRequestRetention as jest.Mock
     ).mockClear();
-    (bridge.rebindResponsesConversationRequestId as jest.Mock).mockClear();
+    (runtime.rebindResponsesConversationRequestId as jest.Mock).mockClear();
     const store =
       await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     for (const requestId of requestIds) {
@@ -1707,7 +1734,6 @@ describe("sendPipelineResponse responses store integration", () => {
   it("clears retained responses store entries when JSON response is an error", async () => {
     const { sendPipelineResponse } =
       await import("../../../src/server/handlers/handler-response-utils.js");
-    const bridge = await import("../../../src/modules/llmswitch/bridge.js");
     const store =
       await import("../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js");
     const routerRequestId = "openai-responses-router-gpt-5.3-codex-json-error-cleanup";
@@ -2038,15 +2064,15 @@ describe("sendPipelineResponse responses store integration", () => {
         ],
       });
 
-      const bridge =
+      const directNativeBridge =
         await import("../../sharedmodule/helpers/responses-openai-bridge-direct-native.js");
-      const ctx = bridge.captureResponsesContext(
+      const ctx = directNativeBridge.captureResponsesContext(
         resumed.payload as Record<string, unknown>,
         {
           route: { requestId: `${routerRequestId}-resume` },
         },
       );
-      const chat = bridge.buildChatRequestFromResponses(
+      const chat = directNativeBridge.buildChatRequestFromResponses(
         resumed.payload as Record<string, unknown>,
         ctx as any,
       ).request;
@@ -2076,7 +2102,7 @@ describe("sendPipelineResponse responses store integration", () => {
   });
 
   it("uses resume fullInput semantics to preserve assistant tool_calls before tool outputs", async () => {
-    const bridge =
+    const directNativeBridge =
       await import("../../sharedmodule/helpers/responses-openai-bridge-direct-native.js");
 
     const payload = {
@@ -2134,10 +2160,10 @@ describe("sendPipelineResponse responses store integration", () => {
       },
     };
 
-    const ctx = bridge.captureResponsesContext(payload as Record<string, unknown>, {
+    const ctx = directNativeBridge.captureResponsesContext(payload as Record<string, unknown>, {
       route: { requestId: "req-full-input-resume-1" },
     });
-    const chat = bridge.buildChatRequestFromResponses(
+    const chat = directNativeBridge.buildChatRequestFromResponses(
       payload as Record<string, unknown>,
       ctx as any,
     ).request as Record<string, unknown>;
