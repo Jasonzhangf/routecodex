@@ -2032,7 +2032,7 @@ owners:
       - tests/sharedmodule/apply-patch-freeform-client-projection.blackbox.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
       - tests/sharedmodule/responses-json-client-projection-direct-native.spec.ts
-      - tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts
+      - tests/sharedmodule/responses-sse-contract-direct-native.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:hub-response-responses-chat-projection

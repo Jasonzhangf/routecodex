@@ -4,9 +4,9 @@ import {
   projectResponsesSseFrameForClientWithNative,
   updateResponsesContractProbeFromSseChunkWithNative,
   updateResponsesSseTransportTerminalStateWithNative
-} from '../../../sharedmodule/helpers/resp-semantics-direct-native.js';
+} from './helpers/resp-semantics-direct-native.js';
 
-describe('native-exports responses SSE contract', () => {
+describe('Responses SSE direct native contract', () => {
   it('calls router_hotpath SSE projection with the native multi-arg contract', () => {
     const projected = projectResponsesSseFrameForClientWithNative({
       frame: 'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_1"}}\n\n',
