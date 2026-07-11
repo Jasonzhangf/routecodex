@@ -1628,9 +1628,11 @@ port = 5520
     expect(portChecks[0]?.restart).toBe(true);
   });
 
-  it('uses restart flow when --restart is provided', async () => {
+  it('refuses explicit --restart takeover when a runtime already listens', async () => {
+    // runtime.lifecycle.start_command: refuseExplicitRestartTakeoverIfOccupied
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
+    const errors: string[] = [];
 
     createStartCommand(program, {
       isDevPackage: true,
@@ -1638,7 +1640,7 @@ port = 5520
       defaultDevPort: 5520,
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
-      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: (message: string) => errors.push(message) },
       env: {},
       fsImpl: {
         existsSync: () => true,
@@ -1660,8 +1662,9 @@ port = 5520
       ensureLocalTokenPortalEnv: async () => {},
       ensurePortAvailable: async (_port, _spinner, opts) => {
         portChecks.push(opts ?? {});
+        throw new Error('ensurePortAvailable should not run for explicit --restart takeover');
       },
-      findListeningPids: () => [],
+      findListeningPids: () => [1234],
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
       resolveServerEntryPath: () => '/tmp/index.js',
@@ -1678,9 +1681,11 @@ port = 5520
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--restart'], { from: 'node' });
-    expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(true);
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--restart'], { from: 'node' })
+    ).rejects.toThrow('exit:1');
+    expect(portChecks).toHaveLength(0);
+    expect(errors.join('\n')).toContain('rcc restart --port 5520');
   });
 
   it('uses non-restart flow when --no-restart is provided', async () => {

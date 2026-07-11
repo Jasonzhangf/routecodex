@@ -37,12 +37,12 @@ functions -> blocks -> orchestration
 
 ### B. flow policy 真源
 
-当前 followup policy 的单点真源已经基本存在：
+当前 followup policy 的单点真源必须是 Rust profile / skeleton owner：
 
-- TS 壳：
-  - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.ts`
 - Rust 真源：
   - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs`
+
+历史 TS 壳 `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-flow-policy.ts` 已删除，不得恢复为 flow policy owner。
 
 Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 
@@ -82,18 +82,18 @@ Rust `plan_servertool_followup_runtime_json(flow_id)` 已能输出：
 
 1. **flow profile 真源已经有 70%**，但还没全量覆盖。
 2. 缺口不是“没有配置能力”，而是**部分 flow 还没搬进 skeleton**。
-3. 更严重的问题是：**TS orchestration 仍然保留第二语义面**。
+3. 防回潮重点是：**不得恢复 TS orchestration 第二语义面**。
 
 ---
 
-## 当前违反“config-only orchestration”的点
+## 历史违反“config-only orchestration”的点
 
-### 1. `backend-route-runtime-block.ts` 仍有 flow-specific 真相硬编码
+### 1. 历史 `backend-route-runtime-block.ts` flow-specific 硬编码已删除
 
 文件：
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`
 
-已确认越界点：
+历史越界点：
 
 ```ts
 if (injectSource === 'servertool.stopless_continue') {
@@ -105,16 +105,16 @@ if (args.flowId === 'stop_message_flow') {
 ```
 
 问题：
-- `stop_message_flow -> reenter` 不该在 TS block 里硬编码。
-- 这本质是 **flow profile 决策**，必须来自 skeleton config。
-- 当前相当于 profile 里一份，TS block 又写一份，形成**双真源**。
+- `stop_message_flow -> reenter` 不得在 TS block 里硬编码。
+- 这本质是 **flow profile 决策**，必须来自 Rust skeleton config / effect plan。
+- 该 TS block 已物理删除；后续若需要扩展，只能回 Rust owner，不得恢复同义 TS block。
 
-### 2. `applyClientInjectOnlyMetadata(...)` 仍把 stop_message 作为特殊流内建
+### 2. 历史 `applyClientInjectOnlyMetadata(...)` stop_message 特例已删除
 
 文件：
 - `/Users/fanzhang/Documents/github/routecodex/sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`
 
-已确认越界点：
+历史越界点：
 
 ```ts
 if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
@@ -122,7 +122,7 @@ if ((args.flowId !== 'stop_message_flow' && !decision.clientInjectOnly) || ...)
 
 问题：
 - 是否强制 client inject 应由 `decision.clientInjectOnly` 决定。
-- 编排 block 不应再知道 `stop_message_flow` 这个业务名。
+- 编排 block 不应再知道 `stop_message_flow` 这个业务名；该逻辑不得以 TS helper 形式回潮。
 
 ### 3. 历史 `backend-route-mainline-block.ts` 已删除
 

@@ -111,4 +111,59 @@ describe('process lifecycle logger', () => {
       }
     }
   });
+
+  test('serializes nested Error details with message instead of empty object', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-lifecycle-nested-error-'));
+    const logPath = path.join(tempDir, 'process-lifecycle.jsonl');
+    const prevPath = process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG;
+    const prevConsole = process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE;
+
+    process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG = logPath;
+    process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE = '0';
+
+    try {
+      const error = new Error('shutdown request aborted');
+      (error as Error & { code?: string; cause?: Error }).code = 'ABORT_ERR';
+      (error as Error & { cause?: Error }).cause = new Error('timeout exceeded');
+
+      logProcessLifecycleSync({
+        event: 'port_http_shutdown',
+        source: 'tests.process-lifecycle.nested-error',
+        details: {
+          result: 'failed',
+          host: '127.0.0.1',
+          port: 4444,
+          error
+        }
+      });
+
+      const [entry] = fs
+        .readFileSync(logPath, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      const details = (entry?.details ?? {}) as Record<string, unknown>;
+      const serializedError = (details.error ?? {}) as Record<string, unknown>;
+      expect(serializedError).toEqual(expect.objectContaining({
+        name: 'Error',
+        message: 'shutdown request aborted',
+        code: 'ABORT_ERR'
+      }));
+      expect((serializedError.cause as Record<string, unknown>)?.message).toBe('timeout exceeded');
+      expect(serializedError).not.toEqual({});
+    } finally {
+      if (prevPath === undefined) {
+        delete process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG;
+      } else {
+        process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG = prevPath;
+      }
+      if (prevConsole === undefined) {
+        delete process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE;
+      } else {
+        process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE = prevConsole;
+      }
+    }
+  });
 });

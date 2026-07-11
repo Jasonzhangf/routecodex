@@ -23,10 +23,12 @@ Rust 真源：
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs`
 
-TS 允许存在的仅是 bridge / orchestration：
+TS 允许存在的仅是 Host N-API 调用壳和测试 helper；历史 llmswitch-core TS bridge / orchestration 已删除，不能作为当前入口恢复：
 
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts`
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts`
+- 已删除：`sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts`
+- 已删除：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat/compat-engine.ts`
+- 当前 Host bridge surface：`src/modules/llmswitch/bridge/native-exports.ts`
+- 当前 direct native test helper：`tests/sharedmodule/helpers/compat-engine-direct-native.ts`
 
 ## 收口规则
 

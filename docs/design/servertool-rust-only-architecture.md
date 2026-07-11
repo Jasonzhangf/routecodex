@@ -781,12 +781,12 @@ TS shell 只做：
 - 前四个主要是 internal lifecycle tool，依赖 skeleton 最深
 - `web_search` 涉及 backend provider bridge，适合最后收口
 
-### Phase 4：移除 TS 真相
+### Phase 4：移除 TS 真相（已完成物理删除）
 
-1. 删除 `engine.ts` 主语义
-2. 删除 `server-side-tools.ts` 主语义
-3. 清理 TS handlers
-4. 删除 `.bak`
+1. 历史 `engine.ts` / `engine-orchestration-shell.ts` 主语义已删除，不得恢复。
+2. 历史 `server-side-tools.ts` 主语义已删除，不得恢复。
+3. 历史 TS handlers 已删除；新增/修复必须回 Rust owner。
+4. `.bak` / legacy imports 不得进入 active runtime。
 
 ### Phase 5：唯一实现门禁
 
@@ -818,23 +818,20 @@ TS shell 只做：
 4. TS 删小了，但 outcome 判定仍双实现
 5. `.bak`、legacy imports 仍在 active runtime
 
-## 推荐首刀
+## 当前推荐下一刀
 
-若按最小高价值切片推进，第一刀应是：
+在 TS 主语义已经删除后，下一刀不再是“让 TS 退化为薄壳”，而是继续收外部引用和 gate：
 
-1. 新建 Rust `servertool/skeleton/*`
-2. 导出 `runServertoolResponseStageJson`
-3. 让 TS `server-side-tools.ts` 先退化为：
-   - 调 native
-   - 执行 bridge request
-   - 回填 result
-4. 然后再逐个把 handler 迁进 skeleton
+1. source-tracked exact scan 找到仍把旧 `sharedmodule/llmswitch-core/src/servertool/**` 当 current owner 的 docs/tests/scripts。
+2. 将 current-facing 引用改指 Rust `servertool-core` / `router-hotpath-napi` 或 Host N-API shell。
+3. 对 active test/script consumer 迁到 direct Rust/NAPI helper，不能恢复 `server-side-tools.ts`。
+4. 扩展 residue gate 防止旧 TS servertool path 作为 runtime/import owner 回潮。
 
-这样可以最早把“执行骨架真相”收回 Rust，而不是继续在 TS 里修补细节。
+这样可以保持“执行骨架真相”已经收回 Rust 的状态，而不是继续在 TS 里修补细节。
 
-## 面向能力较弱模型的 apply_patch 执行计划（审计后新增）
+## 历史 apply_patch 执行计划（审计后新增，非当前入口）
 
-本节目标：把本文重构路线拆成**低认知负担、强约束、可机械执行**的 patch 序列，降低“弱模型”在大改造任务中的偏航风险。
+本节保留历史迁移路线用于解释当时如何从 TS 迁到 Rust。当前 TS 主语义已物理删除，不能按本节恢复 TS 调用壳或重新执行“让 TS 退化为薄壳”的路线；当前执行入口是 source-tracked exact scan、Rust owner、Host N-API shell 和 residue gate。
 
 ### A. 适配原则（给弱模型的硬约束）
 
@@ -1019,34 +1016,34 @@ TS shell 只做：
    - 不通过“改名躲 grep”伪造清理结果；
 4. 只有在 Rust 真源已接住对应语义后，TS 侧历史实现才允许物理删除。
 
-### 当前高优先级债务队列（按命中数排序）
+### 历史高优先级债务队列（已删除 TS 路径）
 
-#### P0：stop-message-auto 族（先做）
+#### P0：stop-message-auto 族（历史）
 
-- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：6
-- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`：3
-- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`：3
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`：已删除
 
 原因：
 
 - 该族直接处于 servertool followup / stop_message 生命周期主链；
 - 与 Rust-only skeleton 的 request/response/finalize 收口关系最紧；
-- 继续保留大量 TS fallback 语义，会阻碍 Patch 3-7 的“主链单真源”收敛。
+- 恢复这些 TS fallback 语义会阻碍“主链单真源”收敛。
 
 执行要求：
 
 - 先把 `fallback` 区分为：
   - 真 fallback/降级语义；
   - 仅变量命名/文本拼接中的“fallback”；
-- 仅当前者成立时才进入 Rust 化/删除计划；
+- 仅当前者成立时才进入 Rust owner 修复计划；
 - 不允许为了过 grep 直接重命名而保持同样双路径语义。
 
-#### P1：clock / orchestration 族
+#### P1：clock / orchestration 族（历史）
 
-- `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`：6
-- `sharedmodule/llmswitch-core/src/servertool/clock/tasks.ts`：3
-- `sharedmodule/llmswitch-core/src/servertool/clock/daemon.ts`：2
-- `sharedmodule/llmswitch-core/src/servertool/clock/session-scope.ts`：2
+- `sharedmodule/llmswitch-core/src/servertool/orchestration-policy-block.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/clock/tasks.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/clock/daemon.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/clock/session-scope.ts`：已删除
 
 原因：
 
@@ -1059,11 +1056,11 @@ TS shell 只做：
 - 如果只是局部 helper 参数名，不应误判为架构性 fallback；
 - 若涉及 scope resolve / pending injection / due window 判定，则必须按 Rust 真源迁移处理。
 
-#### P2：heartbeat / store 族
+#### P2：heartbeat / store 族（历史）
 
-- `sharedmodule/llmswitch-core/src/servertool/heartbeat/session-store.ts`：7
-- `sharedmodule/llmswitch-core/src/servertool/heartbeat/daemon.ts`：3
-- `sharedmodule/llmswitch-core/src/servertool/heartbeat/history-store.ts`：2
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/session-store.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/daemon.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/heartbeat/history-store.ts`：已删除
 
 原因：
 
@@ -1075,11 +1072,11 @@ TS shell 只做：
 - 先确认哪些 `fallback` 只是文件名/sessionId 恢复型局部变量；
 - 若属于历史状态兼容逻辑，必须等对应 Rust codec/state 真源落地后再删。
 
-#### P3：非主链辅助文件
+#### P3：非主链辅助文件（历史）
 
-- `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts`：6
-- `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`：2
-- `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`：1
+- `sharedmodule/llmswitch-core/src/servertool/pre-command-hooks.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/skeleton-config.ts`：已删除
+- `sharedmodule/llmswitch-core/src/servertool/backend-route-runtime-block.ts`：已删除
 
 原因：
 
@@ -1089,15 +1086,14 @@ TS shell 只做：
 
 ### 推荐下一刀
 
-下一刀只做：
+历史下一刀已完成删除；当前下一刀只做：
 
-1. **审计 `stop-message-auto` 族的每一个 `fallback` 命中**；
+1. 审计是否有 source-tracked current docs / tests / scripts 仍把已删除 `stop-message-auto` TS 族当 current owner；
 2. 对每个命中标注：
-   - 变量名/文案；
-   - 局部默认值；
-   - 真降级路径；
-   - 历史兼容路径；
-3. 产出“可直接删 / 需 Rust 接管后删 / 仅重命名无价值”三分类表。
+   - historical doc-only；
+   - active test/script reference；
+   - forbidden current owner reference；
+3. 产出“保留历史 / 改指 Rust owner / 删除 stale reference”三分类表。
 
 禁止在这一刀中同时改动 `clock` 或 `heartbeat`，否则弱模型极易跨模块混改，违反本文“单 patch 单职责”的执行约束。
 
@@ -1107,9 +1103,9 @@ TS shell 只做：
 
 ### 审计范围
 
-1. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
-2. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`
-3. `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`
+1. 历史 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`（已删除）
+2. 历史 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/ai-followup-pure-blocks.ts`（已删除）
+3. 历史 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/blocked-report.ts`（已删除）
 
 总命中数：12
 
@@ -1529,19 +1525,9 @@ resolveStopMessageSessionScope
 
 ### TS bridge 要求
 
-在：
+历史 TS bridge `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts` 已删除，不得恢复为新增 wrapper 位置。新增 native export 必须通过 Rust `router-hotpath-napi` 和 Host N-API shell 暴露。
 
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
-
-新增：
-
-- `planStopMessagePersistedLookupWithNative(...)`
-
-然后由：
-
-- `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
-
-提供 stop-message-auto 专用包装。
+历史 `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts` 已删除，不得恢复 stop-message-auto 专用 TS 包装。
 
 ### TS 删除顺序
 
@@ -1576,13 +1562,13 @@ resolveStopMessageSessionScope
 1. Rust：
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs`
    - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
-2. TS bridge：
+2. Native export / Host bridge：
    - `sharedmodule/llmswitch-core/native-hotpath-required-exports.json`
-   - `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts`
-3. stop-message runtime 壳层：
-   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.ts`
+   - `src/modules/llmswitch/bridge/native-exports.ts`
+3. stop-message runtime owner：
+   - Rust `servertool-core` / `router-hotpath-napi`
 4. stop-message 主链：
-   - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
+   - Rust Chat Process request/response boundary
 5. 最后才允许升级门禁：
    - `scripts/verify-servertool-rust-only.mjs`
 
@@ -1594,7 +1580,7 @@ resolveStopMessageSessionScope
 
 ### 删除点固定
 
-当 Rust contract 与 TS bridge 验证通过后，唯一正确删除点是：
+历史删除点已经完成物理删除；不得恢复以下 TS 删除点：
 
 - `sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.ts`
   - `collectPersistedStopMessageCandidateKeys(...)`

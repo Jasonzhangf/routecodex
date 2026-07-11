@@ -76,7 +76,7 @@ Produce a file-level residue map that identifies all remaining TypeScript semant
 
 ### Review Focus
 
-High-priority review targets must include at least:
+High-priority historical review targets included at least these deleted TS paths; current closeout must not restore them as review or runtime entrypoints:
 
 - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper-from-chat.ts`
 - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper-from-chat.ts`

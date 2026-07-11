@@ -3474,6 +3474,38 @@ owners:
     notes:
       - "restart is a request to the running process/session. It may call /daemon/restart-process or send SIGUSR2 to the target pid; it must not spawn a detached start --restart takeover path."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
+      - "Explicit `start --restart` must not be used as a restart-command bypass. If an existing runtime/listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`."
+  - feature_id: runtime.lifecycle.start_command
+    status: active
+    summary: "CLI start owns server process launch and must not hide restart semantics behind explicit start --restart takeover"
+    owner_kind: ts_runtime_owner
+    owner_scope: "routecodex/rcc start command config loading, port-group launch, daemon supervisor launch, and explicit start --restart guard"
+    owner_module: src/cli/commands/start.ts
+    canonical_types:
+      - StartCommandOptions
+      - StartCommandContext
+    canonical_builders:
+      - refuseExplicitRestartTakeoverIfOccupied
+    allowed_paths:
+      - src/cli/commands/start.ts
+      - src/cli/commands/start-types.ts
+      - src/cli/commands/start-utils.ts
+      - tests/cli/start-command.spec.ts
+      - scripts/install-release.sh
+      - tests/scripts/install-release-dependencies.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/cli/start-command.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Explicit `rcc start --restart` is not a valid in-session restart transport when a runtime already exists; it must fail before writing `cli.start.restart_takeover` stop-intent or calling ensurePortAvailable with restart=true. Start may only launch when the target is stopped, or use explicit stop/exclusive flows outside restart command semantics."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"

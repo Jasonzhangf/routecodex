@@ -46,10 +46,13 @@ provider runtime error
 当前入口文件：
 
 - `src/providers/core/utils/provider-error-reporter.ts`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs`
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/events.rs`
+
+历史 TS ingress / Hub pipeline shell 已删除，禁止恢复：
+
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-provider-runtime-ingress.ts`
+- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
 
 ### 3.2 RequestExecutor 错误入口
 

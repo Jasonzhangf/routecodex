@@ -76,7 +76,7 @@ function resolveMaxPendingWrites(): number {
   return DEFAULT_MAX_PENDING_WRITES;
 }
 
-function serializeUnknown(value: unknown): JsonLike {
+function serializeUnknown(value: unknown, seen: WeakSet<object> = new WeakSet()): JsonLike {
   if (value === null || value === undefined) {
     return null;
   }
@@ -84,23 +84,62 @@ function serializeUnknown(value: unknown): JsonLike {
   if (primitiveType === 'string' || primitiveType === 'number' || primitiveType === 'boolean') {
     return value as JsonScalar;
   }
-  if (Array.isArray(value)) {
-    return value.map((item) => serializeUnknown(item));
+  if (primitiveType === 'bigint' || primitiveType === 'symbol' || primitiveType === 'function') {
+    return String(value);
   }
-  if (value instanceof Error) {
-    const out: Record<string, JsonLike> = {
-      name: value.name,
-      message: value.message
-    };
-    if (value.stack) {
-      out.stack = value.stack;
+  if (primitiveType !== 'object') {
+    return String(value);
+  }
+  const objectValue = value as object;
+  if (seen.has(objectValue)) {
+    return '[Circular]';
+  }
+  seen.add(objectValue);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => serializeUnknown(item, seen));
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    if (value instanceof Error) {
+      const out: Record<string, JsonLike> = {
+        name: value.name,
+        message: value.message
+      };
+      if (value.stack) {
+        out.stack = value.stack;
+      }
+      const errorRecord = value as Error & { cause?: unknown } & Record<string, unknown>;
+      if ('cause' in errorRecord && errorRecord.cause !== undefined) {
+        out.cause = serializeUnknown(errorRecord.cause, seen);
+      }
+      for (const [key, item] of Object.entries(errorRecord)) {
+        if (key === 'name' || key === 'message' || key === 'stack' || key === 'cause') {
+          continue;
+        }
+        out[key] = serializeUnknown(item, seen);
+      }
+      return out;
+    }
+    const withToJson = value as { toJSON?: () => unknown };
+    if (typeof withToJson.toJSON === 'function') {
+      try {
+        const jsonValue = withToJson.toJSON();
+        if (jsonValue !== value) {
+          return serializeUnknown(jsonValue, seen);
+        }
+      } catch {
+        // Continue with enumerable properties below.
+      }
+    }
+    const out: Record<string, JsonLike> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = serializeUnknown(item, seen);
     }
     return out;
-  }
-  try {
-    return JSON.parse(JSON.stringify(value)) as JsonLike;
-  } catch {
-    return String(value);
+  } finally {
+    seen.delete(objectValue);
   }
 }
 
