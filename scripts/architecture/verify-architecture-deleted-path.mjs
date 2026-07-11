@@ -87,6 +87,7 @@ const deletedPathDenylist = [
   'src/modules/llmswitch/core-loader.ts',
   'src/modules/llmswitch/bridge/response-converter.ts',
   'src/types/rcc-llmswitch-core.d.ts',
+  'src/types/llmswitch-shim.d.ts',
   'scripts/enhance-module.js',
   'docs/MODULE_ENHANCEMENT_SYSTEM.md',
   'docs/pipeline-routing-report.md',
