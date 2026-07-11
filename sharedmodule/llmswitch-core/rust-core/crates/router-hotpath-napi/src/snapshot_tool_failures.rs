@@ -949,14 +949,6 @@ pub fn detect_tool_execution_failures_json(payload_json: String) -> NapiResult<S
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-pub fn classify_runtime_error_signal_from_text_json(
-    _stage: String,
-    message: String,
-) -> NapiResult<String> {
-    let value = classify_runtime_error_signal_from_text_value(&message).unwrap_or(Value::Null);
-    serde_json::to_string(&value).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
 pub fn classify_runtime_error_signal_json(
     stage: String,
     payload_json: String,
@@ -989,12 +981,6 @@ pub fn classify_runtime_error_signal_json(
     }
 
     Ok("null".to_string())
-}
-
-pub fn should_inspect_runtime_error_json(stage: String, payload_json: String) -> NapiResult<bool> {
-    let payload: Value =
-        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    Ok(should_inspect_runtime_error_value(&stage, &payload))
 }
 
 pub fn should_inspect_runtime_error_fast_json(
@@ -1092,13 +1078,10 @@ mod tests {
 
     #[test]
     fn classifies_runtime_apply_patch_verification_text() {
-        let raw = classify_runtime_error_signal_from_text_json(
-            "provider.send".to_string(),
-            "apply_patch verification failed: Failed to find expected lines in src/main.rs"
-                .to_string(),
+        let parsed = classify_runtime_error_signal_from_text_value(
+            "apply_patch verification failed: Failed to find expected lines in src/main.rs",
         )
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        .unwrap_or(Value::Null);
         assert_eq!(parsed["group"], "exec-error");
         assert_eq!(parsed["errorType"], "apply_patch_expected_lines_not_found");
     }
@@ -1141,21 +1124,18 @@ mod tests {
 
     #[test]
     fn decides_runtime_error_inspection_from_stage_and_direct_error() {
-        assert!(should_inspect_runtime_error_json(
-            "chat_process.req.stage2.semantic_map".to_string(),
-            json!({}).to_string(),
-        )
-        .unwrap());
-        assert!(should_inspect_runtime_error_json(
-            "provider.send".to_string(),
-            json!({"message":"transport failed"}).to_string(),
-        )
-        .unwrap());
-        assert!(!should_inspect_runtime_error_json(
-            "provider.send".to_string(),
-            json!({"content":"missing field `cmd`"}).to_string(),
-        )
-        .unwrap());
+        assert!(should_inspect_runtime_error_value(
+            "chat_process.req.stage2.semantic_map",
+            &json!({})
+        ));
+        assert!(should_inspect_runtime_error_value(
+            "provider.send",
+            &json!({"message":"transport failed"})
+        ));
+        assert!(!should_inspect_runtime_error_value(
+            "provider.send",
+            &json!({"content":"missing field `cmd`"})
+        ));
     }
 
     #[test]
@@ -1220,13 +1200,8 @@ mod tests {
 
     #[test]
     fn ignores_runtime_text_without_known_failure_signal() {
-        let raw = classify_runtime_error_signal_from_text_json(
-            "provider.send".to_string(),
-            "ordinary provider response".to_string(),
-        )
-        .unwrap();
-        let parsed: Value = serde_json::from_str(&raw).unwrap();
-        assert!(parsed.is_null());
+        let parsed = classify_runtime_error_signal_from_text_value("ordinary provider response");
+        assert!(parsed.is_none());
     }
 
     #[test]

@@ -58,10 +58,8 @@ type NativeChatProcessNodeResultSemantics = {
   isEmptyClientResponsePayloadJson?: (bodyJson: string) => boolean;
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
-  classifyRuntimeErrorSignalFromTextJson?: (stage: string, message: string) => string;
   classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
-  shouldInspectRuntimeErrorJson?: (stage: string, payloadJson: string) => boolean;
   shouldInspectRuntimeErrorFastJson?: (stage: string, payloadJson: string) => boolean;
   shouldInspectToolFailuresJson?: (stage: string) => boolean;
   resolveRequestTailSummaryJson?: (stage: string, payloadJson: string) => string;
@@ -1531,25 +1529,6 @@ export function detectToolExecutionFailuresNative(body: unknown): ToolExecutionF
   return parsed as ToolExecutionFailureSignal[];
 }
 
-export function classifyRuntimeErrorSignalFromTextNative(
-  stage: string,
-  message: string
-): RuntimeErrorSignal | null {
-  const fn = getChatProcessNodeResultSemantics().classifyRuntimeErrorSignalFromTextJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalFromTextJson not available');
-  }
-  const raw = fn(String(stage || ''), String(message || ''));
-  const parsed = JSON.parse(raw) as unknown;
-  if (parsed === null) {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalFromTextJson returned invalid payload');
-  }
-  return parsed as RuntimeErrorSignal;
-}
-
 export function classifyRuntimeErrorSignalNative(
   stage: string,
   payload: unknown
@@ -1575,14 +1554,6 @@ export function shouldLogClientToolErrorToConsoleNative(failure: ToolExecutionFa
     throw new Error('[llmswitch-bridge] shouldLogClientToolErrorToConsoleJson not available');
   }
   return fn(JSON.stringify(failure ?? null));
-}
-
-export function shouldInspectRuntimeErrorNative(stage: string, payload: unknown): boolean {
-  const fn = getChatProcessNodeResultSemantics().shouldInspectRuntimeErrorJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] shouldInspectRuntimeErrorJson not available');
-  }
-  return fn(String(stage || ''), JSON.stringify(payload ?? null));
 }
 
 export function shouldInspectRuntimeErrorFastNative(stage: string, payload: unknown): boolean {

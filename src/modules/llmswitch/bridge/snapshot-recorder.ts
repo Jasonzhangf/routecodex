@@ -11,27 +11,27 @@ import {
 } from './snapshot-recorder-runtime.js';
 import {
   appendStageTrace,
-  classifyRuntimeErrorSignal,
   cloneStageTraceSummary,
-  detectToolExecutionFailures,
   isRecordableApplyPatchErrorType,
   logClientToolError,
   logRuntimeErrorSignal,
   resetSnapshotRecorderErrorsampleStateForTests,
-  shouldLogClientToolErrorToConsole,
   shouldLogRuntimeErrorSignalToConsole,
   shouldWriteClientToolErrorsample,
-  summarizeClientToolObservation,
   writeBridgeErrorsample,
   type SnapshotRecorder
 } from './snapshot-recorder-runtime.js';
 import {
+  classifyRuntimeErrorSignalNative,
   classifyEmptyResponseSignalNative,
+  detectToolExecutionFailuresNative,
   getRouterHotpathJsonBindingSync,
   resolveRequestTailSummaryNative,
   shouldInspectRuntimeErrorFastNative,
   shouldInspectToolFailuresNative,
+  shouldLogClientToolErrorToConsoleNative,
   shouldRecordSnapshotsNative,
+  summarizeClientToolObservationNative,
   writeSnapshotViaHooksNative
 } from './native-exports.js';
 
@@ -266,7 +266,7 @@ export async function createSnapshotRecorder(
           return;
         }
 
-        const toolFailures = shouldInspectToolFailures(stage) ? detectToolExecutionFailures(p) : [];
+        const toolFailures = shouldInspectToolFailures(stage) ? detectToolExecutionFailuresNative(p) : [];
         if (toolFailures.length > 0) {
           const requestId = typeof (context as any)?.requestId === 'string' ? String((context as any).requestId) : '';
           for (const failure of toolFailures) {
@@ -282,7 +282,7 @@ export async function createSnapshotRecorder(
               continue;
             }
             clientToolErrorDedup.add(dedupKey);
-            if (!clientToolParseConsoleLogged && shouldLogClientToolErrorToConsole(failure)) {
+            if (!clientToolParseConsoleLogged && shouldLogClientToolErrorToConsoleNative(failure)) {
               clientToolParseConsoleLogged = true;
               logClientToolError({
                 requestId,
@@ -311,13 +311,13 @@ export async function createSnapshotRecorder(
                 callId: failure.callId,
                 trace: cloneStageTraceSummary(stageTrace, MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES)
               },
-              observation: summarizeClientToolObservation(p, toolFailures)
+              observation: summarizeClientToolObservationNative(p, toolFailures)
             });
           }
         }
 
         if (shouldInspectRuntimeErrorFast(stage, p)) {
-          const signal = classifyRuntimeErrorSignal(stage, p);
+          const signal = classifyRuntimeErrorSignalNative(stage, p);
           if (signal && isRecordableApplyPatchErrorType(signal.errorType)) {
             const requestId = typeof (context as any)?.requestId === 'string' ? String((context as any).requestId) : '';
             const dedupKey = [requestId, stage, signal.group, signal.errorType, signal.matchedText].join('|');

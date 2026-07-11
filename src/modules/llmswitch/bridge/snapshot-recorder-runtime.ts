@@ -1,13 +1,6 @@
 import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
-import {
-  classifyRuntimeErrorSignalNative,
-  detectToolExecutionFailuresNative,
-  shouldInspectRuntimeErrorNative,
-  shouldLogClientToolErrorToConsoleNative,
-  summarizeClientToolObservationNative,
-} from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
 export type SnapshotRecorder = unknown;
@@ -153,22 +146,6 @@ export function shouldLogRuntimeErrorSignalToConsole(signal: RuntimeErrorSignal)
   return signal.group !== 'exec-error';
 }
 
-export function shouldInspectRuntimeError(stage: string, payload: AnyRecord): boolean {
-  return shouldInspectRuntimeErrorNative(stage, payload);
-}
-
-export function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeErrorSignal | null {
-  return classifyRuntimeErrorSignalNative(stage, payload);
-}
-
-export function detectToolExecutionFailures(payload: AnyRecord): ToolExecutionFailureSignal[] {
-  return detectToolExecutionFailuresNative(payload);
-}
-
-export function shouldLogClientToolErrorToConsole(failure: ToolExecutionFailureSignal): boolean {
-  return shouldLogClientToolErrorToConsoleNative(failure);
-}
-
 function cloneForErrorsample(value: unknown): unknown {
   if (!isTracePayloadCaptureEnabled()) {
     return undefined;
@@ -271,11 +248,4 @@ export function shouldWriteClientToolErrorsample(args: {
   }
   clientToolErrorSampleWindow.set(key, now);
   return true;
-}
-
-export function summarizeClientToolObservation(
-  payload: AnyRecord,
-  failures: ToolExecutionFailureSignal[]
-): Record<string, unknown> {
-  return summarizeClientToolObservationNative(payload, failures);
 }
