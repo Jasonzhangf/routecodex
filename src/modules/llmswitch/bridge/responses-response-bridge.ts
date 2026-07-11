@@ -8,7 +8,7 @@
 // feature_id: server.responses_response_handler_bridge_surface
 // canonical_builders: rebindResponsesConversationRequestIdForHttp, normalizeResponsesClientPayloadForHttp
 
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import {
   buildResponsesPayloadFromChatNative,
   planResponsesJsonClientDispatchNative,

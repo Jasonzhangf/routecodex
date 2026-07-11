@@ -1,7 +1,7 @@
 import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import type {
   ClientToolTraceSummaryEntry,
   RuntimeErrorSignal,

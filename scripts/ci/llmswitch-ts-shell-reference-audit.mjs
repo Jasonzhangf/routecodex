@@ -244,6 +244,7 @@ function collectModuleLoaderErrors(files) {
     'src/modules/llmswitch/bridge/module-loader.ts',
   ]) {
     if (!files.includes(rel)) continue;
+    if (!fs.existsSync(path.join(ROOT, rel))) continue;
     const source = readText(rel);
     for (const rule of MODULE_LOADER_FORBIDDEN_PATTERNS) {
       if (rule.pattern.test(source)) {

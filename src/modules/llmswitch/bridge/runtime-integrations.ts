@@ -9,7 +9,7 @@ import type {
   ProviderErrorEvent,
   ProviderSuccessEvent,
 } from "../../../types/llmswitch-local-types.js";
-import type { AnyRecord } from "./module-loader.js";
+import type { AnyRecord } from "./bridge-types.js";
 import {
   getRouterHotpathJsonBindingSync,
   shouldRecordSnapshotsNative,

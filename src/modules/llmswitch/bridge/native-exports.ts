@@ -10,7 +10,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { resolveCorePackageDir } from '../core-loader.js';
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
 type NativeFailureClassification = unknown;

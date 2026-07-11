@@ -514,11 +514,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/modules/llmswitch/bridge/module-loader.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/modules/llmswitch/bridge/responses-client-projection.ts",
       "textContains": ""
     },

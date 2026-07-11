@@ -4,7 +4,7 @@
  * Creates and manages snapshot recorders for HubPipeline.
  */
 
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import {
   type SnapshotRecorder,
   type StageTraceEntry,

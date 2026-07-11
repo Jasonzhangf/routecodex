@@ -1,4 +1,4 @@
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import type { RuntimeErrorSignal, ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 import { detectToolExecutionFailuresNative } from './native-exports.js';
 

@@ -4,7 +4,7 @@
  * Virtual router bootstrap + hub pipeline constructor.
  */
 
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
 // feature_id: hub.runtime_ingress_bridge

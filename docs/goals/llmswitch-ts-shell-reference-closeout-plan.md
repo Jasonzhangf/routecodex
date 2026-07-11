@@ -886,3 +886,9 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Deleted `src/modules/llmswitch/bridge.ts` and `src/modules/llmswitch/bridge/index.ts` after source-tracked exact import scans found no active runtime/test imports; remaining references were residue/contract tests reading file contents and historical docs.
 - Updated contract tests to assert the broad barrels stay physically absent and to verify the concrete leaf owners directly (`responses-sse-bridge.ts`, `responses-response-bridge.ts`, `routing-integrations.ts`).
 - Updated host bridge docs to describe leaf bridge modules as the active source surface. Runtime/server callers must import the leaf bridge they own instead of the retired broad barrel.
+
+### 2026-07-11 module-loader shell deleted
+
+- Deleted `src/modules/llmswitch/bridge/module-loader.ts` after exact reference scans showed its only active source consumers used the local `AnyRecord` type; `resolveCoreModulePath` had no active runtime/test/script consumer.
+- Moved the local bridge-only `AnyRecord` type to `src/modules/llmswitch/bridge/bridge-types.ts` and rewired leaf bridge type imports there without adding runtime behavior.
+- Added the deleted TS shell to the deleted-path/residue gates so the path cannot return as a compatibility re-export shell.

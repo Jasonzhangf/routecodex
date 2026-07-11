@@ -4263,6 +4263,7 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/core-loader.d.ts',
       'src/modules/llmswitch/bridge.d.ts',
       'src/modules/llmswitch/bridge/index.d.ts',
+      'src/modules/llmswitch/bridge/module-loader.ts',
       'src/modules/llmswitch/bridge/module-loader.d.ts',
       'src/modules/llmswitch/bridge/native-exports.d.ts',
       'src/modules/llmswitch/bridge/provider-response-converter-host.d.ts',

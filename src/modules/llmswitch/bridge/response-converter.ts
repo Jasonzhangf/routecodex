@@ -1,4 +1,4 @@
-import type { AnyRecord } from './module-loader.js';
+import type { AnyRecord } from './bridge-types.js';
 import { convertProviderResponse as convertProviderResponseHost } from './provider-response-converter-host.js';
 
 /**
