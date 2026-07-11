@@ -21,6 +21,7 @@ import {
 } from './runtime-integrations.js';
 import {
   captureReqInboundResponsesContextSnapshot,
+  extractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext,
   planResponsesRequestContext,
   planResponsesContinuationRequestAction,
@@ -250,6 +251,9 @@ function buildResponsesResumeControlForContinuationContextForHttp(
   copyString('scopeKey');
   copyString('entryKind');
   copyString('continuationOwner');
+  if (out.continuationOwner === 'direct') {
+    copyString('providerKey');
+  }
   copyString('materializedMode');
   copyBoolean('restored');
   copyBoolean('materialized');
@@ -312,47 +316,11 @@ export function planResponsesHandlerStreamForHttp(args: {
 }
 
 export function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
-  const clientHeaders =
-    metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
-      ? (metadata.clientHeaders as Record<string, unknown>)
-      : undefined;
-  const candidates = [
-    metadata?.session_id,
-    metadata?.sessionId,
-    clientHeaders?.session_id,
-    clientHeaders?.sessionId,
-    clientHeaders?.['session-id'],
-    clientHeaders?.['x-session-id']
-  ];
-  for (const candidate of candidates) {
-    const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  return undefined;
+  return extractSessionIdentifiersFromMetadataNative(metadata).sessionId;
 }
 
 export function readResponsesConversationIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
-  const clientHeaders =
-    metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
-      ? (metadata.clientHeaders as Record<string, unknown>)
-      : undefined;
-  const candidates = [
-    metadata?.conversation_id,
-    metadata?.conversationId,
-    clientHeaders?.conversation_id,
-    clientHeaders?.conversationId,
-    clientHeaders?.['conversation-id'],
-    clientHeaders?.['x-conversation-id']
-  ];
-  for (const candidate of candidates) {
-    const trimmed = typeof candidate === 'string' ? candidate.trim() : '';
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  return undefined;
+  return extractSessionIdentifiersFromMetadataNative(metadata).conversationId;
 }
 
 export function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {

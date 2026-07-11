@@ -9,6 +9,39 @@ const mockPlanResponsesContinuationRequestAction = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
+const mockExtractSessionIdentifiersFromMetadataNative = jest.fn((metadata: Record<string, unknown> | undefined) => {
+  const clientHeaders =
+    metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
+      ? (metadata.clientHeaders as Record<string, unknown>)
+      : undefined;
+  const pick = (values: unknown[]): string | undefined => {
+    for (const value of values) {
+      const trimmed = typeof value === 'string' ? value.trim() : '';
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return undefined;
+  };
+  return {
+    sessionId: pick([
+      metadata?.sessionId,
+      metadata?.session_id,
+      clientHeaders?.session_id,
+      clientHeaders?.sessionId,
+      clientHeaders?.['session-id'],
+      clientHeaders?.['x-session-id']
+    ]),
+    conversationId: pick([
+      metadata?.conversationId,
+      metadata?.conversation_id,
+      clientHeaders?.conversation_id,
+      clientHeaders?.conversationId,
+      clientHeaders?.['conversation-id'],
+      clientHeaders?.['x-conversation-id']
+    ])
+  };
+});
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -26,6 +59,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
+  extractSessionIdentifiersFromMetadataNative: mockExtractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
   planResponsesRequestContext: mockPlanResponsesRequestContext,
   planResponsesContinuationRequestAction: mockPlanResponsesContinuationRequestAction,
