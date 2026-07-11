@@ -1,5 +1,9 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
 import { detectRetryableEmptyAssistantResponseNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  containsEmptyAssistantSanitizedPlaceholder,
+  valueHasNonEmptyPayloadContent,
+} from './request-executor-response-inspect.js';
 
 
 
@@ -34,22 +38,6 @@ export type PayloadContractSignal = {
   reason: string;
   marker: string;
 };
-
-const EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER =
-  '[RouteCodex] assistant response became empty after response sanitization.';
-
-function containsEmptyAssistantSanitizedPlaceholder(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.includes(EMPTY_ASSISTANT_SANITIZED_PLACEHOLDER);
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  return Object.values(value as Record<string, unknown>).some((entry) => containsEmptyAssistantSanitizedPlaceholder(entry));
-}
 
 function bodyHasVisibleAssistantPayload(body: unknown): boolean {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -91,33 +79,6 @@ export async function detectRetryableEmptyAssistantResponse(
     return null;
   }
   return detectRetryableEmptyAssistantResponseNative(body, requestSemantics);
-}
-
-function valueHasNonEmptyPayloadContent(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.some((entry) => valueHasNonEmptyPayloadContent(entry));
-  }
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return [
-    record.content,
-    record.text,
-    record.prompt,
-    record.input_text,
-    record.query,
-    record.instructions,
-    record.instruction,
-    record.message,
-    record.messages,
-    record.input,
-    record.contents,
-    record.parts
-  ].some((entry) => valueHasNonEmptyPayloadContent(entry));
 }
 
 function unwrapProviderRequestPayloadBody(payload: unknown): Record<string, unknown> | null {
