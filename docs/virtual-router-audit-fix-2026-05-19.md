@@ -39,7 +39,7 @@
 ### P0-B（Hub 硬违规）
 6. **移除 anthropic mapper 的 JS fallback 路径（fail-fast）**
    - 文件：
-     - `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper-from-chat.ts`
+     - 历史文件：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper-from-chat.ts`（已删除，不得恢复）
    - 变更：
      - native build 失败后不再回退 `buildAnthropicRequestFromOpenAIChat`（JS fallback）。
      - 改为记录 `nativeBuildFailed` 后直接抛错。

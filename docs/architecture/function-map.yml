@@ -894,7 +894,6 @@ owners:
       - resolveProviderFailureClassification
     allowed_paths:
       - src/providers/core/runtime
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/server/runtime/http-server/executor
     forbidden_paths:
       - src/client
@@ -1011,7 +1010,6 @@ owners:
       - apply_route_selection
       - build_vr_route_04_from_hub_req_chatprocess_03
     allowed_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge
@@ -1088,7 +1086,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - tests/sharedmodule
       - tests/server/runtime/http-server
       - docs
@@ -1422,7 +1419,6 @@ owners:
       - resolve_error_err05_route_availability_decision
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/modules/llmswitch/bridge/native-exports.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
       - docs
@@ -1467,7 +1463,6 @@ owners:
       - forwarder_status_snapshot
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/server/runtime/http-server/routes.ts
       - docs
     forbidden_paths:
@@ -1506,7 +1501,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/server/runtime/http-server/routes.ts
       - src/cli/commands/port.ts
       - tests/sharedmodule
@@ -1679,7 +1673,6 @@ owners:
       - applyMetadataCenterRustWriteResult
     allowed_paths:
       - src/server/runtime/http-server/metadata-center
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
       - tests
@@ -1796,7 +1789,7 @@ owners:
       - src/server/runtime/http-server/executor
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/src/router
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts # deleted; forbidden
     forbidden_mentions_allowlist:
       - HubPipeline
     required_tests:
@@ -1913,7 +1906,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - tests/sharedmodule/helpers/anthropic-response-direct-native.ts
     forbidden_paths:
       - src/providers
@@ -1954,7 +1946,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_policies.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
     forbidden_paths:
       - src/providers
       - src/server
@@ -2070,7 +2061,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
     forbidden_paths:
       - src/providers
       - src/server
@@ -2107,7 +2097,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     forbidden_paths:
       - src/providers
@@ -2605,7 +2594,7 @@ owners:
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.ts # deleted; forbidden
       - src/providers/core/runtime
       - src/server/runtime/http-server
       - src/modules/llmswitch
@@ -2634,7 +2623,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
@@ -2664,7 +2652,6 @@ owners:
       - normalize_responses_function_tools
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
@@ -2693,7 +2680,6 @@ owners:
       - normalize_responses_tool_parameters
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
@@ -2721,7 +2707,6 @@ owners:
       - apply_responses_instructions_to_input
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
@@ -2749,7 +2734,6 @@ owners:
       - apply_responses_crs_request_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
@@ -3474,6 +3458,38 @@ owners:
     notes:
       - "restart is a request to the running process/session. It may call /daemon/restart-process or send SIGUSR2 to the target pid; it must not spawn a detached start --restart takeover path."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
+      - "Explicit `start --restart` must not be used as a restart-command bypass. If an existing runtime/listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`."
+  - feature_id: runtime.lifecycle.start_command
+    status: active
+    summary: "CLI start owns server process launch and must not hide restart semantics behind explicit start --restart takeover"
+    owner_kind: ts_runtime_owner
+    owner_scope: "routecodex/rcc start command config loading, port-group launch, daemon supervisor launch, and explicit start --restart guard"
+    owner_module: src/cli/commands/start.ts
+    canonical_types:
+      - StartCommandOptions
+      - StartCommandContext
+    canonical_builders:
+      - refuseExplicitRestartTakeoverIfOccupied
+    allowed_paths:
+      - src/cli/commands/start.ts
+      - src/cli/commands/start-types.ts
+      - src/cli/commands/start-utils.ts
+      - tests/cli/start-command.spec.ts
+      - scripts/install-release.sh
+      - tests/scripts/install-release-dependencies.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+    required_tests:
+      - tests/cli/start-command.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
+    required_gates:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Explicit `rcc start --restart` is not a valid in-session restart transport when a runtime already exists; it must fail before writing `cli.start.restart_takeover` stop-intent or calling ensurePortAvailable with restart=true. Start may only launch when the target is stopped, or use explicit stop/exclusive flows outside restart command semantics."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"
@@ -3770,7 +3786,6 @@ owners:
       - plan_responses_handler_entry
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge
       - docs/architecture
@@ -3951,7 +3966,7 @@ owners:
       - tests/sharedmodule/sse-index-public-surface-no-factory.spec.ts
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/sse/index.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts # deleted; forbidden
       - src/providers/core/runtime
       - src/server
       - sharedmodule/llmswitch-core/src/conversion/hub
@@ -3988,7 +4003,7 @@ owners:
       - docs/goals/sse-runtime-rust-only-closeout-plan.md
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/sse/index.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts # deleted; forbidden
       - sharedmodule/llmswitch-core/src/sse/json-to-sse
       - sharedmodule/llmswitch-core/src/sse/sse-to-json
       - sharedmodule/llmswitch-core/src/sse/registry
@@ -4599,7 +4614,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks.rs
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts # deleted; forbidden
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
       - tests/sharedmodule/req-process-servertool-bundle-contract.spec.ts
@@ -4627,8 +4642,8 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks.rs
     forbidden_paths:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts # deleted; forbidden
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts # deleted; forbidden
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts

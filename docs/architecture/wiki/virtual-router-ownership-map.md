@@ -39,7 +39,6 @@ Canonical builders:
 - `build_vr_route_04_from_hub_req_chatprocess_03`
 
 Allowed paths:
-- `sharedmodule/llmswitch-core/src/native/router-hotpath`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
 - `src/modules/llmswitch/bridge`
@@ -319,7 +318,6 @@ Canonical builders:
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath`
 - `src/modules/llmswitch/bridge/native-exports.ts`
 - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
 - `docs`
@@ -371,7 +369,6 @@ Canonical builders:
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath`
 - `src/server/runtime/http-server/routes.ts`
 - `docs`
 
@@ -417,7 +414,6 @@ Canonical builders:
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/napi_proxy.rs`
-- `sharedmodule/llmswitch-core/src/native/router-hotpath`
 - `src/server/runtime/http-server/routes.ts`
 - `src/cli/commands/port.ts`
 - `tests/sharedmodule`
