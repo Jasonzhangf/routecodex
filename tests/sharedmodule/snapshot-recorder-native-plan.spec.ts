@@ -30,6 +30,7 @@ jest.unstable_mockModule(
     detectToolExecutionFailuresNative: () => [],
     classifyRuntimeErrorSignalNative: () => null,
     shouldLogClientToolErrorToConsoleNative: () => false,
+    shouldLogRuntimeErrorSignalToConsoleNative: () => false,
     shouldInspectRuntimeErrorFastNative: () => false,
     shouldInspectToolFailuresNative: () => false,
     resolveRequestTailSummaryNative: () => null,

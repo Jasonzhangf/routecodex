@@ -1045,6 +1045,15 @@ pub fn should_log_client_tool_error_to_console_json(failure_json: String) -> Nap
     })
 }
 
+pub fn should_log_runtime_error_signal_to_console_json(signal_json: String) -> NapiResult<bool> {
+    let signal: Value =
+        serde_json::from_str(&signal_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let Some(record) = signal.as_object() else {
+        return Ok(false);
+    };
+    Ok(read_trimmed(record.get("group")) != "exec-error")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1213,6 +1222,20 @@ mod tests {
         .unwrap());
         assert!(!should_log_client_tool_error_to_console_json(
             json!({"toolName":"exec_command","errorType":"exec_command_non_zero_exit"}).to_string()
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn decides_runtime_error_console_logging_from_native_truth() {
+        assert!(should_log_runtime_error_signal_to_console_json(
+            json!({"group":"parse-error","errorType":"sse_decode_error","matchedText":"failed"})
+                .to_string()
+        )
+        .unwrap());
+        assert!(!should_log_runtime_error_signal_to_console_json(
+            json!({"group":"exec-error","errorType":"apply_patch_expected_lines_not_found","matchedText":"failed"})
+                .to_string()
         )
         .unwrap());
     }

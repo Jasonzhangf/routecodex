@@ -15,7 +15,6 @@ import {
   logClientToolError,
   logRuntimeErrorSignal,
   resetSnapshotRecorderErrorsampleStateForTests,
-  shouldLogRuntimeErrorSignalToConsole,
   shouldWriteClientToolErrorsample,
   writeBridgeErrorsample,
   type SnapshotRecorder
@@ -29,6 +28,7 @@ import {
   shouldInspectRuntimeErrorFastNative,
   shouldInspectToolFailuresNative,
   shouldLogClientToolErrorToConsoleNative,
+  shouldLogRuntimeErrorSignalToConsoleNative,
   shouldRecordSnapshotsNative,
   summarizeClientToolObservationNative,
   writeSnapshotViaHooksNative
@@ -322,7 +322,7 @@ export async function createSnapshotRecorder(
             const dedupKey = [requestId, stage, signal.group, signal.errorType, signal.matchedText].join('|');
             if (!runtimeErrorDedup.has(dedupKey)) {
               runtimeErrorDedup.add(dedupKey);
-              if (shouldLogRuntimeErrorSignalToConsole(signal)) {
+              if (shouldLogRuntimeErrorSignalToConsoleNative(signal)) {
                 logRuntimeErrorSignal({
                   requestId,
                   stage,

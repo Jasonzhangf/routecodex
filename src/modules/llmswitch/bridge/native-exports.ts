@@ -60,6 +60,7 @@ type NativeChatProcessNodeResultSemantics = {
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
   classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
+  shouldLogRuntimeErrorSignalToConsoleJson?: (signalJson: string) => boolean;
   shouldInspectRuntimeErrorFastJson?: (stage: string, payloadJson: string) => boolean;
   shouldInspectToolFailuresJson?: (stage: string) => boolean;
   resolveRequestTailSummaryJson?: (stage: string, payloadJson: string) => string;
@@ -1554,6 +1555,14 @@ export function shouldLogClientToolErrorToConsoleNative(failure: ToolExecutionFa
     throw new Error('[llmswitch-bridge] shouldLogClientToolErrorToConsoleJson not available');
   }
   return fn(JSON.stringify(failure ?? null));
+}
+
+export function shouldLogRuntimeErrorSignalToConsoleNative(signal: RuntimeErrorSignal): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldLogRuntimeErrorSignalToConsoleJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldLogRuntimeErrorSignalToConsoleJson not available');
+  }
+  return fn(JSON.stringify(signal ?? null));
 }
 
 export function shouldInspectRuntimeErrorFastNative(stage: string, payload: unknown): boolean {

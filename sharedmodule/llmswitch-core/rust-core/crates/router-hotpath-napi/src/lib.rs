@@ -3036,6 +3036,13 @@ pub fn should_log_client_tool_error_to_console_json_bridge(
     snapshot_tool_failures::should_log_client_tool_error_to_console_json(failure_json)
 }
 
+#[napi(js_name = "shouldLogRuntimeErrorSignalToConsoleJson")]
+pub fn should_log_runtime_error_signal_to_console_json_bridge(
+    signal_json: String,
+) -> NapiResult<bool> {
+    snapshot_tool_failures::should_log_runtime_error_signal_to_console_json(signal_json)
+}
+
 #[napi(js_name = "shouldInspectRuntimeErrorFastJson")]
 pub fn should_inspect_runtime_error_fast_json_bridge(
     stage: String,

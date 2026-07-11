@@ -142,10 +142,6 @@ export function logRuntimeErrorSignal(args: {
   );
 }
 
-export function shouldLogRuntimeErrorSignalToConsole(signal: RuntimeErrorSignal): boolean {
-  return signal.group !== 'exec-error';
-}
-
 function cloneForErrorsample(value: unknown): unknown {
   if (!isTracePayloadCaptureEnabled()) {
     return undefined;

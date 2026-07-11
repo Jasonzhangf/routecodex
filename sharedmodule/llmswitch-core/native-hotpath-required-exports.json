@@ -84,6 +84,7 @@
   "detectToolExecutionFailuresJson",
   "classifyRuntimeErrorSignalJson",
   "shouldLogClientToolErrorToConsoleJson",
+  "shouldLogRuntimeErrorSignalToConsoleJson",
   "shouldInspectRuntimeErrorFastJson",
   "shouldInspectToolFailuresJson",
   "resolveRequestTailSummaryJson",

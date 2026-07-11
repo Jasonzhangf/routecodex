@@ -48,6 +48,7 @@ const mockNativeExportsModule = () => ({
   detectToolExecutionFailuresNative: jest.fn(() => []),
   classifyRuntimeErrorSignalNative: jest.fn(() => null),
   shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
+  shouldLogRuntimeErrorSignalToConsoleNative: jest.fn(() => false),
   shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
   shouldInspectToolFailuresNative: jest.fn(() => false),
   resolveRequestTailSummaryNative: jest.fn(() => null),
