@@ -7,7 +7,7 @@
  * MetadataCenter runtime_control.trafficGovernor.* 作为唯一配置入口。
  */
 
-import { getRouterHotpathJsonBindingSync } from '../../modules/llmswitch/bridge/native-exports.js';
+import { getRouterHotpathJsonBindingSync } from '../llmswitch/bridge/traffic-governor-host.js';
 
 // ---------------------------------------------------------------------------
 // Types

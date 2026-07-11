@@ -819,6 +819,24 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('getRouterHotpathJsonBindingSync');
   });
 
+  it('traffic-governor shell must use its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const shellSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/traffic-governor/index.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/traffic-governor-host.ts'),
+      'utf8',
+    );
+
+    expect(shellSource).toContain('../llmswitch/bridge/traffic-governor-host.js');
+    expect(shellSource).not.toContain('../llmswitch/bridge/native-exports.js');
+    expect(shellSource).not.toContain('../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('getRouterHotpathJsonBindingSync');
+  });
+
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
     const repoRoot = process.cwd();
     const retiredPaths = [

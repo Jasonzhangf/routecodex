@@ -971,7 +971,9 @@ owners:
       - src/server/runtime/http-server/executor/retry-engine.ts
       - src/server/runtime/http-server/executor-provider.ts
       - src/modules/traffic-governor/index.ts
+      - src/modules/llmswitch/bridge/traffic-governor-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
@@ -995,6 +997,7 @@ owners:
       - "Categories are global_error, session_storm, and servertool_followup."
       - "Provider error switching uses the global_error queue with a routing-group/route scoped provider-switch key; each exclude_and_reroute must wait before the next provider is selected so priority/weighted pools have recovery time instead of storm-scanning the whole pool."
       - "Provider traffic saturation no longer enters this queue; governor must raise saturation immediately so upper layers can switch provider without blocking wait."
+      - "`src/modules/traffic-governor/index.ts` must use the narrow `traffic-governor-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
       - "The queue owner does not decide which semantic family an error belongs to; provider availability vs session-local deterministic truth is decided upstream by error.provider_failure_policy + error.session_storm_boundary."
       - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner."
 

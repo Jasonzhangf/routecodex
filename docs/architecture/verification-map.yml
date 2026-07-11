@@ -537,9 +537,13 @@ verification:
     change_risk: high
     unit:
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+      - src/modules/traffic-governor/index.ts
+      - src/modules/llmswitch/bridge/traffic-governor-host.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
     contract:
       - tests/red-tests/server_module_help_contract.test.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/tests/server_module_help.rs
+      - tests/modules/traffic-governor/traffic-governor-host.spec.ts
     integration:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
@@ -551,6 +555,7 @@ verification:
       - npm run build:base
     notes:
       - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "The traffic-governor TS shell must use the narrow `traffic-governor-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
   - feature_id: vr.route_selection
