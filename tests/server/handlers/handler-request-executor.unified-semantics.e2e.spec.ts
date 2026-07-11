@@ -456,6 +456,33 @@ const mockNativeExportsModule = () => ({
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
     typeof origin === 'string' && origin.trim() === 'client'
   ),
+  planResponsesHandlerStreamForHttpNative: jest.fn((args: {
+    payload?: Record<string, unknown>;
+    forceStream?: boolean;
+    acceptsSse: boolean;
+    requestTimeoutMs?: number;
+  }) => {
+    const payload = args.payload ?? {};
+    const hasExplicitStream = typeof payload.stream === 'boolean';
+    const originalStream = payload.stream === true;
+    const outboundStream = typeof args.forceStream === 'boolean'
+      ? args.forceStream
+      : (hasExplicitStream ? originalStream : args.acceptsSse);
+    return {
+      originalStream,
+      outboundStream,
+      inboundStream: outboundStream,
+      acceptsSse: args.acceptsSse,
+      requestStartMeta: {
+        inboundStream: outboundStream,
+        outboundStream,
+        clientAcceptsSse: args.acceptsSse,
+        originalStream,
+        type: payload.type,
+        timeoutMs: args.requestTimeoutMs,
+      },
+    };
+  }),
   buildResponsesPayloadFromChatNative: jest.fn(),
   projectResponsesClientPayloadForClientNative: jest.fn((args: any) => args?.body ?? args?.payload ?? {}),
   projectResponsesSseFrameForClientNative: jest.fn((args: any) => args?.frame ?? ''),

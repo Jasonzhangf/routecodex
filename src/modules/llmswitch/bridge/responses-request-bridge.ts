@@ -25,6 +25,7 @@ import {
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext,
+  planResponsesHandlerStreamForHttpNative,
   planResponsesRequestBodyForHttpNative,
   planResponsesRequestContext,
   planResponsesContinuationRequestAction,
@@ -307,26 +308,7 @@ export function planResponsesHandlerStreamForHttp(args: {
   acceptsSse: boolean;
   requestTimeoutMs?: number;
 }): ResponsesHandlerStreamPlanForHttp {
-  const hasExplicitStream = typeof args.payload?.stream === 'boolean';
-  const originalStream = args.payload?.stream === true;
-  const outboundStream = typeof args.forceStream === 'boolean'
-    ? args.forceStream
-    : (hasExplicitStream ? originalStream : args.acceptsSse);
-  const inboundStream = outboundStream;
-  return {
-    originalStream,
-    outboundStream,
-    inboundStream,
-    acceptsSse: args.acceptsSse,
-    requestStartMeta: {
-      inboundStream,
-      outboundStream,
-      clientAcceptsSse: args.acceptsSse,
-      originalStream,
-      type: args.payload?.type,
-      timeoutMs: args.requestTimeoutMs
-    }
-  };
+  return planResponsesHandlerStreamForHttpNative(args);
 }
 
 function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {

@@ -61,6 +61,33 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
     (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
   ),
+  planResponsesHandlerStreamForHttpNative: jest.fn((args: {
+    payload?: Record<string, unknown>;
+    forceStream?: boolean;
+    acceptsSse: boolean;
+    requestTimeoutMs?: number;
+  }) => {
+    const payload = args.payload ?? {};
+    const hasExplicitStream = typeof payload.stream === 'boolean';
+    const originalStream = payload.stream === true;
+    const outboundStream = typeof args.forceStream === 'boolean'
+      ? args.forceStream
+      : (hasExplicitStream ? originalStream : args.acceptsSse);
+    return {
+      originalStream,
+      outboundStream,
+      inboundStream: outboundStream,
+      acceptsSse: args.acceptsSse,
+      requestStartMeta: {
+        inboundStream: outboundStream,
+        outboundStream,
+        clientAcceptsSse: args.acceptsSse,
+        originalStream,
+        type: payload.type,
+        timeoutMs: args.requestTimeoutMs,
+      },
+    };
+  }),
 }));
 
 jest.unstable_mockModule('../../../../src/server/utils/finish-reason.js', () => ({
@@ -110,6 +137,16 @@ describe('responses-request-bridge metadata center projection', () => {
       clientAcceptsSse: false,
       originalStream: false
     });
+  });
+
+  it('treats non-boolean stream as absent when planning outbound stream', () => {
+    const streamPlan = planResponsesHandlerStreamForHttp({
+      payload: { model: 'gpt-5.4', stream: 'false' },
+      acceptsSse: true
+    });
+    expect(streamPlan.originalStream).toBe(false);
+    expect(streamPlan.outboundStream).toBe(true);
+    expect(streamPlan.inboundStream).toBe(true);
   });
 
   it('writes request-side responses continuation control into metadata center', () => {

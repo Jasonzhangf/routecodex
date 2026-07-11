@@ -5759,6 +5759,45 @@ pub fn should_project_responses_resume_client_error_for_http_json(origin: String
     origin.trim() == "client"
 }
 
+#[napi_derive::napi(js_name = "planResponsesHandlerStreamForHttpJson")]
+pub fn plan_responses_handler_stream_for_http_json(
+    payload_json: String,
+    accepts_sse: bool,
+    force_stream: Option<bool>,
+    request_timeout_ms: Option<i64>,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let obj = payload.as_object().cloned().unwrap_or_default();
+    let has_explicit_stream = matches!(obj.get("stream"), Some(Value::Bool(_)));
+    let original_stream = matches!(obj.get("stream"), Some(Value::Bool(true)));
+    let outbound_stream = force_stream.unwrap_or(if has_explicit_stream {
+        original_stream
+    } else {
+        accepts_sse
+    });
+    let inbound_stream = outbound_stream;
+    let mut request_start_meta = serde_json::Map::new();
+    request_start_meta.insert("inboundStream".to_string(), Value::Bool(inbound_stream));
+    request_start_meta.insert("outboundStream".to_string(), Value::Bool(outbound_stream));
+    request_start_meta.insert("clientAcceptsSse".to_string(), Value::Bool(accepts_sse));
+    request_start_meta.insert("originalStream".to_string(), Value::Bool(original_stream));
+    if let Some(type_value) = obj.get("type") {
+        request_start_meta.insert("type".to_string(), type_value.clone());
+    }
+    if let Some(timeout_ms) = request_timeout_ms {
+        request_start_meta.insert("timeoutMs".to_string(), serde_json::json!(timeout_ms));
+    }
+    let output = serde_json::json!({
+        "originalStream": original_stream,
+        "outboundStream": outbound_stream,
+        "inboundStream": inbound_stream,
+        "acceptsSse": accepts_sse,
+        "requestStartMeta": Value::Object(request_start_meta)
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
 pub fn should_allow_responses_conversation_continuation_json(
     payload_json: String,
@@ -6157,7 +6196,8 @@ mod tests {
         plan_responses_continuation_meta, plan_responses_continuation_request_action,
         plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
-        plan_responses_handler_entry, plan_responses_persisted_entry,
+        plan_responses_handler_entry, plan_responses_handler_stream_for_http_json,
+        plan_responses_persisted_entry,
         plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
         plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
         plan_responses_release_request_payload, plan_responses_request_body_for_http,
@@ -9503,5 +9543,52 @@ mod tests {
         assert_eq!(result["requestBodyMetadata"], Value::Null);
         assert_eq!(result["pipelineBody"]["metadata"], Value::Null);
         assert_eq!(result["pipelineBody"]["input"], json!([]));
+    }
+
+    #[test]
+    fn plan_responses_handler_stream_for_http_matches_ts_boolean_stream_contract() {
+        let explicit_false: Value = serde_json::from_str(
+            &plan_responses_handler_stream_for_http_json(
+                json!({ "model": "gpt-5.5", "stream": false }).to_string(),
+                true,
+                None,
+                Some(900_000),
+            )
+            .expect("explicit false stream plan"),
+        )
+        .expect("explicit false stream json");
+        assert_eq!(explicit_false["originalStream"], json!(false));
+        assert_eq!(explicit_false["outboundStream"], json!(false));
+        assert_eq!(explicit_false["inboundStream"], json!(false));
+
+        let non_boolean: Value = serde_json::from_str(
+            &plan_responses_handler_stream_for_http_json(
+                json!({ "model": "gpt-5.5", "stream": "false" }).to_string(),
+                true,
+                None,
+                Some(900_000),
+            )
+            .expect("non-boolean stream plan"),
+        )
+        .expect("non-boolean stream json");
+        assert_eq!(non_boolean["originalStream"], json!(false));
+        assert_eq!(non_boolean["outboundStream"], json!(true));
+        assert_eq!(non_boolean["inboundStream"], json!(true));
+    }
+
+    #[test]
+    fn plan_responses_handler_stream_for_http_omits_absent_optional_log_fields() {
+        let plan: Value = serde_json::from_str(
+            &plan_responses_handler_stream_for_http_json(
+                json!({ "model": "gpt-5.5", "stream": false }).to_string(),
+                true,
+                None,
+                None,
+            )
+            .expect("stream plan"),
+        )
+        .expect("stream plan json");
+        assert!(plan["requestStartMeta"].get("type").is_none());
+        assert!(plan["requestStartMeta"].get("timeoutMs").is_none());
     }
 }

@@ -98,6 +98,33 @@ const mockNativeExportsModule = () => ({
   }),
   normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
+  planResponsesHandlerStreamForHttpNative: jest.fn((args: {
+    payload?: Record<string, unknown>;
+    forceStream?: boolean;
+    acceptsSse: boolean;
+    requestTimeoutMs?: number;
+  }) => {
+    const payload = args.payload ?? {};
+    const hasExplicitStream = typeof payload.stream === 'boolean';
+    const originalStream = payload.stream === true;
+    const outboundStream = typeof args.forceStream === 'boolean'
+      ? args.forceStream
+      : (hasExplicitStream ? originalStream : args.acceptsSse);
+    return {
+      originalStream,
+      outboundStream,
+      inboundStream: outboundStream,
+      acceptsSse: args.acceptsSse,
+      requestStartMeta: {
+        inboundStream: outboundStream,
+        outboundStream,
+        clientAcceptsSse: args.acceptsSse,
+        originalStream,
+        type: payload.type,
+        timeoutMs: args.requestTimeoutMs,
+      },
+    };
+  }),
   projectSseErrorEventPayloadNative: jest.fn((input: { requestId: string; status: number; message: string; code: string }) => ({
     type: 'error',
     status: input.status,

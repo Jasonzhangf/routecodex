@@ -71,6 +71,33 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     normalizeResponsesDirectCurrentRequestPayload: (payload: AnyRecord) => ({ changed: false, payload }),
     planPrimaryExhaustedToDefaultPoolNative: () => ({}),
     planResponsesRequestBodyForHttpNative: planResponsesRequestBodyForHttpFake,
+    planResponsesHandlerStreamForHttpNative: (args: {
+      payload?: AnyRecord;
+      forceStream?: boolean;
+      acceptsSse: boolean;
+      requestTimeoutMs?: number;
+    }) => {
+      const payload = args.payload ?? {};
+      const hasExplicitStream = typeof payload.stream === 'boolean';
+      const originalStream = payload.stream === true;
+      const outboundStream = typeof args.forceStream === 'boolean'
+        ? args.forceStream
+        : (hasExplicitStream ? originalStream : args.acceptsSse);
+      return {
+        originalStream,
+        outboundStream,
+        inboundStream: outboundStream,
+        acceptsSse: args.acceptsSse,
+        requestStartMeta: {
+          inboundStream: outboundStream,
+          outboundStream,
+          clientAcceptsSse: args.acceptsSse,
+          originalStream,
+          type: payload.type,
+          timeoutMs: args.requestTimeoutMs,
+        },
+      };
+    },
     planResponsesContinuationRequestAction: async () => ({}),
     planResponsesHandlerEntry: async () => ({}),
     planResponsesJsonClientDispatchNative: () => ({}),

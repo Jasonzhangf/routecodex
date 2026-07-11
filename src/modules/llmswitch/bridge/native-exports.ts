@@ -145,6 +145,12 @@ type NativeRouterHotpathJsonBinding = {
   buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
   buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
   shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
+  planResponsesHandlerStreamForHttpJson?: (
+    payloadJson: string,
+    acceptsSse: boolean,
+    forceStream?: boolean,
+    requestTimeoutMs?: number
+  ) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -1379,6 +1385,43 @@ export function shouldProjectResponsesResumeClientErrorForHttpNative(origin: str
     throw new Error('[llmswitch-bridge] shouldProjectResponsesResumeClientErrorForHttpJson not available');
   }
   return fn(String(origin ?? '')) === true;
+}
+
+export function planResponsesHandlerStreamForHttpNative(args: {
+  payload: AnyRecord;
+  forceStream?: boolean;
+  acceptsSse: boolean;
+  requestTimeoutMs?: number;
+}): {
+  originalStream: boolean;
+  outboundStream: boolean;
+  inboundStream: boolean;
+  acceptsSse: boolean;
+  requestStartMeta: Record<string, unknown>;
+} {
+  const fn = getRouterHotpathJsonBindingSync().planResponsesHandlerStreamForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planResponsesHandlerStreamForHttpJson not available');
+  }
+  const parsed = JSON.parse(
+    fn(
+      JSON.stringify(args.payload ?? {}),
+      args.acceptsSse,
+      args.forceStream,
+      args.requestTimeoutMs
+    )
+  ) as unknown;
+  const record = assertNativeObject('planResponsesHandlerStreamForHttpJson', parsed);
+  return {
+    originalStream: record.originalStream === true,
+    outboundStream: record.outboundStream === true,
+    inboundStream: record.inboundStream === true,
+    acceptsSse: record.acceptsSse === true,
+    requestStartMeta: assertNativeObject(
+      'planResponsesHandlerStreamForHttpJson.requestStartMeta',
+      record.requestStartMeta
+    ),
+  };
 }
 
 export function classifyEmptyResponseSignalNative(

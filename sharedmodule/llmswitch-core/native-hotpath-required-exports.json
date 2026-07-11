@@ -204,6 +204,7 @@
   "buildResponsesScopeContinuationExpiredErrorForHttpJson",
   "buildResponsesResumeClientErrorForHttpJson",
   "shouldProjectResponsesResumeClientErrorForHttpJson",
+  "planResponsesHandlerStreamForHttpJson",
   "planResponsesRequestContextJson",
   "planResponsesContinuationRequestActionJson",
   "ensureBridgeOutputFieldsJson",
