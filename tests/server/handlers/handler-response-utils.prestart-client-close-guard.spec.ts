@@ -1,11 +1,6 @@
 import { Readable, PassThrough } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => ({
-  buildResponsesRequestLogContextForHttp: jest.fn(() => ({})),
-  prepareResponsesJsonClientDispatchPlanForHttp: jest.fn(() => ({ mode: 'json' })),
-}));
-
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
@@ -13,6 +8,9 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
     resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
     resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
+  buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
+  planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
+  projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
   projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
   projectResponsesSseFrameForClientNative: jest.fn((input: { frame: string; state: unknown }) => ({
     emit: true,

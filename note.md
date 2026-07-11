@@ -29071,3 +29071,10 @@ Pure Rust NAPI candidates:
 - Helper update: `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` gained `planResponsesJsonClientDispatchWithNative` and optional context passing for `projectResponsesClientPayloadForClientWithNative`.
 - Verification PASS: focused Jest 3 suites / 9 tests, strict `llmswitch-ts-shell-reference-audit --json`, and `git diff --check`.
 - Boundary: source/test contraction only; no runtime behavior change, global install, restart, or live replay claimed.
+
+# 2026-07-12: SSE handler response-bridge mock contraction
+
+- Scope: continue test external-reference contraction for `responses-response-bridge.ts` after the direct JSON guard was moved to native helper evidence.
+- Change: removed `responses-response-bridge.js` mocks from prestart client-close, keepalive protocol, and SSE usage-log tests; these tests now exercise `handler-response-utils.ts` with the real response bridge facade and only mock `native-exports.js`.
+- Verification PASS: focused SSE handler Jest 3 suites / 5 tests; strict `llmswitch-ts-shell-reference-audit --json`; `git diff --check`; exact `rg` found 0 `responses-response-bridge` imports/mocks in the three touched tests.
+- Boundary: test reference contraction only; no runtime behavior change, global install, restart, or live replay claimed.

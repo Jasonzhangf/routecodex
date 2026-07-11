@@ -23,16 +23,6 @@ async function importHandlerWithUsageMock(logUsageSummary: ReturnType<typeof jes
   jest.unstable_mockModule('../../../src/server/runtime/http-server/executor/usage-logger.js', () => ({
     logUsageSummary
   }));
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-response-bridge.js', () => ({
-    buildResponsesRequestLogContextForHttp: ({ metadata, usageLogInfo }: any) => ({
-      ...(metadata && typeof metadata === 'object' ? metadata : {}),
-      ...(usageLogInfo && typeof usageLogInfo === 'object' ? usageLogInfo : {})
-    }),
-    prepareResponsesJsonClientDispatchPlanForHttp: async ({ body }: any) => ({
-      clientBody: body,
-      sanitizedBody: body
-    })
-  }));
   jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
     getRouterHotpathJsonBindingSync: jest.fn(() => ({
       resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
@@ -40,6 +30,9 @@ async function importHandlerWithUsageMock(logUsageSummary: ReturnType<typeof jes
       resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
       resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
     })),
+    buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
+    planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
+    projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
     projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
     projectResponsesSseFrameForClientNative: ({ frame, state }: any) => ({
       emit: true,

@@ -2289,3 +2289,8 @@
 - `tests/modules/llmswitch/bridge/responses-response-bridge.direct-json-protocol-guard.spec.ts` no longer imports `src/modules/llmswitch/bridge/responses-response-bridge.*`; it validates direct passthrough dispatch and replay-safe client projection through direct Rust/NAPI helper calls.
 - `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` exposes `planResponsesJsonClientDispatchWithNative` and allows the existing client payload helper to pass context into `projectResponsesClientPayloadForClientJson`, so the test can prove Rust-owned model/metadata cleanup without preserving a TS bridge test dependency.
 - This is a test external-reference contraction only. `responses-response-bridge.ts` remains an active production facade through `handler-response-utils.ts` and is not a dead deletion candidate yet.
+
+# 2026-07-12: SSE handler tests no longer mock response bridge facade
+
+- `tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts`, `handler-response-utils.responses-keepalive-protocol.spec.ts`, and `handler-response-utils.sse-usage-log.spec.ts` no longer mock `src/modules/llmswitch/bridge/responses-response-bridge.js`; they load the real production facade while mocking only the Rust/NAPI native export boundary needed by the transport tests.
+- This reduces test-side external references to the response bridge facade without moving bridge semantics into the SSE handler. `responses-response-bridge.ts` remains active production glue through `handler-response-utils.ts`.
