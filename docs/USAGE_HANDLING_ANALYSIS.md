@@ -212,9 +212,9 @@ const ou = typeof u.output_tokens === 'number' ? u.output_tokens : (typeof u.com
 const tt = typeof u.total_tokens === 'number' ? u.total_tokens : (iu + ou);
 ```
 
-### llmswitch-core中的Usage类型定义
+### llmswitch-core历史Usage类型示例
 
-**位置**: `sharedmodule/llmswitch-core/src/v2/api/llmswitch-types.ts:58-95`
+历史位置 `sharedmodule/llmswitch-core/src/v2/api/llmswitch-types.ts` 已删除；当前 usage 归一化与请求/响应投影应以 Rust/NAPI owner 和 Host bridge 调用壳为准，不得恢复旧 `src/v2/api` TS 类型面。
 
 ```typescript
 // Chat Completion类型

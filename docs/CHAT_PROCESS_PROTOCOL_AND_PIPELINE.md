@@ -28,8 +28,8 @@
 3. **outbound 仅使用白名单语义重建客户端协议**（clientRemap），不允许把“可映射语义”回塞到 metadata/透传到客户端。
 
 代码事实（当前实现骨架）：
-- 正常入口：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`（`executeRequestStagePipeline` 内部）
-- servertool followup 重入入口：`sharedmodule/llmswitch-core/src/servertool/engine.ts:468`（`__hubEntry = 'chat_process'`，进入 `executeChatProcessEntryPipeline`）
+- 正常入口：Host 通过 `src/modules/llmswitch/bridge/native-exports.ts` 调用 `router-hotpath-napi`；请求链 Rust 真源在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`、`req_process_stage1_tool_governance.rs` 与相关 request/outbound blocks。
+- servertool / stopless followup 重入：由 Rust `servertool-core` + `router-hotpath-napi` effect plan/bridge blocks 规划，TS 只执行外部 IO / N-API 调用壳；已删除的 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 不是当前入口。
 
 ### 2.2 响应侧
 
@@ -40,10 +40,10 @@
 3. **outbound 仅产出客户端协议白名单字段**；内部 metadata 只用于转换过程，不可泄露到客户端 payload。
 
 代码事实（当前实现骨架）：
-- `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`：TS 只调用 `executeHubPipelineWithNative` / `runProviderResponseRustHubPipeline` 并执行 Rust effect plan。
+- Host response bridge 通过 `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `native-exports.ts` 调用 Rust/NAPI；已删除的 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 不是当前入口。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`：响应链总入口，串联 `RespInboundFormatParse -> RespProcessToolGovernance -> RespProcessFinalize -> RespOutbound*`。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` 与 `resp_process_stage1_tool_governance_blocks/`：response tool harvesting / governance 真源。
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts`：仅作为 native JSON/NAPI 薄桥接。
+- `src/modules/llmswitch/bridge/native-exports.ts`：Host N-API 调用壳；已删除的 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts` 不得恢复为 native JSON/NAPI 薄桥接。
 - 已删除的 response governance TS stage wrapper 不得作为当前事实或测试入口恢复。
 
 ## 3) “强制语义映射”规则（进入 chat process 前）
@@ -59,8 +59,8 @@
 
 进入 chat process 的最后一刻，必须 fail-fast 校验：任何**可映射语义**不得存在于 metadata。
 
-代码事实：当前请求侧在 chat_process entry 有 strict gate：
-- `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts:1714`（`assertNoMappableSemanticsInMetadata`）
+代码事实：当前请求侧在 Chat Process / Hub Pipeline Rust 入口有 strict gate：
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs` 及 request governance blocks；已删除的 TS `hub-pipeline.ts` gate 不是当前实现入口。
 - 当前禁入键（含 snake_case 同义键）：`responsesResume`, `clientToolsRaw`, `anthropicToolNameMap`, `responsesContext`, `responseFormat`, `systemInstructions`, `toolsFieldPresent`, `extraFields`
 
 你拍板（A1）：禁入采用“已知具体键枚举”，并持续把同义字段/旧字段补全进黑名单；不禁掉 legacy catch-all 容器本身。
@@ -110,8 +110,7 @@
 
 ### 4.1 请求重入（followup request）
 
-代码事实：目前 followup 通过设置 `__hubEntry='chat_process'` 直接从 chat_process 入口重入：
-- `sharedmodule/llmswitch-core/src/servertool/engine.ts:468`
+代码事实：followup / stopless 重入由 Rust servertool-core 与 router-hotpath N-API effect plan 管理；旧 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 已删除，不得恢复为 reenter owner。
 
 你拍板（B）：followup 重入入口仍为 `__hubEntry='chat_process'`，并明确 hop 编号：
 
@@ -134,7 +133,7 @@
 
 代码事实（当前实现的 canonicalize 约束点）：
 - provider response 入口先进入 Rust HubPipeline total entry：
-  - `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`
+  - `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `src/modules/llmswitch/bridge/native-exports.ts`
 - canonicalize / response tool governance / finalize 在 Rust response chain 内完成：
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs`

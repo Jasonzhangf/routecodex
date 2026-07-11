@@ -105,8 +105,8 @@ export function baz(opts: Opts) { return nativeBaz(opts); }
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_response_compat.rs` → 消息过滤、空 assistant 过滤、mirror 检测、tool_call id 归一
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs` → req_process 工具治理主入口
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` → resp_process 工具治理主入口
-- `sharedmodule/llmswitch-core/src/conversion/hub/process/*.ts` → 编排层薄壳，仅允许条件分支调度
-- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts` → 非 VR runtime 的 native host 绑定层，100% 薄壳，不含业务逻辑
+- `src/modules/llmswitch/bridge/*.ts` → Host/N-API 调用薄壳，仅允许 IO、导入、参数打包和 fail-fast native 调用
+- `sharedmodule/llmswitch-core/src/native/router-hotpath/native-*.ts` → 已退休 source-side native TS wrapper 面；不得恢复为 runtime 真源或测试入口
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/**` → VR runtime 唯一真源；former source-side VR TS runtime root 禁止复活
 
 ## 权威文档索引
