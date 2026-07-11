@@ -3043,6 +3043,28 @@ pub fn should_log_runtime_error_signal_to_console_json_bridge(
     snapshot_tool_failures::should_log_runtime_error_signal_to_console_json(signal_json)
 }
 
+#[napi(js_name = "shouldWriteClientToolErrorsampleJson")]
+pub fn should_write_client_tool_errorsample_json_bridge(
+    endpoint: String,
+    stage: String,
+    failure_json: String,
+    window_ms: f64,
+    now_ms: f64,
+) -> NapiResult<bool> {
+    snapshot_tool_failures::should_write_client_tool_errorsample_json(
+        endpoint,
+        stage,
+        failure_json,
+        window_ms,
+        now_ms,
+    )
+}
+
+#[napi(js_name = "resetSnapshotRecorderErrorsampleStateJson")]
+pub fn reset_snapshot_recorder_errorsample_state_json_bridge() -> NapiResult<bool> {
+    snapshot_tool_failures::reset_snapshot_recorder_errorsample_state_json()
+}
+
 #[napi(js_name = "shouldInspectRuntimeErrorFastJson")]
 pub fn should_inspect_runtime_error_fast_json_bridge(
     stage: String,

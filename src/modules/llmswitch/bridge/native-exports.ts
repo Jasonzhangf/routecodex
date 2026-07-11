@@ -61,6 +61,14 @@ type NativeChatProcessNodeResultSemantics = {
   classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
   shouldLogRuntimeErrorSignalToConsoleJson?: (signalJson: string) => boolean;
+  shouldWriteClientToolErrorsampleJson?: (
+    endpoint: string,
+    stage: string,
+    failureJson: string,
+    windowMs: number,
+    nowMs: number
+  ) => boolean;
+  resetSnapshotRecorderErrorsampleStateJson?: () => boolean;
   shouldInspectRuntimeErrorFastJson?: (stage: string, payloadJson: string) => boolean;
   shouldInspectToolFailuresJson?: (stage: string) => boolean;
   resolveRequestTailSummaryJson?: (stage: string, payloadJson: string) => string;
@@ -1563,6 +1571,34 @@ export function shouldLogRuntimeErrorSignalToConsoleNative(signal: RuntimeErrorS
     throw new Error('[llmswitch-bridge] shouldLogRuntimeErrorSignalToConsoleJson not available');
   }
   return fn(JSON.stringify(signal ?? null));
+}
+
+export function shouldWriteClientToolErrorsampleNative(args: {
+  endpoint: string;
+  stage: string;
+  failure: ToolExecutionFailureSignal;
+  windowMs: number;
+  nowMs: number;
+}): boolean {
+  const fn = getChatProcessNodeResultSemantics().shouldWriteClientToolErrorsampleJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldWriteClientToolErrorsampleJson not available');
+  }
+  return fn(
+    String(args.endpoint || ''),
+    String(args.stage || ''),
+    JSON.stringify(args.failure ?? null),
+    Number(args.windowMs),
+    Number(args.nowMs)
+  );
+}
+
+export function resetSnapshotRecorderErrorsampleStateNative(): void {
+  const fn = getChatProcessNodeResultSemantics().resetSnapshotRecorderErrorsampleStateJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] resetSnapshotRecorderErrorsampleStateJson not available');
+  }
+  fn();
 }
 
 export function shouldInspectRuntimeErrorFastNative(stage: string, payload: unknown): boolean {

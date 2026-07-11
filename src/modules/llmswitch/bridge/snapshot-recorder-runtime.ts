@@ -1,6 +1,10 @@
 import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
+import {
+  resetSnapshotRecorderErrorsampleStateNative,
+  shouldWriteClientToolErrorsampleNative,
+} from './native-exports.js';
 
 type AnyRecord = Record<string, unknown>;
 export type SnapshotRecorder = unknown;
@@ -30,12 +34,11 @@ const MAX_STAGE_TRACE_ENTRIES = 40;
 const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
 export const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
-const clientToolErrorSampleWindow = new Map<string, number>();
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 let cachedTracePayloadCaptureEnabled: boolean | null = null;
 
 export function resetSnapshotRecorderErrorsampleStateForTests(): void {
-  clientToolErrorSampleWindow.clear();
+  resetSnapshotRecorderErrorsampleStateNative();
   cachedTracePayloadCaptureEnabled = null;
 }
 
@@ -200,38 +203,11 @@ export function shouldWriteClientToolErrorsample(args: {
   stage: string;
   failure: ToolExecutionFailureSignal;
 }): boolean {
-  if (
-    args.failure.toolName === 'exec_command' &&
-    args.failure.errorType === 'exec_command_non_zero_exit' &&
-    /\bcode 1\b/i.test(args.failure.matchedText || '')
-  ) {
-    return false;
-  }
-  const windowMs = resolveClientToolErrorSampleWindowMs();
-  if (windowMs <= 0) {
-    return true;
-  }
-  const now = Date.now();
-  const matchedFingerprint =
-    args.failure.toolName === 'apply_patch'
-      ? clipText(String(args.failure.matchedText || '').replace(/\s+/g, ' ').toLowerCase(), 120)
-      : '';
-  const key = [
-    args.endpoint,
-    args.stage,
-    args.failure.toolName,
-    args.failure.errorType,
-    matchedFingerprint
-  ].join('|');
-  for (const [sampleKey, seenAt] of clientToolErrorSampleWindow.entries()) {
-    if (now - seenAt > windowMs) {
-      clientToolErrorSampleWindow.delete(sampleKey);
-    }
-  }
-  const lastSeenAt = clientToolErrorSampleWindow.get(key);
-  if (typeof lastSeenAt === 'number' && now - lastSeenAt <= windowMs) {
-    return false;
-  }
-  clientToolErrorSampleWindow.set(key, now);
-  return true;
+  return shouldWriteClientToolErrorsampleNative({
+    endpoint: args.endpoint,
+    stage: args.stage,
+    failure: args.failure,
+    windowMs: resolveClientToolErrorSampleWindowMs(),
+    nowMs: Date.now(),
+  });
 }

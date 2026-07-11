@@ -1,9 +1,11 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
 const MAX_TRAILING_TOOL_MESSAGES: usize = 8;
 const MAX_RUNTIME_SIGNAL_SCAN_STEPS: usize = 1200;
+static CLIENT_TOOL_ERROR_SAMPLE_WINDOW: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
 
 fn read_trimmed(value: Option<&Value>) -> String {
     value
@@ -23,6 +25,33 @@ fn clip_text(input: &str, max: usize) -> String {
     } else {
         format!("{}...", &text[..max])
     }
+}
+
+fn client_tool_error_sample_window() -> &'static Mutex<HashMap<String, i64>> {
+    CLIENT_TOOL_ERROR_SAMPLE_WINDOW.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn contains_process_code_one(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(relative_index) = lower[search_from..].find("code 1") {
+        let index = search_from + relative_index;
+        let before = lower[..index].chars().last();
+        let after = lower[index + "code 1".len()..].chars().next();
+        let before_ok = match before {
+            Some(ch) => !ch.is_ascii_alphanumeric() && ch != '_',
+            None => true,
+        };
+        let after_ok = match after {
+            Some(ch) => !ch.is_ascii_alphanumeric() && ch != '_',
+            None => true,
+        };
+        if before_ok && after_ok {
+            return true;
+        }
+        search_from = index + "code 1".len();
+    }
+    false
 }
 
 fn looks_like_tool_output_transcript(content: &str) -> bool {
@@ -1054,6 +1083,73 @@ pub fn should_log_runtime_error_signal_to_console_json(signal_json: String) -> N
     Ok(read_trimmed(record.get("group")) != "exec-error")
 }
 
+pub fn should_write_client_tool_errorsample_json(
+    endpoint: String,
+    stage: String,
+    failure_json: String,
+    window_ms: f64,
+    now_ms: f64,
+) -> NapiResult<bool> {
+    let failure: Value =
+        serde_json::from_str(&failure_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let Some(record) = failure.as_object() else {
+        return Ok(false);
+    };
+    let tool_name = read_trimmed(record.get("toolName"));
+    let error_type = read_trimmed(record.get("errorType"));
+    let matched_text = read_trimmed(record.get("matchedText"));
+    if tool_name == "exec_command"
+        && error_type == "exec_command_non_zero_exit"
+        && contains_process_code_one(&matched_text)
+    {
+        return Ok(false);
+    }
+    if window_ms <= 0.0 {
+        return Ok(true);
+    }
+    let now = now_ms.floor() as i64;
+    let window = window_ms.floor() as i64;
+    let matched_fingerprint = if tool_name == "apply_patch" {
+        clip_text(
+            &matched_text
+                .split_whitespace()
+                .collect::<Vec<&str>>()
+                .join(" ")
+                .to_ascii_lowercase(),
+            120,
+        )
+    } else {
+        String::new()
+    };
+    let key = [
+        endpoint.trim().to_string(),
+        stage.trim().to_string(),
+        tool_name,
+        error_type,
+        matched_fingerprint,
+    ]
+    .join("|");
+    let mut samples = client_tool_error_sample_window()
+        .lock()
+        .map_err(|_| napi::Error::from_reason("client tool errorsample window lock poisoned"))?;
+    samples.retain(|_, seen_at| now - *seen_at <= window);
+    if let Some(last_seen_at) = samples.get(&key) {
+        if now - *last_seen_at <= window {
+            return Ok(false);
+        }
+    }
+    samples.insert(key, now);
+    Ok(true)
+}
+
+pub fn reset_snapshot_recorder_errorsample_state_json() -> NapiResult<bool> {
+    let mut samples = client_tool_error_sample_window()
+        .lock()
+        .map_err(|_| napi::Error::from_reason("client tool errorsample window lock poisoned"))?;
+    samples.clear();
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1236,6 +1332,71 @@ mod tests {
         assert!(!should_log_runtime_error_signal_to_console_json(
             json!({"group":"exec-error","errorType":"apply_patch_expected_lines_not_found","matchedText":"failed"})
                 .to_string()
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn decides_client_tool_errorsample_window_from_native_truth() {
+        reset_snapshot_recorder_errorsample_state_json().unwrap();
+        let failure = json!({
+            "toolName": "apply_patch",
+            "errorType": "apply_patch_expected_lines_not_found",
+            "matchedText": "Failed   to find expected lines"
+        })
+        .to_string();
+        assert!(should_write_client_tool_errorsample_json(
+            "/v1/responses".to_string(),
+            "chat_process.req.stage2.semantic_map".to_string(),
+            failure.clone(),
+            1_000.0,
+            10_000.0,
+        )
+        .unwrap());
+        assert!(!should_write_client_tool_errorsample_json(
+            "/v1/responses".to_string(),
+            "chat_process.req.stage2.semantic_map".to_string(),
+            failure.clone(),
+            1_000.0,
+            10_500.0,
+        )
+        .unwrap());
+        assert!(should_write_client_tool_errorsample_json(
+            "/v1/responses".to_string(),
+            "chat_process.req.stage2.semantic_map".to_string(),
+            failure,
+            1_000.0,
+            11_500.0,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn suppresses_exec_command_code_one_errorsample_in_native_truth() {
+        assert!(!should_write_client_tool_errorsample_json(
+            "/v1/responses".to_string(),
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({
+                "toolName": "exec_command",
+                "errorType": "exec_command_non_zero_exit",
+                "matchedText": "process exited with code 1"
+            })
+            .to_string(),
+            0.0,
+            10_000.0,
+        )
+        .unwrap());
+        assert!(should_write_client_tool_errorsample_json(
+            "/v1/responses".to_string(),
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({
+                "toolName": "exec_command",
+                "errorType": "exec_command_non_zero_exit",
+                "matchedText": "process exited with code 10"
+            })
+            .to_string(),
+            0.0,
+            10_000.0,
         )
         .unwrap());
     }

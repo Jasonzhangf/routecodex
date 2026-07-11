@@ -85,6 +85,8 @@
   "classifyRuntimeErrorSignalJson",
   "shouldLogClientToolErrorToConsoleJson",
   "shouldLogRuntimeErrorSignalToConsoleJson",
+  "shouldWriteClientToolErrorsampleJson",
+  "resetSnapshotRecorderErrorsampleStateJson",
   "shouldInspectRuntimeErrorFastJson",
   "shouldInspectToolFailuresJson",
   "resolveRequestTailSummaryJson",
