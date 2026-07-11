@@ -2244,7 +2244,7 @@ verification:
       - src/server/handlers/handler-response-sse.ts
       - src/modules/llmswitch/bridge/native-exports.ts
       - tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts
-      - tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts
+      - tests/red-tests/server_sse_metadata_guard_e2e.test.ts
       - src/server/handlers/handler-response-common.ts
       - src/server/handlers/handler-response-utils.ts
     contract:

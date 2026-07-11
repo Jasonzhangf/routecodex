@@ -86,7 +86,7 @@ flowchart LR
 - `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts`
 - `tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts`
 - `tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts`
-- `tests/modules/llmswitch/bridge/responses-response-bridge.direct-sse-metadata-guard.spec.ts`
+- `tests/red-tests/server_sse_metadata_guard_e2e.test.ts`
 - `tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts`
 - `tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts`
 - `npm run verify:hub-response-provider-sse-materialization`
