@@ -28862,3 +28862,10 @@ Pure Rust NAPI candidates:
 - Contract: SSE/handler tests now keep terminal/probe state native-owned and do not synthesize `response.completed` / `response.done` terminal repair frames in TS. Remaining string hits are only architecture gate denylist/residue-audit patterns.
 - Verification PASS: exact ref scan for `buildResponsesTerminalSseFramesFromProbeNative|buildStandardToolCallTerminalFrames` has no active src/test consumer refs; focused Jest 4 passing suites (`native-exports.responses-sse-contract`, `sse-projection-timeout`, `submit-tool-outputs.sse-error`, `submit-tool-outputs.responses-provider`); `verify:responses-handler-single-bridge-surface`; `verify:responses-sse-business-module`; `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; strict `llmswitch-ts-shell-reference-audit`; `build:base`; touched-file `git diff --check`.
 - Known non-target gap: broad `handler-request-executor.unified-semantics.e2e.spec.ts` still fails 16 legacy expectations around continuation/materialization/SSE mock behavior when run directly; it was not used as closeout evidence for this SSE wrapper deletion.
+
+# 2026-07-11: dead test core-loader mock removed
+
+- Scope: continue llmswitch external-reference closeout by removing zero-consumer test shell residue.
+- Change: physically deleted `tests/mocks/core-loader.ts`; it only exported empty `loadCoreModule` / `initializeModule` stubs and had no active importer.
+- Evidence: exact source scan excluding the deleted path found zero refs for `tests/mocks/core-loader`, `mocks/core-loader`, `loadCoreModule`, or `initializeModule`; strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, and `verify:architecture-thin-wrapper-only` all passed.
+- Non-target blocker: `verify:function-map-compile-gate` and `build:base` currently stop on an existing dirty Rust change that adds `shouldManageResponsesConversationForHttpJson` under a forbidden path; this deletion did not enter runtime build/live closure.
