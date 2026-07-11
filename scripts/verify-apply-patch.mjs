@@ -5,17 +5,9 @@
  * 直接调用 llmswitch-core 的文本 → tool_calls → 校验链路，
  * 用结构化 apply_patch payload（changes 数组）触发校验。
  */
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import chalk from 'chalk';
+import { normalizeAssistantTextToToolCallsJson } from './helpers/responses-codec-direct-native.mjs';
 import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validation-direct-native.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
-const bridgeNativeExportsUrl = pathToFileURL(
-  path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')
-).href;
-const { normalizeAssistantTextToToolCallsJson } = await import(bridgeNativeExportsUrl);
 
 const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value) => value;
 

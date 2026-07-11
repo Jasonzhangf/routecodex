@@ -1,21 +1,10 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const projectRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-);
+import { captureReqInboundResponsesContextSnapshotJson } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 async function main() {
-  const mod = await import(
-    pathToFileURL(path.resolve(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href
-  );
-
-  const context = mod.captureReqInboundResponsesContextSnapshotJson({
+  const context = captureReqInboundResponsesContextSnapshotJson({
     rawRequest: {
       model: 'gpt-5.4',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],

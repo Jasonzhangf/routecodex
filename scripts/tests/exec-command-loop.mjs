@@ -9,15 +9,7 @@
  * - 再通过 Responses 映射验证 /v1/responses 视图同样保持 JSON 语义。
  */
 
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..', '..');
-const nativeExportsPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
-const nativeExportsUrl = pathToFileURL(nativeExportsPath).href;
-
-const { buildResponsesPayloadFromChatNative } = await import(nativeExportsUrl);
+import { buildResponsesPayloadFromChatNative } from '../helpers/responses-codec-direct-native.mjs';
 
 async function main() {
   // 构造一条模拟的 chat 响应，其中 exec_command 直接使用 JSON 编码参数。

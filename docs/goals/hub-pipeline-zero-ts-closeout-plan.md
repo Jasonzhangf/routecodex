@@ -336,7 +336,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: context snapshot script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::captureReqInboundResponsesContextSnapshotJson` instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs` was first moved from the old `responses-openai-bridge.js` dist path to root host `native-exports.js`, then fully moved to script-only direct native helper `scripts/helpers/responses-codec-direct-native.mjs::captureReqInboundResponsesContextSnapshotJson`.
 - Rust request-inbound context capture now strips host-only `metadata.extraFields` in `hub_req_inbound_context_capture.rs`, closing the previous TS bridge post-processing gap in the Rust owner.
 - Verification passed: `cargo test -p router-hotpath-napi capture_responses_context_strips_host_only_metadata_extra_fields -- --nocapture` 1/1, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, `npm run build:native-hotpath`, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`, strict shell reference audit (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), exact source-tracked ref scan, and scoped `git diff --check`.
 - Remaining active script blockers for deleting the bridge are Responses -> Chat users:
@@ -347,7 +347,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: overlong function-name script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs` and only keeps root host `native-exports.js` for other still-live host wrappers such as `captureReqInboundResponsesContextSnapshotJson` / `convertResponsesRequestToChatNative`.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; the remaining root host `native-exports.js` dependencies were retired by extending that direct helper for context capture and Responses -> Chat conversion.
 - The script still proves overlong Responses function calls are removed from captured context, Responses -> Chat messages, and Chat -> Responses roundtrip payload while valid `exec_command` calls survive.
 - Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs`, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 6/6.
 - Remaining active script blockers for deleting the bridge are:
@@ -356,7 +356,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: local-image autoload script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::convertResponsesRequestToChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs` was first moved from the old `responses-openai-bridge.js` dist path to root host `native-exports.js`, then fully moved to script-only direct native helper `scripts/helpers/responses-codec-direct-native.mjs::convertResponsesRequestToChatNative`.
 - Existing Rust/native local image path autoload handles readable local images as `image_url` data URLs and unreadable path notices without script-side semantic repair.
 - Verification passed: direct native local-image probe, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`, and `cargo test -p router-hotpath-napi local_image -- --nocapture` 1/1.
 - Remaining active script blocker for deleting the bridge:
@@ -364,7 +364,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: cross-protocol matrix script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; root host `native-exports.js` remains only for the still-live `convertResponsesRequestToChatNative` host wrapper.
+- `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; the remaining root host `native-exports.js` conversion dependency was later retired by extending that direct helper for Responses -> Chat conversion.
 - Source-tracked exact scan now shows no active script references to `responses-openai-bridge.js`; remaining references are goal/history docs and residue/deleted-path tests.
 - Verification passed: `node --check sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs`; script execution preserved its existing no-sample behavior and skipped because `~/.routecodex/codex-samples/openai-chat` had no qualifying tool-call sample in this environment.
 - Remaining deletion blockers are no longer script imports; next step is to audit active test/runtime/source imports for `responses-openai-bridge.ts` itself, then delete only after exact source/test/package scans prove no active consumer remains.
@@ -372,7 +372,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: roundtrip script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; root host `native-exports.js` remains only for the still-live `convertResponsesRequestToChatNative` host wrapper.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs` now uses direct native `buildResponsesRequestFromChatNative` from `scripts/helpers/responses-codec-direct-native.mjs`; the remaining root host `native-exports.js` conversion dependency was later retired by extending that direct helper for Responses -> Chat conversion.
 - `buildResponsesRequestFromChatJson` now restores `instructions` from explicit Chat payload instructions first and `context.systemInstruction` second, closing the roundtrip parity gap in the Rust Chat -> Responses owner instead of script-side patching.
 - Verification passed: direct native fixture probe 1/1, `node --check sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `node sharedmodule/llmswitch-core/scripts/tests/responses-roundtrip.mjs`, `cargo test -p router-hotpath-napi hub_req_outbound_format_build::tests::test_build_responses_request_from_chat_json_ -- --nocapture` 8/8, `cargo test -p router-hotpath-napi capture_responses_context_ -- --nocapture` 3/3, and `npm run build:native-hotpath`.
 - Remaining active script blockers for deleting the bridge are:
@@ -381,7 +381,7 @@ Additional gates if touched paths require them:
 
 ### 2026-07-10 Progress: response-payload freeform script ref moved to Rust/native
 
-- `sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs` now imports root host `dist/modules/llmswitch/bridge/native-exports.js::buildResponsesPayloadFromChatNative` instead of the old `responses-openai-bridge.js` dist path.
+- `sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs` was first moved from the old `responses-openai-bridge.js` dist path to root host `native-exports.js`, then fully moved to script-only direct native helper `scripts/helpers/responses-codec-direct-native.mjs::buildResponsesPayloadFromChatNative`.
 - Rust freeform tool format recognition now treats `format: "freeform"` the same as grammar/text freeform declarations in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; the client-facing contract remains Rust-owned `custom_tool_call.input` plus raw patch in `required_action`.
 - Verification passed: `cargo test -p router-hotpath-napi freeform_apply_patch -- --nocapture` 3/3, `npm run build:native-hotpath`, `node sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs`, strict shell reference audit (`prodTsShellCount=13`, `shellsWithProdImporters=11`, `shellsWithHostTextRefs=1`, `coreModuleSubpathRefs=3`), exact source-tracked ref scan, and `git diff --check`.
 - Remaining active script blockers for deleting the bridge are Responses -> Chat / context-capture users:

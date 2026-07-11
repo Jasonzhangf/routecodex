@@ -11,13 +11,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildResponsesRequestFromChatNative } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  buildResponsesRequestFromChatNative,
+  convertResponsesRequestToChatNative
+} from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(__filename), '..', '..');
 const fixturesDir = path.join(projectRoot, 'test', 'fixtures', 'responses');
-const nativeBridge = path.resolve(projectRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
 
 async function loadFixtures() {
   const entries = await fs.readdir(fixturesDir);
@@ -35,11 +37,6 @@ async function loadFixtures() {
 }
 
 async function runRoundtripTests() {
-  const bridge = await import(pathToFileURL(nativeBridge).href);
-  const {
-    convertResponsesRequestToChatNative
-  } = bridge;
-
   const fixtures = await loadFixtures();
   let passed = 0;
 

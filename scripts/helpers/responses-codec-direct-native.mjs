@@ -74,6 +74,35 @@ export function buildResponsesRequestFromChatNative(payload, context = {}, extra
   return parsed;
 }
 
+export function convertResponsesRequestToChatNative(payload, options = {}) {
+  return parseNativeRecord(
+    nativeFn('runResponsesOpenaiRequestCodecJson')(
+      stringifyArg(payload ?? {}),
+      stringifyArg(options ?? {}),
+    ),
+    'runResponsesOpenaiRequestCodecJson',
+  );
+}
+
+export function captureReqInboundResponsesContextSnapshotJson(input) {
+  return parseNativeRecord(
+    nativeFn('captureReqInboundResponsesContextSnapshotJson')(
+      stringifyArg(input ?? {}),
+    ),
+    'captureReqInboundResponsesContextSnapshotJson',
+  );
+}
+
+export function normalizeAssistantTextToToolCallsJson(message, options = {}) {
+  return parseNativeRecord(
+    nativeFn('normalizeAssistantTextToToolCallsJson')(
+      stringifyArg(message ?? {}),
+      stringifyArg(options ?? {}),
+    ),
+    'normalizeAssistantTextToToolCallsJson',
+  );
+}
+
 export function buildChatResponseFromResponsesDirectNative(payload) {
   return parseNativeRecord(
     nativeFn('buildChatResponseFromResponsesJson')(stringifyArg(payload)),

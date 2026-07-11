@@ -1,23 +1,20 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildResponsesRequestFromChatNative } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '..', '..');
+import {
+  buildResponsesRequestFromChatNative,
+  captureReqInboundResponsesContextSnapshotJson,
+  convertResponsesRequestToChatNative
+} from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 async function loadBridge() {
-  const responsesBridge = await import(pathToFileURL(path.join(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
   return {
     buildResponsesRequestFromChat: buildResponsesRequestFromChatNative,
-    captureResponsesContext: (payload, dto) => responsesBridge.captureReqInboundResponsesContextSnapshotJson({
+    captureResponsesContext: (payload, dto) => captureReqInboundResponsesContextSnapshotJson({
       rawRequest: payload,
       requestId: dto?.route?.requestId,
       toolCallIdStyle: payload?.toolCallIdStyle ?? payload?.metadata?.toolCallIdStyle
     }),
-    buildChatRequestFromResponses: (payload, context) => responsesBridge.convertResponsesRequestToChatNative(payload, {
+    buildChatRequestFromResponses: (payload, context) => convertResponsesRequestToChatNative(payload, {
       requestId: context?.requestId
     })
   };

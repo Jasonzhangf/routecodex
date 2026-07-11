@@ -5,6 +5,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { buildResponsesPayloadFromChatNative } from './helpers/responses-codec-direct-native.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,8 +54,6 @@ async function main() {
 
   const importCore = async (relPath) => import(pathToFileURL(path.join(localBase, relPath)).href);
 
-  const nativeExportsPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js');
-  const { buildResponsesPayloadFromChatNative } = await import(pathToFileURL(nativeExportsPath).href);
   const sseMod = await importCore(path.join('sse', 'index.js'));
 
   const requestId = (() => {

@@ -182,7 +182,11 @@ Then replay the same endpoint/sample that proves the installed runtime consumes 
   - `scripts/responses-sse-capture.mjs`
   - `scripts/responses-sse-replay-golden.mjs`
   - `sharedmodule/llmswitch-core/scripts/tests/responses-tool-call-id-style-route-wins.mjs`
-- Exact source scan for those five touched scripts now returns zero `dist/modules/llmswitch/bridge/native-exports.js` references.
+- Extended that same helper with direct Rust/NAPI wrappers for `runResponsesOpenaiRequestCodecJson` and `captureReqInboundResponsesContextSnapshotJson`, then migrated the remaining Responses codec/capture leaf scripts:
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs`
+- Exact source scan for touched leaf scripts now returns zero `dist/modules/llmswitch/bridge/native-exports.js` references.
 - Remaining `dist/modules/llmswitch/bridge/native-exports.js` source references are docs/memory history plus release-install surface verification; no new runtime semantic owner was introduced.
 
 ## 2026-07-11 Remaining blackbox bridge refs contracted to direct native helper

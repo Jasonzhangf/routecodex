@@ -7,16 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, '..', '..');
-
-async function loadBridge() {
-  return import(pathToFileURL(path.resolve(repoRoot, '..', '..', 'dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js')).href);
-}
+import { buildResponsesPayloadFromChatNative as buildResponsesPayloadFromChat } from '../../../../scripts/helpers/responses-codec-direct-native.mjs';
 
 function makeChatCompletionWithApplyPatchToolCall() {
   const patch = ['*** Begin Patch', '*** Add File: hello.txt', '+hello', '*** End Patch'].join('\n');
@@ -49,7 +40,6 @@ function makeChatCompletionWithApplyPatchToolCall() {
 }
 
 async function main() {
-  const { buildResponsesPayloadFromChatNative: buildResponsesPayloadFromChat } = await loadBridge();
   const chat = makeChatCompletionWithApplyPatchToolCall();
 
   const toolsRaw = [

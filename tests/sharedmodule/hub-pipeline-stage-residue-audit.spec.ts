@@ -763,7 +763,10 @@ describe('hub pipeline stage residue audit', () => {
     const scriptSources = [
       'scripts/tools/responses-provider-replay.mjs',
       'sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-context-snapshot-no-tool-control.mjs',
       'sharedmodule/llmswitch-core/scripts/tests/responses-create-parameters-single-source.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs',
+      'sharedmodule/llmswitch-core/scripts/tests/responses-local-image-path-autoload.mjs',
       'sharedmodule/llmswitch-core/scripts/tests/responses-request-no-parameters-wrapper.mjs',
       'sharedmodule/llmswitch-core/scripts/tests/responses-tool-choice-single-source.mjs',
       'sharedmodule/llmswitch-core/scripts/tests/responses-overlong-function-name-regression.mjs',
@@ -777,6 +780,8 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).not.toContain('nativeExports.buildResponsesRequestFromChatNative');
       expect(source).not.toContain('responsesBridge.buildResponsesRequestFromChatNative');
       expect(source).not.toContain('mod.buildResponsesRequestFromChatNative');
+      expect(source).not.toContain("dist', 'modules', 'llmswitch', 'bridge', 'native-exports.js");
+      expect(source).not.toContain('dist/modules/llmswitch/bridge/native-exports.js');
     }
   });
 
