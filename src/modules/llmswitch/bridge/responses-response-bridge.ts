@@ -8,7 +8,6 @@
 // feature_id: server.responses_response_handler_bridge_surface
 // canonical_builders: rebindResponsesConversationRequestIdForHttp, normalizeResponsesClientPayloadForHttp
 
-import type { AnyRecord } from './bridge-types.js';
 import {
   buildResponsesPayloadFromChatNative,
   planResponsesJsonClientDispatchNative,
@@ -19,6 +18,7 @@ import {
 } from '../../../server/runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../../utils/strip-internal-keys.js';
 
+type AnyRecord = Record<string, unknown>;
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
   context: AnyRecord;

@@ -7,28 +7,28 @@ import {
   VirtualRouterError,
   VirtualRouterErrorCode
 } from './native-router-hotpath-loader.js';
-import type {
-  ProviderErrorEvent,
-  ProviderFailureEvent,
-  ProviderSuccessEvent,
-  RouterMetadataInput,
-  RoutingDecision,
-  RoutingDiagnostics,
-  RoutingStatusSnapshot,
-  StopMessageStateSnapshot,
-  PreCommandStateSnapshot,
-  TargetMetadata,
-  VirtualRouterConfig,
-  VirtualRouterDryRunDiagnostics,
-  VirtualRouterHealthStore
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
-
 const nodeRequire = createRequire(import.meta.url);
 const nativeBinding = nodeRequire(
   path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
 ) as Record<string, unknown>;
 
 type NativeRouterRequest = Record<string, unknown>;
+export type ProviderErrorEvent = Record<string, unknown>;
+export type ProviderFailureEvent = Record<string, unknown>;
+export type ProviderSuccessEvent = Record<string, unknown>;
+export type RouterMetadataInput = Record<string, unknown>;
+export type RoutingDecision = Record<string, unknown>;
+export type RoutingDiagnostics = Record<string, unknown>;
+export type RoutingStatusSnapshot = {
+  health?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+export type StopMessageStateSnapshot = Record<string, unknown>;
+export type PreCommandStateSnapshot = Record<string, unknown>;
+export type TargetMetadata = Record<string, unknown>;
+export type VirtualRouterConfig = Record<string, unknown>;
+export type VirtualRouterDryRunDiagnostics = Record<string, unknown>;
+export type VirtualRouterHealthStore = Record<string, unknown>;
 
 type TokenEstimateOutput = {
   tokens?: unknown;

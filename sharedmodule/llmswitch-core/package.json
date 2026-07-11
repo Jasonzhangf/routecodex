@@ -3,7 +3,7 @@
   "version": "0.2.11",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "node scripts/build-native-hotpath.mjs && node ../../scripts/generate-llmswitch-servertool-wrapper.mjs"
   },
   "exports": {
     "./native/servertool-wrapper": {

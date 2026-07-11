@@ -27,7 +27,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -73,8 +72,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
@@ -153,7 +150,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_execution_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -171,7 +167,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -189,7 +184,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -207,7 +201,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -225,7 +218,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -243,7 +235,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -262,7 +253,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -298,7 +288,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -316,7 +305,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     integration:
@@ -368,8 +356,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -389,7 +375,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -408,7 +393,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -428,7 +412,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     integration:
@@ -445,7 +428,6 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -480,9 +462,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -842,7 +821,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
     contract:
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
     integration:
       - src/server/runtime/http-server/routes.ts
     smoke:
@@ -1109,7 +1088,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/provider_outcome.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
     contract:
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
+      - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
       - tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -1246,7 +1225,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - src/cli/config/init-provider-catalog.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
@@ -1370,7 +1349,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
     contract:
-      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/gemini-openai-codec.test.ts
+      - tests/sharedmodule/gemini-openai-codec.spec.ts
       - tests/sharedmodule/gemini-openai-codec.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
@@ -1390,7 +1369,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
     contract:
-      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/responses-openai-codec.test.ts
+      - tests/sharedmodule/responses-function-tool-normalization.compat.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs

@@ -4,7 +4,6 @@
  * Virtual router bootstrap + hub pipeline constructor.
  */
 
-import type { AnyRecord } from './bridge-types.js';
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
 // feature_id: hub.runtime_ingress_bridge
@@ -13,6 +12,7 @@ import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 // dispose_hub_pipeline_engine_json,
 // update_hub_pipeline_virtual_router_config_json,
 // update_hub_pipeline_engine_deps_json.
+type AnyRecord = Record<string, unknown>;
 type NativeHubPipelineOrchestrationSemantics = {
   createHubPipelineEngineJson?: (inputJson: string) => string;
   disposeHubPipelineEngineJson?: (handle: string) => void;

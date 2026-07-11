@@ -4,12 +4,11 @@
  * Creates and manages snapshot recorders for HubPipeline.
  */
 
-import type { AnyRecord } from './bridge-types.js';
 import {
-  type SnapshotRecorder,
   type StageTraceEntry,
+  type ClientToolTraceSummaryEntry,
   MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
-} from './snapshot-recorder-types.js';
+} from './snapshot-recorder-runtime.js';
 import {
   appendStageTrace,
   classifyRuntimeErrorSignal,
@@ -22,7 +21,8 @@ import {
   shouldLogRuntimeErrorSignalToConsole,
   shouldWriteClientToolErrorsample,
   summarizeClientToolObservation,
-  writeBridgeErrorsample
+  writeBridgeErrorsample,
+  type SnapshotRecorder
 } from './snapshot-recorder-runtime.js';
 import {
   detectToolExecutionFailures,
@@ -37,6 +37,7 @@ import {
 
 export { resetSnapshotRecorderErrorsampleStateForTests };
 
+type AnyRecord = Record<string, unknown>;
 type EmptyResponseSignal = {
   errorType: string;
   matchedText: string;

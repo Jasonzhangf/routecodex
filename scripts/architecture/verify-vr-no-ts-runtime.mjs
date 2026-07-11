@@ -21,19 +21,12 @@ const oldClassifierResidueFiles = [
   'scripts/analyze-routing-classifier.mjs',
   'scripts/analyze-thinking-keywords.mjs',
   'scripts/tool-classification-report.ts',
-  'sharedmodule/llmswitch-core/tests/hub/chat-envelope-validator-native.test.ts',
-  'sharedmodule/llmswitch-core/tests/router/vision-route-detection.test.ts',
-  'sharedmodule/llmswitch-core/tests/router/thinking-tools-route-priority.test.ts',
-  'sharedmodule/llmswitch-core/tests/router/longcontext-responses-context-route.test.ts',
-  'sharedmodule/llmswitch-core/tests/router/tool-semantics-route-classification.test.ts',
-  'sharedmodule/llmswitch-core/tests/router/web-search-intent-route.test.ts',
   'tests/sharedmodule/router/virtual-router/classifier.spec.ts',
   'tests/sharedmodule/virtual-router-web-search-intent.spec.ts',
 ];
 
 const scanRoots = [
   'sharedmodule/llmswitch-core/src',
-  'sharedmodule/llmswitch-core/tests',
   'sharedmodule/llmswitch-core/scripts',
   'src',
   'tests',

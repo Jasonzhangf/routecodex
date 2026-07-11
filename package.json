@@ -159,7 +159,7 @@
     "verify:hub-response-provider-sse-materialization": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi provider_sse --lib -- --nocapture'",
     "verify:hub-response-provider-context-helpers": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi resolve_provider_response_context_helpers --lib -- --nocapture'",
     "verify:hub-response-post-servertool-client-projection": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi project_post_servertool --lib -- --nocapture'",
-    "verify:llmswitch-core-tsc": "npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false",
+    "verify:llmswitch-core-tsc": "npm run verify:llmswitch-zero-ts-closeout",
     "verify:vr-forwarder-runtime": "bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi forwarder --lib -- --nocapture'",
     "verify:architecture-deleted-path": "node scripts/architecture/verify-architecture-deleted-path.mjs",
     "verify:architecture-duplicate-owner": "node scripts/architecture/verify-architecture-duplicate-owner.mjs",

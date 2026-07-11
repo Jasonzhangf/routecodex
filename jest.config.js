@@ -47,18 +47,14 @@ const config = {
   },
   setupFilesAfterEnv: ['<rootDir>/tests/jest-live-safety.ts'],
   moduleNameMapper: (() => {
-    // By default, run tests against the vendored `sharedmodule/llmswitch-core` source in this repo.
+    // By default, run tests against the vendored `sharedmodule/llmswitch-core` dist in this repo.
     // If CI needs to validate against the npm-installed `@jsonstudio/llms` dist, set:
     //   `ROUTECODEX_JEST_USE_NPM_LLMS=1`
     const useNpmLlms = process.env.ROUTECODEX_JEST_USE_NPM_LLMS === '1';
     const sharedmoduleToNpm = {
-      '../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
       '../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
-      '../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
       '../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
-      '../../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
       '../../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
-      '../../../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
       '../../../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1'
     };
 
@@ -66,7 +62,7 @@ const config = {
       ...(useNpmLlms ? sharedmoduleToNpm : {}),
       '^rcc-llmswitch-core/v2/(.*)$': useNpmLlms
         ? '<rootDir>/node_modules/@jsonstudio/llms/dist/$1'
-        : '<rootDir>/sharedmodule/llmswitch-core/src/$1',
+        : '<rootDir>/sharedmodule/llmswitch-core/dist/$1',
       // Keep existing .js stripping for ESM relative imports.
       '^(\\.{1,2}/.*)\\.js$': '$1'
     };

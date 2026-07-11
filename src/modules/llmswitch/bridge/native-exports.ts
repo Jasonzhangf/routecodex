@@ -10,9 +10,15 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { resolveCorePackageDir } from '../core-loader.js';
-import type { AnyRecord } from './bridge-types.js';
-import type { ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
 
+type AnyRecord = Record<string, unknown>;
+type ToolExecutionFailureSignal = {
+  toolName: 'exec_command' | 'apply_patch' | 'shell_command';
+  errorType: string;
+  matchedText: string;
+  toolCallId?: string;
+  callId?: string;
+};
 type NativeFailureClassification = unknown;
 type NativeFailurePolicyModule = {
   classifyProviderFailure?: (

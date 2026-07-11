@@ -9,7 +9,6 @@ import type {
   ProviderErrorEvent,
   ProviderSuccessEvent,
 } from "../../../types/llmswitch-local-types.js";
-import type { AnyRecord } from "./bridge-types.js";
 import {
   getRouterHotpathJsonBindingSync,
   shouldRecordSnapshotsNative,
@@ -30,6 +29,7 @@ import {
   clearUnresolvedResponsesConversationRequests as clearUnresolvedResponsesConversationRequestsHost,
 } from "./responses-conversation-store-host.js";
 
+type AnyRecord = Record<string, unknown>;
 export async function writeSnapshotViaHooks(
   channelOrOptions: string | AnyRecord,
   payload?: AnyRecord,

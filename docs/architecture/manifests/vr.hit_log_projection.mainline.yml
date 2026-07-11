@@ -3,7 +3,7 @@ summary: "Virtual Router hit-log diagnostics: host effects collect the route
   decision context, runtime host calls Rust/NAPI hit-log projection directly,
   and host emits the formatted diagnostic line without owning formatting or
   telemetry semantics."
-owner_feature_id: vr.hit_log_projection
+owner_feature_id: vr.route_host_effects
 entrypoint:
   node_id: VrHitLog01RouteDecision
   wiki_page: null
@@ -18,14 +18,14 @@ edges:
     from_node: VrHitLog01RouteDecision
     to_node: VrHitLog02NativeProjection
     status: anchored
-    owner_feature_id: vr.hit_log_projection
+    owner_feature_id: vr.route_host_effects
     binding_pending: null
     split_binding_id: null
   - step_id: vrh-02
     from_node: VrHitLog02NativeProjection
     to_node: VrHitLog03HostEmission
     status: anchored
-    owner_feature_id: vr.hit_log_projection
+    owner_feature_id: vr.route_host_effects
     binding_pending: null
     split_binding_id: null
   - step_id: vrh-03

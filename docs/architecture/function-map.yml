@@ -57,7 +57,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
     forbidden_paths:
@@ -143,8 +142,6 @@ owners:
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/stopless-metadata-center.spec.ts
       - docs
     forbidden_paths:
@@ -222,7 +219,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -253,7 +249,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -287,7 +282,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -318,7 +312,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -350,7 +343,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
@@ -381,7 +373,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -415,7 +406,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -475,7 +465,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -505,7 +494,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -604,8 +592,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -638,7 +624,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
       - src/providers
@@ -670,7 +655,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     forbidden_paths:
@@ -703,7 +687,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
       - sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
       - src/providers
@@ -735,7 +718,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - docs
     forbidden_paths:
@@ -771,7 +753,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/followup_mainline_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_followup_delta.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - docs
     forbidden_paths:
       - src/providers
@@ -874,9 +855,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
-      - sharedmodule/llmswitch-core/src/servertool/types.d.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
@@ -1890,7 +1868,7 @@ owners:
       - chat_envelope_to_standardized_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_standardized_bridge.rs
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - tests/sharedmodule
       - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/helpers/standardized-bridge-direct-native.ts
@@ -1945,7 +1923,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic-helpers.ts
       - sharedmodule/llmswitch-core/src/conversion/hub/response/response-runtime-anthropic.ts
     required_tests:
-      - sharedmodule/llmswitch-core/src/conversion/hub/response/__tests__/response-runtime.anthropic-hidden-reasoning.test.ts
+      - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/red-tests/hub_pipeline_anthropic_response_helpers_must_use_native.test.ts
     required_gates:
@@ -4330,7 +4308,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
-      - sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/config_bootstrap.rs
       - src/cli/config/init-provider-catalog.ts
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
@@ -4445,7 +4423,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/codecs/gemini-openai-codec.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
-      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/gemini-openai-codec.test.ts
+      - tests/sharedmodule/gemini-openai-codec.spec.ts
       - tests/sharedmodule/gemini-openai-codec.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
@@ -4473,7 +4451,7 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/codecs/responses-openai-codec.ts
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
-      - sharedmodule/llmswitch-core/src/conversion/codecs/__tests__/responses-openai-codec.test.ts
+      - tests/sharedmodule/responses-function-tool-normalization.compat.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate

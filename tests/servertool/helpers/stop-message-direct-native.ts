@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-const nodeRequire = createRequire(import.meta.url);
+const nodeRequire = createRequire(path.join(process.cwd(), 'package.json'));
 const nativeBinding = nodeRequire(
   path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
 ) as Record<string, unknown>;
@@ -62,6 +62,21 @@ export type StopSchemaGateDecision = {
   parsed?: Record<string, unknown>;
 };
 
+export interface StopMessageDefaultConfigInput {
+  tombstoneCleared?: boolean;
+  configEnabled?: unknown;
+  configText?: unknown;
+  configMaxRepeats?: unknown;
+  envText?: unknown;
+  envMaxRepeats?: unknown;
+}
+
+export interface StopMessageDefaultConfigPlan {
+  enabled: boolean;
+  text: string;
+  maxRepeats: number;
+}
+
 function nativeFn(name: string): (...args: unknown[]) => unknown {
   const fn = nativeBinding[name];
   if (typeof fn !== 'function') {
@@ -106,5 +121,14 @@ export function evaluateStopSchemaGateDirectNative(args: {
         : undefined
     ),
     'evaluateStopSchemaGateJson'
+  );
+}
+
+export function planStopMessageDefaultConfigDirectNative(
+  input: StopMessageDefaultConfigInput
+): StopMessageDefaultConfigPlan {
+  return parseNativeJson<StopMessageDefaultConfigPlan>(
+    nativeFn('planStopMessageDefaultConfigJson')(JSON.stringify(input)),
+    'planStopMessageDefaultConfigJson'
   );
 }

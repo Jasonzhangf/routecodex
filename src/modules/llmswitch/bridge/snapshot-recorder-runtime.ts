@@ -1,22 +1,37 @@
 import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
-import type { AnyRecord } from './bridge-types.js';
-import type {
-  ClientToolTraceSummaryEntry,
-  RuntimeErrorSignal,
-  StageTraceEntry,
-  ToolExecutionFailureSignal
-} from './snapshot-recorder-types.js';
-import {
-  MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES,
-  MAX_STAGE_TRACE_ENTRIES,
-  MAX_STAGE_TRACE_PAYLOAD_CHARS
-} from './snapshot-recorder-types.js';
 import {
   classifyRuntimeErrorSignalFromText
 } from './snapshot-recorder-tool-failures.js';
 
+type AnyRecord = Record<string, unknown>;
+export type SnapshotRecorder = unknown;
+export type RuntimeErrorGroup = 'parse-error' | 'exec-error';
+export interface RuntimeErrorSignal {
+  group: RuntimeErrorGroup;
+  errorType: string;
+  matchedText: string;
+}
+export interface ToolExecutionFailureSignal {
+  toolName: 'exec_command' | 'apply_patch' | 'shell_command';
+  errorType: string;
+  matchedText: string;
+  toolCallId?: string;
+  callId?: string;
+}
+export interface StageTraceEntry {
+  at: string;
+  stage: string;
+  payload: unknown;
+}
+export interface ClientToolTraceSummaryEntry {
+  at: string;
+  stage: string;
+}
+export const MAX_STAGE_TRACE_ENTRIES = 40;
+export const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
+export const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
 const clientToolErrorSampleWindow = new Map<string, number>();
 const truthy = new Set(['1', 'true', 'yes', 'on']);

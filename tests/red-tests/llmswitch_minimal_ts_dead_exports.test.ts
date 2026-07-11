@@ -11,42 +11,7 @@ const SEARCH_ROOTS = [
   'scripts',
 ];
 
-const allowedPublicSurfaceExports: Record<string, readonly string[]> = {
-  'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts': [
-    'ContextWeightedLoadBalancingConfig',
-    'DeepSeekCompatRuntimeOptions',
-    'FeatureBuilder',
-    'ForwarderStatusState',
-    'ForwarderTargetStatusState',
-    'HealthWeightedLoadBalancingConfig',
-    'LoadBalancingPolicy',
-    'ProviderCooldownState',
-    'ProviderHealthConfig',
-    'ProviderHealthState',
-    'ProviderRuntimeMap',
-    'RoutePoolLoadBalancingPolicy',
-    'RoutePoolMode',
-    'RoutePoolTier',
-    'VirtualRouterApplyPatchConfig',
-    'VirtualRouterClassifierConfig',
-    'VirtualRouterClockConfig',
-    'VirtualRouterExecCommandGuardConfig',
-    'VirtualRouterProviderDefinition',
-    'VirtualRouterRoutePoolStatus',
-    'VirtualRouterWebSearchConfig',
-    'VirtualRouterWebSearchDirectActivation',
-    'VirtualRouterWebSearchEngineConfig',
-    'VirtualRouterWebSearchExecutionMode',
-  ],
-  'sharedmodule/llmswitch-core/src/telemetry/stats-center.ts': [
-    'ProviderStatsSnapshot',
-    'ProviderStatsBucket',
-    'RouterStatsBucket',
-    'RouterStatsSnapshot',
-    'StatsCenterOptions',
-    'initStatsCenter',
-  ],
-};
+const allowedPublicSurfaceExports: Record<string, readonly string[]> = {};
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');

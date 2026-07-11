@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
-import type { StageRecorder } from '../../sharedmodule/llmswitch-core/src/servertool/types.js';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const recordResponsesResponseMock = jest.fn();
@@ -15,6 +14,10 @@ jest.unstable_mockModule('../../src/modules/llmswitch/bridge/responses-conversat
 const { convertProviderResponse } = await import(
   '../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
 );
+
+interface StageRecorder {
+  record(stage: string, payload: object): void;
+}
 
 class StubStageRecorder implements StageRecorder {
   public entries: Array<{ stage: string; payload: object }> = [];

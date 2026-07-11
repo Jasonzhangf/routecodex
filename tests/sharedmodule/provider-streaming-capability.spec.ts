@@ -1,5 +1,7 @@
-import { bootstrapVirtualRouterConfig } from './helpers/virtual-router-bootstrap-direct-native.js';
-import type { ProviderRuntimeProfile } from '../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
+import {
+  bootstrapVirtualRouterConfig,
+  type ProviderRuntimeProfile
+} from './helpers/virtual-router-bootstrap-direct-native.js';
 
 function bootstrapProvider(providerId: string, provider: Record<string, unknown>, modelId: string): ProviderRuntimeProfile {
   const result = bootstrapVirtualRouterConfig({

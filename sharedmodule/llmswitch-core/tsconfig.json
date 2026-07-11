@@ -14,19 +14,11 @@
     "isolatedModules": true,
     "noEmitOnError": false,
     "baseUrl": ".",
-    "paths": {
-      "rcc-llmswitch-core/native/servertool-wrapper": [
-        "types/servertool-wrapper.d.ts"
-      ]
-    },
     "types": [
       "node"
     ]
   },
-  "include": [
-    "src/**/*",
-    "src/**/*.json"
-  ],
+  "include": [],
   "exclude": [
     "dist",
     "node_modules",

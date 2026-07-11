@@ -3,9 +3,6 @@ import path from 'node:path';
 
 const root = process.cwd();
 const vrRoot = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine';
-const tsContractFiles = [
-  'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts',
-];
 
 const denyChecks = [
   {
@@ -16,17 +13,6 @@ const denyChecks = [
       /fallback:default/,
       /"fallback"\s*:/,
       /\bdid_fallback\b/,
-    ],
-  },
-  {
-    files: tsContractFiles,
-    extensions: new Set(['.ts']),
-    patterns: [
-      /\bfallback\s*:\s*boolean\b/,
-      /classification\.fallback\b/,
-      /decision\.fallback\b/,
-      /diagnostics\.fallback\b/,
-      /fallback:default/,
     ],
   },
 ];
@@ -84,4 +70,3 @@ if (failures.length > 0) {
 
 console.log('[verify:vr-no-fallback-semantics] ok');
 console.log(`- checked Rust root: ${vrRoot}`);
-console.log(`- checked TS contract files: ${tsContractFiles.length}`);

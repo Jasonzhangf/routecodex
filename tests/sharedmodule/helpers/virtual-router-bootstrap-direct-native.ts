@@ -1,24 +1,20 @@
-import type {
-  ProviderProfile,
-  ProviderRuntimeProfile,
-  RouterMetadataInput,
-  VirtualRouterBootstrapInput,
-  VirtualRouterBootstrapResult,
-  VirtualRouterConfig
-} from '../../../sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.js';
 import {
   callNativeJson,
   VirtualRouterError,
   VirtualRouterErrorCode
 } from './native-router-hotpath-loader.js';
 
-export type {
-  ProviderProfile,
-  ProviderRuntimeProfile,
-  RouterMetadataInput,
-  VirtualRouterBootstrapInput,
-  VirtualRouterBootstrapResult,
-  VirtualRouterConfig
+export type ProviderProfile = Record<string, unknown>;
+export type ProviderRuntimeProfile = Record<string, unknown>;
+export type RouterMetadataInput = Record<string, unknown>;
+export type VirtualRouterConfig = Record<string, unknown>;
+export type VirtualRouterBootstrapInput = Record<string, unknown>;
+export type VirtualRouterBootstrapResult = {
+  config: VirtualRouterConfig;
+  runtime: Record<string, ProviderRuntimeProfile>;
+  targetRuntime?: Record<string, ProviderRuntimeProfile>;
+  providers?: Record<string, ProviderProfile>;
+  [key: string]: unknown;
 };
 
 export {

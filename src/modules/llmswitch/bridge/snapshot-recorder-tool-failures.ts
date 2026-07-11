@@ -1,7 +1,7 @@
-import type { AnyRecord } from './bridge-types.js';
-import type { RuntimeErrorSignal, ToolExecutionFailureSignal } from './snapshot-recorder-types.js';
+import type { RuntimeErrorSignal, ToolExecutionFailureSignal } from './snapshot-recorder-runtime.js';
 import { detectToolExecutionFailuresNative } from './native-exports.js';
 
+type AnyRecord = Record<string, unknown>;
 const PARSE_ERROR_SIGNALS: Array<{ needle: string; errorType: string }> = [
   { needle: 'failed to parse function arguments', errorType: 'tool_args_parse_failed' },
   { needle: 'missing field `cmd`', errorType: 'tool_args_missing_cmd' },

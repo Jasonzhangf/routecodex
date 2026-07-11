@@ -1267,9 +1267,7 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(fs.existsSync(retiredPath)).toBe(false);
     expect(staleImports).toEqual([]);
-    expect(fs.readFileSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.d.ts'), 'utf8')).toContain(
-      'export interface StageRecorder',
-    );
+    expect(fs.existsSync(path.join(repoRoot, 'sharedmodule/llmswitch-core/src/servertool/types.d.ts'))).toBe(false);
   });
 
   it('HubPipeline zero-consumer pipeline type shell must stay physically deleted', () => {
@@ -4278,6 +4276,8 @@ describe('hub pipeline stage residue audit', () => {
       'src/modules/llmswitch/bridge/snapshot-recorder-runtime.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-tool-failures.d.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder-types.d.ts',
+      'src/modules/llmswitch/bridge/snapshot-recorder-types.ts',
+      'src/modules/llmswitch/bridge/bridge-types.ts',
       'src/modules/llmswitch/bridge/snapshot-recorder.d.ts',
       'src/modules/llmswitch/bridge/state-integrations.d.ts',
     ];
@@ -4319,28 +4319,10 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
-  it('ServerTool type surface must not restore zero-consumer nested execution shells', () => {
+  it('ServerTool type surface must stay physically deleted', () => {
     const filePath = path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool/types.d.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const forbidden = [
-      'TriggerMode',
-      'AutoHookPhase',
-      'ServerToolExecutionDescriptor',
-    ];
-    const findings: string[] = [];
 
-    for (const name of forbidden) {
-      const declaration = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${name}\\b`);
-      if (declaration.test(source)) {
-        findings.push(`restored zero-consumer servertool type ${name}`);
-      }
-    }
-
-    expect(findings).toEqual([]);
-    expect(source).toContain('export interface ServerToolHandlerEntry');
-    expect(source).toContain('export interface ServerToolAutoHookDescriptor');
-    expect(source).toContain("trigger: 'tool_call' | 'auto'");
-    expect(source).toContain("phase: 'pre' | 'default' | 'post'");
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
   it('StandardizedRequest type surface must stay physically deleted', () => {
@@ -5130,16 +5112,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('llmswitch-core src must not keep side-by-side TS emit artifacts', () => {
-    const allowedGeneratedDeclarations = new Set([
-      'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts',
-      'sharedmodule/llmswitch-core/src/servertool/types.d.ts',
-    ]);
     const generatedArtifacts = walkFiles(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
       ['.js', '.d.ts', '.js.map'],
     )
-      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'))
-      .filter((relativePath) => !allowedGeneratedDeclarations.has(relativePath));
+      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
 
     expect(generatedArtifacts.sort()).toEqual([]);
   });
@@ -5170,15 +5147,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool source truth dir must not keep side-by-side TS emit artifacts', () => {
-    const allowedGeneratedDeclarations = new Set([
-      'sharedmodule/llmswitch-core/src/servertool/types.d.ts',
-    ]);
     const generatedArtifacts = walkFiles(
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src/servertool'),
       ['.js', '.d.ts', '.js.map'],
     )
-      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'))
-      .filter((relativePath) => !allowedGeneratedDeclarations.has(relativePath));
+      .map((fullPath) => path.relative(process.cwd(), fullPath).split(path.sep).join('/'));
 
     expect(generatedArtifacts.sort()).toEqual([]);
   });
@@ -5424,7 +5397,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(verificationMap).not.toContain('plan_provider_response_orchestration_v2');
   });
 
-  it('virtual router contracts must stay type-only bridge surface', () => {
+  it('virtual router contracts type shell must stay physically deleted', () => {
     const contractsPath = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts',
@@ -5433,22 +5406,12 @@ describe('hub pipeline stage residue audit', () => {
       path.join(process.cwd(), 'sharedmodule/llmswitch-core/src'),
       path.join(process.cwd(), 'src'),
     ];
-    const contractsSource = fs.readFileSync(contractsPath, 'utf8');
-    const findings = collectMatches(contractsSource, [
-      { label: 'TS owns default model context token constant', pattern: /DEFAULT_MODEL_CONTEXT_TOKENS/ },
-      { label: 'TS owns default route constant', pattern: /DEFAULT_ROUTE/ },
-      { label: 'TS owns route priority ordering', pattern: /ROUTE_PRIORITY/ },
-      { label: 'virtual router error code lives in contracts', pattern: /enum\s+VirtualRouterErrorCode/ },
-      { label: 'virtual router error class lives in contracts', pattern: /class\s+VirtualRouterError/ },
-    ]);
+    const findings: string[] = [];
 
     for (const root of sourceRoots) {
       for (const fullPath of walkFiles(root, ['.ts', '.tsx', '.js', '.jsx', '.d.ts'])) {
         const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join('/');
         if (relativePath === 'tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts') {
-          continue;
-        }
-        if (relativePath === 'sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.d.ts') {
           continue;
         }
         const source = fs.readFileSync(fullPath, 'utf8');
@@ -5466,6 +5429,7 @@ describe('hub pipeline stage residue audit', () => {
       }
     }
 
+    expect(fs.existsSync(contractsPath)).toBe(false);
     expect(findings).toEqual([]);
   });
 

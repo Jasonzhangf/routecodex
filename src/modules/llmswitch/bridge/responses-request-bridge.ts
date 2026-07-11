@@ -9,7 +9,6 @@
 // feature_id: hub.chat_process_responses_continuation
 // canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, attachResponsesRequestContextToResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesSessionIdFromHttp, readResponsesConversationIdFromHttp, shouldPersistResponsesConversationForHttp, readResponsesResponseIdFromHttp
 
-import type { AnyRecord } from './bridge-types.js';
 import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
 import {
   captureResponsesRequestContextForRequest,
@@ -32,6 +31,7 @@ import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 import { writeMetadataCenterSlot } from '../../../server/runtime/http-server/metadata-center/dualwrite-api.js';
 
+type AnyRecord = Record<string, unknown>;
 const RESPONSES_PIPELINE_METADATA_WRITER = {
   module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
   symbol: 'buildResponsesPipelineMetadataForHttp',
