@@ -32,6 +32,10 @@ export function hasResponsesConversationResponseInNativeStore(responseId?: strin
   return executeResponsesStoreOperation<boolean>('debug_has_response', { responseId });
 }
 
+export function hasResponsesConversationRequestInNativeStore(requestId?: string): boolean {
+  return executeResponsesStoreOperation<boolean>('debug_has_request', { requestId });
+}
+
 export function hasResponsesConversationScopeInNativeStore(scopeKey?: string): boolean {
   return executeResponsesStoreOperation<boolean>('debug_has_scope', { scopeKey });
 }

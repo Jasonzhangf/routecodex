@@ -334,7 +334,3 @@ export function getResponsesConversationStoreDebugStats(): StoreMetrics {
 export function releaseResponsesConversationRequestPayload(requestId?: string): void {
   executeStoreOperation<null>('release_request_payload', { requestId });
 }
-
-export function hasResponsesConversationRequestForDebug(requestId?: string): boolean {
-  return executeStoreOperation<boolean>('debug_has_request', { requestId });
-}

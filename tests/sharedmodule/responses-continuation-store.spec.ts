@@ -7,7 +7,6 @@ import {
   clearAllResponsesConversationState,
   clearResponsesConversationByRequestId,
   clearUnresolvedResponsesConversationRequests,
-  hasResponsesConversationRequestForDebug,
   lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
@@ -20,6 +19,7 @@ import {
 } from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
 import {
+  hasResponsesConversationRequestInNativeStore,
   hasResponsesConversationResponseInNativeStore,
   hasResponsesConversationScopeInNativeStore
 } from './helpers/responses-conversation-store-direct-native';
@@ -2834,8 +2834,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestForDebug('req-resp-store-1')).toBe(false);
-    expect(hasResponsesConversationRequestForDebug('req-resp-store-2')).toBe(true);
+    expect(hasResponsesConversationRequestInNativeStore('req-resp-store-1')).toBe(false);
+    expect(hasResponsesConversationRequestInNativeStore('req-resp-store-2')).toBe(true);
     expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-1')).toBe(false);
     expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-2')).toBe(true);
     expect(hasResponsesConversationScopeInNativeStore('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
@@ -2912,8 +2912,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestForDebug('req-pending-old-1')).toBe(false);
-    expect(hasResponsesConversationRequestForDebug('req-pending-old-2')).toBe(true);
+    expect(hasResponsesConversationRequestInNativeStore('req-pending-old-1')).toBe(false);
+    expect(hasResponsesConversationRequestInNativeStore('req-pending-old-2')).toBe(true);
 
     const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBeGreaterThanOrEqual(1);
@@ -2952,8 +2952,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestForDebug('req-pending-scope-a-1')).toBe(true);
-    expect(hasResponsesConversationRequestForDebug('req-pending-scope-b-1')).toBe(true);
+    expect(hasResponsesConversationRequestInNativeStore('req-pending-scope-a-1')).toBe(true);
+    expect(hasResponsesConversationRequestInNativeStore('req-pending-scope-b-1')).toBe(true);
   });
 
   it('keeps recording when response capture sees synthetic RouteCodex assistant control text', () => {
