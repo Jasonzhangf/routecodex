@@ -201,6 +201,7 @@
   "materializeProviderOwnedSubmitContextJson",
   "planResponsesRequestBodyForHttpJson",
   "shouldManageResponsesConversationForHttpJson",
+  "buildResponsesConversationPortScopeForHttpJson",
   "buildResponsesScopeContinuationExpiredErrorForHttpJson",
   "buildResponsesResumeClientErrorForHttpJson",
   "shouldProjectResponsesResumeClientErrorForHttpJson",

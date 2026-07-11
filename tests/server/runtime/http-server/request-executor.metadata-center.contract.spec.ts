@@ -98,6 +98,7 @@ const mockNativeExportsModule = () => ({
   }),
   normalizeExplicitRoutePoolNative: jest.fn((value: unknown) => (Array.isArray(value) ? value : [])),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => undefined),
+  buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;

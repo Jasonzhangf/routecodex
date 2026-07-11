@@ -104,6 +104,24 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     planResponsesRequestContext: async () => ({}),
     shouldManageResponsesConversationForHttpNative: (entryEndpoint?: string) =>
       entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs',
+    buildResponsesConversationPortScopeForHttpNative: (portContext?: {
+      matchedPort?: unknown;
+      localPort?: unknown;
+      routingPolicyGroup?: unknown;
+    } | null) => {
+      const matchedPort = typeof portContext?.matchedPort === 'number'
+        ? portContext.matchedPort
+        : typeof portContext?.localPort === 'number'
+          ? portContext.localPort
+          : undefined;
+      const routingPolicyGroup = typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()
+        ? portContext.routingPolicyGroup.trim()
+        : undefined;
+      return {
+        ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
+        ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+      };
+    },
     buildResponsesScopeContinuationExpiredErrorForHttpNative: () => ({
       error: {
         message: 'Responses continuation expired or not found for local scope materialization',

@@ -5713,6 +5713,33 @@ pub fn should_manage_responses_conversation_for_http_json(entry_endpoint: String
     entry_endpoint == "/v1/responses" || entry_endpoint == "/v1/responses.submit_tool_outputs"
 }
 
+#[napi_derive::napi(js_name = "buildResponsesConversationPortScopeForHttpJson")]
+pub fn build_responses_conversation_port_scope_for_http_json(
+    port_context_json: String,
+) -> NapiResult<String> {
+    let port_context: Value = serde_json::from_str(&port_context_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let obj = port_context.as_object();
+    let matched_port = obj
+        .and_then(|row| row.get("matchedPort").and_then(Value::as_i64))
+        .or_else(|| obj.and_then(|row| row.get("localPort").and_then(Value::as_i64)));
+    let routing_policy_group = obj
+        .and_then(|row| row.get("routingPolicyGroup").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut output = serde_json::Map::new();
+    if let Some(port) = matched_port {
+        output.insert("matchedPort".to_string(), serde_json::json!(port));
+    }
+    if let Some(group) = routing_policy_group {
+        output.insert(
+            "routingPolicyGroup".to_string(),
+            Value::String(group.to_string()),
+        );
+    }
+    serde_json::to_string(&Value::Object(output)).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "buildResponsesScopeContinuationExpiredErrorForHttpJson")]
 pub fn build_responses_scope_continuation_expired_error_for_http_json() -> NapiResult<String> {
     let output = serde_json::json!({
@@ -6196,8 +6223,8 @@ mod tests {
         plan_responses_continuation_meta, plan_responses_continuation_request_action,
         plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
         plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
-        plan_responses_handler_entry, plan_responses_handler_stream_for_http_json,
-        plan_responses_persisted_entry,
+        build_responses_conversation_port_scope_for_http_json, plan_responses_handler_entry,
+        plan_responses_handler_stream_for_http_json, plan_responses_persisted_entry,
         plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
         plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
         plan_responses_release_request_payload, plan_responses_request_body_for_http,
@@ -9590,5 +9617,33 @@ mod tests {
         .expect("stream plan json");
         assert!(plan["requestStartMeta"].get("type").is_none());
         assert!(plan["requestStartMeta"].get("timeoutMs").is_none());
+    }
+
+    #[test]
+    fn build_responses_conversation_port_scope_for_http_matches_handler_contract() {
+        let from_matched: Value = serde_json::from_str(
+            &build_responses_conversation_port_scope_for_http_json(
+                json!({
+                    "matchedPort": 5555,
+                    "localPort": 5520,
+                    "routingPolicyGroup": " longcontext "
+                })
+                .to_string(),
+            )
+            .expect("matched port scope"),
+        )
+        .expect("matched port scope json");
+        assert_eq!(from_matched["matchedPort"], json!(5555));
+        assert_eq!(from_matched["routingPolicyGroup"], json!("longcontext"));
+
+        let from_local: Value = serde_json::from_str(
+            &build_responses_conversation_port_scope_for_http_json(
+                json!({ "localPort": 5520, "routingPolicyGroup": " " }).to_string(),
+            )
+            .expect("local port scope"),
+        )
+        .expect("local port scope json");
+        assert_eq!(from_local["matchedPort"], json!(5520));
+        assert!(from_local.get("routingPolicyGroup").is_none());
     }
 }

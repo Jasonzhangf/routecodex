@@ -113,6 +113,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
     (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
   ),
+  buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;

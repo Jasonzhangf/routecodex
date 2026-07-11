@@ -21,6 +21,7 @@ import {
 } from './runtime-integrations.js';
 import {
   captureReqInboundResponsesContextSnapshot,
+  buildResponsesConversationPortScopeForHttpNative,
   buildResponsesResumeClientErrorForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
@@ -288,18 +289,7 @@ export function buildResponsesConversationPortScopeForHttp(
     routingPolicyGroup?: unknown;
   } | null | undefined
 ): ResponsesConversationPortScopeForHttp {
-  const matchedPort = typeof portContext?.matchedPort === 'number'
-    ? portContext.matchedPort
-    : typeof portContext?.localPort === 'number'
-      ? portContext.localPort
-      : undefined;
-  const routingPolicyGroup = typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()
-    ? portContext.routingPolicyGroup.trim()
-    : undefined;
-  return {
-    ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
-    ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
-  };
+  return buildResponsesConversationPortScopeForHttpNative(portContext);
 }
 
 export function planResponsesHandlerStreamForHttp(args: {

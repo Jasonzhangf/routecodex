@@ -142,6 +142,7 @@ type NativeRouterHotpathJsonBinding = {
   extractSessionIdentifiersJson?: (metadataJson: string) => string;
   planResponsesRequestBodyForHttpJson?: (payloadJson: string) => string;
   shouldManageResponsesConversationForHttpJson?: (entryEndpoint: string) => boolean;
+  buildResponsesConversationPortScopeForHttpJson?: (portContextJson: string) => string;
   buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
   buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
   shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
@@ -1303,6 +1304,28 @@ export function shouldManageResponsesConversationForHttpNative(entryEndpoint: st
     throw new Error('[llmswitch-bridge] shouldManageResponsesConversationForHttpJson not available');
   }
   return fn(String(entryEndpoint ?? '')) === true;
+}
+
+export function buildResponsesConversationPortScopeForHttpNative(portContext: {
+  matchedPort?: unknown;
+  localPort?: unknown;
+  routingPolicyGroup?: unknown;
+} | null | undefined): {
+  matchedPort?: number;
+  routingPolicyGroup?: string;
+} {
+  const fn = getRouterHotpathJsonBindingSync().buildResponsesConversationPortScopeForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesConversationPortScopeForHttpJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(portContext ?? null))) as unknown;
+  const record = assertNativeObject('buildResponsesConversationPortScopeForHttpJson', parsed);
+  return {
+    ...(typeof record.matchedPort === 'number' ? { matchedPort: record.matchedPort } : {}),
+    ...(typeof record.routingPolicyGroup === 'string' && record.routingPolicyGroup.trim()
+      ? { routingPolicyGroup: record.routingPolicyGroup.trim() }
+      : {}),
+  };
 }
 
 export function buildResponsesScopeContinuationExpiredErrorForHttpNative(): {

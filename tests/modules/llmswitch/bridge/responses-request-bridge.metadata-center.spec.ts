@@ -26,6 +26,24 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
     (entryEndpoint?: string) =>
       entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
   ),
+  buildResponsesConversationPortScopeForHttpNative: jest.fn((portContext?: {
+    matchedPort?: unknown;
+    localPort?: unknown;
+    routingPolicyGroup?: unknown;
+  } | null) => {
+    const matchedPort = typeof portContext?.matchedPort === 'number'
+      ? portContext.matchedPort
+      : typeof portContext?.localPort === 'number'
+        ? portContext.localPort
+        : undefined;
+    const routingPolicyGroup = typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()
+      ? portContext.routingPolicyGroup.trim()
+      : undefined;
+    return {
+      ...(typeof matchedPort === 'number' ? { matchedPort } : {}),
+      ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+    };
+  }),
   buildResponsesScopeContinuationExpiredErrorForHttpNative: jest.fn(() => ({
     error: {
       message: 'Responses continuation expired or not found for local scope materialization',
@@ -100,6 +118,7 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 
 let buildResponsesPipelineMetadataForHttp: any;
 let planResponsesHandlerStreamForHttp: any;
+let buildResponsesConversationPortScopeForHttp: any;
 let attachResponsesRequestContextToResultForHttp: any;
 let finalizeResponsesPipelineResultForHttp: any;
 let MetadataCenter: any;
@@ -110,6 +129,7 @@ beforeAll(async () => {
   ({
     buildResponsesPipelineMetadataForHttp,
     planResponsesHandlerStreamForHttp,
+    buildResponsesConversationPortScopeForHttp,
     attachResponsesRequestContextToResultForHttp,
     finalizeResponsesPipelineResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
@@ -147,6 +167,23 @@ describe('responses-request-bridge metadata center projection', () => {
     expect(streamPlan.originalStream).toBe(false);
     expect(streamPlan.outboundStream).toBe(true);
     expect(streamPlan.inboundStream).toBe(true);
+  });
+
+  it('builds port scope through the native bridge surface', () => {
+    expect(buildResponsesConversationPortScopeForHttp({
+      matchedPort: 5555,
+      localPort: 5520,
+      routingPolicyGroup: ' longcontext '
+    })).toEqual({
+      matchedPort: 5555,
+      routingPolicyGroup: 'longcontext',
+    });
+    expect(buildResponsesConversationPortScopeForHttp({
+      localPort: 5520,
+      routingPolicyGroup: ' '
+    })).toEqual({
+      matchedPort: 5520,
+    });
   });
 
   it('writes request-side responses continuation control into metadata center', () => {
