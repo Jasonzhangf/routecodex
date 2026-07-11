@@ -1444,9 +1444,12 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
+      - src/modules/llmswitch/bridge/mimoweb-tool-harvest-host.ts
+      - src/providers/core/runtime/mimoweb/mimoweb-provider.ts
     contract:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/providers/core/runtime/mimoweb-provider.unit.test.ts
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
@@ -1458,6 +1461,7 @@ verification:
       - npm run build:base
     notes:
       - "Response-side harvest, apply_patch reversal, and internal tool stripping must stay in resp_process_stage1_tool_governance Rust blocks."
+      - "MiMo Web provider text-tool harvest must use the narrow `mimoweb-tool-harvest-host.ts` bridge and must not bind directly to the broad `native-exports.js` surface."
 
   - feature_id: hub.chat_process_session_usage
     change_risk: medium

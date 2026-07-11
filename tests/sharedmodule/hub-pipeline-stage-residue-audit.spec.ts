@@ -837,6 +837,23 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('getRouterHotpathJsonBindingSync');
   });
 
+  it('mimoweb provider text-tool harvest must use its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const providerSource = fs.readFileSync(
+      path.join(repoRoot, 'src/providers/core/runtime/mimoweb/mimoweb-provider.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/mimoweb-tool-harvest-host.ts'),
+      'utf8',
+    );
+
+    expect(providerSource).toContain('../../../../modules/llmswitch/bridge/mimoweb-tool-harvest-host.js');
+    expect(providerSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('normalizeAssistantTextToToolCallsJson');
+  });
+
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
     const repoRoot = process.cwd();
     const retiredPaths = [

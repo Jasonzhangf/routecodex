@@ -70,7 +70,7 @@ jest.unstable_mockModule('../../../../src/providers/core/utils/provider-error-re
   buildRuntimeFromCompatContext: jest.fn(() => ({ requestId: 'test-request' }))
 }));
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/mimoweb-tool-harvest-host.js', () => ({
   normalizeAssistantTextToToolCallsJson: mockNormalizeAssistantTextToToolCallsJson
 }));
 

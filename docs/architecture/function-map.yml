@@ -4658,6 +4658,8 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks.rs
+      - src/modules/llmswitch/bridge/mimoweb-tool-harvest-host.ts
+      - src/providers/core/runtime/mimoweb/mimoweb-provider.ts
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts # deleted; forbidden
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts # deleted; forbidden
@@ -4665,6 +4667,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/providers/core/runtime/mimoweb-provider.unit.test.ts
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
@@ -4672,3 +4675,4 @@ owners:
     migration_target: rust
     notes:
       - "Reverse patching and internal tool stripping must be in Rust per ARCH-HUB-3."
+      - "MiMo Web provider text-tool harvest must use the narrow `mimoweb-tool-harvest-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
