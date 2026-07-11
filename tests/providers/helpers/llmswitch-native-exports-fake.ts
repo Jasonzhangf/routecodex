@@ -285,7 +285,6 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     stripResponsesStoredContextInputMediaNative: (payload: unknown) => payload,
     updateResponsesContractProbeFromSseChunkNative: () => ({}),
     updateResponsesSseTransportTerminalStateNative: (input: unknown) => input,
-    validateApplyPatchArgumentsNative: () => ({ ok: true }),
     validateCanonicalClientToolCall: () => ({ ok: true }),
     validatePipelineNodeContractBoundaryNative: () => ({ ok: true }),
     writeSnapshotViaHooksNative: () => undefined,
