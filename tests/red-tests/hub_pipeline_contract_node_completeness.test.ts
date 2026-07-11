@@ -1,7 +1,7 @@
 import {
-  describeHubPipelineContractsWithNative,
-  describeVirtualRouterContractsWithNative,
-  describePipelineContractWithNative,
+  describeHubPipelineContractsNative,
+  describeVirtualRouterContractsNative,
+  describePipelineContractNative,
 } from '../../src/modules/llmswitch/bridge/native-exports.js';
 
 const HUB_NODES: Array<{ nodeId: string; ownerBuilder: string }> = [
@@ -19,8 +19,8 @@ const VR_NODES: Array<{ nodeId: string; ownerBuilder: string }> = [
 ];
 
 describe('hub pipeline contract node completeness (online help)', () => {
-  it('returns all 7 typed hub nodes from describeHubPipelineContractsWithNative', () => {
-    const all = describeHubPipelineContractsWithNative();
+  it('returns all 7 typed hub nodes from describeHubPipelineContractsNative', () => {
+    const all = describeHubPipelineContractsNative();
     const nodes = (all?.nodes ?? []).map((n: { nodeId: string }) => n.nodeId);
     for (const { nodeId } of HUB_NODES) {
       expect(nodes).toContain(nodeId);
@@ -28,8 +28,8 @@ describe('hub pipeline contract node completeness (online help)', () => {
     expect(nodes.length).toBe(7);
   });
 
-  it('returns the 1 virtual router node from describeVirtualRouterContractsWithNative', () => {
-    const vr = describeVirtualRouterContractsWithNative();
+  it('returns the 1 virtual router node from describeVirtualRouterContractsNative', () => {
+    const vr = describeVirtualRouterContractsNative();
     const vrNodes = (vr?.nodes ?? []).map((n: { nodeId: string }) => n.nodeId);
     for (const { nodeId } of VR_NODES) {
       expect(vrNodes).toContain(nodeId);
@@ -37,9 +37,9 @@ describe('hub pipeline contract node completeness (online help)', () => {
     expect(vrNodes.length).toBe(1);
   });
 
-  it('returns complete fields for every node via describePipelineContractWithNative', () => {
+  it('returns complete fields for every node via describePipelineContractNative', () => {
     for (const { nodeId, ownerBuilder } of [...HUB_NODES, ...VR_NODES]) {
-      const detail = describePipelineContractWithNative(nodeId);
+      const detail = describePipelineContractNative(nodeId);
       expect(detail?.node?.nodeId).toBe(nodeId);
       expect(detail?.node?.ownerBuilder).toBe(ownerBuilder);
       expect(typeof detail?.node?.help === 'string' && detail.node.help.length > 0).toBe(true);
@@ -63,7 +63,7 @@ describe('hub pipeline contract node completeness (online help)', () => {
     };
 
     for (const [nodeId, effect] of Object.entries(expectedToolValidation)) {
-      const detail = describePipelineContractWithNative(nodeId);
+      const detail = describePipelineContractNative(nodeId);
       expect(detail?.node?.effects).toContain(effect);
     }
   });

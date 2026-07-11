@@ -131,10 +131,10 @@ describe('Hub Pipeline request type topology contract', () => {
       expect(requiredExports).toContain(token);
     }
     for (const token of [
-      'describeHubPipelineContractsWithNative',
-      'describeVirtualRouterContractsWithNative',
+      'describeHubPipelineContractsNative',
+      'describeVirtualRouterContractsNative',
       'describeMetaCarrierContractsNative',
-      'describePipelineContractWithNative',
+      'describePipelineContractNative',
       'validatePipelineNodeContractBoundaryWithNative',
     ]) {
       expect(tsBridge).toContain(token);

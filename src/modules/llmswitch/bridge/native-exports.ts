@@ -1095,20 +1095,12 @@ export function describeHubPipelineContractsNative(): AnyRecord {
   return fn();
 }
 
-export function describeHubPipelineContractsWithNative(): AnyRecord {
-  return describeHubPipelineContractsNative();
-}
-
 export function describeVirtualRouterContractsNative(): AnyRecord {
   const fn = getHubVrNodeContracts().describeVirtualRouterContractsWithNative;
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-bridge] describeVirtualRouterContractsWithNative not available');
   }
   return fn();
-}
-
-export function describeVirtualRouterContractsWithNative(): AnyRecord {
-  return describeVirtualRouterContractsNative();
 }
 
 export function describeMetaCarrierContractsNative(): AnyRecord {
@@ -1125,10 +1117,6 @@ export function describePipelineContractNative(nodeId: string): AnyRecord {
     throw new Error('[llmswitch-bridge] describePipelineContractWithNative not available');
   }
   return fn(nodeId);
-}
-
-export function describePipelineContractWithNative(nodeId: string): AnyRecord {
-  return describePipelineContractNative(nodeId);
 }
 
 export function describeServerContractsWithNative(): AnyRecord {
