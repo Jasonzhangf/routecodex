@@ -2,7 +2,7 @@ import { buildInfo } from '../../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
-  classifyRuntimeErrorSignalFromTextNative,
+  classifyRuntimeErrorSignalNative,
   detectToolExecutionFailuresNative,
   shouldLogClientToolErrorToConsoleNative,
 } from './native-exports.js';
@@ -38,13 +38,6 @@ const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
 const clientToolErrorSampleWindow = new Map<string, number>();
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 let cachedTracePayloadCaptureEnabled: boolean | null = null;
-
-type SignalFieldPath = ReadonlyArray<string | number>;
-
-interface SignalTextCandidate {
-  path: SignalFieldPath;
-  value: string;
-}
 
 export function resetSnapshotRecorderErrorsampleStateForTests(): void {
   clientToolErrorSampleWindow.clear();
@@ -185,131 +178,12 @@ export function shouldInspectRuntimeError(stage: string, payload: AnyRecord): bo
   );
 }
 
-function isLikelyContentPath(path: SignalFieldPath): boolean {
-  return path.some((segment) => {
-    if (typeof segment !== 'string') {
-      return false;
-    }
-    return (
-      segment === 'message' ||
-      segment === 'content' ||
-      segment === 'contents' ||
-      segment === 'text' ||
-      segment === 'messages' ||
-      segment === 'tool_calls' ||
-      segment === 'function' ||
-      segment === 'arguments' ||
-      segment === 'call_id' ||
-      segment === 'input' ||
-      segment === 'output' ||
-      segment === 'reasoning' ||
-      segment === 'summary' ||
-      segment === 'excerpt' ||
-      segment === 'observation'
-    );
-  });
-}
-
-function shouldSkipSignalPath(path: SignalFieldPath): boolean {
-  if (isLikelyContentPath(path)) {
-    return true;
-  }
-  return path.some((segment) => typeof segment === 'string' && segment.startsWith('trace'));
-}
-
-function collectRuntimeSignalTexts(payload: unknown): SignalTextCandidate[] {
-  const candidates: SignalTextCandidate[] = [];
-  const queue: Array<{ value: unknown; path: SignalFieldPath }> = [{ value: payload, path: [] }];
-  const seen = new WeakSet<object>();
-  let steps = 0;
-
-  while (queue.length > 0 && steps < 1200) {
-    steps += 1;
-    const current = queue.shift();
-    if (!current) {
-      continue;
-    }
-    const { value, path } = current;
-    if (typeof value === 'string') {
-      if (!shouldSkipSignalPath(path)) {
-        candidates.push({ path, value });
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object') {
-      continue;
-    }
-    if (seen.has(value as object)) {
-      continue;
-    }
-    seen.add(value as object);
-
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => {
-        queue.push({ value: item, path: [...path, index] });
-      });
-      continue;
-    }
-
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      if (
-        key === 'error' ||
-        key === 'message' ||
-        key === 'reason' ||
-        key === 'detail' ||
-        key === 'details' ||
-        key === 'statusText' ||
-        key === 'failure' ||
-        key === 'failureReason' ||
-        key.endsWith('Error') ||
-        key.endsWith('Reason') ||
-        key.endsWith('Message') ||
-        key.endsWith('Detail')
-      ) {
-        queue.push({ value: child, path: [...path, key] });
-      }
-    }
-  }
-
-  return candidates;
-}
-
 export function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeErrorSignal | null {
-  if (stage === 'chat_process.resp.stage1.sse_decode') {
-    const decoded = (payload as any).decoded;
-    const err = typeof (payload as any).error === 'string' ? String((payload as any).error) : '';
-    if (decoded === false && err) {
-      return {
-        group: 'parse-error',
-        errorType: 'sse_decode_error',
-        matchedText: err
-      };
-    }
-  }
-
-  const candidates = collectRuntimeSignalTexts(payload);
-  if (candidates.length <= 0) {
-    return null;
-  }
-
-  for (const candidate of candidates) {
-    const resolved = classifyRuntimeErrorSignalFromText(stage, candidate.value);
-    if (resolved) {
-      return resolved;
-    }
-  }
-  return null;
+  return classifyRuntimeErrorSignalNative(stage, payload);
 }
 
 export function detectToolExecutionFailures(payload: AnyRecord): ToolExecutionFailureSignal[] {
   return detectToolExecutionFailuresNative(payload);
-}
-
-function classifyRuntimeErrorSignalFromText(
-  stage: string,
-  message: string
-): RuntimeErrorSignal | null {
-  return classifyRuntimeErrorSignalFromTextNative(stage, message);
 }
 
 export function shouldLogClientToolErrorToConsole(failure: ToolExecutionFailureSignal): boolean {

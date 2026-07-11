@@ -143,6 +143,7 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
     detectRetryableEmptyAssistantResponseNative: () => false,
     detectToolExecutionFailuresNative: () => [],
     classifyRuntimeErrorSignalFromTextNative: () => null,
+    classifyRuntimeErrorSignalNative: () => null,
     shouldLogClientToolErrorToConsoleNative: () => false,
     evaluateResponsesDirectRouteDecisionNative: () => ({}),
     evaluateSingletonRoutePoolExhaustionNative: () => ({}),

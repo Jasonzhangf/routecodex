@@ -3029,6 +3029,14 @@ pub fn classify_runtime_error_signal_from_text_json_bridge(
     snapshot_tool_failures::classify_runtime_error_signal_from_text_json(stage, message)
 }
 
+#[napi(js_name = "classifyRuntimeErrorSignalJson")]
+pub fn classify_runtime_error_signal_json_bridge(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<String> {
+    snapshot_tool_failures::classify_runtime_error_signal_json(stage, payload_json)
+}
+
 #[napi(js_name = "shouldLogClientToolErrorToConsoleJson")]
 pub fn should_log_client_tool_error_to_console_json_bridge(
     failure_json: String,

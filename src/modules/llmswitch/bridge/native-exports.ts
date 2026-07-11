@@ -59,6 +59,7 @@ type NativeChatProcessNodeResultSemantics = {
   classifyEmptyResponseSignalJson?: (stage: string, bodyJson: string) => string;
   detectToolExecutionFailuresJson?: (bodyJson: string) => string;
   classifyRuntimeErrorSignalFromTextJson?: (stage: string, message: string) => string;
+  classifyRuntimeErrorSignalJson?: (stage: string, payloadJson: string) => string;
   shouldLogClientToolErrorToConsoleJson?: (failureJson: string) => boolean;
   updateResponsesContractProbeFromSseChunkJson?: (chunkJson: string, probeJson: string) => string;
   updateResponsesSseTransportTerminalStateJson?: (
@@ -1540,6 +1541,25 @@ export function classifyRuntimeErrorSignalFromTextNative(
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalFromTextJson returned invalid payload');
+  }
+  return parsed as RuntimeErrorSignal;
+}
+
+export function classifyRuntimeErrorSignalNative(
+  stage: string,
+  payload: unknown
+): RuntimeErrorSignal | null {
+  const fn = getChatProcessNodeResultSemantics().classifyRuntimeErrorSignalJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalJson not available');
+  }
+  const raw = fn(String(stage || ''), JSON.stringify(payload ?? null));
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('[llmswitch-bridge] classifyRuntimeErrorSignalJson returned invalid payload');
   }
   return parsed as RuntimeErrorSignal;
 }

@@ -1,8 +1,9 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const MAX_TRAILING_TOOL_MESSAGES: usize = 8;
+const MAX_RUNTIME_SIGNAL_SCAN_STEPS: usize = 1200;
 
 fn read_trimmed(value: Option<&Value>) -> String {
     value
@@ -252,6 +253,84 @@ fn classify_runtime_error_signal_from_text_value(message: &str) -> Option<Value>
         }
     }
     None
+}
+
+fn is_likely_content_path(path: &[String]) -> bool {
+    path.iter().any(|segment| {
+        matches!(
+            segment.as_str(),
+            "message"
+                | "content"
+                | "contents"
+                | "text"
+                | "messages"
+                | "tool_calls"
+                | "function"
+                | "arguments"
+                | "call_id"
+                | "input"
+                | "output"
+                | "reasoning"
+                | "summary"
+                | "excerpt"
+                | "observation"
+        )
+    })
+}
+
+fn should_skip_runtime_signal_path(path: &[String]) -> bool {
+    is_likely_content_path(path) || path.iter().any(|segment| segment.starts_with("trace"))
+}
+
+fn collect_runtime_signal_texts(payload: &Value) -> Vec<String> {
+    let mut candidates = Vec::<String>::new();
+    let mut queue = VecDeque::from([(payload, Vec::<String>::new())]);
+    let mut steps = 0usize;
+
+    while let Some((value, path)) = queue.pop_front() {
+        if steps >= MAX_RUNTIME_SIGNAL_SCAN_STEPS {
+            break;
+        }
+        steps += 1;
+        match value {
+            Value::String(text) => {
+                if !should_skip_runtime_signal_path(&path) {
+                    candidates.push(text.clone());
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    let mut child_path = path.clone();
+                    child_path.push(index.to_string());
+                    queue.push_back((item, child_path));
+                }
+            }
+            Value::Object(record) => {
+                for (key, child) in record.iter() {
+                    if key == "error"
+                        || key == "message"
+                        || key == "reason"
+                        || key == "detail"
+                        || key == "details"
+                        || key == "statusText"
+                        || key == "failure"
+                        || key == "failureReason"
+                        || key.ends_with("Error")
+                        || key.ends_with("Reason")
+                        || key.ends_with("Message")
+                        || key.ends_with("Detail")
+                    {
+                        let mut child_path = path.clone();
+                        child_path.push(key.clone());
+                        queue.push_back((child, child_path));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    candidates
 }
 
 fn json_object(entries: Vec<(&str, Value)>) -> Value {
@@ -556,6 +635,40 @@ pub fn classify_runtime_error_signal_from_text_json(
     serde_json::to_string(&value).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn classify_runtime_error_signal_json(
+    stage: String,
+    payload_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    if stage == "chat_process.resp.stage1.sse_decode" {
+        let decoded = payload.get("decoded").and_then(Value::as_bool);
+        let err = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if decoded == Some(false) && !err.is_empty() {
+            let value = json_object(vec![
+                ("group", Value::String("parse-error".to_string())),
+                ("errorType", Value::String("sse_decode_error".to_string())),
+                ("matchedText", Value::String(err)),
+            ]);
+            return serde_json::to_string(&value)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
+        }
+    }
+
+    for candidate in collect_runtime_signal_texts(&payload) {
+        if let Some(value) = classify_runtime_error_signal_from_text_value(&candidate) {
+            return serde_json::to_string(&value)
+                .map_err(|e| napi::Error::from_reason(e.to_string()));
+        }
+    }
+
+    Ok("null".to_string())
+}
+
 pub fn should_log_client_tool_error_to_console_json(failure_json: String) -> NapiResult<bool> {
     let failure: Value =
         serde_json::from_str(&failure_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -623,6 +736,42 @@ mod tests {
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["group"], "exec-error");
         assert_eq!(parsed["errorType"], "apply_patch_expected_lines_not_found");
+    }
+
+    #[test]
+    fn classifies_runtime_sse_decode_payload() {
+        let raw = classify_runtime_error_signal_json(
+            "chat_process.resp.stage1.sse_decode".to_string(),
+            json!({"decoded": false, "error": "Anthropic SSE error event [500] Operation failed"})
+                .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["group"], "parse-error");
+        assert_eq!(parsed["errorType"], "sse_decode_error");
+        assert_eq!(
+            parsed["matchedText"],
+            "Anthropic SSE error event [500] Operation failed"
+        );
+    }
+
+    #[test]
+    fn runtime_payload_classifier_ignores_normal_content_paths() {
+        let raw = classify_runtime_error_signal_json(
+            "chat_process.req.stage2.semantic_map".to_string(),
+            json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "failed to parse function arguments: missing field `cmd`"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert!(parsed.is_null());
     }
 
     #[test]
