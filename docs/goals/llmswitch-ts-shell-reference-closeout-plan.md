@@ -977,3 +977,10 @@ If runtime behavior is changed beyond compile-time reference closure, add the ma
 - Kept the raw Rust/NAPI capability and binding type entry; only the host `native-exports.ts` wrapper was removed.
 - `hub-pipeline-stage-residue-audit` now rejects reintroducing the host wrapper and rejects the migrated scripts using `nativeExports.buildResponsesRequestFromChatNative`, `responsesBridge.buildResponsesRequestFromChatNative`, or `mod.buildResponsesRequestFromChatNative`.
 - Exact source scan after deletion shows `buildResponsesRequestFromChatNative` only in the direct native helper, scripts that import that helper, historical docs, and the residue gate; active production code has no host-wrapper consumer.
+
+### 2026-07-11 snapshot recorder runtime leaf shell deleted
+
+- Deleted zero-production-import host leaf `src/modules/llmswitch/bridge/snapshot-recorder-runtime.ts`; exact source scan found no active importer outside `snapshot-recorder.ts` and stale allowlist/residue references.
+- Moved the remaining host IO/logging glue into `snapshot-recorder.ts` without adding a new public facade; semantic classifiers, trace planners, sample-window policy, and snapshot hook planning remain Rust/NAPI-owned through `native-exports.ts`.
+- Removed the stale no-fallback allowlist entry for the deleted runtime leaf and extended the residue gate so `snapshot-recorder-runtime.ts` must stay physically absent.
+- Verification passed: exact deleted-ref scan, focused snapshot/residue/unified-hub Jest 4 suites / 236 tests, strict shell reference audit, zero-TS closeout verifier, deleted-path, thin-wrapper-only, fallback-denylist, and scoped `git diff --check`.

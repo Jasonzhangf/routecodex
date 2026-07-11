@@ -1434,11 +1434,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/modules/llmswitch/bridge/snapshot-recorder-runtime.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/monitoring/semantic-tracker.ts",
       "textContains": ""
     },
