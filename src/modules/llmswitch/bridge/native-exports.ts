@@ -141,6 +141,7 @@ type NativeRouterHotpathJsonBinding = {
   sanitizeProviderOutboundPayloadJson?: (inputJson: string) => string;
   normalizeResponsesDirectCurrentRequestPayloadJson?: (inputJson: string) => string;
   extractSessionIdentifiersJson?: (metadataJson: string) => string;
+  planResponsesRequestBodyForHttpJson?: (payloadJson: string) => string;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -1257,6 +1258,33 @@ export function extractSessionIdentifiersFromMetadataNative(
     ...(typeof record.conversationId === 'string' && record.conversationId.trim()
       ? { conversationId: record.conversationId.trim() }
       : {}),
+  };
+}
+
+export function planResponsesRequestBodyForHttpNative(payload: unknown): {
+  requestBodyMetadata?: Record<string, unknown>;
+  pipelineBody: AnyRecord;
+} {
+  const fn = getRouterHotpathJsonBindingSync().planResponsesRequestBodyForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] planResponsesRequestBodyForHttpJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(payload ?? null))) as unknown;
+  const record = assertNativeObject('planResponsesRequestBodyForHttpJson', parsed);
+  const pipelineBody = assertNativeObject(
+    'planResponsesRequestBodyForHttpJson.pipelineBody',
+    record.pipelineBody
+  );
+  const requestBodyMetadata =
+    record.requestBodyMetadata === undefined
+      ? undefined
+      : assertNativeObject(
+          'planResponsesRequestBodyForHttpJson.requestBodyMetadata',
+          record.requestBodyMetadata
+        );
+  return {
+    ...(requestBodyMetadata ? { requestBodyMetadata } : {}),
+    pipelineBody,
   };
 }
 

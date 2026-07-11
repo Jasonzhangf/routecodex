@@ -28767,3 +28767,38 @@ Superseded on 2026-07-07: persisted provider cooldown is not runtime truth. Prov
 - Change: added a script-only direct native bootstrap helper and migrated the three active VR scripts to Rust/NAPI `bootstrapVirtualRouterConfigJson`; direct VR engine helper now maps thrown native `VIRTUAL_ROUTER_ERROR:*` into `VirtualRouterError`.
 - Deleted three stale standalone HubPipeline scripts after exact name scans found no active caller and execution showed they depended on the absent `dist/conversion/hub/pipeline/hub-pipeline.js` TS runtime surface.
 - Verification PASS: exact script scans for retired bootstrap wrapper and dist HubPipeline consumer returned zero matches; VR scripts 3/3 passed; helper syntax checks passed; strict shell reference audit, deleted-path, thin-wrapper-only, and function-map compile gates passed.
+
+# 2026-07-11: responses-request-bridge rustification progress
+
+## Done this session
+- `readResponsesSessionIdFromHttp` / `readResponsesConversationIdFromHttp` → `extractSessionIdentifiersFromMetadataNative` (Rust NAPI)
+- Dead helper exports retracted to file-private: `readRequestBodyMetadataForHttp`, `stripRequestBodyMetadataForPipelineForHttp`, `readClientAbortSignalForHttp`, `readResponsesResponseIdFromHttp`
+- Dead function deleted: `shouldPersistResponsesConversationForHttp`
+- function-map synced (removed dead canonical builders from `server.responses_request_handler_bridge_surface`)
+- Commits: `c0131e33c`, `aa69304`
+
+## Gate status
+- llmswitch-core TS: 0 files, 0 LOC (baseline maintained)
+- `verify:llmswitch-rustification-audit`: PASS
+- `verify:function-map-compile-gate`: PASS (120 features)
+- focused Jest 5 suites / 36 tests: PASS
+- `npx tsc --noEmit`: PASS
+
+## responses-request-bridge.ts remaining export surface
+Bridge-facing public surface (handler consumer, cannot delete/reorder):
+- `prepareResponsesRequestBodyForHttp` → uses private `readRequestBodyMetadataForHttp` + `stripRequestBodyMetadataForPipelineForHttp`
+- `buildResponsesPipelineMetadataForHttp` → MetadataCenter write, stream intent, client abort; no direct native equivalent
+- `buildResponsesConversationPortScopeForHttp` → simple port/routing context extract; Rust has `build_responses_conversation_scope_plan_json` but contract mismatch
+- `planResponsesHandlerStreamForHttp` → pure stream intent computation; no native equivalent
+- `finalizeResponsesHandlerPayloadForHttp` → stream normalization + system prompt; no native equivalent
+- `shouldManageResponsesConversationForHttp` → endpoint check; pure TS
+- `buildResponsesScopeContinuationExpiredErrorForHttp` → static error shape; pure TS
+- `buildResponsesResumeClientErrorForHttp` → static error shape; pure TS
+- `shouldProjectResponsesResumeClientErrorForHttp` → pure origin check; used in prepareResponsesHandlerRuntimeForHttp
+- `attachResponsesRequestContextToResultForHttp` → metadata merge; no native equivalent
+- Exported types: `ResponsesRequestContextForHttp`, `PrepareResponsesHandlerEntryForHttpArgs`, `ResponsesConversationPortScopeForHttp`, `ResponsesHandlerStreamPlanForHttp`, `PrepareResponsesHandlerRuntimeForHttpArgs`, `PrepareResponsesHandlerRuntimeForHttpResult`, `PrepareResponsesHandlerEntryForHttpResult`, `PreparedResponsesRequestBodyForHttp`
+
+## Next candidate actions
+1. Add Rust NAPI for request-body metadata strip (`readRequestBodyMetadataForHttp` + `stripRequestBodyMetadataForPipelineForHttp`) — these are pure JSON extraction
+2. Rust-ify `planResponsesHandlerStreamForHttp` — pure stream intent logic
+3. Audit other bridge files: `responses-response-bridge.ts`, `routing-integrations.ts`, `runtime-integrations.ts`

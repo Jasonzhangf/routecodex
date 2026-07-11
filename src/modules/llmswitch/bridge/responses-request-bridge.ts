@@ -23,6 +23,7 @@ import {
   captureReqInboundResponsesContextSnapshot,
   extractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext,
+  planResponsesRequestBodyForHttpNative,
   planResponsesRequestContext,
   planResponsesContinuationRequestAction,
   planResponsesHandlerEntry,
@@ -122,12 +123,7 @@ export function prepareResponsesRequestBodyForHttp(
   payload: AnyRecord,
   _runtimeMetadata?: Record<string, unknown>
 ): PreparedResponsesRequestBodyForHttp {
-  const requestBodyMetadata = readRequestBodyMetadataForHttp(payload);
-  const pipelineBody = stripRequestBodyMetadataForPipelineForHttp(payload);
-  return {
-    requestBodyMetadata,
-    pipelineBody,
-  };
+  return planResponsesRequestBodyForHttpNative(payload);
 }
 
 export function buildResponsesPipelineMetadataForHttp(args: {
@@ -321,33 +317,6 @@ function readResponsesSessionIdFromHttp(metadata: Record<string, unknown> | unde
 
 function readResponsesConversationIdFromHttp(metadata: Record<string, unknown> | undefined): string | undefined {
   return extractSessionIdentifiersFromMetadataNative(metadata).conversationId;
-}
-
-function readRequestBodyMetadataForHttp(payload: unknown): Record<string, unknown> | undefined {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return undefined;
-  }
-  const raw = (payload as Record<string, unknown>).metadata;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
-  } catch {
-    return { ...(raw as Record<string, unknown>) };
-  }
-}
-
-function stripRequestBodyMetadataForPipelineForHttp<T>(payload: T): T {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return payload;
-  }
-  const record = payload as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(record, 'metadata')) {
-    return payload;
-  }
-  const { metadata: _metadata, ...withoutMetadata } = record;
-  return withoutMetadata as T;
 }
 
 function readClientAbortSignalForHttp(clientConnectionState: unknown): AbortSignal | undefined {
@@ -764,7 +733,7 @@ export async function prepareResponsesHandlerEntryForHttp(
 export async function prepareResponsesHandlerRuntimeForHttp(
   args: PrepareResponsesHandlerRuntimeForHttpArgs
 ): Promise<PrepareResponsesHandlerRuntimeForHttpResult> {
-  const requestBodyMetadata = readRequestBodyMetadataForHttp(args.payload);
+  const requestBodyMetadata = planResponsesRequestBodyForHttpNative(args.payload).requestBodyMetadata;
   const requestMetadata = {
     ...(requestBodyMetadata ?? {}),
     ...(args.requestMetadata ?? {}),
@@ -957,6 +926,7 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
   requestContext: ResponsesRequestContextForHttp;
   providerKey?: string;
   routeHint?: string;
+  continuationOwner?: 'direct' | 'relay';
 }): Promise<Record<string, unknown> | undefined> {
   const nextMetadata = attachResponsesRequestContextToResultForHttp({
     entryEndpoint: args.entryEndpoint,
@@ -964,6 +934,9 @@ export async function finalizeResponsesPipelineResultForHttp(args: {
     requestContext: args.requestContext,
   });
   if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
+    return nextMetadata;
+  }
+  if (args.continuationOwner === 'direct') {
     return nextMetadata;
   }
   await seedResponsesToolCallResponseForHttp({

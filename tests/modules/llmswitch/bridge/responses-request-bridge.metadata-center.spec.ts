@@ -18,6 +18,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   captureReqInboundResponsesContextSnapshot: jest.fn(),
   extractSessionIdentifiersFromMetadataNative: jest.fn(() => ({})),
   materializeProviderOwnedSubmitContext: jest.fn(),
+  planResponsesRequestBodyForHttpNative: jest.fn((payload: Record<string, unknown>) => ({ pipelineBody: payload })),
   planResponsesRequestContext: jest.fn(),
   planResponsesContinuationRequestAction: jest.fn(),
   planResponsesHandlerEntry: jest.fn(),
@@ -34,15 +35,19 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 let buildResponsesPipelineMetadataForHttp: any;
 let planResponsesHandlerStreamForHttp: any;
 let attachResponsesRequestContextToResultForHttp: any;
+let finalizeResponsesPipelineResultForHttp: any;
 let MetadataCenter: any;
 let readRuntimeControlProjection: any;
+let runtimeIntegrations: any;
 
 beforeAll(async () => {
   ({
     buildResponsesPipelineMetadataForHttp,
     planResponsesHandlerStreamForHttp,
-    attachResponsesRequestContextToResultForHttp
+    attachResponsesRequestContextToResultForHttp,
+    finalizeResponsesPipelineResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
+  runtimeIntegrations = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
   ({ MetadataCenter } = await import(
     '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
   ));
@@ -133,6 +138,41 @@ describe('responses-request-bridge metadata center projection', () => {
     const center = MetadataCenter.read(nextMetadata);
     expect(center).toBeUndefined();
     expect(nextMetadata?.responsesRequestContext).toBeUndefined();
+  });
+
+  it('does not let handler finalize overwrite router-direct continuation state', async () => {
+    runtimeIntegrations.captureResponsesRequestContextForRequest.mockClear();
+    runtimeIntegrations.recordResponsesResponseForRequest.mockClear();
+    const requestContext = {
+      payload: { model: 'gpt-5.4', input: [] },
+      context: { input: [] },
+      sessionId: 'sess-direct-finalize',
+      matchedPort: 5555,
+      routingPolicyGroup: 'gateway_priority_5555'
+    };
+
+    await finalizeResponsesPipelineResultForHttp({
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-direct-finalize',
+      body: {
+        id: 'resp-direct-finalize',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_direct_finalize',
+            name: 'lookup',
+            arguments: '{}'
+          }
+        ]
+      },
+      resultMetadata: {},
+      requestContext,
+      providerKey: 'p1.key1',
+      continuationOwner: 'direct'
+    });
+
+    expect(runtimeIntegrations.captureResponsesRequestContextForRequest).not.toHaveBeenCalled();
+    expect(runtimeIntegrations.recordResponsesResponseForRequest).not.toHaveBeenCalled();
   });
 
   it('relay submit_tool_outputs pipeline metadata must not carry route pin in continuation context', () => {

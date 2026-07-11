@@ -114,6 +114,7 @@ pub(crate) fn build_meta_route_03_from_metadata(
     }
     if let Some(runtime_control) = runtime_control {
         copy_non_empty_string(runtime_control, &mut control, "routeHint");
+        copy_non_empty_string(runtime_control, &mut control, "retryProviderKey");
         copy_non_empty_string(
             runtime_control,
             &mut control,
@@ -304,6 +305,19 @@ mod tests {
         assert_eq!(
             carrier.get_string("providerProtocol").as_deref(),
             Some("openai-chat")
+        );
+    }
+
+    #[test]
+    fn builds_meta_route_03_carries_runtime_retry_provider_key() {
+        let carrier = build_meta_route_03_from_metadata(&json!({
+            "runtimeControl": {
+                "retryProviderKey": " provider.key1.gpt-5.4 "
+            }
+        }));
+        assert_eq!(
+            carrier.get_string("retryProviderKey").as_deref(),
+            Some("provider.key1.gpt-5.4")
         );
     }
 

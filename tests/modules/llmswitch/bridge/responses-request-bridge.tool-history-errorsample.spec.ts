@@ -21,6 +21,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   captureReqInboundResponsesContextSnapshotJson: jest.fn(),
   extractSessionIdentifiersFromMetadataNative: jest.fn(() => ({})),
   materializeProviderOwnedSubmitContext: jest.fn(),
+  planResponsesRequestBodyForHttpNative: jest.fn((payload: Record<string, unknown>) => ({ pipelineBody: payload })),
   planResponsesRequestContext: jest.fn(),
   planResponsesContinuationRequestAction: jest.fn(),
   planResponsesHandlerEntry: jest.fn(),

@@ -199,6 +199,7 @@
   "publishResponsesRecordPlanJson",
   "planResponsesHandlerEntryJson",
   "materializeProviderOwnedSubmitContextJson",
+  "planResponsesRequestBodyForHttpJson",
   "planResponsesRequestContextJson",
   "planResponsesContinuationRequestActionJson",
   "ensureBridgeOutputFieldsJson",

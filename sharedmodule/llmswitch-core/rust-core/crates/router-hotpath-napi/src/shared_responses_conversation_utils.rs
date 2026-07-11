@@ -3254,6 +3254,24 @@ fn build_responses_conversation_scope_plan(input: &Value) -> Value {
     })
 }
 
+fn plan_responses_request_body_for_http(payload: &Value) -> Value {
+    let Some(payload_obj) = payload.as_object() else {
+        return serde_json::json!({
+            "pipelineBody": payload,
+        });
+    };
+    let mut pipeline_body = payload_obj.clone();
+    let request_body_metadata = pipeline_body
+        .remove("metadata")
+        .and_then(|value| value.as_object().cloned().map(Value::Object));
+    let mut output = Map::new();
+    if let Some(metadata) = request_body_metadata {
+        output.insert("requestBodyMetadata".to_string(), metadata);
+    }
+    output.insert("pipelineBody".to_string(), Value::Object(pipeline_body));
+    Value::Object(output)
+}
+
 const RESPONSES_STORE_TTL_MS: i64 = 1000 * 60 * 30;
 const RESPONSES_STORE_PERSIST_SCHEMA_VERSION: i64 = 1;
 
@@ -5681,6 +5699,14 @@ pub fn build_responses_conversation_scope_plan_json(input_json: String) -> NapiR
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "planResponsesRequestBodyForHttpJson")]
+pub fn plan_responses_request_body_for_http_json(payload_json: String) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_request_body_for_http(&payload);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 #[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
 pub fn should_allow_responses_conversation_continuation_json(
     payload_json: String,
@@ -6082,11 +6108,11 @@ mod tests {
         plan_responses_handler_entry, plan_responses_persisted_entry,
         plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
         plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
-        plan_responses_release_request_payload, plan_responses_request_context,
-        plan_responses_scope_continuation_match, plan_responses_store_sweep,
-        plan_responses_store_tokens, prepare_responses_conversation_entry,
-        publish_responses_record_plan_json, restore_responses_continuation_payload,
-        resume_responses_conversation_payload,
+        plan_responses_release_request_payload, plan_responses_request_body_for_http,
+        plan_responses_request_context, plan_responses_scope_continuation_match,
+        plan_responses_store_sweep, plan_responses_store_tokens,
+        prepare_responses_conversation_entry, publish_responses_record_plan_json,
+        restore_responses_continuation_payload, resume_responses_conversation_payload,
     };
     use serde_json::{json, Value};
     use std::sync::{LazyLock, Mutex};
@@ -9395,5 +9421,35 @@ mod tests {
         );
         let _ = responses_store_operation_for_test(&persistence_file_path, "clear_all", json!({}));
         let _ = std::fs::remove_file(persistence_file_path);
+    }
+
+    #[test]
+    fn plan_responses_request_body_for_http_strips_metadata_from_pipeline_body() {
+        let result = plan_responses_request_body_for_http(&json!({
+            "model": "gpt-5.5",
+            "metadata": {
+                "session_id": "sess_body",
+                "conversation_id": "conv_body"
+            },
+            "input": []
+        }));
+        assert_eq!(
+            result["requestBodyMetadata"]["session_id"],
+            json!("sess_body")
+        );
+        assert_eq!(result["pipelineBody"]["metadata"], Value::Null);
+        assert_eq!(result["pipelineBody"]["model"], json!("gpt-5.5"));
+    }
+
+    #[test]
+    fn plan_responses_request_body_for_http_removes_non_object_metadata_without_exposing_truth() {
+        let result = plan_responses_request_body_for_http(&json!({
+            "model": "gpt-5.5",
+            "metadata": "not-control-truth",
+            "input": []
+        }));
+        assert_eq!(result["requestBodyMetadata"], Value::Null);
+        assert_eq!(result["pipelineBody"]["metadata"], Value::Null);
+        assert_eq!(result["pipelineBody"]["input"], json!([]));
     }
 }

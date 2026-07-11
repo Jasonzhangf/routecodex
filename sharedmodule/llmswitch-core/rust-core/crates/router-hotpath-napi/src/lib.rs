@@ -3567,8 +3567,8 @@ pub use shared_responses_conversation_utils::{
     materialize_provider_owned_submit_context_json, plan_responses_captured_entry_json,
     plan_responses_continuation_request_action_json, plan_responses_conversation_preflight_json,
     plan_responses_handler_entry_json, plan_responses_record_continuation_flag_json,
-    plan_responses_request_context_json, prepare_responses_conversation_entry_json,
-    publish_responses_record_plan_json,
+    plan_responses_request_body_for_http_json, plan_responses_request_context_json,
+    prepare_responses_conversation_entry_json, publish_responses_record_plan_json,
 };
 
 // ---------------------------------------------------------------------------

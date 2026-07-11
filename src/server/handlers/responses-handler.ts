@@ -460,7 +460,8 @@ export async function handleResponses(
       resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
       requestContext,
       providerKey: finalizeProviderKey,
-      ...(finalizeRouteHint ? { routeHint: finalizeRouteHint } : {})
+      ...(finalizeRouteHint ? { routeHint: finalizeRouteHint } : {}),
+      continuationOwner: result.continuationOwner
     });
     if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {

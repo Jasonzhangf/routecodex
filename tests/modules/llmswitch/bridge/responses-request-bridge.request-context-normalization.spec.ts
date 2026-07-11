@@ -9,6 +9,15 @@ const mockPlanResponsesContinuationRequestAction = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
+const mockPlanResponsesRequestBodyForHttpNative = jest.fn((payload: Record<string, unknown>) => {
+  const { metadata, ...pipelineBody } = payload;
+  return {
+    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { requestBodyMetadata: { ...(metadata as Record<string, unknown>) } }
+      : {}),
+    pipelineBody,
+  };
+});
 const mockExtractSessionIdentifiersFromMetadataNative = jest.fn((metadata: Record<string, unknown> | undefined) => {
   const clientHeaders =
     metadata?.clientHeaders && typeof metadata.clientHeaders === 'object' && !Array.isArray(metadata.clientHeaders)
@@ -61,6 +70,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   captureReqInboundResponsesContextSnapshot: mockCaptureReqInboundResponsesContextSnapshot,
   extractSessionIdentifiersFromMetadataNative: mockExtractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext: mockMaterializeProviderOwnedSubmitContext,
+  planResponsesRequestBodyForHttpNative: mockPlanResponsesRequestBodyForHttpNative,
   planResponsesRequestContext: mockPlanResponsesRequestContext,
   planResponsesContinuationRequestAction: mockPlanResponsesContinuationRequestAction,
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,

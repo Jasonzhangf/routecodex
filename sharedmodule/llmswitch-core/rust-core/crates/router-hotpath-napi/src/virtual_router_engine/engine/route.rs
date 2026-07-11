@@ -45,20 +45,29 @@ fn parse_retry_provider_key_target(raw: &str) -> Option<InstructionTarget> {
         return None;
     }
     let parts: Vec<&str> = trimmed.split('.').collect();
-    if parts.len() < 3 {
+    if parts.len() < 2 {
         return None;
     }
     let provider = parts[0].trim();
     let alias = parts[1].trim();
-    let model = parts[2..].join(".");
-    if provider.is_empty() || alias.is_empty() || model.trim().is_empty() {
+    let model = if parts.len() >= 3 {
+        let joined = parts[2..].join(".");
+        let trimmed_model = joined.trim();
+        if trimmed_model.is_empty() {
+            return None;
+        }
+        Some(trimmed_model.to_string())
+    } else {
+        None
+    };
+    if provider.is_empty() || alias.is_empty() {
         return None;
     }
     Some(InstructionTarget {
         provider: Some(provider.to_string()),
         key_alias: Some(alias.to_string()),
         key_index: None,
-        model: Some(model.trim().to_string()),
+        model,
         path_length: Some(3),
         process_mode: None,
     })
@@ -1002,6 +1011,41 @@ mod tests {
             provider_key, "anthropic.key1.claude-sonnet",
             "stopless followup should land on thinking pool"
         );
+    }
+
+    #[test]
+    fn retry_provider_key_without_model_forces_provider_alias() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "model": "gpt-4o",
+            "input": [
+                { "role": "user", "content": [{ "type": "input_text", "text": "plain request" }] }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/responses",
+                "requestId": "test-retry-provider-key-without-model",
+                "runtimeControl": {
+                    "retryProviderKey": "anthropic.key1"
+                }
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("route should succeed");
+
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(
+            decision["providerKey"].as_str(),
+            Some("anthropic.key1.claude-sonnet")
+        );
+        assert_eq!(decision["reasoning"].as_str(), Some("forced"));
     }
 
     #[test]

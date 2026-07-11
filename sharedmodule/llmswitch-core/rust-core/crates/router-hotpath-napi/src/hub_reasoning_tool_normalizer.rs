@@ -3082,7 +3082,8 @@ pub fn normalize_assistant_text_to_tool_calls_json(
         if mapped_calls.is_empty() {
             let mut explicit_calls = parse_explicit_json_tool_calls(text.as_str(), "reasoning");
             if explicit_calls.is_empty() {
-                explicit_calls = parse_plain_structured_apply_patch_json(text.as_str(), "reasoning");
+                explicit_calls =
+                    parse_plain_structured_apply_patch_json(text.as_str(), "reasoning");
             }
             if !explicit_calls.is_empty() {
                 mapped_calls.extend(explicit_calls);
@@ -3924,7 +3925,10 @@ exec_command
             .get("function")
             .and_then(Value::as_object)
             .expect("function");
-        assert_eq!(function.get("name").and_then(Value::as_str), Some("apply_patch"));
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("apply_patch")
+        );
         let arguments = function
             .get("arguments")
             .and_then(Value::as_str)
