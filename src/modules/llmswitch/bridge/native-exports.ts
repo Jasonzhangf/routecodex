@@ -141,6 +141,10 @@ type NativeRouterHotpathJsonBinding = {
   normalizeResponsesDirectCurrentRequestPayloadJson?: (inputJson: string) => string;
   extractSessionIdentifiersJson?: (metadataJson: string) => string;
   planResponsesRequestBodyForHttpJson?: (payloadJson: string) => string;
+  shouldManageResponsesConversationForHttpJson?: (entryEndpoint: string) => boolean;
+  buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
+  buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
+  shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
 
   // -- failure_policy batch #2 (error classification) --
   isContextLengthExceededErrorJson?: (inputJson: string) => string;
@@ -1285,6 +1289,96 @@ export function planResponsesRequestBodyForHttpNative(payload: unknown): {
     ...(requestBodyMetadata ? { requestBodyMetadata } : {}),
     pipelineBody,
   };
+}
+
+export function shouldManageResponsesConversationForHttpNative(entryEndpoint: string | undefined): boolean {
+  const fn = getRouterHotpathJsonBindingSync().shouldManageResponsesConversationForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldManageResponsesConversationForHttpJson not available');
+  }
+  return fn(String(entryEndpoint ?? '')) === true;
+}
+
+export function buildResponsesScopeContinuationExpiredErrorForHttpNative(): {
+  error: {
+    message: string;
+    type: 'invalid_request_error';
+    code: 'responses_continuation_expired';
+  };
+} {
+  const fn = getRouterHotpathJsonBindingSync().buildResponsesScopeContinuationExpiredErrorForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesScopeContinuationExpiredErrorForHttpJson not available');
+  }
+  const parsed = JSON.parse(fn()) as unknown;
+  const record = assertNativeObject('buildResponsesScopeContinuationExpiredErrorForHttpJson', parsed);
+  const errorRecord = assertNativeObject(
+    'buildResponsesScopeContinuationExpiredErrorForHttpJson.error',
+    record.error
+  );
+  return {
+    error: {
+      message: String(errorRecord.message ?? ''),
+      type: 'invalid_request_error',
+      code: 'responses_continuation_expired',
+    },
+  };
+}
+
+export function buildResponsesResumeClientErrorForHttpNative(args: {
+  status?: number;
+  code?: string;
+  origin?: string;
+  message?: string;
+}): {
+  status: number;
+  body: {
+    error: {
+      message: string;
+      type: 'invalid_request_error';
+      code: string;
+      origin: string;
+    };
+  };
+} {
+  const fn = getRouterHotpathJsonBindingSync().buildResponsesResumeClientErrorForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesResumeClientErrorForHttpJson not available');
+  }
+  const payload: Record<string, unknown> = {};
+  if (typeof args.status === 'number') payload.status = args.status;
+  if (typeof args.code === 'string') payload.code = args.code;
+  if (typeof args.origin === 'string') payload.origin = args.origin;
+  if (typeof args.message === 'string') payload.message = args.message;
+  const parsed = JSON.parse(fn(JSON.stringify(payload))) as unknown;
+  const record = assertNativeObject('buildResponsesResumeClientErrorForHttpJson', parsed);
+  const bodyRecord = assertNativeObject(
+    'buildResponsesResumeClientErrorForHttpJson.body',
+    record.body
+  );
+  const errorRecord = assertNativeObject(
+    'buildResponsesResumeClientErrorForHttpJson.body.error',
+    bodyRecord.error
+  );
+  return {
+    status: typeof record.status === 'number' ? record.status : 422,
+    body: {
+      error: {
+        message: String(errorRecord.message ?? 'Unable to resume Responses conversation'),
+        type: 'invalid_request_error',
+        code: String(errorRecord.code ?? 'responses_resume_failed'),
+        origin: String(errorRecord.origin ?? 'client'),
+      },
+    },
+  };
+}
+
+export function shouldProjectResponsesResumeClientErrorForHttpNative(origin: string | undefined): boolean {
+  const fn = getRouterHotpathJsonBindingSync().shouldProjectResponsesResumeClientErrorForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] shouldProjectResponsesResumeClientErrorForHttpJson not available');
+  }
+  return fn(String(origin ?? '')) === true;
 }
 
 export function classifyEmptyResponseSignalNative(

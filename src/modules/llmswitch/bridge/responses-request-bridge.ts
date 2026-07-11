@@ -21,12 +21,16 @@ import {
 } from './runtime-integrations.js';
 import {
   captureReqInboundResponsesContextSnapshot,
+  buildResponsesResumeClientErrorForHttpNative,
+  buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
   materializeProviderOwnedSubmitContext,
   planResponsesRequestBodyForHttpNative,
   planResponsesRequestContext,
   planResponsesContinuationRequestAction,
   planResponsesHandlerEntry,
+  shouldManageResponsesConversationForHttpNative,
+  shouldProjectResponsesResumeClientErrorForHttpNative,
 } from './native-exports.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
@@ -392,7 +396,7 @@ export function finalizeResponsesHandlerPayloadForHttp(args: {
 }
 
 export function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
-  return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
+  return shouldManageResponsesConversationForHttpNative(entryEndpoint);
 }
 
 export function buildResponsesScopeContinuationExpiredErrorForHttp(): {
@@ -402,13 +406,7 @@ export function buildResponsesScopeContinuationExpiredErrorForHttp(): {
     code: 'responses_continuation_expired';
   };
 } {
-  return {
-    error: {
-      message: 'Responses continuation expired or not found for local scope materialization',
-      type: 'invalid_request_error',
-      code: 'responses_continuation_expired',
-    },
-  };
+  return buildResponsesScopeContinuationExpiredErrorForHttpNative();
 }
 
 export function buildResponsesResumeClientErrorForHttp(args: {
@@ -427,32 +425,13 @@ export function buildResponsesResumeClientErrorForHttp(args: {
     };
   };
 } {
-  return {
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message:
-          typeof args.message === 'string' && args.message.trim()
-            ? args.message
-            : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code:
-          typeof args.code === 'string' && args.code.trim()
-            ? args.code
-            : 'responses_resume_failed',
-        origin:
-          typeof args.origin === 'string' && args.origin.trim()
-            ? args.origin
-            : 'client',
-      },
-    },
-  };
+  return buildResponsesResumeClientErrorForHttpNative(args);
 }
 
 export function shouldProjectResponsesResumeClientErrorForHttp(args: {
   origin?: string;
 }): boolean {
-  return typeof args.origin === 'string' && args.origin.trim() === 'client';
+  return shouldProjectResponsesResumeClientErrorForHttpNative(args.origin);
 }
 
 async function buildCapturedRelayResumeRequestContextForHttp(args: {

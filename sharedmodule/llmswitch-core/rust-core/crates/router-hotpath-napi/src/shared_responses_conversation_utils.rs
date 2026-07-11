@@ -5707,6 +5707,58 @@ pub fn plan_responses_request_body_for_http_json(payload_json: String) -> NapiRe
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi_derive::napi(js_name = "shouldManageResponsesConversationForHttpJson")]
+pub fn should_manage_responses_conversation_for_http_json(entry_endpoint: String) -> bool {
+    let entry_endpoint = entry_endpoint.trim();
+    entry_endpoint == "/v1/responses" || entry_endpoint == "/v1/responses.submit_tool_outputs"
+}
+
+#[napi_derive::napi(js_name = "buildResponsesScopeContinuationExpiredErrorForHttpJson")]
+pub fn build_responses_scope_continuation_expired_error_for_http_json() -> NapiResult<String> {
+    let output = serde_json::json!({
+        "error": {
+            "message": "Responses continuation expired or not found for local scope materialization",
+            "type": "invalid_request_error",
+            "code": "responses_continuation_expired"
+        }
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "buildResponsesResumeClientErrorForHttpJson")]
+pub fn build_responses_resume_client_error_for_http_json(args_json: String) -> NapiResult<String> {
+    let args: Value =
+        serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let obj = args
+        .as_object()
+        .ok_or_else(|| napi::Error::from_reason("args must be object"))?;
+    let get_str = |key: &str, fallback: &str| -> String {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    let status = obj.get("status").and_then(|v| v.as_i64()).unwrap_or(422);
+    let output = serde_json::json!({
+        "status": status,
+        "body": {
+            "error": {
+                "message": get_str("message", "Unable to resume Responses conversation"),
+                "type": "invalid_request_error",
+                "code": get_str("code", "responses_resume_failed"),
+                "origin": get_str("origin", "client")
+            }
+        }
+    });
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi_derive::napi(js_name = "shouldProjectResponsesResumeClientErrorForHttpJson")]
+pub fn should_project_responses_resume_client_error_for_http_json(origin: String) -> bool {
+    origin.trim() == "client"
+}
+
 #[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
 pub fn should_allow_responses_conversation_continuation_json(
     payload_json: String,
