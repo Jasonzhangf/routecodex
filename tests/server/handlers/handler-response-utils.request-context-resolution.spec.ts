@@ -18,7 +18,7 @@ function createMockResponse() {
 }
 
 function mockNativeExports(overrides: Record<string, unknown> = {}) {
-  jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
     getRouterHotpathJsonBindingSync: jest.fn(() => ({
       resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
       resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
@@ -50,7 +50,7 @@ describe('responses handler request-context resolution', () => {
   it('registers metadata session id as the request log color identity when usage has only a log key', async () => {
     const registerRequestLogContext = jest.fn();
     mockNativeExports();
-    jest.unstable_mockModule('../../../../src/server/utils/request-log-color.js', () => ({
+    jest.unstable_mockModule('../../../src/server/utils/request-log-color.js', () => ({
       colorizeRequestLog: jest.fn((line: string) => line),
       colorizeVirtualRouterHitLogLine: jest.fn((line: string) => line),
       extractLeadingAnsiColor: jest.fn(() => undefined),
@@ -59,12 +59,12 @@ describe('responses handler request-context resolution', () => {
       resolveSessionLogColor: jest.fn(() => ''),
       stripAnsiCodes: jest.fn((line: string) => line),
     }));
-    jest.unstable_mockModule('../../../../src/utils/snapshot-writer.js', () => ({
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined,
     }));
 
-    const { sendPipelineResponse } = await import('../../../../src/server/handlers/handler-response-utils.js');
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const res = createMockResponse();
 
     await sendPipelineResponse(
@@ -102,12 +102,12 @@ describe('responses handler request-context resolution', () => {
     mockNativeExports({
       planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'project_client_payload' })),
     });
-    jest.unstable_mockModule('../../../../src/utils/snapshot-writer.js', () => ({
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined,
     }));
 
-    const { sendPipelineResponse } = await import('../../../../src/server/handlers/handler-response-utils.js');
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
     const res = createMockResponse();
 
     await expect(
