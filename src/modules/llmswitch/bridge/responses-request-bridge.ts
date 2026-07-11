@@ -65,7 +65,7 @@ export type ResponsesRequestContextForHttp = {
   routingPolicyGroup?: string;
 };
 
-export type PrepareResponsesHandlerEntryForHttpArgs = {
+type PrepareResponsesHandlerEntryForHttpArgs = {
   payload: AnyRecord;
   entryEndpoint: string;
   responseIdFromPath?: string;
@@ -81,7 +81,7 @@ export type ResponsesConversationPortScopeForHttp = {
   routingPolicyGroup?: string;
 };
 
-export type ResponsesHandlerStreamPlanForHttp = {
+type ResponsesHandlerStreamPlanForHttp = {
   originalStream: boolean;
   outboundStream: boolean;
   inboundStream: boolean;
@@ -89,7 +89,7 @@ export type ResponsesHandlerStreamPlanForHttp = {
   requestStartMeta: Record<string, unknown>;
 };
 
-export type PrepareResponsesHandlerRuntimeForHttpArgs = {
+type PrepareResponsesHandlerRuntimeForHttpArgs = {
   payload: AnyRecord;
   entryEndpoint: string;
   responseIdFromPath?: string;
@@ -101,7 +101,7 @@ export type PrepareResponsesHandlerRuntimeForHttpArgs = {
   requestTimeoutMs?: number;
 };
 
-export type PrepareResponsesHandlerRuntimeForHttpResult =
+type PrepareResponsesHandlerRuntimeForHttpResult =
   | {
       kind: 'ok';
       payload: AnyRecord;
@@ -121,7 +121,7 @@ export type PrepareResponsesHandlerRuntimeForHttpResult =
       streamPlan: ResponsesHandlerStreamPlanForHttp;
     };
 
-export type PreparedResponsesRequestBodyForHttp = {
+type PreparedResponsesRequestBodyForHttp = {
   requestBodyMetadata?: Record<string, unknown>;
   pipelineBody: AnyRecord;
 };
@@ -260,7 +260,7 @@ function readResponsesResponseIdFromHttp(body: unknown): string | undefined {
   return undefined;
 }
 
-export type PrepareResponsesHandlerEntryForHttpResult =
+type PrepareResponsesHandlerEntryForHttpResult =
   | {
       kind: 'ok';
       payload: AnyRecord;

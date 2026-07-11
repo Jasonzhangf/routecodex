@@ -8,8 +8,6 @@ import {
   clearResponsesConversationByRequestId,
   clearUnresolvedResponsesConversationRequests,
   hasResponsesConversationRequestForDebug,
-  hasResponsesConversationResponseForDebug,
-  hasResponsesConversationScopeForDebug,
   lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
   recordResponsesResponse,
@@ -21,6 +19,10 @@ import {
   releaseResponsesConversationRequestPayload
 } from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
+import {
+  hasResponsesConversationResponseInNativeStore,
+  hasResponsesConversationScopeInNativeStore
+} from './helpers/responses-conversation-store-direct-native';
 import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.js';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
@@ -2834,10 +2836,10 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(hasResponsesConversationRequestForDebug('req-resp-store-1')).toBe(false);
     expect(hasResponsesConversationRequestForDebug('req-resp-store-2')).toBe(true);
-    expect(hasResponsesConversationResponseForDebug('resp-store-supersede-1')).toBe(false);
-    expect(hasResponsesConversationResponseForDebug('resp-store-supersede-2')).toBe(true);
-    expect(hasResponsesConversationScopeForDebug('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
-    expect(hasResponsesConversationScopeForDebug('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
+    expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-1')).toBe(false);
+    expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-2')).toBe(true);
+    expect(hasResponsesConversationScopeInNativeStore('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
+    expect(hasResponsesConversationScopeInNativeStore('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-3',

@@ -338,11 +338,3 @@ export function releaseResponsesConversationRequestPayload(requestId?: string): 
 export function hasResponsesConversationRequestForDebug(requestId?: string): boolean {
   return executeStoreOperation<boolean>('debug_has_request', { requestId });
 }
-
-export function hasResponsesConversationResponseForDebug(responseId?: string): boolean {
-  return executeStoreOperation<boolean>('debug_has_response', { responseId });
-}
-
-export function hasResponsesConversationScopeForDebug(scopeKey?: string): boolean {
-  return executeStoreOperation<boolean>('debug_has_scope', { scopeKey });
-}
