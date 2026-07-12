@@ -38,6 +38,7 @@ import {
 import type { StartCommandContext, StartCommandOptions } from './start-types.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import { buildShutdownCallerHeaders } from '../../utils/shutdown-caller-headers.js';
+import { planRuntimeStartRestartTakeoverGuard } from '../../modules/llmswitch/bridge/runtime-lifecycle-host.js';
 
 export type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
@@ -488,10 +489,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         };
 
-        // Start must take over an existing RouteCodex runtime by default so the
-        // installed snapshot is actually refreshed. Use --no-restart for a
-        // probe-only start that refuses occupied ports.
-        const shouldRestart = options.exclusive === true || options.restart !== false;
+        // Start is launch-only. Existing runtime replacement must use
+        // `rcc restart`; only explicit --exclusive remains a takeover command.
+        const shouldRestart = options.exclusive === true;
         const grouped = hasMultiPortConfig
           ? resolvedPortGroup
           : (ctx.isDevPackage
@@ -628,51 +628,47 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             logStartNonBlocking(ctx, 'daemon_supervisor_stop_force', error, { port: resolvedPort, daemonPid });
           }
         };
-        const refuseExplicitRestartTakeoverIfOccupied = async (): Promise<void> => {
-          if (options.restart !== true || options.exclusive === true || daemonSupervisor) {
+        const refuseStartTakeoverIfOccupied = async (): Promise<void> => {
+          if (options.exclusive === true || daemonSupervisor) {
             return;
           }
-          const occupied: Array<{ port: number; pids: number[]; healthy: boolean }> = [];
+          const occupied: Array<{ port: number; pids: number[] }> = [];
           for (const p of effectivePortGroup) {
             const pids = ctx.findListeningPids(p);
             if (pids.length > 0) {
-              occupied.push({ port: p, pids, healthy: false });
-              continue;
-            }
-            for (const host of buildLocalProbeHostCandidates(serverHost)) {
-              const probe = await probeRouteCodexHealth({
-                fetchImpl: ctx.fetch,
-                host,
-                port: p,
-                timeoutMs: 800
-              });
-              if (probe.ok) {
-                occupied.push({ port: p, pids: [], healthy: true });
-                break;
-              }
+              occupied.push({ port: p, pids });
             }
           }
           if (occupied.length === 0) {
             return;
           }
+          const guard = planRuntimeStartRestartTakeoverGuard({
+            explicitRestart: options.restart === true,
+            exclusive: false,
+            daemonSupervisor,
+            occupiedPorts: occupied.map((item) => item.port)
+          });
+          if (guard.action !== 'refuse') {
+            return;
+          }
           logProcessLifecycleSync({
-            event: 'start_restart_takeover_refused',
+            event: 'start_takeover_refused',
             source: 'cli.start',
             details: {
-              reason: 'explicit_start_restart_existing_runtime',
+              reason: guard.reasonCode,
+              explicitRestart: options.restart === true,
               ports: occupied.map((item) => ({
                 port: item.port,
-                pids: item.pids,
-                healthy: item.healthy
+                pids: item.pids
               }))
             }
           });
-          spinner.fail(`start --restart refuses to stop existing RouteCodex runtime on port-group: ${occupied.map((item) => item.port).join(', ')}`);
+          spinner.fail(`rcc start refuses to stop existing RouteCodex runtime on port-group: ${guard.ports.join(', ')}`);
           ctx.logger.error(`Use 'rcc restart --port ${resolvedPort} --host ${serverHost}' for in-session restart.`);
           ctx.logger.error(`Use 'rcc stop --port ${resolvedPort}' before start only when an explicit stop is intended.`);
           ctx.exit(1);
         };
-        await refuseExplicitRestartTakeoverIfOccupied();
+        await refuseStartTakeoverIfOccupied();
         if (shouldRestart && !daemonSupervisor) {
           startPortGroupLock = acquireStartPortGroupLock({
             fsImpl,
@@ -731,7 +727,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (shouldRestart && !daemonSupervisor) {
           for (const p of effectivePortGroup) {
             writeDaemonStopIntent(p, {
-              source: 'cli.start.restart_takeover',
+              source: 'cli.start.exclusive_takeover',
               routeCodexHomeDir: routeCodexHome,
               pid: process.pid
             });

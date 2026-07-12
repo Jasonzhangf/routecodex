@@ -1,21 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveRccRuntimeLifecycleDir } from '../config/user-data-paths.js';
+import {
+  planRuntimeStopIntentConsume,
+  planRuntimeStopIntentWrite,
+  type RuntimeStopIntentRecord as StopIntentRecord
+} from '../modules/llmswitch/bridge/runtime-lifecycle-host.js';
 
 // feature_id: runtime.lifecycle.stop_intent
 // 2026-06-16 runtime lifecycle rebase: stop-intent is a cross-process signal,
 // not a long-lived state file. It lives under
 // <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json and must
 // be reaped when older than the TTL.
-
-type StopIntentRecord = {
-  port: number;
-  requestedAtMs: number;
-  source: string;
-  pid?: number;
-};
-
-const DEFAULT_MAX_AGE_MS = 60_000;
 
 function normalizePort(port: number): number {
   return Math.floor(Number(port));
@@ -47,21 +43,20 @@ export function writeServerStopIntent(
   }
   const filePath = resolveIntentPath(normalizedPort, options.routeCodexHomeDir);
   const baseDir = path.dirname(filePath);
-  const record: StopIntentRecord = {
+  const plan = planRuntimeStopIntentWrite({
     port: normalizedPort,
-    requestedAtMs:
-      Number.isFinite(options.requestedAtMs as number)
-        ? Math.floor(options.requestedAtMs as number)
-        : Date.now(),
-    source:
-      typeof options.source === 'string' && options.source.trim() ? options.source.trim() : 'unknown',
-    ...(Number.isFinite(options.pid as number) && Number(options.pid) > 0
-      ? { pid: Math.floor(Number(options.pid)) }
-      : {})
-  };
+    source: options.source,
+    requestedAtMs: Number.isFinite(options.requestedAtMs as number)
+      ? Number(options.requestedAtMs)
+      : Date.now(),
+    ...(Number.isFinite(options.pid as number) ? { pid: Number(options.pid) } : {})
+  });
+  if (plan.action !== 'write' || plan.resourceId !== 'runtime.stop_intent') {
+    throw new Error(`writeServerStopIntent: invalid native plan action=${plan.action}`);
+  }
   try {
     fs.mkdirSync(baseDir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(record), 'utf8');
+    fs.writeFileSync(filePath, JSON.stringify(plan.record), 'utf8');
   } catch {
     // ignore: stop intent is a best-effort cross-process signal
   }
@@ -86,7 +81,7 @@ export function consumeServerStopIntent(
     : Date.now();
   const maxAgeMs = Number.isFinite(options.maxAgeMs as number) && Number(options.maxAgeMs) > 0
     ? Math.floor(options.maxAgeMs as number)
-    : DEFAULT_MAX_AGE_MS;
+    : undefined;
   const ignorePid = Number.isFinite(options.ignorePid as number) && Number(options.ignorePid) > 0
     ? Math.floor(Number(options.ignorePid))
     : null;
@@ -97,24 +92,7 @@ export function consumeServerStopIntent(
       return { matched: false };
     }
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<StopIntentRecord>;
-    if (
-      typeof parsed.port !== 'number' ||
-      !Number.isFinite(parsed.port) ||
-      Math.floor(parsed.port) !== normalizedPort ||
-      typeof parsed.requestedAtMs !== 'number' ||
-      !Number.isFinite(parsed.requestedAtMs)
-    ) {
-      return { matched: false };
-    }
-    record = {
-      port: Math.floor(parsed.port),
-      requestedAtMs: Math.floor(parsed.requestedAtMs),
-      source: typeof parsed.source === 'string' && parsed.source.trim() ? parsed.source.trim() : 'unknown',
-      ...(Number.isFinite(parsed.pid as number) && Number(parsed.pid) > 0
-        ? { pid: Math.floor(Number(parsed.pid)) }
-        : {})
-    };
+    record = JSON.parse(raw) as StopIntentRecord;
   } catch {
     return { matched: false };
   }
@@ -122,29 +100,29 @@ export function consumeServerStopIntent(
   if (!record) {
     return { matched: false };
   }
-  if (nowMs - record.requestedAtMs > maxAgeMs) {
+  const plan = planRuntimeStopIntentConsume({
+    port: normalizedPort,
+    record,
+    nowMs,
+    ...(maxAgeMs ? { maxAgeMs } : {}),
+    ...(ignorePid ? { ignorePid } : {}),
+    preserveMatched: options.preserveMatched === true
+  });
+  if (plan.shouldDelete) {
     try {
       fs.unlinkSync(filePath);
     } catch {
       // ignore
     }
-    return { matched: false };
   }
-  if (ignorePid && record.pid === ignorePid) {
+  if (!plan.matched) {
     return { matched: false };
-  }
-  if (options.preserveMatched !== true) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch {
-      // ignore
-    }
   }
   return {
     matched: true,
-    source: record.source,
-    requestedAtMs: record.requestedAtMs,
-    ...(record.pid ? { pid: record.pid } : {})
+    source: plan.source,
+    requestedAtMs: plan.requestedAtMs,
+    ...(plan.pid ? { pid: plan.pid } : {})
   };
 }
 

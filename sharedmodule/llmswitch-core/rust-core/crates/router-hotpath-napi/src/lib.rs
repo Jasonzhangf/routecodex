@@ -80,6 +80,7 @@ mod resp_process_stage2_finalize;
 mod responses_openai_codec;
 mod responses_reasoning_registry;
 mod responses_sse_event_payload;
+mod runtime_lifecycle;
 mod server_contracts;
 mod servertool_core_blocks;
 mod servertool_followup_delta;
@@ -3791,6 +3792,58 @@ pub fn decide_direct_router_retry_json(input_json: String) -> NapiResult<String>
 pub fn decide_direct_provider_retry_json(input_json: String) -> NapiResult<String> {
     direct_decision::decision::decide_direct_provider_retry_json(input_json)
         .map_err(|e| napi::Error::from_reason(e))
+}
+
+// ---------------------------------------------------------------------------
+// runtime_lifecycle NAPI exports
+// ---------------------------------------------------------------------------
+
+#[napi]
+pub fn plan_runtime_pid_cache_write_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_pid_cache_write_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_pid_cache_read_result_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_pid_cache_read_result_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_stop_intent_write_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_stop_intent_write_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_stop_intent_consume_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_stop_intent_consume_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_instance_write_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_instance_write_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_instance_status_update_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_instance_status_update_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_restart_request_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_restart_request_json(input_json)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi]
+pub fn plan_runtime_start_restart_takeover_guard_json(input_json: String) -> NapiResult<String> {
+    runtime_lifecycle::plan_runtime_start_restart_takeover_guard_json(input_json)
+        .map_err(napi::Error::from_reason)
 }
 
 // ---------------------------------------------------------------------------

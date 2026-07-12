@@ -7,7 +7,7 @@ version: 1
 owners:
   - feature_id: architecture.resource_ownership_model
     status: active
-    summary: "resource ownership taxonomy, operation map, and resource-flow gate for request/response/resource convergence"
+    summary: "resource ownership taxonomy, operation map, resource-flow gate, and source-binding gate for request/response/resource convergence"
     owner_kind: architecture_contract
     owner_scope: "M0 architecture resource ownership registry; runtime refactors must bind to this map before changing resource writers"
     owner_module: scripts/architecture/verify-resource-operation-map.mjs
@@ -23,7 +23,10 @@ owners:
       - docs/architecture/resource-operation-map.yml
       - docs/architecture/resource-global-coverage-report.json
       - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/verify-resource-source-bindings.mjs
       - scripts/architecture/audit-resource-global-coverage.mjs
+      - scripts/architecture/verify-function-map-build-wiring.mjs
+      - scripts/tests/resource-source-bindings-red-fixtures.mjs
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
       - docs/architecture/mainline-call-map.yml
@@ -34,7 +37,10 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     required_tests:
       - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/verify-resource-source-bindings.mjs
       - scripts/architecture/audit-resource-global-coverage.mjs
+      - scripts/architecture/verify-function-map-build-wiring.mjs
+      - scripts/tests/resource-source-bindings-red-fixtures.mjs
     required_gates:
       - npm run audit:resource-global-coverage
       - npm run verify:resource-operation-map
@@ -42,6 +48,8 @@ owners:
       - npm run verify:resource-mainline-bindings
       - npm run verify:resource-forbidden-writes
       - npm run verify:resource-side-channel-isolation
+      - npm run verify:resource-source-bindings
+      - npm run test:resource-source-bindings-red-fixtures
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     migration_target: rust
@@ -57,6 +65,65 @@ owners:
     notes:
       - "This feature owns the map/gate shell only; it must not become a runtime global manager."
       - "Resource identity is global per lifecycle, but writes stay stage-bound and feature-owned."
+
+  - feature_id: architecture.agent_collab_protocol
+    status: active
+    summary: "project-local black-box multi-worker collaboration protocol, schema, examples, verifier gate, and red fixtures"
+    owner_kind: architecture_contract
+    owner_scope: "file-scoped governance contract for .agent-collab authoring and gates; no runtime behavior ownership"
+    owner_module: scripts/architecture/verify-agent-collab-protocol.mjs
+    canonical_types:
+      - AgentCollabProtocol
+      - AgentCollabSchema
+      - AgentCollabEvidence
+    canonical_builders:
+      - assertSchemaRequired
+      - assertRequiredFields
+      - parseJsonl
+    allowed_paths:
+      - .agent-collab/PROTOCOL.md
+      - .agent-collab/schema
+      - .agent-collab/examples
+      - .gitignore
+      - AGENTS.md
+      - scripts/architecture/verify-agent-collab-protocol.mjs
+      - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+      - scripts/architecture/verify-function-map-build-wiring.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/goals/agent-collab-protocol-plan.md
+      - .agents/skills/rcc-dev-skills/SKILL.md
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server
+      - src/cli/commands/start.ts
+      - src/cli/commands/restart.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    required_tests:
+      - scripts/architecture/verify-agent-collab-protocol.mjs
+      - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+      - scripts/architecture/verify-function-map-build-wiring.mjs
+    required_gates:
+      - npm run verify:agent-collab-protocol
+      - npm run test:agent-collab-protocol-red-fixtures
+      - npm run verify:function-map-build-wiring
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-review-surface-light
+      - npm run verify:resource-source-bindings
+    migration_target: none
+    resource_bindings:
+      writes:
+        - architecture.agent_collab_protocol_contract@AgentCollabProtocolAuthoring
+      reads:
+        - architecture.agent_collab_protocol_contract@AgentCollabProtocolVerifier
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    notes:
+      - "This feature is a collaboration governance contract only; it must not alter runtime request/response/provider behavior."
+      - "Claims are semantic IDs and evidence-backed; stale heartbeat is not takeover permission."
 
   - feature_id: hub.servertool_followup
     status: active
@@ -1243,6 +1310,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "unified blocking backoff queue for host-side error action categories"
     owner_module: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    resource_bindings:
+      writes:
+        - error.action_backoff_queue@ErrorActionQueueState
+      reads:
+        - error.chain@ErrorErr05ExecutionDecision
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ErrorActionCategory
       - ErrorActionQueueEvent
@@ -1277,6 +1353,7 @@ owners:
       - tests/sharedmodule/server-module-help.live.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Error storm prevention waits are fixed blocking waits: 1s -> 3s -> 5s -> repeat."
@@ -1293,6 +1370,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "virtual router route classification and selected target truth"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - vr.route_selection_decision@VrRoute04SelectedTarget
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+        - metadata.runtime_control@VrRoute04SelectedTarget
+        - hub.route_metadata_carrier@MetaRoute03RouteCarrier
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - VrRoute04SelectedTarget
     canonical_builders:
@@ -1316,6 +1404,7 @@ owners:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:llmswitch-rustification-audit
       - npm run verify:repo-sanity
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
@@ -1423,6 +1512,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Hub request-route metadata normalization and metadata input extraction for route hint, retry provider pin, and routing-side metadata"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+    resource_bindings:
+      writes:
+        - hub.route_metadata_carrier@MetaRoute03RouteCarrier
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - continuation.scope_state@ContinuationScopeState
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - MetaRoute03RouteCarrier
     canonical_builders:
@@ -1444,6 +1544,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "This broader surface names the real second builder-bearing Rust file; keep the owner truthful instead of forcing a file-scoped singleton that the compile gate cannot prove."
@@ -1504,6 +1605,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Virtual Router file-scoped route surface for retry-provider-pin parsing and forced-target selection input"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+    resource_bindings:
+      writes:
+        - vr.route_retry_pin_input@SelectionResult
+      reads:
+        - hub.route_metadata_carrier@MetaRoute03RouteCarrier
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - InstructionTarget
       - SelectionResult
@@ -1525,6 +1636,7 @@ owners:
     required_gates:
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership."
@@ -1640,6 +1752,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Hub pipeline contract and meta-carrier boundary descriptors for request-route and response metadata surfaces"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_contracts/mod.rs
+    resource_bindings:
+      writes:
+        - hub.pipeline_contract_descriptor@NodeContract
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - hub.route_metadata_carrier@MetaRoute03RouteCarrier
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - NodeContract
       - MetaCarrierContract
@@ -1662,6 +1784,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "This file-scoped contract owner keeps route-control and response.metadata contract surfaces queryable apart from broader Rust orchestration owners."
@@ -1672,6 +1795,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "server module-help contract descriptors for request metadata, response metadata, and client/protocol boundary help"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
+    resource_bindings:
+      writes:
+        - server.contract_descriptor@ServerModuleHelp
+      observes:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - ServerModuleHelp
     canonical_builders:
@@ -1692,6 +1825,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "This file-scoped contract owner keeps server response/request contract help queryable apart from broader Rust root owners."
@@ -2753,6 +2887,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "apply_patch must stay single freeform patch contract end-to-end; no filePath-plus-patch rewrite and no legacy line-edit guidance"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - tool.apply_patch_freeform_contract@HubReqChatProcess03Governed
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - response.hub_semantic@HubRespChatProcess03Governed
+      forbidden:
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - HubReqChatProcess03Governed
       - HubReqOutbound05ProviderSemantic
@@ -2777,6 +2922,7 @@ owners:
       - npm run verify:apply-patch-freeform-contract
       - npm run verify:apply-patch-regressions
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Rust owns apply_patch grammar, schema normalization, and history/protocol canonicalization; no TS servertool handler may own apply_patch execution."
@@ -2789,6 +2935,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "--snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable"
     owner_module: src/utils
+    resource_bindings:
+      writes:
+        - snapshot.stage_selector_contract@SnapshotStageSelector
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - SnapshotStageSelector
       - SnapshotStageKind
@@ -2816,6 +2971,7 @@ owners:
     required_gates:
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch."
@@ -2829,6 +2985,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "provider snapshot error-spill buffer keeps bounded request-scoped samples until an error-stage flush"
     owner_module: src/debug/snapshot/buffer.ts
+    resource_bindings:
+      writes:
+        - snapshot.provider_error_buffer_state@ProviderSnapshotPersistInput
+      reads:
+        - snapshot.stage_selector_contract@SnapshotStageSelector
+        - error.chain@ErrorErr06ClientProjected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ProviderSnapshotPersistInput
     canonical_builders:
@@ -2855,6 +3021,7 @@ owners:
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "The buffer is runtime-local spill state only; it must not become a client/provider payload carrier."
@@ -2866,6 +3033,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "provider debug example hooks and debug-mode toggles stay in explicit TS debug-owner surface"
     owner_module: src/debug/hooks
+    resource_bindings:
+      writes:
+        - provider.debug_hook_observation@HookExecutionContext
+      observes:
+        - debug.artifact@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - BidirectionalHook
       - HookExecutionContext
@@ -2888,6 +3064,7 @@ owners:
       - tests/providers/core/hooks/debug-example-hooks.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: ts
     notes:
       - "This feature is debug-only observation surface; it must not become a normal response metadata owner."
@@ -3376,6 +3553,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns config.toml path precedence, config env handling, TOML-only rejection, directory scan, RCC user dir env precedence, retired ~/.routecodex rejection, default ~/.rcc resolution, and RCC subpath joining; TS path files are native shells plus snapshot-env publishing"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/path.rs
+    resource_bindings:
+      writes:
+        - config.path_resolution_plan@RouteCodexConfigPathResolveInput
+      reads:
+        - config.authoring_surface@ConfigLoad01PublicShell
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - RccUserDirResolveInput
       - RccPathResolveInput
@@ -3424,6 +3610,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:config-path-resolution-rust
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Missing config is fail-fast; no fallback path result is allowed."
@@ -3435,6 +3622,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns TOML parse/serialize and comment-preserving scalar patch semantics for user and provider config; TS toml-basic/toml-comment-preserving are native shells only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_toml_codec.rs
+    resource_bindings:
+      writes:
+        - config.toml_codec_record@TomlValue
+      reads:
+        - config.authoring_surface@ConfigLoad01PublicShell
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - TomlValue
       - TomlStringScalarPatchInput
@@ -3456,6 +3652,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:config-toml-codec-rust
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "No caller may parse config with raw JSON.parse/TOML logic or patch TOML scalar text outside codec owner; src/config/toml-basic.ts and src/config/toml-comment-preserving.ts are thin native shells only."
@@ -3467,6 +3664,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "TS detects TOML-only user config path and performs file IO; Rust decodes TOML config text and rejects JSON fail-fast"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+    resource_bindings:
+      writes:
+        - config.user_config_text_codec@DecodedUserConfigFile
+      reads:
+        - config.path_resolution_plan@RouteCodexConfigPathResolveInput
+        - config.toml_codec_record@TomlValue
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - UserConfigFormat
       - DecodedUserConfigFile
@@ -3501,6 +3708,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:config-toml-codec-rust
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "No caller may parse user config with raw JSON.parse/TOML logic outside codec owner; src/config/user-config-codec.ts must call native detectRouteCodexUserConfigFormatSync and decodeRouteCodexUserConfigTextSync for file format and TOML text semantics."
@@ -3512,6 +3720,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped TS provider-config-codec handles single-file TOML file IO/path shell only for codec/writer tests and explicit codec callers; Rust decodes TOML config text; provider v2 root loading, file planning, duplicate detection, identity validation, and coercion delegate to Rust; provider JSON config is rejected"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+    resource_bindings:
+      writes:
+        - config.provider_config_text_codec@DecodedProviderConfigFile
+      reads:
+        - config.path_resolution_plan@ProviderConfigRootPlanInput
+        - config.toml_codec_record@TomlValue
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ProviderConfigFormat
       - DecodedProviderConfigFile
@@ -3536,6 +3754,7 @@ owners:
       - npm run verify:function-map-compile-gate
       - npm run verify:config-toml-codec-rust
       - npm run verify:config-provider-codec-rust
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Provider config single-file codec is now file-scoped; maintenance/admin/init/provider-update must not call provider-config-codec directly for providerId/root reads."
@@ -3549,6 +3768,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns provider config v2 root directory loading, provider directory scan, config.v2 TOML file selection, file read, TOML parse bridge, coercion to ProviderConfigV2 shape, duplicate provider id detection, and base/suffixed provider identity validation; TS caller remains root path/native bridge shell"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_provider_codec.rs
+    resource_bindings:
+      writes:
+        - config.provider_config_coercion_plan@ProviderConfigRootLoadInput
+      reads:
+        - config.path_resolution_plan@ProviderConfigRootPlanInput
+        - config.provider_config_text_codec@DecodedProviderConfigFile
+        - config.toml_codec_record@TomlValue
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ProviderConfigCoerceInput
       - ProviderConfigFilePlanInput
@@ -3582,6 +3812,7 @@ owners:
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:config-provider-codec-rust
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Provider config v2 root loading, directory/file IO, duplicate accumulation, config.v2 TOML filename filtering/sorting, coercion, and base/suffixed provider identity validation must not be reimplemented in TS; provider-v2-loader.ts may only resolve the root path and call the native bridge."
@@ -3897,6 +4128,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "routing instruction state store managed through Rust VR state store; TS modules/routing is bridge only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing_state_store.rs
+    resource_bindings:
+      writes:
+        - manager.routing_control_state@RoutingInstructionState
+      reads:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - route.selection@VrRoute04SelectedTarget
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - RoutingInstructionState
       - RoutingManagerStateStore
@@ -3918,6 +4159,7 @@ owners:
       - tests/manager/storage/jsonl-file-store.spec.ts
     required_gates:
       - npm run verify:architecture-ci
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Routing state persistence truth lives in Rust routing_state_store.rs; TS RoutingStateManagerModule is bridge."
@@ -3929,6 +4171,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "file-scoped provider-error diagnostics bridge; TS modules/health may record diagnostic events but must not persist provider health or cooldown snapshots"
     owner_module: src/manager/modules/health
+    resource_bindings:
+      writes:
+        - manager.health_diagnostic_event@HealthManagerModule
+      observes:
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - HealthManagerModule
       - VirtualRouterHealthStore
@@ -3949,6 +4200,7 @@ owners:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
     required_gates:
       - npm run verify:architecture-ci
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Cross-restart cooldown persistence is forbidden; TS HealthManagerModule must not load or persist provider health/cooldown snapshots."
@@ -3959,6 +4211,17 @@ owners:
     owner_kind: server_projection
     owner_scope: "daemon-admin HTTP surface (auth/credentials/ports/providers/quota/restart/stats/status) is projection shell over manager/llmswitch-core truth"
     owner_module: src/server/runtime/http-server/daemon-admin
+    resource_bindings:
+      writes:
+        - daemon_admin.command_projection@DaemonAdminRouteRegistrar
+      reads:
+        - daemon_admin.auth_gate_decision@DaemonAdminRouteOptions
+        - manager.routing_control_state@RoutingInstructionState
+        - manager.health_diagnostic_event@HealthManagerModule
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - DaemonAdminRouteOptions
       - DaemonAdminRouteRegistrar
@@ -3980,6 +4243,7 @@ owners:
       - tests/server/daemon-admin/providers-handler-utils.spec.ts
     required_gates:
       - npm run verify:architecture-ci
+      - npm run verify:resource-operation-map
     migration_target: ts
     notes:
       - "daemon-admin is handler-family projection; it must not own quota/health/routing state."
@@ -3990,6 +4254,15 @@ owners:
     owner_kind: server_projection
     owner_scope: "daemon-admin route registrar plus local-only and auth gate shell before sub-handler dispatch"
     owner_module: src/server/runtime/http-server/daemon-admin-routes.ts
+    resource_bindings:
+      writes:
+        - daemon_admin.auth_gate_decision@DaemonAdminRouteOptions
+      reads:
+        - server.handler_transport_envelope@ServerRespOutbound05ClientFrame
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - DaemonAdminRouteOptions
     canonical_builders:
@@ -4008,15 +4281,16 @@ owners:
       - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
     required_gates:
       - npm run verify:architecture-ci
+      - npm run verify:resource-operation-map
     migration_target: ts
     notes:
       - "This shell owns only route registration and auth/local gate behavior; daemon sub-handlers still project manager or llmswitch-core truth."
   - feature_id: runtime.lifecycle.pid_cache
     status: active
     summary: "server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state"
-    owner_kind: ts_runtime_owner
-    owner_scope: "server pid cache writer/reader helpers under runtime-lifecycle subdir"
-    owner_module: src/utils/server-runtime-pid.ts
+    owner_kind: rust_ssot
+    owner_scope: "server pid cache decision/record plans; TS only executes runtime-lifecycle filesystem IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.pid_cache@ServerPidCacheRecord
@@ -4027,11 +4301,11 @@ owners:
     canonical_types:
       - ServerPidCacheRecord
     canonical_builders:
-      - resolveServerPidCachePath
-      - writeServerPidCache
-      - readServerPidCache
-      - unlinkServerPidCacheBestEffort
+      - plan_runtime_pid_cache_write_json
+      - plan_runtime_pid_cache_read_result_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/utils/server-runtime-pid.ts
       - src/cli/commands/start.ts
       - src/index.ts
@@ -4040,18 +4314,19 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/red-tests/runtime_pids_moved_out_of_rcc_home_root.test.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
     migration_target: rust
     notes:
-      - "PID file is a cache, never the source of truth. Authoritative state is HTTP /health + listener identity (port + trusted RouteCodex command)."
+      - "PID file is a cache, never the source of truth. Rust plans record validity/write projection; TS only resolves paths, reads/writes/unlinks files, and logs IO failures."
   - feature_id: runtime.lifecycle.stop_intent
     status: active
     summary: "stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL"
-    owner_kind: ts_runtime_owner
-    owner_scope: "stop intent writer/consumer/reaper under runtime-lifecycle subdir"
-    owner_module: src/utils/server-runtime-stop-intent.ts
+    owner_kind: rust_ssot
+    owner_scope: "stop intent write/consume TTL decision plans; TS only executes runtime-lifecycle filesystem IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.stop_intent@StopIntentRecord
@@ -4064,11 +4339,11 @@ owners:
     canonical_types:
       - StopIntentRecord
     canonical_builders:
-      - resolveServerStopIntentPath
-      - writeServerStopIntent
-      - consumeServerStopIntent
-      - clearServerStopIntent
+      - plan_runtime_stop_intent_write_json
+      - plan_runtime_stop_intent_consume_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/utils/server-runtime-stop-intent.ts
       - src/utils/daemon-stop-intent.ts
       - src/cli/commands/start.ts
@@ -4076,18 +4351,19 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/utils/daemon-stop-intent.spec.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
     migration_target: rust
     notes:
-      - "Re-export layer src/utils/daemon-stop-intent.ts only re-exports the new helper."
+      - "Re-export layer src/utils/daemon-stop-intent.ts only re-exports the helper. Rust owns matched/stale/delete plan; TS only executes file IO."
   - feature_id: runtime.lifecycle.instance_registry
     status: active
     summary: "managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json"
-    owner_kind: ts_runtime_owner
-    owner_scope: "instance declaration writer/reader/state-update"
-    owner_module: src/utils/runtime-instance-registry.ts
+    owner_kind: rust_ssot
+    owner_scope: "instance declaration/status record plans; TS only executes runtime-lifecycle filesystem IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.instance_record@RuntimeInstanceRecord
@@ -4102,12 +4378,11 @@ owners:
       - RuntimeInstance
       - InstanceLifecycleStatus
     canonical_builders:
-      - resolveRuntimeInstancePath
-      - writeRuntimeInstance
-      - readRuntimeInstance
-      - updateRuntimeInstanceStatus
-      - removeRuntimeInstance
+      - plan_runtime_instance_write_json
+      - plan_runtime_instance_status_update_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/utils/runtime-instance-registry.ts
       - tests/utils/runtime-instance-registry.spec.ts
       - src/cli/commands/start.ts
@@ -4115,6 +4390,7 @@ owners:
     forbidden_paths:
       - src/providers
     required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/utils/runtime-instance-registry.spec.ts
       - tests/cli/start-command.spec.ts
       - tests/cli/stop-command.spec.ts
@@ -4122,14 +4398,14 @@ owners:
       - npm run verify:runtime-lifecycle-pid-rebase
     migration_target: rust
     notes:
-      - "Authoritative description of the instance, not the pid cache."
+      - "Authoritative description of the instance, not the pid cache. Rust owns write/status-update record plans; TS only persists the returned record."
       - "Wired from start.ts (daemon supervisor / daemon restart / direct spawn / shutdown-intent) and stop.ts (shutdown-intent); pid cache remains the transient hint, instance.json is the authoritative description."
   - feature_id: runtime.lifecycle.restart_command
     status: active
     summary: "CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session"
-    owner_kind: ts_runtime_owner
-    owner_scope: "routecodex/rcc restart command target resolution, restart transport selection, SIGUSR2 or daemon restart-process request, and restart readiness wait"
-    owner_module: src/cli/commands/restart.ts
+    owner_kind: rust_ssot
+    owner_scope: "restart transport decision plan; TS restart command only resolves targets and executes planned HTTP/SIGUSR2 IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.admin_restart_request@RestartProcessHttpRequest
@@ -4145,12 +4421,10 @@ owners:
       - RestartCommandContext
       - RestartTarget
     canonical_builders:
-      - createRestartCommand
-      - resolveRestartTargets
-      - requestProcessRestartViaHttp
-      - requestInPlaceRestart
-      - waitForRestart
+      - plan_runtime_restart_request_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/cli/commands/restart.ts
       - src/cli/register/restart-command.ts
       - src/cli.ts
@@ -4162,6 +4436,7 @@ owners:
       - src/providers
       - src/server/runtime/http-server/executor
     required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
     required_gates:
@@ -4169,15 +4444,15 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "restart is a request to the running process/session. It may call /daemon/restart-process or send SIGUSR2 to the target pid; it must not spawn a detached start --restart takeover path."
+      - "Rust plan chooses the restart transport. TS may call /daemon/restart-process or send SIGUSR2 to the target pid only as instructed; it must not spawn a detached start --restart takeover path."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
-      - "Explicit `start --restart` must not be used as a restart-command bypass. If an existing runtime/listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`."
+      - "Default start and explicit `start --restart` must not be used as restart-command bypasses. If an existing listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`; only explicit `--exclusive` remains a destructive takeover path."
   - feature_id: runtime.lifecycle.start_command
     status: active
-    summary: "CLI start owns server process launch and must not hide restart semantics behind explicit start --restart takeover"
-    owner_kind: ts_runtime_owner
-    owner_scope: "routecodex/rcc start command config loading, port-group launch, daemon supervisor launch, and explicit start --restart guard"
-    owner_module: src/cli/commands/start.ts
+    summary: "CLI start owns server process launch; default start and explicit start --restart must not hide restart semantics behind takeover"
+    owner_kind: rust_ssot
+    owner_scope: "start takeover guard decision plan; TS start command only observes listener pids and executes launch/IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.pid_cache@ServerPidCacheRecord
@@ -4193,8 +4468,10 @@ owners:
       - StartCommandOptions
       - StartCommandContext
     canonical_builders:
-      - refuseExplicitRestartTakeoverIfOccupied
+      - plan_runtime_start_restart_takeover_guard_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/cli/commands/start.ts
       - src/cli/commands/start-types.ts
       - src/cli/commands/start-utils.ts
@@ -4206,6 +4483,7 @@ owners:
       - src/providers
       - src/server/runtime/http-server/executor
     required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/start-command.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
     required_gates:
@@ -4213,7 +4491,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Explicit `rcc start --restart` is not a valid in-session restart transport when a runtime already exists; it must fail before writing `cli.start.restart_takeover` stop-intent or calling ensurePortAvailable with restart=true. Start may only launch when the target is stopped, or use explicit stop/exclusive flows outside restart command semantics."
+      - "Rust guard decides whether explicit `rcc start --restart` may proceed. Existing live runtime/listener must fail before `cli.start.restart_takeover` stop-intent or ensurePortAvailable restart takeover."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"
@@ -4817,6 +5095,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust-only runtime dispatch; TS runtime may only call native bridge and must not use src/sse public library or protocol-specific converter wrappers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
+    resource_bindings:
+      writes:
+        - sse.runtime_dispatch_plan@SseRuntimeInput
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - SseRuntimeInput
       - NativeSseRuntimeProtocol
@@ -4849,6 +5137,7 @@ owners:
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Protocol dispatch, unknown-protocol fail-fast, JSON->SSE frames, and SSE->JSON materialization are Rust-owned through unified NAPI dispatch."
@@ -4859,6 +5148,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust-owned SSE wire parser boundary backed by native line/event parsers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+    resource_bindings:
+      writes:
+        - sse.stream_parse_contract@SseParseResult
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - RawSseEvent
       - SseParseResult
@@ -4881,6 +5179,7 @@ owners:
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "SSE parser semantics are Rust-owned; TS may only expose required native exports and must not recreate parser recovery or success synthesis."
@@ -4891,6 +5190,15 @@ owners:
     owner_kind: server_projection
     owner_scope: "file-scoped protocol-specific SSE event-type allowlists for strict parser callers; transport parser defaults remain no-recovery and no semantic validation unless a caller supplies an explicit protocol allowlist."
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+    resource_bindings:
+      writes:
+        - sse.event_type_validation_plan@SseParserConfigInput
+      reads:
+        - sse.stream_parse_contract@SseParseResult
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - SseParserConfigInput
       - RawSseEvent
@@ -4912,6 +5220,7 @@ owners:
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Event-type allowlists are explicit protocol validation inputs; they must not become fallback recovery, provider policy, or a second SSE semantic parser."
@@ -4922,6 +5231,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust-owned OpenAI Responses SSE event stream to Responses JSON projection; TS may only marshal native calls"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    resource_bindings:
+      writes:
+        - sse.responses_decode_projection_payload@ResponsesResponse
+      reads:
+        - sse.stream_parse_contract@SseParseResult
+        - sse.event_type_validation_plan@SseParserConfigInput
+        - response.provider_raw@ProviderRespInbound01Raw
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - ResponsesSseEvent
       - ResponsesResponse
@@ -4947,6 +5267,7 @@ owners:
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Decode projection is owned by the native materializer in Rust; it may aggregate provider SSE into Responses JSON and surface decode failures, but it must not own provider retry/reroute policy, Hub tool governance, or client frame repair."
@@ -4957,6 +5278,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust-owned Responses JSON to ordered client-visible Responses SSE event projection; TS may only keep transport frames"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_sse_event_payload.rs
+    resource_bindings:
+      writes:
+        - sse.responses_encode_projection_frames@ResponsesSseEvent
+      reads:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - sse.runtime_dispatch_plan@SseRuntimeInput
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - ResponsesSseEvent
       - ResponsesJsonToSseOptions
@@ -4983,6 +5314,7 @@ owners:
     required_gates:
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "Encode projection emits client protocol frames only through the Rust native owner. Serializer failures must surface fail-fast; fallback frame synthesis is forbidden. The old Responses SSE TS event-payload wrapper is deleted; tests use direct Rust/NAPI evidence."

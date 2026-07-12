@@ -24,6 +24,7 @@
 20. **Responses continuation 不可变区硬锁（高优先级）**：`/v1/responses` continuation 只允许在 **response Chat Process 出口 save**，只允许在 **下一轮 request Chat Process 入口 restore**。从 `resp_chatprocess save` 之后，到下一轮 `req_chatprocess restore` 之前，所有 `resp_outbound` / SSE / server handler / adapter / store transport / `req_inbound` 只能做语义等价归一化、投影、传输、scope 校验和释放；禁止做任何语义转换、上下文恢复、history/tool 修补、tool_call/tool_output 重排、stopless/servertool guidance 注入、required_action 推断、response repair、request rebuild、payload cleanup。这个区间内任何逻辑操作都会造成下一轮中间操作丢失，必须视为架构违规并物理删除。
 21. **live debug 样本/日志入口锁**：运行时排障先看 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`，再看 `~/.rcc/logs/server-<port>.log`；`port-unknown`、根目录 `req_*`、裸 provider 目录都不是允许长期增长的主路径，验证 canonical `ports/<port>/` 后必须物理清理旧样本。
 22. **live 重启/验证命令锁**：受管端口 live 验证只允许使用全局安装版本 `routecodex restart --port <port>` + `/health`；禁止把 repo-local `node dist/cli.js start ...`、`routecodex start ...` 或其他 start/node-dist 口径当作交付验证真相。
+23. **多 worker 协作协议入口**：RouteCodex 项目本地协作真源为 `.agent-collab/PROTOCOL.md`。代码/配置/长 gate/合并前先按该协议刷新 runs、claims、handoff、merge-queue 与 kill switch；细节留在协议和 `.agents/skills/rcc-dev-skills/SKILL.md`，不在本入口展开。
 
 ## Metadata 生命周期硬边界（醒目）
 1. **入口可读**：req_inbound / adapter 可从当前请求读取 metadata，并绑定 requestId、pipelineId、port/serverId、session/conversation scope。

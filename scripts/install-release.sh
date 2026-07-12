@@ -131,11 +131,20 @@ prepare_isolated_build_root() {
     fi
   }
 
+  copy_agent_collab_contract() {
+    copy_isolated_path ".agent-collab/PROTOCOL.md"
+    copy_isolated_path ".agent-collab/schema"
+    copy_isolated_path ".agent-collab/examples"
+  }
+
   for item in \
     package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
+    .gitignore AGENTS.md \
     src scripts config configsamples docs tests webui vendor; do
     copy_isolated_path "$item"
   done
+  copy_isolated_path ".agents/skills/rcc-dev-skills"
+  copy_agent_collab_contract
   copy_isolated_path "samples/mock-provider"
   copy_llmswitch_core
 

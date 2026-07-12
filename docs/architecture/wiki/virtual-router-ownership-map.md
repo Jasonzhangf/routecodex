@@ -13,9 +13,9 @@ Feature scope: `vr.* / virtual_router.*`
 
 | feature_id | summary | owner kind | owner module | required gates |
 | --- | --- | --- | --- | --- |
-| `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity` |
+| `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity`<br/>`npm run verify:resource-operation-map` |
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
-| `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability` |
+| `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability`<br/>`npm run verify:resource-operation-map` |
 | `vr.hit_log_projection` | Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs` | `npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime` |
 | `vr.route_host_effects` | Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit` |
 | `virtual_router.primary_exhausted_to_default_pool` | primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run build:base` |
@@ -59,6 +59,7 @@ Required gates:
 - `npm run verify:vr-no-ts-runtime`
 - `npm run verify:llmswitch-rustification-audit`
 - `npm run verify:repo-sanity`
+- `npm run verify:resource-operation-map`
 
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
@@ -146,6 +147,7 @@ Required tests:
 Required gates:
 - `npm run verify:vr-no-ts-runtime`
 - `npm run verify:architecture-custom-payload-carrier-owner-queryability`
+- `npm run verify:resource-operation-map`
 
 Notes:
 - This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership.

@@ -36,6 +36,15 @@ description: RouteCodex 调试与架构路由入口
 5. 在 `docs/architecture/wiki/mainline-call-graph.md`（或功能 wiki）核对节点闭环。
 6. 若相关 skill 已覆盖现成流程/经验，优先复用；如果没有，任务结束时必须回查并沉淀到对应 skill。
 
+## 多 worker 协作（RouteCodex 本地协议）
+
+- 项目协作真源是 `.agent-collab/PROTOCOL.md`；不要假设共享控制面、共享 worker 内存、可靠实时消息或可见工具状态。
+- 代码/配置编辑、长 gate、提交、合并前，先刷新 `.agent-collab/` 视图：`runs/*/heartbeat.json`、`claims/*/owner.json`、最近 `events.jsonl`、`handoff/`、`merge-queue/`、`KILL_SWITCH`。
+- 写入前 claim 语义 owner，不 claim 裸文件路径；优先 `feature_id`、`resource_id`、`mainline_node_id`、`gate_id`，用 `mkdir .agent-collab/claims/<semantic_id>` 作为本地原子占用。
+- 保留并行 worker 的无关 dirty worktree；禁止用 checkout/reset/broad cleanup 清理他人改动。
+- 心跳 stale 不等于接管授权；生产写入、删除、迁移、发布、鉴权、密钥、global install、live runtime 变更仍需明确授权或 checked handoff。
+- 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
+
 ## Debug 首选顺序（强制）
 1. 先查 `function map / owner registry / verification map`
 - 锁唯一 owner、允许路径、required gates。
@@ -161,6 +170,10 @@ description: RouteCodex 调试与架构路由入口
 - 资源第四层补缺边界：mainline `resource_flow` 已 `108/108` 后，只补 feature-level `resource_bindings`。servertool engine 子功能使用 plan/state/projection/policy 资源族（如 `servertool.engine_action_plan`、`servertool.execution_contract_plan`、`servertool.registry_projection`），不新增假 mainline flow，不把非相邻 owner 绑到 request/response/route 资源凑数。
 - 资源 host/runtime 补缺边界：server/host/CLI surface 要用 entry/handle/transport/projection 资源（如 `runtime.hub_pipeline_handle`、`runtime.http_entry_dispatch`、`server.handler_transport_envelope`、`models.capability_catalog`、`cli.command_dispatch_intent`），不要把 shell/handler owner 硬绑到 request/response/route truth 凑 coverage。
 - 资源 protocol/conversion 补缺边界：provider-wire compat 与协议转换要用 owner-specific `protocol.*` 资源；相邻但不同 feature 的 schema 修补必须拆资源（如 Responses function tool schema 与 tool parameters schema），禁止合并成一个多 writer 模糊资源凑覆盖。`protocol.*` side_channel 只读控制面，禁止进 provider/client body。
+- 资源 config codec/path 补缺边界：path resolution、TOML codec、user/provider text codec、provider coercion 要用下层 `config.*_plan` / `config.*_codec` 资源；不要把 codec/path owner 绑定到 `config.runtime_projection` / provider profile projection 这类高层 materialization 资源凑数。
+- 资源 residual 补缺边界：error/VR/contract/snapshot/debug/manager/daemon/SSE residual feature 也必须用 owner-specific 资源收口；禁止为完成覆盖率把它们塞进 request/response/route 主线真相。第四层 `119/119` 只代表 map/doc/gate 闭合，不代表 runtime refactor 已完成。
+- 资源 source-binding gate 边界：第四层 `119/119` 后，runtime refactor 前必须先跑 `verify:resource-source-bindings` 和红测 fixture；资源 owner 必须能经 function-map `owner_module` / `allowed_paths` 找到真实 `feature_id:` source anchor，查不到只能标 `binding pending`，禁止伪造 symbol/resource/edge。source-binding 绿门禁必须留在 `verify:architecture-review-surface-light`，红测 fixture 必须留在 `verify:architecture-ci-longtail` 并由 `verify:function-map-build-wiring` 锁住。
+- 首个 runtime slice 准入：先用 `.agent-collab` claim 精确 `feature_id` / `resource_id` / `mainline_node_id`，再证明 owner/source/map/gate 可查；对 dry-run 相关 slice，runtime 改动前必须先有 request dry-run 最终 provider request 样本和 response dry-run converter 黑盒结果，后续修复先加失败 dry-run 样本再改唯一 owner。
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 
 ## 快查命令
@@ -177,6 +190,9 @@ description: RouteCodex 调试与架构路由入口
   - `npm run verify:resource-mainline-bindings`
   - `npm run verify:resource-forbidden-writes`
   - `npm run verify:resource-side-channel-isolation`
+  - `npm run verify:resource-source-bindings`
+  - `npm run test:resource-source-bindings-red-fixtures`
+  - `npm run verify:architecture-review-surface-light`
 - 查 gate：
   - `rg -n 'feature_id: <id>' docs/architecture/verification-map.yml`
 - 查源码锚点：

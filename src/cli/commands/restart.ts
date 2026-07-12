@@ -17,6 +17,10 @@ import {
   type RouteCodexHealthProbeResult
 } from '../../utils/http-health-probe.js';
 import { buildLocalProbeHostCandidates, resolvePreferredLocalConnectHost } from '../../utils/local-connect-host.js';
+import {
+  planRuntimeRestartRequest,
+  type RuntimeRestartRequestPlan
+} from '../../modules/llmswitch/bridge/runtime-lifecycle-host.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -337,7 +341,8 @@ function normalizeHostForHttp(host: string): string {
 async function requestProcessRestartViaHttp(
   ctx: RestartCommandContext,
   target: RestartTarget,
-  apiKey?: string
+  apiKey: string | undefined,
+  fallbackTransport: RuntimeRestartRequestPlan['httpFallbackTransport']
 ): Promise<'http' | 'signal'> {
   const host = normalizeHostForHttp(target.host || LOCAL_HOSTS.LOCALHOST);
   try {
@@ -375,26 +380,23 @@ async function requestProcessRestartViaHttp(
       port: target.port
     });
   }
-  if (isHttpOnlyRestartMode(ctx)) {
+  if (fallbackTransport !== 'signal') {
     throw new Error(`restart endpoint unavailable on ${host}:${target.port}; manual one-time restart required to adopt server-managed restart`);
   }
   requestInPlaceRestart(ctx, target);
   return 'signal';
 }
 
-function shouldUseHttpRestartTransport(
+function planRestartTransport(
   ctx: RestartCommandContext,
   target: RestartTarget,
   restartApiKey: RestartApiKeyResolution
-): boolean {
-  if (isHttpOnlyRestartMode(ctx)) {
-    return true;
-  }
-  const oldPids = Array.isArray(target.oldPids) ? target.oldPids : [];
-  if (oldPids.length > 0) {
-    return restartApiKey.source === 'config' && Boolean(normalizeString(restartApiKey.value));
-  }
-  return Boolean(normalizeString(restartApiKey.value));
+): RuntimeRestartRequestPlan {
+  return planRuntimeRestartRequest({
+    oldPids: Array.isArray(target.oldPids) ? target.oldPids : [],
+    restartApiKey,
+    httpOnly: isHttpOnlyRestartMode(ctx)
+  });
 }
 
 type RestartTarget = {
@@ -654,11 +656,16 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           if (ctx.reportGuardianLifecycle && approved !== true) {
             throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
           }
-          const transport = shouldUseHttpRestartTransport(ctx, t, restartApiKey)
-            ? await requestProcessRestartViaHttp(ctx, t, restartApiKey.value)
-            : (() => {
+          const plan = planRestartTransport(ctx, t, restartApiKey);
+          const transport = plan.preferredTransport === 'http'
+            ? await requestProcessRestartViaHttp(ctx, t, restartApiKey.value, plan.httpFallbackTransport)
+            : plan.preferredTransport === 'signal'
+              ? (() => {
                 requestInPlaceRestart(ctx, t);
                 return 'signal' as const;
+              })()
+              : (() => {
+                throw new Error(`no restart transport available for ${t.host}:${t.port} (${plan.reasonCode})`);
               })();
           if (transport === 'signal') {
             spinner.warn(`Used in-place signal restart for ${t.host}:${t.port}.`);

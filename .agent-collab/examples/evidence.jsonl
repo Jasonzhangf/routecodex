@@ -1,0 +1,1 @@
+{"run_id":"20260712T080000Z-routecodex-12345-a1b2","claim":"feature_id:architecture.agent_collab_protocol","command_or_check":"npm run verify:agent-collab-protocol","result":"pass","summary":"protocol, schemas, and examples validate","artifact":null,"timestamp":"2026-07-12T08:11:00Z"}

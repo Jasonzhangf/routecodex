@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/agent-collab/owner.schema.json",
+  "title": "RouteCodex Agent Collab Claim Owner",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["semantic_id", "run_id", "status", "created_at", "ttl_seconds", "allowed_paths", "required_gates"],
+  "properties": {
+    "semantic_id": {
+      "type": "string",
+      "pattern": "^(feature_id|resource_id|mainline_node_id|gate_id):.+$"
+    },
+    "run_id": { "type": "string", "minLength": 1 },
+    "worker_id": { "type": ["string", "null"] },
+    "task_id": { "type": ["string", "null"] },
+    "status": { "type": "string", "enum": ["active", "handoff", "complete", "released", "stale"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": ["string", "null"], "format": "date-time" },
+    "ttl_seconds": { "type": "integer", "minimum": 1 },
+    "allowed_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_gates": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

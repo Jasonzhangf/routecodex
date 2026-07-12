@@ -1232,11 +1232,11 @@ chains:
         to_node: ServerPidCacheRecord
         caller_symbol: writeServerPidCache
         caller_file: src/cli/commands/start.ts
-        callee_symbol: writeServerPidCache
-        callee_file: src/utils/server-runtime-pid.ts
+        callee_symbol: planRuntimePidCacheWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.pid_cache
         semantic_input: "server port + pid number"
-        semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        semantic_output: "Rust plan returns runtime.pid_cache record; TS writes pid.cache JSON under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
         resource_flow:
           consumes: []
           produces: [runtime.pid_cache]
@@ -1248,11 +1248,11 @@ chains:
         to_node: ServerPidCacheRecord
         caller_symbol: writeServerPidCache
         caller_file: src/index.ts
-        callee_symbol: writeServerPidCache
-        callee_file: src/utils/server-runtime-pid.ts
+        callee_symbol: planRuntimePidCacheWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.pid_cache
         semantic_input: "server port + pid number"
-        semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        semantic_output: "Rust plan returns runtime.pid_cache record; TS writes pid.cache JSON under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
         resource_flow:
           consumes: []
           produces: [runtime.pid_cache]
@@ -1264,11 +1264,11 @@ chains:
         to_node: StopIntentRecord
         caller_symbol: writeDaemonStopIntent
         caller_file: src/cli/commands/stop.ts
-        callee_symbol: writeServerStopIntent
-        callee_file: src/utils/server-runtime-stop-intent.ts
+        callee_symbol: planRuntimeStopIntentWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port + stop reason + timestamp"
-        semantic_output: "stop-intent.json written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        semantic_output: "Rust plan returns runtime.stop_intent record; TS writes stop-intent.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
         resource_flow:
           consumes: []
           produces: [runtime.stop_intent]
@@ -1280,11 +1280,11 @@ chains:
         to_node: StopIntentRecord
         caller_symbol: consumeDaemonStopIntent
         caller_file: src/cli/commands/start.ts
-        callee_symbol: consumeServerStopIntent
-        callee_file: src/utils/server-runtime-stop-intent.ts
+        callee_symbol: planRuntimeStopIntentConsume
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port context"
-        semantic_output: "stop-intent record if fresh TTL-valid intent exists, otherwise null"
+        semantic_output: "Rust plan returns matched/stale/delete decision for stop-intent; TS unlinks only when the plan requests deletion"
         resource_flow:
           consumes: [runtime.stop_intent]
           produces: [runtime.stop_intent]
@@ -1294,13 +1294,13 @@ chains:
       - step_id: rtl-05
         from_node: ServerRestartCommand
         to_node: RestartProcessHttpRequest
-        caller_symbol: requestProcessRestartViaHttp
+        caller_symbol: planRestartTransport
         caller_file: src/cli/commands/restart.ts
-        callee_symbol: registerRestartRoutes
-        callee_file: src/server/runtime/http-server/daemon-admin/restart-handler.ts
+        callee_symbol: planRuntimeRestartRequest
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.restart_command
-        semantic_input: "target host/port plus configured restart API key when HTTP restart transport is selected"
-        semantic_output: "POST /daemon/restart-process asks the existing RouteCodex process to SIGUSR2 itself; no detached start --restart takeover"
+        semantic_input: "target host/port plus resolved local pid hints, configured restart API key, and HTTP-only mode"
+        semantic_output: "Rust plan selects HTTP restart request only when allowed; TS POSTs /daemon/restart-process without detached start --restart takeover"
         resource_flow:
           consumes: []
           produces: [runtime.admin_restart_request]
@@ -1310,13 +1310,13 @@ chains:
       - step_id: rtl-06
         from_node: ServerRestartCommand
         to_node: RestartProcessSignal
-        caller_symbol: requestInPlaceRestart
+        caller_symbol: planRestartTransport
         caller_file: src/cli/commands/restart.ts
-        callee_symbol: sendSignal
-        callee_file: src/cli.ts
+        callee_symbol: planRuntimeRestartRequest
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.restart_command
-        semantic_input: "target pid hints from listener discovery plus SIGUSR2"
-        semantic_output: "existing RouteCodex child receives SIGUSR2; managed start parent restarts the child inside the original session"
+        semantic_input: "target pid hints from listener discovery plus restart API-key state"
+        semantic_output: "Rust plan selects signal restart; TS sends SIGUSR2 to existing RouteCodex child so the managed start parent restarts inside the original session"
         resource_flow:
           consumes: [runtime.pid_cache]
           produces: [runtime.restart_signal]
@@ -1328,11 +1328,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: writeRuntimeInstance
         caller_file: src/cli/commands/start.ts
-        callee_symbol: writeRuntimeInstance
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope + status=declared"
-        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (direct server spawn)"
+        semantic_output: "Rust plan returns runtime.instance_record; TS writes instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (direct server spawn)"
         resource_flow:
           consumes: []
           produces: [runtime.instance_record]
@@ -1344,11 +1344,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: writeRuntimeInstance
         caller_file: src/cli/commands/start.ts
-        callee_symbol: writeRuntimeInstance
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
-        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (daemon supervisor first spawn)"
+        semantic_output: "Rust plan returns runtime.instance_record; TS writes instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (daemon supervisor first spawn)"
         resource_flow:
           consumes: []
           produces: [runtime.instance_record]
@@ -1360,11 +1360,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: writeRuntimeInstance
         caller_file: src/cli/commands/start.ts
-        callee_symbol: writeRuntimeInstance
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceWrite
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
-        semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (managed restart child)"
+        semantic_output: "Rust plan returns runtime.instance_record; TS writes instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (managed restart child)"
         resource_flow:
           consumes: [runtime.restart_signal]
           produces: [runtime.instance_record]
@@ -1376,11 +1376,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: updateRuntimeInstanceStatus
         caller_file: src/cli/commands/start.ts
-        callee_symbol: updateRuntimeInstanceStatus
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceStatusUpdate
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=healthy"
-        semantic_output: "instance.json status promoted to healthy after restart probe passes"
+        semantic_output: "Rust plan returns status-update record; TS writes instance.json status healthy after restart probe passes"
         resource_flow:
           consumes: [runtime.instance_record]
           produces: [runtime.instance_record]
@@ -1392,11 +1392,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: updateRuntimeInstanceStatus
         caller_file: src/cli/commands/start.ts
-        callee_symbol: updateRuntimeInstanceStatus
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceStatusUpdate
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=shutdown-intent"
-        semantic_output: "instance.json status promoted to shutdown-intent before HTTP shutdown request"
+        semantic_output: "Rust plan returns status-update record; TS writes instance.json shutdown-intent before HTTP shutdown request"
         resource_flow:
           consumes: [runtime.instance_record]
           produces: [runtime.instance_record]
@@ -1408,11 +1408,11 @@ chains:
         to_node: RuntimeInstanceRecord
         caller_symbol: updateRuntimeInstanceStatus
         caller_file: src/cli/commands/stop.ts
-        callee_symbol: updateRuntimeInstanceStatus
-        callee_file: src/utils/runtime-instance-registry.ts
+        callee_symbol: planRuntimeInstanceStatusUpdate
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=shutdown-intent + notes.source=cli.stop"
-        semantic_output: "instance.json status promoted to shutdown-intent on stop request"
+        semantic_output: "Rust plan returns status-update record; TS writes instance.json shutdown-intent on stop request"
         resource_flow:
           consumes: [runtime.stop_intent, runtime.instance_record]
           produces: [runtime.instance_record]
@@ -1424,11 +1424,11 @@ chains:
         to_node: StartRestartTakeoverGuard
         caller_symbol: createStartCommand
         caller_file: src/cli/commands/start.ts
-        callee_symbol: refuseExplicitRestartTakeoverIfOccupied
-        callee_file: src/cli/commands/start.ts
+        callee_symbol: planRuntimeStartRestartTakeoverGuard
+        callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.start_command
-        semantic_input: "explicit --restart start request plus resolved port group and listener/health observations"
-        semantic_output: "existing runtime is refused before stop-intent or /shutdown; stopped target may proceed to start"
+        semantic_input: "start request mode plus resolved port group and listener observations"
+        semantic_output: "Rust guard plan refuses default/--restart start when an existing runtime listener is present before stop-intent or /shutdown; stopped target may proceed to start"
         resource_flow:
           consumes: [runtime.instance_record]
           produces: [runtime.instance_record]

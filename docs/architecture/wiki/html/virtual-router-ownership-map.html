@@ -136,9 +136,9 @@
         <thead><tr><th>feature_id</th><th>summary</th><th>owner kind</th><th>owner module</th><th>required gates</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code></td></tr>
+        <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
         <tr><td><code>vr.metadata_center_surface</code></td><td>Virtual Router read-only metadata-center-backed route surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-owner-queryability</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
-        <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code></td></tr>
+        <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
         <tr><td><code>vr.hit_log_projection</code></td><td>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code></td><td><code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
         <tr><td><code>vr.route_host_effects</code></td><td>Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code></td></tr>
         <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
@@ -184,6 +184,7 @@
           <li><code>npm run verify:vr-no-ts-runtime</code></li>
           <li><code>npm run verify:llmswitch-rustification-audit</code></li>
           <li><code>npm run verify:repo-sanity</code></li>
+          <li><code>npm run verify:resource-operation-map</code></li>
         </ul>
         <p>Notes:</p>
         <ul>
@@ -275,6 +276,7 @@
         <ul>
           <li><code>npm run verify:vr-no-ts-runtime</code></li>
           <li><code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code></li>
+          <li><code>npm run verify:resource-operation-map</code></li>
         </ul>
         <p>Notes:</p>
         <ul>

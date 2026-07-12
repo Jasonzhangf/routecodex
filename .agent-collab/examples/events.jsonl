@@ -1,0 +1,2 @@
+{"run_id":"20260712T080000Z-routecodex-12345-a1b2","claim":"feature_id:architecture.agent_collab_protocol","event_type":"claim_acquired","message":"created semantic claim directory with atomic mkdir","timestamp":"2026-07-12T08:00:02Z"}
+{"run_id":"20260712T080000Z-routecodex-12345-a1b2","claim":"feature_id:architecture.agent_collab_protocol","event_type":"gate_started","message":"started protocol verifier","timestamp":"2026-07-12T08:10:00Z"}

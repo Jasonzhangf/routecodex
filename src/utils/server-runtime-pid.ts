@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveRccRuntimeLifecycleDir, resolveRccUserDir } from '../config/user-data-paths.js';
+import {
+  planRuntimePidCacheReadResult,
+  planRuntimePidCacheWrite,
+  type RuntimePidCacheRecord as ServerPidCacheRecord
+} from '../modules/llmswitch/bridge/runtime-lifecycle-host.js';
 
 // feature_id: runtime.lifecycle.pid_cache
 // 2026-06-16 runtime lifecycle rebase: pid file is a transient cache, not the
@@ -35,12 +40,7 @@ export function resolveServerInstancePath(port: number, routeCodexHomeDir?: stri
   return path.join(resolvePortsDir(routeCodexHomeDir), String(normalizePort(port)), 'instance.json');
 }
 
-export type ServerPidCacheRecord = {
-  pid: number;
-  port: number;
-  writtenAtMs: number;
-  origin: 'start' | 'resume' | 'snapshot';
-};
+export type { ServerPidCacheRecord };
 
 export function writeServerPidCache(args: {
   port: number;
@@ -48,20 +48,20 @@ export function writeServerPidCache(args: {
   origin?: ServerPidCacheRecord['origin'];
   routeCodexHomeDir?: string;
 }): void {
-  const port = normalizePort(args.port);
-  if (!Number.isFinite(port) || port <= 0) {
-    return;
+  const plan = planRuntimePidCacheWrite({
+    port: args.port,
+    pid: args.pid,
+    origin: args.origin ?? 'start',
+    nowMs: Date.now()
+  });
+  if (plan.action !== 'write' || plan.resourceId !== 'runtime.pid_cache') {
+    throw new Error(`writeServerPidCache: invalid native plan action=${plan.action}`);
   }
-  if (!Number.isFinite(args.pid) || args.pid <= 0) {
-    return;
-  }
-  const filePath = resolveServerPidCachePath(port, args.routeCodexHomeDir);
   const record: ServerPidCacheRecord = {
-    pid: Math.floor(args.pid),
-    port,
-    writtenAtMs: Date.now(),
-    origin: args.origin ?? 'start'
+    ...plan.record,
+    origin: plan.record.origin as ServerPidCacheRecord['origin']
   };
+  const filePath = resolveServerPidCachePath(record.port, args.routeCodexHomeDir);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(record), 'utf8');
 }
@@ -96,22 +96,16 @@ export function readServerPidCache(args: {
   const filePath = resolveServerPidCachePath(port, args.routeCodexHomeDir);
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<ServerPidCacheRecord>;
-    if (
-      typeof parsed.pid !== 'number' ||
-      !Number.isFinite(parsed.pid) ||
-      parsed.pid <= 0 ||
-      typeof parsed.port !== 'number' ||
-      Math.floor(parsed.port) !== port
-    ) {
-      return null;
+    const parsed = JSON.parse(raw) as unknown;
+    const plan = planRuntimePidCacheReadResult({ port, record: parsed });
+    if (plan.shouldDelete) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // cache cleanup is best-effort; the read result still remains invalid.
+      }
     }
-    return {
-      pid: Math.floor(parsed.pid),
-      port,
-      writtenAtMs: typeof parsed.writtenAtMs === 'number' ? Math.floor(parsed.writtenAtMs) : 0,
-      origin: parsed.origin ?? 'start'
-    };
+    return plan.matched && plan.record ? plan.record : null;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
     if (code && code !== 'ENOENT') {

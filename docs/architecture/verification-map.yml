@@ -11,9 +11,13 @@ verification:
       - docs/architecture/resource-operation-map.yml
       - docs/architecture/resource-taxonomy.md
       - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/verify-resource-source-bindings.mjs
       - scripts/architecture/audit-resource-global-coverage.mjs
+      - scripts/tests/resource-source-bindings-red-fixtures.mjs
     contract:
       - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/verify-resource-source-bindings.mjs
+      - scripts/tests/resource-source-bindings-red-fixtures.mjs
       - scripts/architecture/audit-resource-global-coverage.mjs
     integration:
       - docs/architecture/function-map.yml
@@ -27,12 +31,44 @@ verification:
       - npm run verify:resource-mainline-bindings
       - npm run verify:resource-forbidden-writes
       - npm run verify:resource-side-channel-isolation
+      - npm run verify:resource-source-bindings
+      - npm run test:resource-source-bindings-red-fixtures
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     build:
       - npm run build:base
     notes:
       - "M0 resource ownership is map/gate only. Do not start runtime refactors until resource ownership and mainline resource flow are green."
+
+  - feature_id: architecture.agent_collab_protocol
+    change_risk: medium
+    unit:
+      - .agent-collab/PROTOCOL.md
+      - .agent-collab/schema
+      - .agent-collab/examples
+      - scripts/architecture/verify-agent-collab-protocol.mjs
+      - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+    contract:
+      - scripts/architecture/verify-agent-collab-protocol.mjs
+      - scripts/tests/agent-collab-protocol-red-fixtures.mjs
+      - scripts/architecture/verify-function-map-build-wiring.mjs
+    integration:
+      - package.json
+      - docs/architecture/function-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/verification-map.yml
+    smoke:
+      - npm run verify:agent-collab-protocol
+      - npm run test:agent-collab-protocol-red-fixtures
+      - npm run verify:function-map-build-wiring
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-review-surface-light
+      - npm run verify:resource-source-bindings
+    build:
+      - npm run build:base
+    notes:
+      - "Project-local .agent-collab protocol is doc/schema/gate governance only and must not mutate runtime behavior."
+      - "Completion requires evidence.jsonl; merge/integration defaults to handoff or merge queue."
 
   - feature_id: hub.servertool_followup
     change_risk: high
@@ -604,6 +640,7 @@ verification:
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -623,6 +660,7 @@ verification:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:vr-no-ts-runtime
       - npm run verify:repo-sanity
     build:
@@ -689,6 +727,7 @@ verification:
       - tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
@@ -728,6 +767,7 @@ verification:
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:vr-no-ts-runtime
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
@@ -794,6 +834,7 @@ verification:
       - tests/sharedmodule/responses-sse-metadata-boundary.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
@@ -810,6 +851,7 @@ verification:
       - tests/sharedmodule/server-module-help.live.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-custom-payload-carrier-owner-queryability
     build:
@@ -1604,6 +1646,7 @@ verification:
       - sharedmodule/llmswitch-core/scripts/tests/apply-patch-freeform-tool-schema-passthrough.mjs
     smoke:
       - cargo test -p router-hotpath-napi test_validate_apply_patch_arguments_repairs_line_number_hunk_with_inline_context_trailer --lib -- --nocapture
+      - npm run verify:resource-operation-map
       - npm run verify:apply-patch-freeform-contract
       - npm run verify:apply-patch-regressions
       - npm run verify:function-map-compile-gate
@@ -1629,6 +1672,7 @@ verification:
       - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
     build:
@@ -1652,6 +1696,7 @@ verification:
       - tests/providers/core/utils/snapshot-writer.local-mirror.spec.ts
       - tests/providers/core/utils/snapshot-writer.429-suppression.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-snapshot-stage-contract
       - npm run verify:architecture-snapshot-stage-owners
     build:
@@ -1669,6 +1714,7 @@ verification:
       - tests/providers/core/hooks/debug-example-hooks.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1901,6 +1947,7 @@ verification:
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1922,6 +1969,7 @@ verification:
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1942,6 +1990,7 @@ verification:
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1966,6 +2015,7 @@ verification:
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1994,6 +2044,7 @@ verification:
     integration:
       - tests/grep/config-codec-gate.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -2153,6 +2204,7 @@ verification:
     integration:
       - tests/manager/storage/jsonl-file-store.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2169,6 +2221,7 @@ verification:
     integration:
       - tests/manager/storage/jsonl-file-store.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2183,6 +2236,7 @@ verification:
     integration:
       - tests/server/daemon-admin/providers-handler-utils.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2198,6 +2252,7 @@ verification:
     integration:
       - tests/server/runtime/http-server/daemon-admin-routes.auth.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2471,6 +2526,7 @@ verification:
     integration: []
     smoke:
       - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi sse_runtime_dispatch --lib -- --nocapture
+      - npm run verify:resource-operation-map
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -2487,6 +2543,7 @@ verification:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -2505,6 +2562,7 @@ verification:
       - tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -2523,6 +2581,7 @@ verification:
       - tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -2545,6 +2604,7 @@ verification:
       - tests/server/handlers/responses-handler.sse-terminal-event.blackbox.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:sse-architecture-boundary
       - npm run verify:function-map-compile-gate
     build:
@@ -2687,8 +2747,10 @@ verification:
   - feature_id: runtime.lifecycle.pid_cache
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/utils/server-runtime-pid.ts
     contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/red-tests/runtime_pids_moved_out_of_rcc_home_root.test.ts
     integration:
       - tests/utils/server-runtime-pid.spec.ts
@@ -2696,6 +2758,7 @@ verification:
       - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
       - "PID cache is only a runtime-lifecycle cache file; verification must prove writes moved under state/runtime-lifecycle and legacy root pid files stay deleted."
@@ -2703,9 +2766,11 @@ verification:
   - feature_id: runtime.lifecycle.stop_intent
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/utils/server-runtime-stop-intent.ts
       - src/utils/daemon-stop-intent.ts
     contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/utils/daemon-stop-intent.spec.ts
     integration:
       - tests/utils/managed-server-pids.spec.ts
@@ -2713,6 +2778,7 @@ verification:
       - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
       - "Stop intent remains best-effort cross-process signaling; verification must prove runtime-lifecycle pathing and stale intent cleanup."
@@ -2720,8 +2786,10 @@ verification:
   - feature_id: runtime.lifecycle.instance_registry
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/utils/runtime-instance-registry.ts
     contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/utils/runtime-instance-registry.spec.ts
     integration:
       - tests/utils/runtime-instance-registry.spec.ts
@@ -2729,6 +2797,7 @@ verification:
       - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
       - "Instance registry is the authoritative local declaration of managed runtime state; verification must prove instance.json write/read/update/remove under runtime-lifecycle path."
@@ -2736,8 +2805,10 @@ verification:
   - feature_id: runtime.lifecycle.restart_command
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/cli/commands/restart.ts
     contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
     integration: []
@@ -2746,6 +2817,7 @@ verification:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
       - "Restart command must request restart from the existing process/session via /daemon/restart-process or SIGUSR2; it must not spawn start --restart as a takeover path when live version differs."
@@ -2753,9 +2825,11 @@ verification:
   - feature_id: runtime.lifecycle.start_command
     change_risk: medium
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/cli/commands/start.ts
       - scripts/install-release.sh
     contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/start-command.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
     integration:
@@ -2765,9 +2839,10 @@ verification:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
-      - "Explicit `start --restart` must fail before stop-intent or /shutdown when a runtime already exists. Install release verification must use in-session `rcc restart` for live runtime and `rcc start --no-restart` only when the target is stopped."
+      - "Default start and explicit `start --restart` must fail before stop-intent or /shutdown when a runtime listener already exists. Install release verification must use in-session `rcc restart` for live runtime and `rcc start --no-restart` only when the target is stopped."
 
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium

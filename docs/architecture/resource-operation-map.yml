@@ -3,6 +3,19 @@ version: 1
 status: m0
 
 resources:
+  - resource_id: architecture.agent_collab_protocol_contract
+    resource_kind: governance_contract
+    lifecycle: architecture.collaboration_protocol
+    identity: [semantic_id, run_id, gate_id]
+    owner_feature_id: architecture.agent_collab_protocol
+    owner_node: AgentCollabProtocolAuthoring
+    allowed_readers: [AgentCollabProtocolVerifier, ArchitectureReviewSurface, FunctionMapBuildWiring]
+    allowed_writers: [AgentCollabProtocolAuthoring]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, MetaReq04RuntimeControlBound]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:agent-collab-protocol, npm run test:agent-collab-protocol-red-fixtures, npm run verify:function-map-build-wiring]
+
   - resource_id: request.normal_payload
     resource_kind: normal_payload
     lifecycle: request.mainline
@@ -159,6 +172,97 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
 
+  - resource_id: error.action_backoff_queue
+    resource_kind: side_channel
+    lifecycle: error.control_surface.mainline
+    identity: [category, scopeKey, queueKey]
+    owner_feature_id: error.backoff_action_queue
+    owner_node: ErrorActionQueueState
+    allowed_readers: [RequestExecutorRetryState, RetryEngine, TrafficGovernorHost]
+    allowed_writers: [describeErrorActionQueueContract, recordErrorActionBackoff, waitErrorActionBackoffWithGate]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: vr.route_selection_decision
+    resource_kind: side_channel
+    lifecycle: vr.route_control_surface.mainline
+    identity: [requestId, routingGroup, routeName, providerKey]
+    owner_feature_id: vr.route_selection
+    owner_node: VrRoute04SelectedTarget
+    allowed_readers: [hub.route_selection_bridge, HubReqOutbound05ProviderSemantic, vr.hit_log_record]
+    allowed_writers: [apply_route_selection, build_vr_route_04_from_hub_req_chatprocess_03]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+
+  - resource_id: hub.route_metadata_carrier
+    resource_kind: side_channel
+    lifecycle: vr.route_control_surface.mainline
+    identity: [requestId, entryEndpoint, routeHint, retryProviderKey]
+    owner_feature_id: hub.route_metadata_surface
+    owner_node: MetaRoute03RouteCarrier
+    allowed_readers: [VrRoute04SelectedTarget, vr.metadata_center_surface, vr.route_retry_pin_surface]
+    allowed_writers: [build_router_metadata_input]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-custom-payload-carrier-owner-queryability]
+
+  - resource_id: vr.route_retry_pin_input
+    resource_kind: side_channel
+    lifecycle: vr.route_control_surface.mainline
+    identity: [requestId, retryProviderKey, forcedTarget]
+    owner_feature_id: vr.route_retry_pin_surface
+    owner_node: SelectionResult
+    allowed_readers: [VrRoute04SelectedTarget, route.selection]
+    allowed_writers: [parse_retry_provider_key_target]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+
+  - resource_id: hub.pipeline_contract_descriptor
+    resource_kind: side_channel
+    lifecycle: architecture.contract_surface.mainline
+    identity: [contractVersion, nodeId, carrierId]
+    owner_feature_id: hub.pipeline_contract_surface
+    owner_node: NodeContract
+    allowed_readers: [architecture.review_surface, hub_pipeline_contract_gate]
+    allowed_writers: [describe_meta_carrier_contracts, validate_pipeline_node_contract_boundary]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-custom-payload-carrier-owner-queryability]
+
+  - resource_id: server.contract_descriptor
+    resource_kind: side_channel
+    lifecycle: architecture.contract_surface.mainline
+    identity: [contractVersion, moduleId, phase]
+    owner_feature_id: server.rust_contract_surface
+    owner_node: ServerModuleHelp
+    allowed_readers: [architecture.review_surface, server_module_help_contract_gate]
+    allowed_writers: [describe_server_contracts, describe_server_module_help]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-custom-payload-carrier-owner-queryability]
+
+  - resource_id: tool.apply_patch_freeform_contract
+    resource_kind: normal_payload
+    lifecycle: tool.contract_surface.mainline
+    identity: [requestId, toolName, patchGrammar]
+    owner_feature_id: tool.apply_patch_freeform_contract
+    owner_node: HubReqChatProcess03Governed
+    allowed_readers: [HubReqOutbound05ProviderSemantic, HubRespChatProcess03Governed]
+    allowed_writers: [normalize_apply_patch_schema_args, validate_apply_patch_arguments_json, repair_line_number_update_hunks_with_live_context]
+    forbidden_writers: [src.server.runtime.http_server, src.providers.core.runtime, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:apply-patch-freeform-contract]
+
   - resource_id: provider_runtime.observation
     resource_kind: side_channel
     lifecycle: error.mainline
@@ -211,6 +315,45 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map]
 
+  - resource_id: snapshot.stage_selector_contract
+    resource_kind: diagnostic
+    lifecycle: snapshot.contract_surface.mainline
+    identity: [stageKind, selectorMode, snapMode]
+    owner_feature_id: snapshot.stage_contract
+    owner_node: SnapshotStageSelector
+    allowed_readers: [SnapshotRecorder, ProviderSnapshotWriter, HubSnapshotHooks]
+    allowed_writers: [getDefaultSnapshotStageSelector, shouldCaptureSnapshotStage, stageSelectorNeedsHubSnapshots]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-snapshot-stage-contract]
+
+  - resource_id: snapshot.provider_error_buffer_state
+    resource_kind: diagnostic
+    lifecycle: snapshot.contract_surface.mainline
+    identity: [requestId, providerKey, errorStage]
+    owner_feature_id: snapshot.provider_error_buffer
+    owner_node: ProviderSnapshotPersistInput
+    allowed_readers: [ProviderSnapshotWriter, ErrorErr06ClientProjected]
+    allowed_writers: [shouldFlushSnapshotBuffer, bufferProviderSnapshotForErrorFlush, takeBufferedProviderSnapshots, resetProviderSnapshotErrorBufferForTests]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-snapshot-stage-contract]
+
+  - resource_id: provider.debug_hook_observation
+    resource_kind: diagnostic
+    lifecycle: debug.hook_surface.mainline
+    identity: [hookName, hookDirection, debugMode]
+    owner_feature_id: provider.debug_example_hooks_surface
+    owner_node: HookExecutionContext
+    allowed_readers: [DebugSurface, ProviderHookManager]
+    allowed_writers: [registerDebugExampleHooks, enableDebugMode, disableDebugMode]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
   - resource_id: sse.transport_frame
     resource_kind: transport
     lifecycle: sse.chat_stream_projection.mainline
@@ -223,6 +366,58 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: true
     required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: manager.routing_control_state
+    resource_kind: runtime_lifecycle
+    lifecycle: manager.control_surface.mainline
+    identity: [routingStateKey, conversationId, routeName]
+    owner_feature_id: manager.routing_control_surface
+    owner_node: RoutingInstructionState
+    allowed_readers: [RoutingManagerStateStore, VirtualRouterRuntime]
+    allowed_writers: [load_routing_instruction_state, persist_routing_instruction_state]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: manager.health_diagnostic_event
+    resource_kind: diagnostic
+    lifecycle: manager.control_surface.mainline
+    identity: [providerKey, runtimeKey, diagnosticEvent]
+    owner_feature_id: manager.health_runtime
+    owner_node: HealthManagerModule
+    allowed_readers: [VirtualRouterHealthStore, manager.routing_control_state]
+    allowed_writers: [getHealthStore, resolveStateDir]
+    forbidden_writers: [provider_runtime.observation, route.selection, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: daemon_admin.command_projection
+    resource_kind: server_projection
+    lifecycle: daemon_admin.control_surface.mainline
+    identity: [adminRoute, httpMethod, commandFamily]
+    owner_feature_id: daemon_admin.command_handlers
+    owner_node: DaemonAdminRouteRegistrar
+    allowed_readers: [daemon_admin.auth_gate_decision, ManagerRuntime]
+    allowed_writers: [registerDaemonAuthRoutes, registerProviderRoutes, registerControlRoutes, registerRestartRoutes, registerStatsRoutes, registerStatusRoutes, registerPortsRoutes]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: daemon_admin.auth_gate_decision
+    resource_kind: side_channel
+    lifecycle: daemon_admin.control_surface.mainline
+    identity: [adminRoute, localAddress, authMode]
+    owner_feature_id: daemon_admin.auth_gate_shell
+    owner_node: DaemonAdminRouteOptions
+    allowed_readers: [DaemonAdminRouteRegistrar, daemon_admin.command_projection]
+    allowed_writers: [isDaemonAdminAuthRequired, rejectNonLocalOrUnauthorizedAdmin, registerDaemonAdminRoutes]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
 
   - resource_id: servertool.followup_state
     resource_kind: side_channel
@@ -483,6 +678,71 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:config-toml-codec-rust]
+
+  - resource_id: config.path_resolution_plan
+    resource_kind: config_path_resolution
+    lifecycle: config.codec_surface.mainline
+    identity: [homeDir, rccUserDir, configPath]
+    owner_feature_id: config.path_resolution_surface
+    owner_node: RouteCodexConfigPathResolveInput
+    allowed_readers: [ConfigLoad01PublicShell, ConfigLoad02NativeBridge, ProviderConfigRootPlanInput]
+    allowed_writers: [resolve_rcc_user_dir_for_host_with_env, resolve_rcc_path_for_host_with_env, resolve_routecodex_config_path_for_host, plan_routecodex_config_loader_paths_for_host, plan_provider_config_root_for_host]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, VrRoute04SelectedTarget, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-path-resolution-rust]
+
+  - resource_id: config.toml_codec_record
+    resource_kind: config_codec
+    lifecycle: config.codec_surface.mainline
+    identity: [configPath, tomlDocumentKind, scalarPatchPath]
+    owner_feature_id: config.toml_codec
+    owner_node: TomlValue
+    allowed_readers: [DecodedUserConfigFile, DecodedProviderConfigFile, ProviderConfigCoerceInput]
+    allowed_writers: [parse_toml_record_json, serialize_toml_record_json, update_toml_string_scalar_in_table_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-toml-codec-rust]
+
+  - resource_id: config.user_config_text_codec
+    resource_kind: config_codec
+    lifecycle: config.codec_surface.mainline
+    identity: [configPath, userConfigFormat]
+    owner_feature_id: config.user_config_codec
+    owner_node: DecodedUserConfigFile
+    allowed_readers: [ConfigLoad03RustLoader, ConfigLoad04UserConfigParsed]
+    allowed_writers: [detect_user_config_format_json, decode_user_config_text_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-toml-codec-rust]
+
+  - resource_id: config.provider_config_text_codec
+    resource_kind: config_codec
+    lifecycle: config.codec_surface.mainline
+    identity: [providerConfigPath, providerConfigFormat]
+    owner_feature_id: config.provider_config_codec
+    owner_node: DecodedProviderConfigFile
+    allowed_readers: [ProviderConfigCoerceInput, ConfigLoad04UserConfigParsed]
+    allowed_writers: [detect_provider_config_format_json, decode_provider_config_text_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-provider-codec-rust]
+
+  - resource_id: config.provider_config_coercion_plan
+    resource_kind: config_codec
+    lifecycle: config.codec_surface.mainline
+    identity: [providerRoot, providerKey, providerConfigPath]
+    owner_feature_id: config.provider_config_coercion
+    owner_node: ProviderConfigRootLoadInput
+    allowed_readers: [ConfigLoad04UserConfigParsed, ConfigLoad05RuntimeManifestCompiled, config.provider_profile_projection]
+    allowed_writers: [coerce_provider_config_v2_from_parsed_json, plan_provider_config_v2_files_json, resolve_provider_config_v2_identity_json, load_provider_configs_v2_from_root_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-provider-codec-rust]
 
   - resource_id: runtime.pid_cache
     resource_kind: runtime_lifecycle
@@ -911,6 +1171,71 @@ resources:
     forbidden_writers: [ServerRespOutbound05ClientFrame, route.selection, provider_runtime.observation]
     may_enter_provider_body: false
     may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.runtime_dispatch_plan
+    resource_kind: transport
+    lifecycle: sse.runtime_surface.mainline
+    identity: [requestId, nativeProtocol, dispatchDirection]
+    owner_feature_id: sse.runtime_rust_dispatch
+    owner_node: SseRuntimeInput
+    allowed_readers: [sse.stream_parse_contract, sse.responses_decode_projection_payload, sse.responses_encode_projection_frames]
+    allowed_writers: [build_sse_frames_from_json_json, build_json_from_sse_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.stream_parse_contract
+    resource_kind: transport
+    lifecycle: sse.runtime_surface.mainline
+    identity: [streamId, parserConfig, protocol]
+    owner_feature_id: sse.stream_parse_boundary
+    owner_node: SseParseResult
+    allowed_readers: [sse.runtime_dispatch_plan, sse.event_type_validation_plan, sse.responses_decode_projection_payload]
+    allowed_writers: [assemble_sse_event_from_lines_json, parse_sse_event_with_config_json, parse_sse_stream_with_config_json, parse_sse_stream_chunk_with_config_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.event_type_validation_plan
+    resource_kind: transport
+    lifecycle: sse.runtime_surface.mainline
+    identity: [protocol, eventType, parserConfig]
+    owner_feature_id: sse.event_type_validation
+    owner_node: SseParserConfigInput
+    allowed_readers: [sse.stream_parse_contract, sse.responses_decode_projection_payload]
+    allowed_writers: [validate_sse_event_type, infer_sse_event_type_from_data]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.responses_decode_projection_payload
+    resource_kind: provider_response
+    lifecycle: sse.runtime_surface.mainline
+    identity: [requestId, responseId, streamId]
+    owner_feature_id: sse.responses_decode_projection
+    owner_node: ResponsesResponse
+    allowed_readers: [HubRespInbound02Parsed, response.provider_raw]
+    allowed_writers: [build_responses_json_from_sse_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.responses_encode_projection_frames
+    resource_kind: transport
+    lifecycle: sse.runtime_surface.mainline
+    identity: [requestId, responseId, streamId]
+    owner_feature_id: sse.responses_encode_projection
+    owner_node: ResponsesSseEvent
+    allowed_readers: [ServerRespOutbound05ClientFrame, sse.transport_frame]
+    allowed_writers: [build_responses_sse_stream_frames_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
     required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
 
   - resource_id: stage_a.servertool_outcome_plan

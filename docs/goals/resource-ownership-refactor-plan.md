@@ -319,6 +319,60 @@ Next-layer backlog:
 - Config codec/path/coercion features: `config.path_resolution_surface`, `config.toml_codec`, `config.user_config_codec`, `config.provider_config_codec`, and `config.provider_config_coercion`.
 - Manager/daemon/SSE residuals: `manager.routing_control_surface`, `manager.health_runtime`, `daemon_admin.command_handlers`, `daemon_admin.auth_gate_shell`, `sse.runtime_rust_dispatch`, `sse.stream_parse_boundary`, `sse.event_type_validation`, `sse.responses_decode_projection`, and `sse.responses_encode_projection`.
 
+## Fourth-Layer Config Codec / Path / Coercion Binding Closure
+
+The config codec/path/coercion batch continues fourth-layer feature-level binding coverage. It does not add mainline flows and does not change runtime behavior; it maps lower-level config path resolution, TOML codec, user/provider config text codec, and provider v2 coercion owners to explicit config resources below the higher-level config materialization resources.
+
+Closed in the config codec/path/coercion batch:
+
+- `config.path_resolution_surface`
+- `config.toml_codec`
+- `config.user_config_codec`
+- `config.provider_config_codec`
+- `config.provider_config_coercion`
+
+Fourth-layer config resource identities:
+
+- `config.path_resolution_plan`
+- `config.toml_codec_record`
+- `config.user_config_text_codec`
+- `config.provider_config_text_codec`
+- `config.provider_config_coercion_plan`
+
+Design closeout:
+
+- Config path/codec/coercion resources are distinct from `config.validated_manifest`, `config.runtime_projection`, `config.provider_profile_projection`, and `config.routing_policy_projection`; codec/path owners must not be bound to high-level runtime materialization resources to inflate coverage.
+- TOML parse/serialize and user/provider text decode resources are codec resources, not provider runtime resources; they must not enter provider body, route selection, or client response payload.
+- Provider config coercion is represented as a root-load/coercion plan resource, keeping TS callers as root path/native bridge shells and Rust as the coercion owner.
+
+Current config batch coverage evidence:
+
+- `npm run audit:resource-global-coverage` reports `resources: 87`.
+- Mainline resource flow coverage remains `108/108`.
+- Active feature resource binding coverage increased from `95/119` to `100/119`.
+- `missing_resource_flow_edges` remains empty.
+- The config codec/path/coercion priority batch no longer appears in the missing binding list.
+
+Verified gates for this map-only slice:
+
+- `npm run verify:resource-operation-map`
+- `npm run audit:resource-global-coverage`
+- `npm run verify:resource-owner-uniqueness`
+- `npm run verify:resource-mainline-bindings`
+- `npm run verify:resource-forbidden-writes`
+- `npm run verify:resource-side-channel-isolation`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:architecture-mainline-manifest-sync`
+- `npm run verify:architecture-wiki-sync`
+- `git diff --check`
+
+Next-layer backlog:
+
+- Error/VR/pipeline contract surfaces: `error.backoff_action_queue`, `vr.route_selection`, `hub.route_metadata_surface`, `vr.route_retry_pin_surface`, `hub.pipeline_contract_surface`, `server.rust_contract_surface`, and `tool.apply_patch_freeform_contract`.
+- Snapshot/debug surfaces: `snapshot.stage_contract`, `snapshot.provider_error_buffer`, and `provider.debug_example_hooks_surface`.
+- Manager/daemon/SSE residuals: `manager.routing_control_surface`, `manager.health_runtime`, `daemon_admin.command_handlers`, `daemon_admin.auth_gate_shell`, `sse.runtime_rust_dispatch`, `sse.stream_parse_boundary`, `sse.event_type_validation`, `sse.responses_decode_projection`, and `sse.responses_encode_projection`.
+
 ## Design Principles
 
 - Unique resource identity does not mean one global mutable object.
@@ -503,3 +557,166 @@ Pilot runtime refactor verification:
 - Resource verifier gates pass.
 - No runtime refactor is claimed complete unless resource ownership, tests, build, and live/sample verification match the changed resource.
 - Local skills and project memory capture reusable resource-ownership rules and anti-patterns.
+
+## Fourth-Layer Final Feature Binding Closure
+
+Fourth-layer feature-level resource binding coverage is now complete. This final closure did not add mainline flows and did not change runtime behavior; it only mapped the remaining owner surfaces to queryable, owner-specific resources and gates.
+
+Final closure batches:
+
+- Error / VR / pipeline contract surfaces: `error.backoff_action_queue`, `vr.route_selection`, `hub.route_metadata_surface`, `vr.route_retry_pin_surface`, `hub.pipeline_contract_surface`, `server.rust_contract_surface`, and `tool.apply_patch_freeform_contract`.
+- Snapshot / debug surfaces: `snapshot.stage_contract`, `snapshot.provider_error_buffer`, and `provider.debug_example_hooks_surface`.
+- Manager / daemon admin surfaces: `manager.routing_control_surface`, `manager.health_runtime`, `daemon_admin.command_handlers`, and `daemon_admin.auth_gate_shell`.
+- SSE residual surfaces: `sse.runtime_rust_dispatch`, `sse.stream_parse_boundary`, `sse.event_type_validation`, `sse.responses_decode_projection`, and `sse.responses_encode_projection`.
+
+Final fourth-layer resource identities:
+
+- `error.action_backoff_queue`
+- `vr.route_selection_decision`
+- `hub.route_metadata_carrier`
+- `vr.route_retry_pin_input`
+- `hub.pipeline_contract_descriptor`
+- `server.contract_descriptor`
+- `tool.apply_patch_freeform_contract`
+- `snapshot.stage_selector_contract`
+- `snapshot.provider_error_buffer_state`
+- `provider.debug_hook_observation`
+- `manager.routing_control_state`
+- `manager.health_diagnostic_event`
+- `daemon_admin.command_projection`
+- `daemon_admin.auth_gate_decision`
+- `sse.runtime_dispatch_plan`
+- `sse.stream_parse_contract`
+- `sse.event_type_validation_plan`
+- `sse.responses_decode_projection_payload`
+- `sse.responses_encode_projection_frames`
+
+Final fourth-layer coverage evidence:
+
+- `npm run audit:resource-global-coverage` reports `resources: 106`.
+- Active feature resource binding coverage is `119/119`.
+- Mainline resource flow coverage remains `108/108`.
+- `missing_resource_flow_edges` remains empty.
+
+Verified gates for the final map-only closure:
+
+- `npm run verify:resource-operation-map`
+- `npm run audit:resource-global-coverage`
+- `npm run verify:resource-owner-uniqueness`
+- `npm run verify:resource-mainline-bindings`
+- `npm run verify:resource-forbidden-writes`
+- `npm run verify:resource-side-channel-isolation`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:architecture-mainline-manifest-sync`
+- `npm run verify:architecture-wiki-sync`
+- `git diff --check`
+
+Completion boundary:
+
+- This closes fourth-layer project-wide map/doc/gate coverage, not runtime refactoring.
+- Runtime refactor remains out of scope until a specific resource owner, source anchor, required tests, and dry-run/live/sample evidence are selected.
+- No build/global install/live runtime validation was required because this closure did not change runtime behavior.
+
+## Source-Binding Gate Layer
+
+After fourth-layer coverage reached `119/119`, resource ownership must be mechanically bound to real source anchors before runtime refactor starts. This layer is still map/doc/gate work; it does not change runtime behavior.
+
+Source-binding contract:
+
+- Every resource `owner_feature_id` must exist in function-map and verification-map.
+- Every resource owner must have a real source anchor through function-map `owner_module` / `allowed_paths` and the literal `feature_id: <id>` marker.
+- Owner source anchors must expose at least one canonical builder/type hit through the declared allowed surface.
+- Every resource `required_gates` entry must be an existing `package.json` npm script.
+- Every feature `resource_bindings` entry and every mainline `resource_flow` resource id must reference a declared resource.
+- Every mainline resource flow must point at a real adjacent `chain_id::step_id` in `mainline-call-map.yml`.
+- Side-channel resources must not enter provider or client body, and side-channel flow fields must not carry normal payload resources.
+- `forbidden_writers` must be non-empty and must not overlap `allowed_writers`.
+
+Executable gates:
+
+- `npm run verify:resource-source-bindings`
+- `npm run test:resource-source-bindings-red-fixtures`
+- `npm run verify:architecture-review-surface-light` now runs `verify:resource-source-bindings`, so `build:base`, `build:min`, `build`, `build:dev`, and `build:dev:full` cannot bypass the green source-binding gate.
+- `npm run verify:architecture-ci-longtail` now runs `test:resource-source-bindings-red-fixtures`, and `verify:function-map-build-wiring` locks this red fixture wiring.
+
+Red fixture coverage:
+
+- missing owner feature
+- undeclared resource binding
+- missing source anchor
+- missing required gate
+- side-channel resource entering provider body
+- forbidden writer overlap
+- fake / non-adjacent mainline resource flow
+
+Current source-binding evidence:
+
+- `npm run verify:resource-source-bindings` checks `106` resources, `85` distinct owner source anchors, and `108` mainline flows.
+- `npm run test:resource-source-bindings-red-fixtures` proves the gate fails closed for all required negative cases.
+- `npm run verify:architecture-review-surface-light` proves the source-binding gate runs inside the existing architecture review surface.
+- Fourth-layer coverage remains the baseline: resources `106`, active feature `resource_bindings` `119/119`, mainline `resource_flow` `108/108`.
+
+## First Runtime Slice Pre-Refactor Closure: `debug.pipeline_dry_run_loop.mainline`
+
+This section is a pre-refactor closure only. It proves that the first real runtime resource owner slice can be claimed, queried, tested, and validated through dry-run black-box evidence before any runtime behavior is changed.
+
+Collaboration claim:
+
+- Run ID: `20260712T065350Z-Macstudio-61037-599a`
+- Semantic claim: `mainline_node_id:debug.pipeline_dry_run_loop.mainline`
+- Claim file: `.agent-collab/claims/mainline_node_id:debug.pipeline_dry_run_loop.mainline/owner.json`
+- Evidence file: `.agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/evidence.jsonl`
+- Existing unrelated claim avoided: `feature_id:runtime.lifecycle.mainline`
+
+Owner and resource audit:
+
+- Owner feature: `debug.pipeline_dry_run_loop`
+- Owner module: `src/debug/pipeline-dry-run.ts`
+- Mainline chain: `debug.pipeline_dry_run_loop.mainline`
+- Mainline edges: `ddr-01`, `ddr-02`, `ddr-03`, `ddr-04`
+- Primary resources: `dryrun.provider_request_probe`, `snapshot.debug_sample`
+- Adjacent consumed resources: `request.protocol_context`, `provider.wire_payload`, `response.provider_raw`, with `metadata.runtime_control` as side-channel read on `ddr-02`
+- Projected resource: `response.client_payload`
+- Forbidden writes: dry-run must not write response truth or provider wire truth; function owner forbids `request.provider_semantic@HubReqOutbound05ProviderSemantic`
+
+Testing design:
+
+- Lifecycle: request dry-run starts from the normal HTTP entrypoint with `x-routecodex-dry-run: provider-request`, creates a non-enumerable internal carrier, traverses handler/Hub/VR/provider runtime request construction, writes the provider-request snapshot, and stops before upstream provider HTTP transport.
+- Captured request replay: `scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base <live base>` must write `dry-run.provider-request.json`.
+- Captured response replay: `npm run dry-run:codex-response -- --sample <provider-response.json>` must call existing `convertProviderResponseIfNeeded`; no script-local response conversion truth is allowed.
+- White-box: `tests/debug/pipeline-dry-run.spec.ts` locks local-only header acceptance, remote rejection, non-enumerable carrier propagation, final provider request output, provider header redaction, provider snapshot write, and upstream transport not being called.
+- Module black-box request: assert output object is `routecodex.pipeline_dry_run`, `dryRun=true`, `evidence.stoppedBeforeProviderSend=true`, `evidence.providerRequestSnapshotWritten=true`, and `providerRequest.body` is present.
+- Module black-box response: assert `ok=true`, `converted.status=200`, and converted body shape matches the target client endpoint.
+- Project black-box impact: this slice is diagnostic-only and must not change normal provider request/response semantics, routing policy, provider health, cooldown, retry, direct passthrough, continuation, or client response projection outside dry-run mode.
+
+Existing red/negative coverage:
+
+- `tests/debug/pipeline-dry-run.spec.ts` rejects non-local dry-run header use with `403`.
+- `tests/debug/pipeline-dry-run.spec.ts` proves provider HTTP transport is not called during provider-request dry-run.
+- `scripts/dry-run-codex-response.ts` fail-fast rejects provider-response samples containing serialized `sseStream` without replayable `bodyText/raw/text`; this is the required negative fixture shape for response converter bugs that involve SSE snapshots.
+
+Known gaps:
+
+- No new runtime red test was added in this pre-refactor closure because no runtime behavior changed.
+- The next runtime fix under this slice must first add a failing request dry-run sample or failing provider-response dry-run sample for the concrete bug, then prove it turns green through the same dry-run commands.
+- Request dry-run black-box verification requires an already-running local RouteCodex endpoint; this closure used existing healthy port `5520` and did not restart or install anything.
+
+Current black-box evidence:
+
+- Request sample: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json`
+- Request dry-run command: `node scripts/replay-codex-sample.mjs --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json --dry-run provider-request --base http://127.0.0.1:5520 --label agent-collab-dryrun-slice`
+- Request dry-run artifact: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/runs/sample_1783839364169/agent-collab-dryrun-slice/dry-run.provider-request.json`
+- Request dry-run confirmed fields: `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `dryRun=true`, `evidence.stoppedBeforeProviderSend=true`, `evidence.providerRequestSnapshotWritten=true`, `providerRequest.method=POST`, `providerRequest.endpoint=/responses`, and `providerRequest.body` present.
+- Response sample: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json`
+- Response dry-run command: `npm run dry-run:codex-response -- --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json --out-dir .agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/response-dry-run-openai-chat`
+- Response dry-run artifact: `.agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/response-dry-run-openai-chat/response-dry-run.json`
+- Response dry-run confirmed fields: `ok=true`, `entryEndpoint=/v1/chat/completions`, `providerProtocol=openai-responses`, `converted.status=200`, `converted.body.object=chat.completion`, and `converted.body.choices` present.
+
+Next runtime refactor admission rule:
+
+1. Own a non-conflicting `.agent-collab` semantic claim for the exact `feature_id`, `resource_id`, or `mainline_node_id`.
+2. Add a failing request dry-run sample or failing provider-response dry-run sample for the concrete bug.
+3. Confirm `function-map`, `resource-operation-map`, `mainline-call-map`, and `verification-map` still identify the same owner, resources, adjacent edge, allowed paths, forbidden paths, and gates.
+4. Change only the unique owner surface required for the failing sample.
+5. Green closeout must include `npm run test:pipeline-dry-run`, request dry-run black-box replay, response dry-run black-box replay when response handling is touched, `verify:resource-source-bindings`, `verify:function-map-compile-gate`, and `verify:architecture-review-surface-light`.

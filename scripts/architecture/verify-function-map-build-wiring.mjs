@@ -13,6 +13,10 @@ const requiredScript = 'verify:function-map-compile-gate';
 const requiredReviewSurfaceLightScript = 'verify:architecture-review-surface-light';
 const requiredReviewSurfaceScript = 'verify:architecture-review-surface';
 const requiredLongtailScript = 'verify:architecture-ci-longtail';
+const requiredResourceSourceBindingScript = 'verify:resource-source-bindings';
+const requiredResourceSourceBindingRedScript = 'test:resource-source-bindings-red-fixtures';
+const requiredAgentCollabProtocolScript = 'verify:agent-collab-protocol';
+const requiredAgentCollabProtocolRedScript = 'test:agent-collab-protocol-red-fixtures';
 const compileGate = scripts[requiredScript] || '';
 const requiredGateParts = [
   'verify:architecture-feature-id-anchors',
@@ -61,6 +65,14 @@ if (!baseCommand) {
   if (tscIndex !== -1 && (gateIndex === -1 || gateIndex > tscIndex)) {
     failures.push('build:base must run verify:function-map-compile-gate before tsc');
   }
+}
+
+const reviewSurfaceLightCommand = scripts[requiredReviewSurfaceLightScript] || '';
+if (!reviewSurfaceLightCommand.includes(`npm run ${requiredResourceSourceBindingScript}`)) {
+  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredResourceSourceBindingScript}`);
+}
+if (!reviewSurfaceLightCommand.includes(`npm run ${requiredAgentCollabProtocolScript}`)) {
+  failures.push(`${requiredReviewSurfaceLightScript} must run ${requiredAgentCollabProtocolScript}`);
 }
 
 // build must run build:base + verify:architecture-ci
@@ -127,6 +139,14 @@ if (!architectureCi.includes(`npm run ${requiredLongtailScript}`)) {
   failures.push(`verify:architecture-ci must run ${requiredLongtailScript}`);
 }
 
+const architectureCiLongtail = scripts[requiredLongtailScript] || '';
+if (!architectureCiLongtail.includes(`npm run ${requiredResourceSourceBindingRedScript}`)) {
+  failures.push(`${requiredLongtailScript} must run ${requiredResourceSourceBindingRedScript}`);
+}
+if (!architectureCiLongtail.includes(`npm run ${requiredAgentCollabProtocolRedScript}`)) {
+  failures.push(`${requiredLongtailScript} must run ${requiredAgentCollabProtocolRedScript}`);
+}
+
 if (failures.length > 0) {
   console.error('[verify:function-map-build-wiring] failed');
   for (const failure of failures) console.error(`- ${failure}`);
@@ -139,3 +159,4 @@ console.log('- build requires build:base and verify:architecture-ci');
 console.log('- build:dev and build:dev:full use build:base');
 console.log('- build/pack scripts do not mutate global installs; release install verification uses a temp prefix');
 console.log('- verify:architecture-ci requires verify:architecture-review-surface, verify:function-map-build-wiring, and verify:architecture-ci-longtail');
+console.log('- architecture review/light and CI longtail require resource source-binding and agent-collab green/red gates');

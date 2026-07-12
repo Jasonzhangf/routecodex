@@ -29285,3 +29285,99 @@ Pure Rust NAPI candidates:
 - Coverage after `npm run audit:resource-global-coverage`: resources `82`, active feature `resource_bindings` `95/119`, mainline `resource_flow` `108/108`, `missing_resource_flow_edges: []`.
 - Verification PASS: `verify:resource-operation-map`, `audit:resource-global-coverage`, resource owner/mainline/forbidden/side-channel gates, `verify:function-map-compile-gate`, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
 - Remaining first missing group: `error.backoff_action_queue`, VR/pipeline contract surfaces, snapshot/debug surfaces, config codec/path/coercion, manager/daemon surfaces, and SSE residuals.
+
+# 2026-07-12 12:46 CST: Resource ownership fourth-layer config codec/path bindings
+
+- Scope: map/doc/gate-only continuation of active resource convergence goal; no runtime code changed.
+- Closed feature-level resource bindings for `config.path_resolution_surface`, `config.toml_codec`, `config.user_config_codec`, `config.provider_config_codec`, and `config.provider_config_coercion`.
+- Added config resources: `config.path_resolution_plan`, `config.toml_codec_record`, `config.user_config_text_codec`, `config.provider_config_text_codec`, and `config.provider_config_coercion_plan`.
+- Design boundary: lower-level config path/codec/coercion resources are distinct from high-level runtime materialization resources; do not bind codec owners to `config.runtime_projection` or provider profile projection just to increase coverage.
+- Coverage after `npm run audit:resource-global-coverage`: resources `87`, active feature `resource_bindings` `100/119`, mainline `resource_flow` `108/108`, `missing_resource_flow_edges: []`.
+- Verification PASS: `verify:resource-operation-map`, `audit:resource-global-coverage`, resource owner/mainline/forbidden/side-channel gates, `verify:function-map-compile-gate`, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
+- Remaining first missing group: `error.backoff_action_queue`, VR/pipeline contract surfaces, snapshot/debug surfaces, manager/daemon surfaces, and SSE residuals.
+
+# 2026-07-12 13:07 CST: Resource ownership fourth-layer feature bindings complete
+
+- Scope: map/doc/gate-only completion of active fourth-layer resource convergence goal; no runtime code changed, no build/global install/live runtime required.
+- Closed final missing feature-level bindings for error/VR/pipeline contract, snapshot/debug, manager/daemon, and SSE residual surfaces.
+- Added final resource families: `error.action_backoff_queue`, `vr.*` route-control resources, `hub.pipeline_contract_descriptor`, `server.contract_descriptor`, `tool.apply_patch_freeform_contract`, `snapshot.*` contracts, `provider.debug_hook_observation`, `manager.*`, `daemon_admin.*`, and `sse.*` dispatch/parser/projection resources.
+- Coverage after `npm run audit:resource-global-coverage`: resources `106`, active feature `resource_bindings` `119/119`, mainline `resource_flow` `108/108`, no missing mainline resource-flow edges.
+- Verification PASS: full resource gate suite, function-map compile gate, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
+- Boundary: fourth-layer coverage is complete as map/doc/gate truth. Runtime refactor still requires a separate resource owner slice with tests plus dry-run/live/sample verification if behavior changes.
+
+# 2026-07-12 13:55 CST: Resource source-binding gate layer
+
+- Scope: next-layer resource convergence gate before runtime refactor; no runtime behavior code changed.
+- Added `scripts/architecture/verify-resource-source-bindings.mjs` and npm script `verify:resource-source-bindings`.
+- Added red fixture harness `scripts/tests/resource-source-bindings-red-fixtures.mjs` and npm script `test:resource-source-bindings-red-fixtures`.
+- The source-binding gate validates resource owner features, verification-map presence, owner source anchors through function-map `owner_module` / `allowed_paths`, required gate scripts, declared resource references, real adjacent mainline flow edges, side-channel body isolation, and forbidden writer overlap.
+- Red fixtures prove fail-closed behavior for missing owner feature, undeclared resource binding, missing source anchor, missing required gate, side-channel entering provider body, forbidden writer overlap, and fake non-adjacent mainline flow.
+- Initial PASS evidence: `verify:resource-source-bindings` checked resources `106`, owner source anchors `85`, mainline flows `108`; red fixture command passed all 7 negative cases.
+- Fourth-layer baseline remains unchanged: `audit:resource-global-coverage` reports resources `106`, active feature `resource_bindings` `119/119`, mainline `resource_flow` `108/108`.
+
+# 2026-07-12 14:10 CST: Resource source-binding gate wired into architecture review
+
+- Scope: promote the source-binding gate from manually runnable script to real architecture/build gate; no runtime behavior code changed.
+- `verify:architecture-review-surface-light` now runs `verify:resource-source-bindings`; because `build:base`, `build:min`, `build`, `build:dev`, and `build:dev:full` already depend on review-light/build:base, source-binding green gate is now on the normal build path.
+- `verify:architecture-ci-longtail` now runs `test:resource-source-bindings-red-fixtures`; `verify:function-map-build-wiring` now fails if review-light drops the green gate or longtail drops the red fixture gate.
+- `npm run verify:architecture-review-surface-light` PASS after rendering wiki HTML; the source-binding gate ran inside it and checked resources `106`, owner source anchors `85`, mainline flows `108`.
+
+# 2026-07-12: Agent collaboration protocol foundation
+
+- Scope: project-local `.agent-collab/` collaboration governance only; no runtime behavior, live restart, global install, or release mutation changed.
+- Added tracked authoring contract: `.agent-collab/PROTOCOL.md`, `.agent-collab/schema/*.schema.json`, and `.agent-collab/examples/*`.
+- Added ignored runtime-state boundary in `.gitignore`: `.agent-collab/runs/`, `claims/`, `handoff/`, `merge-queue/`, and `KILL_SWITCH` stay local runtime state while protocol/schema/examples remain trackable.
+- Added `scripts/architecture/verify-agent-collab-protocol.mjs` and npm gate `verify:agent-collab-protocol`; it checks protocol terms, schema parseability/required fields, and examples.
+- Added `scripts/tests/agent-collab-protocol-red-fixtures.mjs` and npm gate `test:agent-collab-protocol-red-fixtures`; red fixtures cover missing protocol, invalid schema, missing owner `semantic_id`, missing actor `run_id`, missing heartbeat `updated_at`, missing evidence `result`, missing stale-heartbeat non-takeover rule, missing evidence completion rule, and missing handoff/merge queue rule.
+- Wired `verify:agent-collab-protocol` into `verify:architecture-review-surface-light`, wired red fixtures into `verify:architecture-ci-longtail`, and updated `verify:function-map-build-wiring` to fail if either wire is removed.
+- Added `architecture.agent_collab_protocol` function/verification-map owner and governance resource `architecture.agent_collab_protocol_contract`; this resource is explicitly non-runtime and forbidden from provider/client payload and metadata runtime control.
+- Updated project AGENTS with a short pointer to `.agent-collab/PROTOCOL.md` and updated local rcc-dev skill with RouteCodex-specific multi-worker claim/evidence/handoff rules.
+- Verification PASS: `verify:agent-collab-protocol`, `test:agent-collab-protocol-red-fixtures`, `verify:function-map-build-wiring`, `verify:resource-operation-map`, `verify:resource-source-bindings`, `verify:function-map-compile-gate`, `verify:architecture-review-surface-light`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-wiki-sync`, and `audit:resource-global-coverage`.
+- Current coverage after this doc/gate slice: resources `107`, owner source anchors `86`, active feature `resource_bindings` `120/120`, mainline `resource_flow` `108/108`.
+
+# 2026-07-12: First runtime slice pre-refactor closure for dry-run loop
+
+- Scope: pre-refactor closure only for `debug.pipeline_dry_run_loop.mainline`; no runtime behavior code changed, no restart/install/release mutation.
+- `.agent-collab` workflow exercised with run `20260712T065350Z-Macstudio-61037-599a` and semantic claim `mainline_node_id:debug.pipeline_dry_run_loop.mainline`; existing unrelated `feature_id:runtime.lifecycle.mainline` claim was avoided.
+- Owner/source/map audit: owner feature `debug.pipeline_dry_run_loop`, owner module `src/debug/pipeline-dry-run.ts`, chain `debug.pipeline_dry_run_loop.mainline`, edges `ddr-01..ddr-04`, resources `dryrun.provider_request_probe` and `snapshot.debug_sample`, required gates and wiki are queryable.
+- Test design and runtime admission rule appended to `docs/goals/resource-ownership-refactor-plan.md`: future runtime work must first add a failing request dry-run or provider-response dry-run sample, then fix the unique owner and rerun dry-run black-box checks.
+- Existing black-box request dry-run evidence: `node scripts/replay-codex-sample.mjs --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json --dry-run provider-request --base http://127.0.0.1:5520 --label agent-collab-dryrun-slice` wrote `dry-run.provider-request.json` with `object=routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`, `providerRequestSnapshotWritten=true`, and final `providerRequest.body`.
+- Existing black-box response dry-run evidence: `npm run dry-run:codex-response -- --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json --out-dir .agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/response-dry-run-openai-chat` wrote `response-dry-run.json` with `ok=true`, `converted.status=200`, and `converted.body.object=chat.completion`.
+- Verification PASS: `test:pipeline-dry-run`, `verify:agent-collab-protocol`, `test:agent-collab-protocol-red-fixtures`, `verify:resource-source-bindings`, `audit:resource-global-coverage`, `verify:function-map-compile-gate`, `verify:architecture-review-surface-light`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-wiki-sync`, and `git diff --check`.
+- `.agent-collab` evidence and merge template written under `.agent-collab/runs/20260712T065350Z-Macstudio-61037-599a/` and `.agent-collab/merge-queue/20260712T065350Z-Macstudio-61037-599a-debug-pipeline-dry-run-loop.json`.
+
+# 2026-07-12 14:40 CST: Runtime lifecycle Rust closeout live verified
+
+- Scope: `runtime.lifecycle.mainline` runtime refactor and release/live validation.
+- Rust owner: added `router-hotpath-napi/src/runtime_lifecycle.rs` for pid cache, stop-intent, instance registry, restart transport, and `start --restart` takeover guard plans. Instance status names and backward transition rejection are now validated in Rust, not TS.
+- TS collapse: lifecycle callers now go through `src/modules/llmswitch/bridge/runtime-lifecycle-host.ts`; `server-runtime-pid.ts`, `server-runtime-stop-intent.ts`, `runtime-instance-registry.ts`, `restart.ts`, `start.ts`, and `install-release.sh` execute file/HTTP/signal/spawn/install IO only.
+- Restart behavior: `restart.ts` no longer spawns `start --restart`; `start --restart` refuses existing live/listening runtimes before stop-intent or shutdown; `install-release.sh` uses global installed `rcc restart` for live runtime and `rcc start --no-restart` only when stopped.
+- Verification PASS: cargo `runtime_lifecycle` tests 3/3; focused Jest 51/51; `verify:runtime-lifecycle-pid-rebase`; resource operation/source/red-fixture gates; function-map compile; mainline call map; manifest/wiki/html sync; runtime lifecycle loop gate; llmswitch rustification and strict TS shell audits; `build:native-hotpath`; `build:base`; `install:release`.
+- Release/live PASS: installed `routecodex/rcc/current` version `0.90.3927`, current symlink `releases/routecodex-0.90.3927-2026-07-12T063551Z`; `/health` on 5555/5520/10000/4444 all `ok ready=true pipelineReady=true version=0.90.3927`.
+- In-session restart proof: before explicit global `routecodex restart --port 5555 --host 127.0.0.1`, netstat showed listener `node:63616` with parent `41955`; after restart, listener became `node:79326` with the same parent `41955` (`node ~/.rcc/install/current/dist/cli.js start --snap`). `process-lifecycle.jsonl` records pid `63616` receiving `SIGUSR2`, `restart_delegate_parent_supervisor`, and exit code `75`.
+
+# 2026-07-12 15:10 CST: Runtime lifecycle start takeover fully closed
+
+- Scope: continued `runtime.lifecycle.mainline` closeout after auditing the generated goal against current worktree.
+- Correction: default `rcc start` was still a TS-owned restart/takeover path (`options.restart !== false`) and wrote stop-intent before port takeover. This violated the Rust-owned start semantics goal even though explicit `start --restart` was already guarded.
+- Change: `runtime_lifecycle.rs` now refuses any occupied non-exclusive start plan, with separate reasons for explicit `start --restart` and default start; `start.ts` default flow is launch-only (`restart:false`) and only explicit `--exclusive` writes stop-intent / takeover lock. `server-runtime-stop-intent.ts` no longer owns the default TTL; it lets Rust apply the default unless a caller explicitly passes `maxAgeMs`.
+- Tests updated: direct-native lifecycle Jest now covers default start refusal; `start-command.spec.ts` now proves default start is launch-only, default occupied start fails before `ensurePortAvailable`, and explicit `--exclusive` is the only takeover path.
+- Verification PASS after changes: cargo `runtime_lifecycle` tests 3/3; focused lifecycle Jest 52/52; `git diff --check`; `verify:runtime-lifecycle-pid-rebase`; `verify:resource-operation-map`; function-map compile; mainline call map; runtime lifecycle loop gate; manifest/wiki/html sync; resource source-binding green/red gates; llmswitch rustification audit; strict TS shell audit; `build:native-hotpath`; `build:base`; `install:release`.
+- Release/live PASS: installed global `routecodex`, `rcc`, and `~/.rcc/install/current/package.json` all report `0.90.3930`; `/health` on 5520 reports `ok ready=true pipelineReady=true version=0.90.3930`.
+- In-session restart proof: before explicit global `routecodex restart --port 5520 --host 127.0.0.1`, listener was `node:46976` with parent supervisor `41955` (`node ~/.rcc/install/current/dist/cli.js start --snap`); after restart listener is `node:48692` with the same parent `41955`. `process-lifecycle.jsonl` records pid `46976` receiving `SIGUSR2`, `restart_delegate_parent_supervisor`, and exit code `75`.
+- Live negative proof: global `rcc start --restart --port 5520` exits nonzero with `start_takeover_refused` and points to `rcc restart`; listener remains `node:48692`, `/health` remains `0.90.3930`, and the old `stop-intent.json` mtime stays unchanged. That old file predates this install and has retired source `cli.start.restart_takeover`, while current installed dist only writes `cli.start.exclusive_takeover`.
+
+# 2026-07-12 15:31 CST: Runtime lifecycle closeout final 0.90.3931 evidence
+
+- Final release/live truth: repo `package.json`, global `routecodex`, global `rcc`, and `~/.rcc/install/current/package.json` all report `0.90.3931`; live `http://127.0.0.1:5520/health` reports `ready=true`, `pipelineReady=true`, `version=0.90.3931`.
+- In-session restart proof for `0.90.3931`: `process-lifecycle.jsonl` records pid `3967` under parent supervisor `41955` receiving `SIGUSR2`, emitting `restart_delegate_parent_supervisor`, and exiting with code `75`; current listener is `node:11617` and `ps` shows parent `41955` still running `node ~/.rcc/install/current/dist/cli.js start --snap`.
+- Live negative proof rerun: `ROUTECODEX_START_DAEMON=0 RCC_START_DAEMON=0 rcc start --restart --port 5520` exits `1` with `start_takeover_refused`; stop-intent mtime remains `1783818045 -> 1783818045`; listener remains `node:11617`.
+- Installed dist residue scan has zero matches for `adoptCurrentRuntimeViaStart`, `targetsNeedRuntimeAdoption`, `getExpectedVersion`, `start --restart`, `adopt_release_runtime_for_port`, `install-release.runtime-version-adoption`, and `cli.start.restart_takeover`.
+
+# 2026-07-12 15:40 CST: Runtime lifecycle final install advanced to 0.90.3932
+
+- Correction: after the final `build:base`, `gen-build-info` advanced the package/build truth to `0.90.3932`, so `npm run install:release` was rerun and supersedes the earlier `0.90.3931` install evidence.
+- Final release/live truth: repo `package.json`, global `routecodex`, global `rcc`, and `~/.rcc/install/current/package.json` all report `0.90.3932`; live `http://127.0.0.1:5520/health` reports `ready=true`, `pipelineReady=true`, `version=0.90.3932`.
+- In-session restart proof for `0.90.3932`: install/restart signaled old child `node:11617` under supervisor `41955`; `process-lifecycle.jsonl` records `SIGUSR2 -> restart_delegate_parent_supervisor -> exitCode 75`; current listener is `node:49119` with the same parent `41955` running `node ~/.rcc/install/current/dist/cli.js start --snap`.
+- Live negative proof rerun: `ROUTECODEX_START_DAEMON=0 RCC_START_DAEMON=0 rcc start --restart --port 5520` exits `1` with `start_takeover_refused`; stop-intent mtime remains `1783818045 -> 1783818045`; listener remains `node:49119`.
+- Installed dist residue scan still has zero matches for `adoptCurrentRuntimeViaStart`, `targetsNeedRuntimeAdoption`, `getExpectedVersion`, `start --restart`, `adopt_release_runtime_for_port`, `install-release.runtime-version-adoption`, and `cli.start.restart_takeover`.

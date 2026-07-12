@@ -401,6 +401,14 @@ type NativeRouterHotpathJsonBinding = {
   planPrimaryExhaustedToDefaultPoolJson?: (
     inputJson: string
   ) => string;
+  planRuntimePidCacheWriteJson?: (inputJson: string) => string;
+  planRuntimePidCacheReadResultJson?: (inputJson: string) => string;
+  planRuntimeStopIntentWriteJson?: (inputJson: string) => string;
+  planRuntimeStopIntentConsumeJson?: (inputJson: string) => string;
+  planRuntimeInstanceWriteJson?: (inputJson: string) => string;
+  planRuntimeInstanceStatusUpdateJson?: (inputJson: string) => string;
+  planRuntimeRestartRequestJson?: (inputJson: string) => string;
+  planRuntimeStartRestartTakeoverGuardJson?: (inputJson: string) => string;
   resolveSessionColorStr?: (sessionId?: string | null) => string;
   resolveSessionLogColorKeyJson?: (inputJson: string) => string;
   evaluateResponsesDirectRouteDecisionJson?: (

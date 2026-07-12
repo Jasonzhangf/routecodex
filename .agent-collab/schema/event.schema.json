@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/agent-collab/event.schema.json",
+  "title": "RouteCodex Agent Collab Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "event_type", "timestamp"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "claim": { "type": ["string", "null"] },
+    "event_type": { "type": "string", "minLength": 1 },
+    "message": { "type": ["string", "null"] },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

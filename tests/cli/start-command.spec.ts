@@ -868,7 +868,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
-  it('release foreground start restarts by default and preserves explicit --no-restart', async () => {
+  it('release foreground start is launch-only by default and preserves explicit --exclusive', async () => {
     const restartFlags: Array<boolean | undefined> = [];
     const createContext = () => ({
       isDevPackage: false,
@@ -926,10 +926,14 @@ routingPolicyGroup = "gateway_coding_10000"
     createStartCommand(noRestartProgram, createContext());
     await noRestartProgram.parseAsync(['node', 'rcc', 'start', '--no-restart'], { from: 'node' });
 
-    expect(restartFlags).toEqual([true, false]);
+    const exclusiveProgram = new Command();
+    createStartCommand(exclusiveProgram, createContext());
+    await exclusiveProgram.parseAsync(['node', 'rcc', 'start', '--exclusive'], { from: 'node' });
+
+    expect(restartFlags).toEqual([false, false, true]);
   });
 
-  it('writes daemon stop intent before explicit foreground restart takeover', async () => {
+  it('writes daemon stop intent before explicit foreground exclusive takeover', async () => {
     const previousRccHome = process.env.RCC_HOME;
     const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
     const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
@@ -1002,7 +1006,7 @@ port = 5520
         }
       });
 
-      await program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' });
+      await program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--exclusive'], { from: 'node' });
       expect(checkedPorts).toEqual([4444, 5520]);
     } finally {
       if (previousRccHome === undefined) {
@@ -1024,7 +1028,7 @@ port = 5520
     }
   });
 
-  it('release daemon takeover preserves stop intent for old supervisors and marks the new supervisor to ignore it', async () => {
+  it('release daemon exclusive takeover preserves stop intent for old supervisors and marks the new supervisor to ignore it', async () => {
     const previousRccHome = process.env.RCC_HOME;
     const previousRouteCodexUserDir = process.env.ROUTECODEX_USER_DIR;
     const previousRouteCodexHome = process.env.ROUTECODEX_HOME;
@@ -1099,7 +1103,7 @@ port = 5520
         }
       });
 
-      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--snap'], { from: 'node' })).rejects.toThrow('exit:0');
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--snap', '--exclusive'], { from: 'node' })).rejects.toThrow('exit:0');
       expect(checkedPorts).toEqual([4444, 5520]);
       expect(spawnedEnv?.ROUTECODEX_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID).toBe(String(process.pid));
       expect(spawnedEnv?.RCC_DAEMON_SUPERVISOR_IGNORE_STOP_INTENT_PID).toBe(String(process.pid));
@@ -1108,7 +1112,7 @@ port = 5520
         expect(fs.existsSync(intentPath)).toBe(true);
         const parsed = JSON.parse(fs.readFileSync(intentPath, 'utf8')) as { pid?: number; source?: string };
         expect(parsed.pid).toBe(process.pid);
-        expect(parsed.source).toBe('cli.start.restart_takeover');
+        expect(parsed.source).toBe('cli.start.exclusive_takeover');
       }
     } finally {
       if (previousRccHome === undefined) {
@@ -1196,7 +1200,7 @@ port = 5520
         }
       });
 
-      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' })).rejects.toThrow('exit:0');
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--exclusive'], { from: 'node' })).rejects.toThrow('exit:0');
       expect(checkedPorts).toEqual([]);
     } finally {
       if (previousRccHome === undefined) {
@@ -1292,7 +1296,7 @@ port = 5520
         }
       });
 
-      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath], { from: 'node' })).rejects.toThrow('exit:1');
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--exclusive'], { from: 'node' })).rejects.toThrow('exit:1');
       expect(spinnerInfo.some((line) => line.includes('another start is already taking over'))).toBe(true);
       expect(spinnerInfo.some((line) => line.includes('waiting for existing start takeover to finish'))).toBe(true);
     } finally {
@@ -1573,7 +1577,7 @@ port = 5520
     ]);
   });
 
-  it('restarts by default', async () => {
+  it('uses launch-only flow by default', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
 
@@ -1625,7 +1629,7 @@ port = 5520
 
     await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(true);
+    expect(portChecks[0]?.restart).toBe(false);
   });
 
   it('refuses explicit --restart takeover when a runtime already listens', async () => {
@@ -1683,6 +1687,65 @@ port = 5520
 
     await expect(
       program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--restart'], { from: 'node' })
+    ).rejects.toThrow('exit:1');
+    expect(portChecks).toHaveLength(0);
+    expect(errors.join('\n')).toContain('rcc restart --port 5520');
+  });
+
+  it('refuses default start takeover when a runtime already listens', async () => {
+    const program = new Command();
+    const portChecks: Array<{ restart?: boolean }> = [];
+    const errors: string[] = [];
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: (message: string) => errors.push(message) },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async (_port, _spinner, opts) => {
+        portChecks.push(opts ?? {});
+        throw new Error('ensurePortAvailable should not run for default start takeover');
+      },
+      findListeningPids: () => [1234],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => createFakeChild(1),
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' })
     ).rejects.toThrow('exit:1');
     expect(portChecks).toHaveLength(0);
     expect(errors.join('\n')).toContain('rcc restart --port 5520');

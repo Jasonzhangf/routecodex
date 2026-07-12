@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveRccRuntimeLifecycleDir } from '../config/user-data-paths.js';
+import {
+  planRuntimeInstanceStatusUpdate,
+  planRuntimeInstanceWrite
+} from '../modules/llmswitch/bridge/runtime-lifecycle-host.js';
 
 // feature_id: runtime.lifecycle.instance_registry
 // 2026-06-16 runtime lifecycle rebase: each managed server instance is
@@ -64,17 +68,21 @@ export function writeRuntimeInstance(args: {
     throw new Error(`writeRuntimeInstance: invalid port ${args.port}`);
   }
   const now = Date.now();
-  const record: RuntimeInstance = {
+  const plan = planRuntimeInstanceWrite({
     port,
-    host: String(args.host || '').trim() || '127.0.0.1',
-    command: String(args.command || '').trim(),
-    configPath: String(args.configPath || '').trim(),
-    ownerScope: String(args.ownerScope || '').trim() || 'unknown',
-    startedAtMs: Number.isFinite(args.startedAtMs as number) ? Math.floor(args.startedAtMs as number) : now,
+    host: args.host,
+    command: args.command,
+    configPath: args.configPath,
+    ownerScope: args.ownerScope,
+    startedAtMs: args.startedAtMs,
     status: args.status ?? 'declared',
-    statusUpdatedAtMs: now,
+    nowMs: now,
     notes: args.notes
-  };
+  });
+  if (plan.action !== 'write' || plan.resourceId !== 'runtime.instance_record') {
+    throw new Error(`writeRuntimeInstance: invalid native plan action=${plan.action}`);
+  }
+  const record = plan.record as RuntimeInstance;
   const filePath = resolveInstancePath(port, args.routeCodexHomeDir);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   // write to a sibling temp file then rename, so observers never see a half-written instance.json
@@ -116,12 +124,17 @@ export function updateRuntimeInstanceStatus(args: {
     return null;
   }
   const now = Date.now();
-  const next: RuntimeInstance = {
-    ...existing,
+  const plan = planRuntimeInstanceStatusUpdate({
+    port: args.port,
+    existing,
     status: args.status,
-    statusUpdatedAtMs: now,
-    notes: args.notes ?? existing.notes
-  };
+    nowMs: now,
+    notes: args.notes
+  });
+  if (plan.action !== 'write' || !plan.record) {
+    return null;
+  }
+  const next = plan.record as RuntimeInstance;
   const filePath = resolveInstancePath(args.port, args.routeCodexHomeDir);
   const tmpPath = `${filePath}.tmp-${process.pid}-${now}`;
   fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf8');

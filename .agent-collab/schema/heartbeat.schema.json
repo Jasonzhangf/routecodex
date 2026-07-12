@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routecodex.local/agent-collab/heartbeat.schema.json",
+  "title": "RouteCodex Agent Collab Heartbeat",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "status", "updated_at"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["active", "idle", "blocked", "handoff", "complete", "failed"] },
+    "claim": { "type": ["string", "null"] },
+    "message": { "type": ["string", "null"] },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}
