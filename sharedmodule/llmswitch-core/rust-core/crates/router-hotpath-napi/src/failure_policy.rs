@@ -291,7 +291,57 @@ pub fn classify_error_err02_host_captured(
     }
     let client_disconnect = is_error_err02_client_disconnect(&input);
     let network_transport_like = is_error_err02_network_transport_like(&input);
+    let reason = input
+        .reason
+        .as_deref()
+        .or(input.error_message.as_deref())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let code_matches = |expected: &str| {
+        error_code.as_deref() == Some(expected) || upstream_code.as_deref() == Some(expected)
+    };
+    let prompt_too_long = code_matches("CONTEXT_LENGTH_EXCEEDED")
+        || [
+            "prompt is too long",
+            "maximum context",
+            "max context",
+            "context_length",
+            "context length",
+            "context window",
+            "input tokens exceeds",
+            "request entity too large",
+            "payload too large",
+            "body too large",
+        ]
+        .iter()
+        .any(|hint| reason.contains(hint));
+    let local_response_contract = [
+        "[mimoweb] upstream assistant response was empty",
+        "[mimoweb] upstream emitted tool markers but no tool calls could be harvested",
+        "[mimoweb] upstream repeated prior tool call after tool_result",
+        "[mimoweb] serialized query exceeds empty-safe limit",
+    ]
+    .iter()
+    .any(|hint| reason.contains(hint));
     let classification = if client_disconnect {
+        Some(FailureClassification::Unrecoverable)
+    } else if prompt_too_long
+        || code_matches("ERR_HTTP2_STREAM_CANCEL")
+        || code_matches("514")
+        || (input.status_code == Some(520)
+            && (code_matches("PROVIDER_STATUS_1000") || reason.contains("unknown error, 520")))
+    {
+        Some(FailureClassification::Recoverable)
+    } else if code_matches("MALFORMED_REQUEST")
+        || code_matches("CLIENT_TOOL_ARGS_INVALID")
+        || local_response_contract
+        || matches!(input.status_code, Some(401 | 402 | 403 | 404))
+        || (code_matches("MALFORMED_RESPONSE")
+            && !reason.contains("context_length_exceeded")
+            && !reason.contains("instead of sse")
+            && !reason.contains("usage limit exceeded"))
+    {
         Some(FailureClassification::Unrecoverable)
     } else {
         Some(classify_failure(

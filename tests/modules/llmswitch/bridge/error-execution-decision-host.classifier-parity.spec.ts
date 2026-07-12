@@ -34,6 +34,34 @@ const cases = [
     name: 'non-provider followup',
     input: { stage: 'provider.followup', statusCode: 502, errorCode: 'HTTP_502' },
   },
+  ...[401, 402, 403, 404].map((statusCode) => ({
+    name: `terminal HTTP ${statusCode}`,
+    input: { stage: 'provider.send', statusCode, errorCode: `HTTP_${statusCode}`, reason: 'provider rejected request' },
+  })),
+  {
+    name: 'plain malformed response',
+    input: { stage: 'provider.send', statusCode: 502, errorCode: 'MALFORMED_RESPONSE', reason: 'invalid provider response' },
+  },
+  {
+    name: 'malformed request',
+    input: { stage: 'provider.send', statusCode: 400, errorCode: 'MALFORMED_REQUEST', reason: 'invalid request payload' },
+  },
+  {
+    name: 'client tool args invalid',
+    input: { stage: 'provider.send', statusCode: 502, errorCode: 'CLIENT_TOOL_ARGS_INVALID', reason: 'tool arguments invalid' },
+  },
+  {
+    name: 'context length exceeded',
+    input: { stage: 'provider.send', statusCode: 400, errorCode: 'CONTEXT_LENGTH_EXCEEDED', reason: 'maximum context length exceeded' },
+  },
+  {
+    name: 'HTTP2 stream cancel',
+    input: { stage: 'provider.send', statusCode: 502, errorCode: 'ERR_HTTP2_STREAM_CANCEL', reason: 'stream cancelled' },
+  },
+  {
+    name: 'GLM 514 business error',
+    input: { stage: 'provider.send', statusCode: 200, errorCode: '514', reason: 'glm business error (514)' },
+  },
 ] as const;
 
 describe('ErrorErr02 Rust classifier parity', () => {
