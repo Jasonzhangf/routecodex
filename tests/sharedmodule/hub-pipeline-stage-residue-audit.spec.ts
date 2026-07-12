@@ -591,45 +591,59 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('provider response mainline must invoke Rust HubPipeline total entry before TS residue stages', () => {
-    const filePath = path.join(
+    const hostPath = path.join(
       process.cwd(),
       'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
     );
-    const source = fs.readFileSync(filePath, 'utf8');
+    const effectsPath = path.join(
+      process.cwd(),
+      'src/modules/llmswitch/bridge/provider-response-effects.ts',
+    );
+    const hostSource = fs.readFileSync(hostPath, 'utf8');
+    const effectsSource = fs.readFileSync(effectsPath, 'utf8');
 
-    expect(source).toContain('executeHubPipelineWithNative');
-    expect(source).toContain('runProviderResponseRustHubPipeline');
-    expect(source).toContain('nativeResponsePlan.effectPlan.effects');
-    expect(source).toContain('__nativeResponsePlan');
-    expect(source).toContain('executeProviderResponseNativeOutboundEffects');
-    expect(source).toContain('runtimeStateWrite');
-    expect(source).toContain('servertoolRuntimeActions');
-    expect(source).toContain('executeProviderResponseNativeServertoolEffects');
-    expect(source).toContain('executeProviderResponseNativeRuntimeStateEffect');
-    expect(source).toContain('server-side tool execution has been removed');
-    expect(source).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);');
-    expect(source).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
-    expect(source).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
-    expect(source).not.toContain('runServertoolResponseStageOrchestrationShell');
-    expect(source).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
-    expect(source).not.toContain('shouldRunProviderResponseRustHubPipeline');
-    expect(source).not.toContain('if (nativeResponsePlan)');
-    expect(source).not.toContain('return false;');
-    expect(source).not.toContain('runRespInboundStage2FormatParse');
-    expect(source).not.toContain('runRespInboundStage3SemanticMap');
-    expect(source).not.toContain('runRespProcessStage1ToolGovernance');
-    expect(source).not.toContain('runRespProcessStage2Finalize');
-    expect(source).not.toContain('runRespProcessStage3ServerToolOrchestration');
-    expect(source).not.toContain('runRespOutboundStage1ClientRemap');
-    expect(source).not.toContain('OpenAIChatResponseMapper');
-    expect(source).not.toContain('PROVIDER_RESPONSE_REGISTRY');
-    expect(source).not.toContain('hasNewGovernedServerToolCalls(');
-    expect(source).not.toContain('if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {\n    return false;');
-    expect(source).not.toContain('runtime.clock');
-    expect(source).not.toContain('runtime.webSearch');
-    expect(source).not.toContain('runtime.servertool');
-    expect(source).not.toContain('effectPlan.effects.length !== 1');
-    const servertoolRuntimeActionFindings = collectMatches(source, [
+    expect(hostSource).toContain('executeHubPipelineWithNative');
+    expect(hostSource).toContain('runProviderResponseRustHubPipeline');
+    expect(hostSource).toContain('executeProviderResponseNativeOutboundEffects');
+    expect(hostSource).toContain('executeProviderResponseNativeServertoolEffects');
+    expect(hostSource).toContain('executeProviderResponseNativeRuntimeStateEffect');
+    expect(hostSource).toContain('Server-side tool execution has been removed');
+    expect(hostSource).toContain('const nativeResponsePlan = runProviderResponseRustHubPipeline(nativeOptions);');
+    expect(hostSource).not.toContain('nativeResponsePlan.effectPlan.effects');
+    expect(hostSource).not.toContain('__nativeResponsePlan');
+    expect(hostSource).not.toContain('runtimeStateWrite');
+    expect(hostSource).not.toContain('servertoolRuntimeActions');
+    expect(effectsSource).toContain('nativeResponsePlan.effectPlan.effects');
+    expect(effectsSource).toContain('__nativeResponsePlan');
+    expect(effectsSource).toContain('runtimeStateWrite');
+    expect(effectsSource).toContain('servertoolRuntimeActions');
+    expect(effectsSource).toContain('executeProviderResponseNativeOutboundEffects');
+    expect(effectsSource).toContain('executeProviderResponseNativeServertoolEffects');
+    expect(effectsSource).toContain('executeProviderResponseNativeRuntimeStateEffect');
+    expect(effectsSource).toContain('server-side tool execution has been removed');
+    expect(hostSource).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(hostSource).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
+    expect(hostSource).not.toContain('runServertoolResponseStageOrchestrationShell');
+    expect(hostSource).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
+    expect(hostSource).not.toContain('shouldRunProviderResponseRustHubPipeline');
+    expect(hostSource).not.toContain('if (nativeResponsePlan)');
+    expect(hostSource).not.toContain('return false;');
+    expect(hostSource).not.toContain('runRespInboundStage2FormatParse');
+    expect(hostSource).not.toContain('runRespInboundStage3SemanticMap');
+    expect(hostSource).not.toContain('runRespProcessStage1ToolGovernance');
+    expect(hostSource).not.toContain('runRespProcessStage2Finalize');
+    expect(hostSource).not.toContain('runRespProcessStage3ServerToolOrchestration');
+    expect(hostSource).not.toContain('runRespOutboundStage1ClientRemap');
+    expect(hostSource).not.toContain('OpenAIChatResponseMapper');
+    expect(hostSource).not.toContain('PROVIDER_RESPONSE_REGISTRY');
+    expect(hostSource).not.toContain('hasNewGovernedServerToolCalls(');
+    expect(hostSource).not.toContain('if (options.providerInvoker || options.reenterPipeline || options.clientInjectDispatch) {\n    return false;');
+    expect(hostSource).not.toContain('runtime.clock');
+    expect(hostSource).not.toContain('runtime.webSearch');
+    expect(hostSource).not.toContain('runtime.servertool');
+    const providerResponseSplitSource = `${hostSource}\n${effectsSource}`;
+    expect(providerResponseSplitSource).not.toContain('effectPlan.effects.length !== 1');
+    const servertoolRuntimeActionFindings = collectMatches(providerResponseSplitSource, [
       { label: 'ts-servertool-action-reenter-branch', pattern: /effect\.action\s*===\s*['"]requireReenterPipeline['"]/ },
       { label: 'ts-servertool-action-runtime-branch', pattern: /effect\.action\s*===\s*['"]requireRuntimeExecutor['"]/ },
       { label: 'ts-servertool-missing-reenter-error-owner', pattern: /SERVERTOOL_FOLLOWUP_FAILED/ },
@@ -645,8 +659,19 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
     );
+    const nativeCallsPath = path.join(
+      process.cwd(),
+      'src/modules/llmswitch/bridge/provider-response-native-calls.ts',
+    );
+    const effectsPath = path.join(
+      process.cwd(),
+      'src/modules/llmswitch/bridge/provider-response-effects.ts',
+    );
     const manifestPath = path.join(process.cwd(), 'docs/loops/rustification/minimal-ts-surface.json');
     const source = fs.readFileSync(filePath, 'utf8');
+    const nativeCallsSource = fs.readFileSync(nativeCallsPath, 'utf8');
+    const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const splitSources = `${source}\n${nativeCallsSource}\n${effectsSource}`;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
       entries?: Array<{
         path?: string;
@@ -670,12 +695,14 @@ describe('hub pipeline stage residue audit', () => {
     expect(manifest.entries ?? []).toEqual([]);
     expect(manifestEntry).toBeUndefined();
     expect(source).toContain('executeHubPipelineWithNative');
-    expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(source).not.toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(nativeCallsSource).toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
-    expect(source).toContain('publishResponsesRecordPlanWithNative');
+    expect(source).not.toContain('publishResponsesRecordPlanWithNative');
+    expect(nativeCallsSource).toContain('publishResponsesRecordPlanWithNative');
     expect(source).toContain('buildSseFramesFromJsonWithNative');
-    expect(source).toContain('server-side tool execution has been removed');
-    expect(source).not.toContain('runServertoolResponseStageOrchestrationShell');
+    expect(splitSources).toContain('server-side tool execution has been removed');
+    expect(splitSources).not.toContain('runServertoolResponseStageOrchestrationShell');
     expect(findings).toEqual([]);
   });
 
@@ -729,6 +756,10 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
       'utf8',
     );
+    const nativeCallsSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-native-calls.ts'),
+      'utf8',
+    );
     const nativeHostSource = fs.readFileSync(
       path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-native-host.ts'),
       'utf8',
@@ -748,8 +779,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(nativeHostSource).toContain('getProviderResponseNativeBindingSync');
     expect(metadataProtocolTestSource).toContain('src/modules/llmswitch/bridge/provider-response-native-host.js');
     expect(metadataProtocolTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
-    expect(hostSource).toContain('asFlatRecordJson');
-    expect(hostSource).toContain('validateCanonicalClientToolCallJson');
+    expect(hostSource).toContain("from './provider-response-native-calls.js'");
+    expect(hostSource).not.toContain('asFlatRecordJson');
+    expect(hostSource).not.toContain('validateCanonicalClientToolCallJson');
+    expect(nativeCallsSource).toContain('asFlatRecordJson');
+    expect(nativeCallsSource).toContain('validateCanonicalClientToolCallJson');
   });
 
   it('provider response helper shell must stay deleted after host bridge direct native wiring', () => {
@@ -761,6 +795,10 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(
       path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
       'utf8'
+    );
+    const nativeCallsSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-native-calls.ts'),
+      'utf8',
     );
     const findings = collectMatches(source, [
       { label: 'ts-client-facing-request-id-fallback', pattern: /:\s*context\.requestId\b/ },
@@ -774,7 +812,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(fs.existsSync(retiredHelperPath)).toBe(false);
     expect(source).toContain('resolveProviderResponseContextSignals');
     expect(source).toContain('resolveProviderResponseContextHelpersWithNative');
-    expect(source).toContain('resolveProviderResponseContextHelpersJson');
+    expect(source).not.toContain('resolveProviderResponseContextHelpersJson');
+    expect(nativeCallsSource).toContain('resolveProviderResponseContextHelpersJson');
     expect(source).not.toContain("'native/router-hotpath/native-hub-pipeline-resp-semantics'");
     expect(source).not.toContain('conversion/hub/response/provider-response-helpers');
     expect(findings).toEqual([]);
@@ -4858,9 +4897,11 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('provider response may only invoke native session usage plan without restoring TS usage semantics', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
+    const hostPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
+    const effectsPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-effects.ts');
+    const hostSource = fs.readFileSync(hostPath, 'utf8');
+    const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const findings = collectMatches(`${hostSource}\n${effectsSource}`, [
       { label: 'restores retired session token estimator export', pattern: /estimateSessionBoundTokens/ },
       { label: 'restores retired session delta token estimator', pattern: /estimateDeltaTokens|countRequestTokens/ },
       { label: 'restores retired session usage snapshot reader', pattern: /SessionUsageSnapshot|buildSnapshot/ },
@@ -4872,9 +4913,10 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(findings).toEqual([]);
-    expect(source).toContain('planChatProcessSessionUsage');
-    expect(source).not.toContain('saveChatProcessSessionActualUsage');
-    expect(source).not.toContain('../process/chat-process-session-usage.js');
+    expect(hostSource).not.toContain('planChatProcessSessionUsage');
+    expect(effectsSource).toContain('planChatProcessSessionUsageWithNative');
+    expect(`${hostSource}\n${effectsSource}`).not.toContain('saveChatProcessSessionActualUsage');
+    expect(`${hostSource}\n${effectsSource}`).not.toContain('../process/chat-process-session-usage.js');
   });
 
   it('virtual router routing-state persistence predicates must stay Rust-owned', () => {
@@ -5813,9 +5855,16 @@ describe('hub pipeline stage residue audit', () => {
   });
 
   it('servertool response SSE projection must use post-governance client semantic truth', () => {
-    const filePath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
-    const source = fs.readFileSync(filePath, 'utf8');
-    const findings = collectMatches(source, [
+    const hostPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-converter-host.ts');
+    const nativeCallsPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-native-calls.ts');
+    const metadataEffectsPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-metadata-effects.ts');
+    const effectsPath = path.join(process.cwd(), 'src/modules/llmswitch/bridge/provider-response-effects.ts');
+    const hostSource = fs.readFileSync(hostPath, 'utf8');
+    const nativeCallsSource = fs.readFileSync(nativeCallsPath, 'utf8');
+    const metadataEffectsSource = fs.readFileSync(metadataEffectsPath, 'utf8');
+    const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const splitSources = `${hostSource}\n${nativeCallsSource}\n${metadataEffectsSource}\n${effectsSource}`;
+    const findings = collectMatches(splitSources, [
       { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
       { label: 'keeps streamPipe payload as response truth in TS shell', pattern: /payload:\s*streamPayload|streamPayload\s+as\s+JsonObject/ },
       { label: 'scans raw Rust effectPlan kinds in TS shell', pattern: /effectPlan\.effects\.filter\(\(effect\)\s*=>\s*effect\?\.(?:kind|kind\s*===)/ },
@@ -5823,23 +5872,23 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-post-servertool-responses-projection-owner', pattern: /buildResponsesPayloadFromChatWithNative/ },
     ]);
 
-    expect(source).toContain('normalizeProviderResponseEffectPlanWithNative');
-    expect(source).toContain('buildProviderResponseMetadataSnapshotWithNative');
-    expect(source).toContain('resolveProviderProtocolWithNative');
-    expect(source).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
-    expect(source).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
-    expect(source).toContain('server-side tool execution has been removed');
-    expect(source).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
-    expect(source).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
-    expect(source).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
-    expect(source).not.toContain('if (orchestration.executed)');
-    expect(source).not.toContain('actionPlan.executionPlans.some');
-    expect(source).not.toContain('runtimeControl.providerProtocol');
-    expect(source).not.toContain('Object.keys(runtimeControlProjected)');
-    expect(source).not.toContain('return direct;');
-    expect(source).not.toContain('return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;');
-    expect(source).toContain('buildSseFramesFromJsonWithNative');
-    expect(source).toContain('buildReadableFromSseFrames(frameResult.frames)');
+    expect(nativeCallsSource).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(nativeCallsSource).toContain('buildProviderResponseMetadataSnapshotWithNative');
+    expect(hostSource).toContain('resolveProviderProtocolWithNative');
+    expect(metadataEffectsSource).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
+    expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
+    expect(splitSources).toContain('server-side tool execution has been removed');
+    expect(splitSources).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
+    expect(splitSources).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
+    expect(splitSources).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');
+    expect(splitSources).not.toContain('if (orchestration.executed)');
+    expect(splitSources).not.toContain('actionPlan.executionPlans.some');
+    expect(splitSources).not.toContain('runtimeControl.providerProtocol');
+    expect(splitSources).not.toContain('Object.keys(runtimeControlProjected)');
+    expect(splitSources).not.toContain('return direct;');
+    expect(splitSources).not.toContain('return nestedMetadata ? asRecord(nestedMetadata.metadataCenterSnapshot) ?? null : null;');
+    expect(hostSource).toContain('buildSseFramesFromJsonWithNative');
+    expect(hostSource).toContain('buildReadableFromSseFrames(frameResult.frames)');
     expect(findings).toEqual([]);
   });
 

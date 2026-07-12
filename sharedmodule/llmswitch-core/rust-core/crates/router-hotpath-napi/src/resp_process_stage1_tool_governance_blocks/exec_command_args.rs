@@ -393,18 +393,6 @@ pub(crate) fn normalize_exec_command_text(raw: &str) -> String {
     strip_python_heredoc_pseudo_escapes(repaired.as_str())
 }
 
-pub(crate) fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
-    if args.contains_key(key) {
-        return true;
-    }
-    ["input", "args"].iter().any(|container_key| {
-        args.get(*container_key)
-            .and_then(Value::as_object)
-            .map(|row| row.contains_key(key))
-            .unwrap_or(false)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{normalize_exec_command_args, read_command_from_args};

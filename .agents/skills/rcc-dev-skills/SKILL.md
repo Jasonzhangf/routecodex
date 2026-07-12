@@ -178,6 +178,8 @@ description: RouteCodex 调试与架构路由入口
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 - Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
 - Monitored handler/executor 白盒测试也不能 import `tests/providers/helpers/llmswitch-native-exports-fake.ts`；需要 handler 专属行为时放到 owner-specific fake（如 `responses-handler-host-fakes.ts`）。
+- Responses request-bridge host wiring 测试使用 `tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts` 这类 owner-specific fake；禁止回到 `llmswitch-native-exports-fake` / broad `native-exports.ts` mock。
+- Host split 后 gate/source-map 必须跟随真实 helper owner：例如 provider-response converter 拆出 `provider-response-native-calls.ts` / `provider-response-effects.ts` / `provider-response-metadata-effects.ts` 后，gate 检查这些 helper 的 shared invoker / fail-fast / MetadataCenter 证据，禁止为了旧 gate 把 helper 逻辑搬回主 host。
 - Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
 
 ## 快查命令

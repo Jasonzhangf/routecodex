@@ -109,6 +109,18 @@ pub(crate) fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String
         .or_else(|| input.and_then(|row| read_trimmed_string(row.get("cwd"))))
 }
 
+pub(crate) fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
+    if args.contains_key(key) {
+        return true;
+    }
+    ["input", "args"].iter().any(|container_key| {
+        args.get(*container_key)
+            .and_then(Value::as_object)
+            .map(|row| row.contains_key(key))
+            .unwrap_or(false)
+    })
+}
+
 pub(crate) fn normalize_on_off_auto_mode(value: Option<&Value>) -> Option<String> {
     let normalized = read_trimmed_string(value)?.to_ascii_lowercase();
     match normalized.as_str() {

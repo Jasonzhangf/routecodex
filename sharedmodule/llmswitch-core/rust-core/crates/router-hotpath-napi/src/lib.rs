@@ -65,6 +65,7 @@ mod hub_submit_tool_outputs;
 mod hub_text_markup_normalizer;
 mod hub_tool_session_compat;
 mod metadata_center;
+mod napi_json;
 mod openai_openai_codec;
 mod primary_exhausted_to_default_pool_blocks;
 mod provider_response_shared_pure_blocks;
@@ -128,6 +129,7 @@ use crate::virtual_router_engine::{
     evaluate_singleton_route_pool_exhaustion, SingletonRoutePoolExhaustionDecision,
     SingletonRoutePoolExhaustionInput,
 };
+use napi_json::{parse_napi_json, stringify_napi_json};
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingToolSyncOutput {
@@ -169,34 +171,31 @@ fn parse_routing_instruction_parse_options(
         Some(value) if !value.trim().is_empty() => value,
         _ => return Ok(RoutingInstructionParseOptions::default()),
     };
-    serde_json::from_str(&raw).map_err(|e| napi::Error::from_reason(e.to_string()))
+    parse_napi_json(&raw)
 }
 #[napi]
 pub fn resolve_virtual_router_routing_state_key_json(metadata_json: String) -> NapiResult<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let metadata: Value = parse_napi_json(&metadata_json)?;
     let output =
         resolve_virtual_router_routing_state_key(metadata_center_snapshot_or_self(&metadata));
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
 pub fn evaluate_singleton_route_pool_exhaustion_json(input_json: String) -> NapiResult<String> {
-    let input: SingletonRoutePoolExhaustionInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: SingletonRoutePoolExhaustionInput = parse_napi_json(&input_json)?;
     let output: SingletonRoutePoolExhaustionDecision =
         evaluate_singleton_route_pool_exhaustion(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
 pub fn resolve_error_err05_route_availability_decision_json(
     input_json: String,
 ) -> NapiResult<String> {
-    let input: ErrorErr05RouteAvailabilityDecisionInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: ErrorErr05RouteAvailabilityDecisionInput = parse_napi_json(&input_json)?;
     let output = resolve_error_err05_route_availability_decision(&input);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
@@ -206,16 +205,15 @@ pub fn plan_chat_process_session_usage_json(input_json: String) -> NapiResult<St
             input_json,
         )
         .map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
 pub fn resolve_virtual_router_stop_message_scope_json(metadata_json: String) -> NapiResult<String> {
-    let metadata: Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let metadata: Value = parse_napi_json(&metadata_json)?;
     let output =
         resolve_virtual_router_stop_message_scope(metadata_center_snapshot_or_self(&metadata));
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 fn metadata_center_snapshot_or_self(metadata: &Value) -> &Value {
@@ -433,12 +431,10 @@ pub fn analyze_pending_tool_sync_json(
     messages_json: String,
     after_tool_call_ids_json: String,
 ) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let after_tool_call_ids: Vec<String> = serde_json::from_str(&after_tool_call_ids_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
+    let after_tool_call_ids: Vec<String> = parse_napi_json(&after_tool_call_ids_json)?;
     let output = analyze_pending_tool_sync(messages, after_tool_call_ids);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
@@ -447,18 +443,16 @@ pub fn analyze_continue_execution_injection_json(
     marker: String,
     target_text: String,
 ) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
     let output = analyze_continue_execution_injection(messages, marker, target_text);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
 pub fn analyze_chat_process_media_json(messages_json: String) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
     let output = analyze_chat_process_media(messages);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
@@ -466,10 +460,9 @@ pub fn strip_chat_process_historical_images_json(
     messages_json: String,
     placeholder_text: String,
 ) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
     let output = strip_chat_process_historical_images(messages, placeholder_text);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
@@ -477,18 +470,16 @@ pub fn strip_responses_stored_context_input_media_json(
     input_entries_json: String,
     placeholder_text: String,
 ) -> NapiResult<String> {
-    let input_entries: Vec<Value> = serde_json::from_str(&input_entries_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input_entries: Vec<Value> = parse_napi_json(&input_entries_json)?;
     let output = strip_responses_stored_context_input_media(input_entries, placeholder_text);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
 pub fn analyze_chat_web_search_intent_json(messages_json: String) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
     let output = analyze_chat_web_search_intent(messages);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi]
@@ -1174,8 +1165,7 @@ pub fn parse_routing_instructions_json(
     messages_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    let messages: Vec<Value> = serde_json::from_str(&messages_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = parse_napi_json(&messages_json)?;
     let options = parse_routing_instruction_parse_options(options_json)?;
     let parsed = virtual_router_engine::instructions::with_rcc_user_dir_override(
         options.rcc_user_dir.as_deref(),
@@ -1186,13 +1176,12 @@ pub fn parse_routing_instructions_json(
         .iter()
         .map(serialize_routing_instruction_for_napi)
         .collect();
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&output)
 }
 
 #[napi(js_name = "applyRoutingInstructionsJson")]
 pub fn apply_routing_instructions_json(input_json: String) -> NapiResult<String> {
-    let input: ApplyRoutingInstructionsInput =
-        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let input: ApplyRoutingInstructionsInput = parse_napi_json(&input_json)?;
     let mut state =
         virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
             &input.state,
@@ -1208,20 +1197,19 @@ pub fn apply_routing_instructions_json(input_json: String) -> NapiResult<String>
         .map_err(napi::Error::from_reason)?;
     let out =
         virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&state);
-    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&out)
 }
 
 #[napi]
 pub fn serialize_routing_instruction_state_json(state_json: String) -> NapiResult<String> {
-    let state_value: Value =
-        serde_json::from_str(&state_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let state_value: Value = parse_napi_json(&state_json)?;
     let state = virtual_router_engine::routing_state_store::deserialize_routing_instruction_state(
         &state_value,
     )
     .unwrap_or_default();
     let out =
         virtual_router_engine::routing_state_store::serialize_routing_instruction_state(&state);
-    serde_json::to_string(&out).map_err(|e| napi::Error::from_reason(e.to_string()))
+    stringify_napi_json(&out)
 }
 
 #[napi]

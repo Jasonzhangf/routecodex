@@ -43,11 +43,13 @@ const TS_OWNER_WHITELIST = new Set([
   'daemon_admin.auth_gate_shell', // daemon-admin local/auth gate shell
   'server.http_runtime_lifecycle', // HTTP lifecycle shell around the index owner
   'server.provider_response_conversion_host', // TS host converter shell over Rust/provider response semantics
+  'hub.provider_response_host_split', // TS host split surface; provider response semantics remain Rust-owned
   'server.response_inspection_helpers', // TS pure inspection helpers pending native downshift
   'server.servertool_followup_dispatch_surface', // TS followup execution glue over Rust/servertool truth
   'server.servertool_followup_metadata_surface', // TS nested followup metadata projection shell
   'server.runtime_key_resolution', // TS runtime-handle binding shell; policy/selection remains VR/ErrorErr truth
   'hub.metadata_center_dualwrite_api', // transitional dual-write API shell during Rust migration
+  'hub.bridge_native_json_invoker_singleton', // TS host bridge call-mechanics helper; Rust remains semantic owner
   'debug.unified_surface', // debug authoring/diag surface is TS governance shell pending Rust migration
   'debug.pipeline_dry_run_loop', // local-only dry-run diagnostic loop; runtime semantics are gated by black-box fixtures
   'debug.internal_error_numbering', // debug-only internal error registry surface, not runtime/provider payload truth

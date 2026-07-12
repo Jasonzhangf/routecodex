@@ -10,6 +10,11 @@ import {
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
+  assertNativeObject,
+  callNativePreencodedJsonCapability,
+  stringifyNativeJsonArg,
+} from './native-json-invoker.js';
+import {
   appendSnapshotStageTraceNative,
   classifyRuntimeErrorSignalNative,
   classifyEmptyResponseSignalNative,
@@ -287,52 +292,39 @@ function readMetadataCenterSnapshotFromAnyBoundTarget(target: unknown): Record<s
   return metadata ? readMetadataCenterSnapshotFromAnyBoundTarget(metadata) : null;
 }
 
-function callSnapshotNativeJson(capability: string, args: unknown[]): unknown {
-  const binding = getSnapshotHooksNativeBindingSync() as Record<string, ((...args: unknown[]) => unknown) | undefined>;
-  const fn = binding[capability];
-  if (typeof fn !== 'function') {
-    throw new Error(`[llmswitch-bridge] ${capability} not available`);
-  }
-  const raw = fn(...args);
-  if (typeof raw !== 'string' || !raw) {
-    throw new Error(`[llmswitch-bridge] ${capability} returned empty result`);
-  }
-  return JSON.parse(raw) as unknown;
-}
-
-function stringifySnapshotNativeArg(capability: string, value: unknown): string | null {
-  try {
-    return JSON.stringify(value) ?? null;
-  } catch (error) {
-    if (capability === 'normalizeSnapshotStagePayloadJson') {
-      return null;
-    }
-    const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
-    throw new Error(`[llmswitch-bridge] ${capability} JSON stringify failed: ${detail}`);
-  }
-}
-
 function normalizeSnapshotStagePayloadNative(stage: string, payload: unknown): unknown {
   if (payload === undefined || payload === null) {
     return null;
   }
-  const payloadJson = stringifySnapshotNativeArg('normalizeSnapshotStagePayloadJson', payload);
+  const payloadJson = stringifyNativeJsonArg('normalizeSnapshotStagePayloadJson', payload, {
+    label: 'llmswitch-bridge',
+    nullOnStringifyFailure: true,
+  });
   if (!payloadJson) {
     return payload;
   }
-  return callSnapshotNativeJson('normalizeSnapshotStagePayloadJson', [
-    typeof stage === 'string' ? stage : '',
-    payloadJson
-  ]);
+  return callNativePreencodedJsonCapability(
+    getSnapshotHooksNativeBindingSync,
+    'normalizeSnapshotStagePayloadJson',
+    [typeof stage === 'string' ? stage : '', payloadJson],
+    { label: 'llmswitch-bridge' }
+  );
 }
 
 function buildSnapshotRecorderWriteOptionsNative(input: Record<string, unknown>): Record<string, unknown> {
-  const inputJson = stringifySnapshotNativeArg('buildSnapshotRecorderWriteOptionsJson', input);
-  const parsed = callSnapshotNativeJson('buildSnapshotRecorderWriteOptionsJson', [inputJson]);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('[llmswitch-bridge] buildSnapshotRecorderWriteOptionsJson returned invalid payload');
-  }
-  return parsed as Record<string, unknown>;
+  const inputJson = stringifyNativeJsonArg('buildSnapshotRecorderWriteOptionsJson', input, {
+    label: 'llmswitch-bridge',
+  });
+  return assertNativeObject(
+    'buildSnapshotRecorderWriteOptionsJson',
+    callNativePreencodedJsonCapability(
+      getSnapshotHooksNativeBindingSync,
+      'buildSnapshotRecorderWriteOptionsJson',
+      [inputJson],
+      { label: 'llmswitch-bridge' }
+    ),
+    { label: 'llmswitch-bridge' }
+  );
 }
 
 function createBaseSnapshotRecorder(context: AnyRecord, endpoint: string): SnapshotRecorder {

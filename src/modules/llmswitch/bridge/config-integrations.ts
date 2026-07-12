@@ -5,6 +5,7 @@
  */
 
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
+import { parseNativeJsonResult as parseSharedNativeJsonResult } from './native-json-invoker.js';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -12,12 +13,10 @@ function loadNativeConfigBinding(): AnyRecord {
   return getRouterHotpathJsonBindingSync() as unknown as AnyRecord;
 }
 
-function parseNativeJsonResult(raw: unknown): unknown {
-  const text = String(raw);
-  if (text.startsWith('Error:')) {
-    throw new Error(text.slice('Error:'.length).trimStart());
-  }
-  return JSON.parse(text) as unknown;
+function parseNativeConfigJsonResult(raw: unknown): unknown {
+  return parseSharedNativeJsonResult('config native export', raw, {
+    label: 'llmswitch-config-bridge',
+  });
 }
 
 function safeBridgeCwd(): string | undefined {
@@ -313,7 +312,7 @@ export function decodeRouteCodexUserConfigTextSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] decodeRouteCodexUserConfigTextJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     raw: String(input.raw ?? ''),
     ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
   }))) as unknown;
@@ -332,7 +331,7 @@ export function decodeRouteCodexProviderConfigTextSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] decodeRouteCodexProviderConfigTextJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     raw: String(input.raw ?? ''),
     ...(typeof input.configPath === 'string' ? { configPath: input.configPath } : {})
   }))) as unknown;
@@ -345,7 +344,7 @@ export function detectRouteCodexUserConfigFormatSync(configPath: string): 'toml'
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] detectRouteCodexUserConfigFormatJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
   return parseDetectedConfigFormatOutput(output, 'user');
 }
 
@@ -355,7 +354,7 @@ export function detectRouteCodexProviderConfigFormatSync(configPath: string): 't
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] detectRouteCodexProviderConfigFormatJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({ configPath: String(configPath ?? '') }))) as unknown;
   return parseDetectedConfigFormatOutput(output, 'provider');
 }
 
@@ -374,7 +373,7 @@ export function writeRouteCodexUserConfigFileNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] writeRouteCodexUserConfigFileJson not available');
   }
-  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+  return validatePersistedConfigFileOutput(parseNativeConfigJsonResult(fn(JSON.stringify({
     configPath: input.configPath,
     parsed: input.parsed ?? {},
     format: input.format
@@ -396,7 +395,7 @@ export function writeRouteCodexProviderConfigFileNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] writeRouteCodexProviderConfigFileJson not available');
   }
-  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+  return validatePersistedConfigFileOutput(parseNativeConfigJsonResult(fn(JSON.stringify({
     configPath: input.configPath,
     parsed: input.parsed ?? {},
     format: input.format
@@ -419,7 +418,7 @@ export function updateRouteCodexUserConfigStringScalarNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] updateRouteCodexUserConfigStringScalarJson not available');
   }
-  return validatePersistedConfigFileOutput(parseNativeJsonResult(fn(JSON.stringify({
+  return validatePersistedConfigFileOutput(parseNativeConfigJsonResult(fn(JSON.stringify({
     configPath: input.configPath,
     tablePath: input.tablePath,
     key: input.key,
@@ -441,7 +440,7 @@ export function loadRouteCodexConfigNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] loadRouteCodexConfigJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     explicitPath: input.explicitPath,
     routecodexProviderDir: input.routecodexProviderDir ?? process.env.ROUTECODEX_PROVIDER_DIR,
     rccProviderDir: input.rccProviderDir ?? process.env.RCC_PROVIDER_DIR,
@@ -485,7 +484,7 @@ export function coerceRouteCodexProviderConfigV2Sync(
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] coerceRouteCodexProviderConfigV2Json not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     parsed: parsed ?? {},
     fallbackProviderId: String(fallbackProviderId ?? '')
   }))) as unknown;
@@ -511,7 +510,7 @@ export function planRouteCodexProviderConfigV2FilesSync(fileNames: string[]): Ar
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] planRouteCodexProviderConfigV2FilesJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ fileNames }))) as unknown;
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({ fileNames }))) as unknown;
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     throw new Error('[llmswitch-config-bridge] RouteCodex provider config file planner returned invalid payload');
   }
@@ -570,7 +569,7 @@ export function loadRouteCodexProviderConfigsV2FromRootSync(rootDir: string): Re
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] loadRouteCodexProviderConfigsV2FromRootJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir: String(rootDir ?? '') }))) as unknown;
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({ rootDir: String(rootDir ?? '') }))) as unknown;
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     throw new Error('[llmswitch-config-bridge] RouteCodex provider config root loader returned invalid payload');
   }
@@ -587,7 +586,7 @@ export function resolveRccUserDirNativeSync(homeDir?: string): string {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] resolveRccUserDirJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     rccHome: process.env.RCC_HOME,
     routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
     routecodexHome: process.env.ROUTECODEX_HOME,
@@ -605,7 +604,7 @@ export function resolveRccPathNativeSync(segments: string[], homeDir?: string): 
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] resolveRccPathJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     segments: Array.isArray(segments) ? segments.map(String) : [],
     rccHome: process.env.RCC_HOME,
     routecodexUserDir: process.env.ROUTECODEX_USER_DIR,
@@ -624,7 +623,7 @@ export function resolveRccSnapshotsDirNativeSync(homeDir?: string): string {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] resolveRccSnapshotsDirJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     homeDir,
     rccSnapshotDir: process.env.RCC_SNAPSHOT_DIR,
     routecodexSnapshotDir: process.env.ROUTECODEX_SNAPSHOT_DIR,
@@ -657,7 +656,7 @@ export function planAuthFileResolutionNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] planAuthFileResolutionJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     keyId: String(input.keyId ?? ''),
     authDir: input.authDir,
     homeDir: input.homeDir,
@@ -701,7 +700,7 @@ export function resolveAuthFileKeyNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] resolveAuthFileKeyJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     keyId: String(input.keyId ?? ''),
     authDir: input.authDir,
     homeDir: input.homeDir,
@@ -739,7 +738,7 @@ export function planRouteCodexConfigLoaderPathsNativeSync(input: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] planRouteCodexConfigLoaderPathsJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     explicitPath: input.explicitPath,
     routecodexProviderDir: input.routecodexProviderDir,
     rccProviderDir: input.rccProviderDir
@@ -768,7 +767,7 @@ export function planProviderConfigRootNativeSync(rootDir?: string): {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] planProviderConfigRootJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({ rootDir }))) as unknown;
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({ rootDir }))) as unknown;
   if (!output || typeof output !== 'object' || Array.isArray(output)) {
     throw new Error('[llmswitch-config-bridge] Provider config root planner returned invalid payload');
   }
@@ -790,7 +789,7 @@ export function resolveRouteCodexConfigPathNativeSync(options: {
   if (typeof fn !== 'function') {
     throw new Error('[llmswitch-config-bridge] resolveRouteCodexConfigPathJson not available');
   }
-  const output = parseNativeJsonResult(fn(JSON.stringify({
+  const output = parseNativeConfigJsonResult(fn(JSON.stringify({
     preferredPath: options.preferredPath,
     configName: options.configName,
     allowDirectoryScan: options.allowDirectoryScan ?? true,

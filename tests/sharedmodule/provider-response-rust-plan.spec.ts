@@ -415,7 +415,9 @@ describe('provider response Rust native plan', () => {
     const command = extractExecCommandFromResponsesBody(result.body);
     expect(command).toContain('routecodex hook run reasoningStop');
     expect(command).toContain('"repeatCount":1');
-    expect(command).toContain('"triggerHint":"non_terminal_schema"');
+    expect(command).toContain('"triggerHint":"invalid_schema"');
+    expect(command).toContain('"reasonCode":"stop_schema_current_goal_missing"');
+    expect(command).toContain('"missingFields":["current_goal"]');
     expect(bodyText).not.toContain('stopreason');
     expect(bodyText).not.toContain('第二轮还没做完');
   });

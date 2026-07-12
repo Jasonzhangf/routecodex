@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
-} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
+} from './responses-request-handler-host-fake.js';
 
 const mockWriteErrorsampleJson = jest.fn(async () => '/tmp/errorsample.json');
 

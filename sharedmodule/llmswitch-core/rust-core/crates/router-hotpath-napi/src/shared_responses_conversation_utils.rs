@@ -3,7 +3,8 @@
 use crate::chat_process_media_semantics::strip_responses_stored_context_input_media;
 use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use crate::shared_json_utils::{
-    read_optional_bool, read_string_array_command, read_trimmed_string, read_workdir_from_args,
+    args_contain_direct_or_nested_key, read_optional_bool, read_string_array_command,
+    read_trimmed_string, read_workdir_from_args,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
@@ -59,18 +60,6 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
                 read_value(row.get("cmd")).or_else(|| read_value(row.get("command")))
             })
         })
-}
-
-fn args_contain_direct_or_nested_key(args: &Map<String, Value>, key: &str) -> bool {
-    if args.contains_key(key) {
-        return true;
-    }
-    ["input", "args"].iter().any(|container_key| {
-        args.get(*container_key)
-            .and_then(Value::as_object)
-            .map(|row| row.contains_key(key))
-            .unwrap_or(false)
-    })
 }
 
 fn build_shell_like_output_arguments(

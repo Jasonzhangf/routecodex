@@ -173,6 +173,8 @@ function checkNoActiveRuntimeRefs() {
   const files = activeRuntimeRoots.flatMap((root) => collectFiles(root));
   const allow = new Set([
     repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
+    repoPath('src/modules/llmswitch/bridge/provider-response-effects.ts'),
+    repoPath('src/modules/llmswitch/bridge/provider-response-metadata-effects.ts'),
   ]);
   for (const file of files) {
     if (allow.has(file)) {
@@ -199,16 +201,27 @@ function checkNoActiveRuntimeRefs() {
 }
 
 function checkProviderResponseFailFastShell() {
-  const path = repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts');
-  const source = readRequired(path);
-  assertContains('provider-response-servertool-failfast', path, source, 'executeProviderResponseNativeServertoolEffects');
-  assertContains('provider-response-servertool-failfast', path, source, 'server-side tool execution has been removed');
-  assertContains('provider-response-servertool-failfast', path, source, 'CLI-owned tools must be projected by Rust');
-  assertContains('provider-response-servertool-failfast', path, source, 'writeRustStopGatewayContextToMetadataCenter');
-  assertContains('provider-response-servertool-failfast', path, source, 'applyNativeRuntimeControlWritePlan');
-  assertContains('provider-response-servertool-failfast', path, source, 'readBoundMetadataCenter');
-  for (const marker of deletedTsBridgeSymbols) {
-    assertNotContains('provider-response-servertool-failfast', path, source, marker);
+  const hostPath = repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts');
+  const effectsPath = repoPath('src/modules/llmswitch/bridge/provider-response-effects.ts');
+  const metadataPath = repoPath('src/modules/llmswitch/bridge/provider-response-metadata-effects.ts');
+  const hostSource = readRequired(hostPath);
+  const effectsSource = readRequired(effectsPath);
+  const metadataSource = readRequired(metadataPath);
+  assertContains('provider-response-servertool-failfast', hostPath, hostSource, './provider-response-effects.js');
+  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'executeProviderResponseNativeServertoolEffects');
+  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'server-side tool execution has been removed');
+  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'CLI-owned tools must be projected by Rust');
+  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'writeRustStopGatewayContextToMetadataCenter');
+  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'applyNativeRuntimeControlWritePlan');
+  assertContains('provider-response-servertool-failfast', metadataPath, metadataSource, 'readBoundMetadataCenter');
+  for (const [path, source] of [
+    [hostPath, hostSource],
+    [effectsPath, effectsSource],
+    [metadataPath, metadataSource],
+  ]) {
+    for (const marker of deletedTsBridgeSymbols) {
+      assertNotContains('provider-response-servertool-failfast', path, source, marker);
+    }
   }
   pass('provider-response-servertool-failfast', 'provider-response host boundary has no server-side executor bridge');
 }

@@ -1,14 +1,17 @@
 use crate::hub_bridge_actions::utils::create_harvested_tool_call_id;
 use crate::hub_text_markup_normalizer::TextMarkupNormalizeOptions;
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
-use crate::shared_json_utils::extract_balanced_json_candidate_at;
+use crate::shared_json_utils::{
+    extract_balanced_json_candidate_at, extract_balanced_json_object_at,
+};
+use crate::shared_tool_call_id_core::clamp_responses_input_item_id;
 use crate::shared_tool_mapping::{
     is_routecodex_explicit_tool_name_candidate, normalize_routecodex_tool_name_with_embedded_hint,
     read_routecodex_tool_name_hint_from_args,
 };
 use crate::shared_tooling::{
-    is_structured_apply_patch_payload, normalize_xml_scalar_text, repair_arguments_to_string,
-    value_to_string,
+    is_image_path, is_structured_apply_patch_payload, normalize_xml_scalar_text,
+    repair_arguments_to_string, value_to_string,
 };
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -528,15 +531,6 @@ fn map_reasoning_content_to_responses_output(
     }]
 }
 
-fn is_image_path(input: &str) -> bool {
-    let lowered = input.trim().to_ascii_lowercase();
-    if lowered.is_empty() {
-        return false;
-    }
-    let re = cached_regex(r"\.(png|jpg|jpeg|gif|webp|bmp|svg|tiff?|ico|heic|jxl)$");
-    re.is_match(lowered.as_str())
-}
-
 fn short_hash(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
@@ -613,23 +607,6 @@ fn normalize_with_fallback(call_id: Option<&str>, fallback: Option<&str>, prefix
     }
     let seed = short_hash("routecodex_fallback");
     clamp_prefixed_id(prefix, seed.as_str(), seed.as_str())
-}
-
-fn clamp_responses_input_item_id(raw: Option<&str>) -> Option<String> {
-    let trimmed = raw.unwrap_or("").trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.len() <= MAX_RESPONSES_ITEM_ID_LENGTH {
-        return Some(trimmed.to_string());
-    }
-    let hash = short_hash(trimmed);
-    let room = MAX_RESPONSES_ITEM_ID_LENGTH
-        .saturating_sub(1)
-        .saturating_sub(hash.len())
-        .max(1);
-    let head = trimmed.chars().take(room).collect::<String>();
-    Some(format!("{}_{}", head, hash))
 }
 
 fn parse_lenient_string(value: &str) -> Value {
@@ -1866,92 +1843,6 @@ fn normalize_structured_tool_call_entry(
     normalized.insert("type".to_string(), Value::String("function".to_string()));
     normalized.insert("function".to_string(), Value::Object(fn_obj));
     Some(Value::Object(normalized))
-}
-
-fn extract_balanced_json_object_at(text: &str, start_byte: usize) -> Option<(usize, String)> {
-    if start_byte >= text.len() || !text[start_byte..].starts_with('{') {
-        return None;
-    }
-
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (offset, ch) in text[start_byte..].char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if ch == '\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-            continue;
-        }
-        if ch == '{' {
-            depth += 1;
-            continue;
-        }
-        if ch == '}' {
-            depth -= 1;
-            if depth == 0 {
-                let end_byte = start_byte + offset + ch.len_utf8();
-                return Some((end_byte, text[start_byte..end_byte].to_string()));
-            }
-        }
-    }
-
-    None
-}
-
-fn extract_balanced_json_array_at(text: &str, start_byte: usize) -> Option<(usize, String)> {
-    if start_byte >= text.len() || !text[start_byte..].starts_with('[') {
-        return None;
-    }
-
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (offset, ch) in text[start_byte..].char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if ch == '\\' {
-                escaped = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-            continue;
-        }
-        if ch == '[' {
-            depth += 1;
-            continue;
-        }
-        if ch == ']' {
-            depth -= 1;
-            if depth == 0 {
-                let end_byte = start_byte + offset + ch.len_utf8();
-                return Some((end_byte, text[start_byte..end_byte].to_string()));
-            }
-        }
-    }
-
-    None
 }
 
 fn collect_sentinel_tool_calls_candidates(text: &str) -> Vec<String> {

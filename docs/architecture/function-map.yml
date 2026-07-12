@@ -2268,6 +2268,7 @@ owners:
       - src/modules/llmswitch/bridge/executor-metadata-host.ts
       - src/server/runtime/http-server/executor-metadata.ts
       - tests/server/http-server/executor-metadata.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
       - docs
     forbidden_paths:
       - src/providers/core/runtime
@@ -2276,6 +2277,7 @@ owners:
     required_tests:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-metadata-center-write-boundaries
@@ -2284,6 +2286,7 @@ owners:
       - "This owner captures request/session/continuation-facing metadata into the request-local carrier; it must not project provider semantics or client response payloads."
       - "For relay `/v1/responses` resume, this owner may preserve `continuation_context.responsesResume` and bind `runtime_control.routeHint`, but it must not write request payload/context mirrors into MetadataCenter and must not become the effective owner of relay `retryProviderKey` truth."
       - "The narrow request-capture exception `hasStoplessDirectiveInRequestPayload(...) -> runtime_control.stopMessageEnabled` is an entry-side owner for direct stopless intent only; the later top-level `metadata.stopMessageEnabled` mirror remains transitional projection, not a second truth source."
+      - "responses-request-bridge host wiring tests use owner-specific `responses-request-handler-host-fake.ts`; they must not import broad `llmswitch-native-exports-fake` or mock `native-exports.ts`."
 
   - feature_id: hub.metadata_center_attempt_merge
     status: active
@@ -2472,6 +2475,257 @@ owners:
       - "Only pure Rust/NAPI black-box evidence may use direct-native helpers."
       - "Runtime source must never import test/script direct-native helpers."
 
+  - feature_id: hub.bridge_native_json_invoker_singleton
+    status: active
+    summary: "single TS host bridge native JSON invoker helper for binding lookup, JSON encode/decode, fail-fast native errors, and record/array assertions"
+    owner_kind: ts_host_bridge
+    owner_scope: "host-side native JSON call mechanics only; no provider, routing, Hub Pipeline, snapshot, or config business semantics"
+    owner_module: src/modules/llmswitch/bridge/native-json-invoker.ts
+    canonical_types:
+      - NativeBindingProvider
+      - NativeJsonBinding
+    canonical_builders:
+      - requireNativeFunction
+      - stringifyNativeJsonArg
+      - parseNativeJsonResult
+      - callNativeJsonCapability
+      - callNativePreencodedJsonCapability
+      - assertNativeObject
+      - assertNativeArray
+    allowed_paths:
+      - src/modules/llmswitch/bridge/native-json-invoker.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
+      - scripts/architecture/verify-hub-bridge-native-json-invoker-singleton.mjs
+      - scripts/tests/hub-bridge-native-json-invoker-singleton-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers/core/runtime
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    forbidden_mentions_allowlist:
+      - native-json-invoker
+      - native JSON invoker
+    required_tests:
+      - scripts/tests/hub-bridge-native-json-invoker-singleton-red-fixtures.mjs
+      - scripts/architecture/verify-hub-bridge-native-json-invoker-singleton.mjs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run test:hub-bridge-native-json-invoker-singleton-red-fixtures
+      - npm run verify:hub-bridge-native-json-invoker-singleton
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "This owner is a TS host bridge library for NAPI call mechanics only; Rust remains the semantic owner for Hub Pipeline, VR, config, snapshot, and provider-response behavior."
+      - "Monitored bridge files must not carry local duplicate native function lookup / JSON stringify / JSON parse helpers; provider-response converter delegates native call mechanics through `provider-response-native-calls.ts`, which uses this shared invoker."
+      - "Snapshot normalize payload keeps its existing null-on-stringify-failure behavior by explicit helper option, not by fallback or second path."
+
+  - feature_id: hub.provider_response_host_split
+    status: active
+    summary: "provider response host split that keeps convertProviderResponse as orchestration while native calls and host side effects live in shared helper modules"
+    owner_kind: ts_host_bridge
+    owner_scope: "host-side provider response orchestration split only; no provider/client payload semantics, Hub Pipeline decisions, fallback, or Rust semantic ownership"
+    owner_module: src/modules/llmswitch/bridge/provider-response-converter-host.ts
+    canonical_types:
+      - ProviderResponseRuntimeEffectPlan
+      - ProviderResponseNativePlan
+      - MetadataCenterLike
+    canonical_builders:
+      - convertProviderResponse
+    allowed_paths:
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-metadata-effects.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - scripts/architecture/verify-provider-response-host-split.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+    forbidden_mentions_allowlist:
+      - provider-response-host-split
+      - provider-response-native-calls
+      - provider-response-metadata-effects
+      - provider-response-effects
+      - convertProviderResponse
+    required_tests:
+      - scripts/tests/provider-response-host-split-red-fixtures.mjs
+      - scripts/architecture/verify-provider-response-host-split.mjs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    required_gates:
+      - npm run test:provider-response-host-split-red-fixtures
+      - npm run verify:provider-response-host-split
+      - npm run verify:hub-bridge-native-json-invoker-singleton
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "This owner only governs TS host file shape and shared helper placement; Rust remains semantic owner for provider response materialization, Hub response pipeline, context helpers, and client projection."
+      - "The host file must remain below the split gate line threshold and must import native-call, metadata-effect, and runtime-effect helpers instead of growing local helper clusters."
+      - "Red fixtures must fail when native call wrappers, MetadataCenter write helpers, or runtime effect executors are reintroduced into provider-response-converter-host.ts."
+
+  - feature_id: hub.rust_napi_json_wrapper_helper
+    status: active
+    summary: "Rust NAPI JSON parse/stringify helper for public JSON wrapper mechanics without changing capability names or owner semantics"
+    owner_kind: rust_helper
+    owner_scope: "Rust NAPI JSON wrapper mechanics only; no Hub Pipeline, provider, routing, servertool, or payload business semantics"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/napi_json.rs
+    canonical_types:
+      - NapiResult
+    canonical_builders:
+      - parse_napi_json
+      - stringify_napi_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/napi_json.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - scripts/architecture/verify-rust-napi-json-wrapper-helper.mjs
+      - scripts/tests/rust-napi-json-wrapper-helper-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+    forbidden_mentions_allowlist:
+      - rust-napi-json-wrapper-helper
+      - napi_json
+      - parse_napi_json
+      - stringify_napi_json
+    required_tests:
+      - scripts/tests/rust-napi-json-wrapper-helper-red-fixtures.mjs
+      - scripts/architecture/verify-rust-napi-json-wrapper-helper.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/napi_json.rs
+    required_gates:
+      - npm run test:rust-napi-json-wrapper-helper-red-fixtures
+      - npm run verify:rust-napi-json-wrapper-helper
+      - npm run test:rust-napi-json-wrapper-helper-cargo
+      - npm run build:native-hotpath
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "This helper only centralizes serde_json parse/serialize to NapiResult error projection for Rust NAPI wrappers."
+      - "Public NAPI capability names, owning builder semantics, and payload shapes must not change."
+      - "Red fixtures must fail if monitored lib.rs wrappers reintroduce local serde_json parse/stringify error wrappers instead of using napi_json."
+
+  - feature_id: hub.reasoning_tool_normalizer_shared_helpers
+    status: active
+    summary: "Rust reasoning tool normalizer reuse of existing shared pure helpers"
+    owner_kind: rust_helper
+    owner_scope: "shared helper placement for duplicate pure mechanics only; no tool-governance semantic movement"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs
+    canonical_types:
+      - ParsedToolCall
+      - MatchEntry
+    canonical_builders:
+      - normalize_assistant_text_to_tool_calls_json
+      - extract_tool_calls_from_reasoning_text_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tooling.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_call_id_core.rs
+      - scripts/architecture/verify-hub-reasoning-tool-normalizer-shared-helpers.mjs
+      - scripts/tests/hub-reasoning-tool-normalizer-shared-helpers-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+    forbidden_mentions_allowlist:
+      - hub-reasoning-tool-normalizer-shared-helpers
+      - reasoning tool normalizer shared helpers
+    required_tests:
+      - scripts/tests/hub-reasoning-tool-normalizer-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-hub-reasoning-tool-normalizer-shared-helpers.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs
+    required_gates:
+      - npm run test:hub-reasoning-tool-normalizer-shared-helpers-red-fixtures
+      - npm run verify:hub-reasoning-tool-normalizer-shared-helpers
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This owner only removes duplicate pure helper mechanics from the reasoning normalizer by reusing existing Rust shared helpers."
+      - "Tool governance semantics, parser behavior, public NAPI names, and provider/client payload shapes must not change."
+      - "Red fixtures must fail if image-path, Responses item-id clamp, balanced JSON extraction, or local hash helpers are reintroduced in the reasoning normalizer."
+
+  - feature_id: hub.responses_conversation_shared_helpers
+    status: active
+    summary: "Responses conversation and exec_command blocks reuse shared Rust nested argument key detection"
+    owner_kind: rust_helper
+    owner_scope: "shared helper placement for exact duplicate pure mechanics only; no Responses continuation/store or exec_command semantic movement"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+    canonical_types:
+      - Map
+      - Value
+    canonical_builders:
+      - args_contain_direct_or_nested_key
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/exec_command_args.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/tool_args.rs
+      - scripts/architecture/verify-responses-conversation-shared-helpers.mjs
+      - scripts/tests/responses-conversation-shared-helpers-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+    forbidden_mentions_allowlist:
+      - responses-conversation-shared-helpers
+      - args_contain_direct_or_nested_key
+    required_tests:
+      - scripts/tests/responses-conversation-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-responses-conversation-shared-helpers.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    required_gates:
+      - npm run test:responses-conversation-shared-helpers-red-fixtures
+      - npm run verify:responses-conversation-shared-helpers
+      - npm run test:responses-conversation-shared-helpers-cargo
+      - npm run verify:responses-history-protocol-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This owner only removes exact duplicate nested-key pure helper mechanics from Responses conversation and exec_command blocks by reusing shared_json_utils."
+      - "Responses continuation/store semantics, exec_command command extraction semantics, public NAPI names, and provider/client payload shapes must not change."
+      - "Red fixtures must fail if `args_contain_direct_or_nested_key` is locally reintroduced in shared_responses_conversation_utils.rs or exec_command_args.rs."
 
   - feature_id: hub.chat_envelope_type_surface
     status: retired
@@ -2738,6 +2992,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
     forbidden_paths:
       - src/providers
       - src/server
@@ -2830,6 +3085,7 @@ owners:
       - docs/architecture
       - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
     forbidden_paths:
       - src/server/handlers
@@ -2837,6 +3093,7 @@ owners:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
     required_tests:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -5313,6 +5570,7 @@ owners:
       - build_responses_json_from_sse_json
     allowed_paths:
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
       - src/providers/core/runtime/responses-provider.ts
       - docs/goals/sse-function-map-architecture-closeout-plan.md

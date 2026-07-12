@@ -1655,7 +1655,7 @@ chains:
         caller_symbol: convertProviderResponse
         caller_file: src/modules/llmswitch/bridge/provider-response-converter-host.ts
         callee_symbol: readRequestTruthFromBoundMetadataCenter
-        callee_file: src/modules/llmswitch/bridge/provider-response-converter-host.ts
+        callee_file: src/modules/llmswitch/bridge/provider-response-metadata-effects.ts
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
         semantic_output: "response closeout derives `finishReason` and uses MetadataCenter-backed request truth for lifecycle persistence without reopening request truth"

@@ -3,7 +3,7 @@ import { MetadataCenter } from '../../../../src/server/runtime/http-server/metad
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
-} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
+} from './responses-request-handler-host-fake.js';
 
 const mockCaptureReqInboundResponsesContextSnapshotJson = jest.fn();
 const mockPlanResponsesHandlerEntry = jest.fn();

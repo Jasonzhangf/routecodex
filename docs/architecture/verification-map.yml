@@ -1094,6 +1094,7 @@ verification:
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
     integration: []
     smoke:
       - npm run verify:function-map-compile-gate
@@ -1104,6 +1105,7 @@ verification:
       - "Request capture must keep request truth, client attachment scope, and retry-attempt carrier seeding request-local and queryable."
       - "Validation must prove relay `/v1/responses` bridge entry keeps only control fields such as `responsesResume` in continuation_context, binds `routeHint`, does not write request/context payload mirrors into MetadataCenter, and does not claim effective `retryProviderKey` ownership at the handler shell boundary."
       - "Validation must prove the narrow stopless-directive entry write only lands `runtime_control.stopMessageEnabled`, and any remaining top-level `metadata.stopMessageEnabled` / `routecodexPortStopMessageEnabled` references are stale residue, not independent truth or compatibility projections."
+      - "responses-request-bridge host wiring tests must use `tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts`, not broad native-exports fakes."
 
   - feature_id: hub.metadata_center_attempt_merge
     change_risk: high
@@ -1352,6 +1354,153 @@ verification:
     notes:
       - "Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names."
 
+  - feature_id: hub.bridge_native_json_invoker_singleton
+    change_risk: medium
+    unit:
+      - src/modules/llmswitch/bridge/native-json-invoker.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/routing-integrations.ts
+      - src/modules/llmswitch/bridge/config-integrations.ts
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
+      - scripts/architecture/verify-hub-bridge-native-json-invoker-singleton.mjs
+    contract:
+      - scripts/tests/hub-bridge-native-json-invoker-singleton-red-fixtures.mjs
+      - scripts/architecture/verify-hub-bridge-native-json-invoker-singleton.mjs
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run test:hub-bridge-native-json-invoker-singleton-red-fixtures
+      - npm run verify:hub-bridge-native-json-invoker-singleton
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:base
+    notes:
+      - "This gate proves host bridge native JSON call mechanics are centralized while Rust remains the semantic owner. It does not claim runtime behavior change or live closeout."
+      - "Red fixtures must fail when a monitored bridge file reintroduces local native binding lookup, stringify/parse, snapshot invoker, or when a native-call helper drops the shared invoker import."
+
+  - feature_id: hub.provider_response_host_split
+    change_risk: medium
+    unit:
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-metadata-effects.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - scripts/architecture/verify-provider-response-host-split.mjs
+    contract:
+      - scripts/tests/provider-response-host-split-red-fixtures.mjs
+      - scripts/architecture/verify-provider-response-host-split.mjs
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+    smoke:
+      - npm run test:provider-response-host-split-red-fixtures
+      - npm run verify:provider-response-host-split
+      - npm run verify:hub-bridge-native-json-invoker-singleton
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+      - npm run build:base
+    notes:
+      - "This gate proves provider-response-converter-host.ts remains orchestration-only after the host split; it does not claim runtime behavior change or live closeout."
+      - "Red fixtures must fail when native call wrappers, metadata write helpers, or runtime effect executors return to the main provider-response host file."
+
+  - feature_id: hub.rust_napi_json_wrapper_helper
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/napi_json.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - scripts/architecture/verify-rust-napi-json-wrapper-helper.mjs
+    contract:
+      - scripts/tests/rust-napi-json-wrapper-helper-red-fixtures.mjs
+      - scripts/architecture/verify-rust-napi-json-wrapper-helper.mjs
+      - npm run test:rust-napi-json-wrapper-helper-cargo
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    smoke:
+      - npm run test:rust-napi-json-wrapper-helper-red-fixtures
+      - npm run verify:rust-napi-json-wrapper-helper
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+    notes:
+      - "This gate proves Rust NAPI JSON wrapper mechanics are centralized without changing public capability names or payload semantics."
+      - "Red fixtures must fail when the helper module is removed, package/map wiring is missing, or monitored lib.rs wrappers reintroduce local serde_json parse/stringify wrappers."
+
+  - feature_id: hub.reasoning_tool_normalizer_shared_helpers
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_reasoning_tool_normalizer.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tooling.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_tool_call_id_core.rs
+      - scripts/architecture/verify-hub-reasoning-tool-normalizer-shared-helpers.mjs
+    contract:
+      - scripts/tests/hub-reasoning-tool-normalizer-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-hub-reasoning-tool-normalizer-shared-helpers.mjs
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi hub_reasoning_tool_normalizer --lib -- --nocapture
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    smoke:
+      - npm run test:hub-reasoning-tool-normalizer-shared-helpers-red-fixtures
+      - npm run verify:hub-reasoning-tool-normalizer-shared-helpers
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+    notes:
+      - "This gate proves duplicate pure helper mechanics are not locally reintroduced in the reasoning normalizer."
+      - "Focused Rust tests must prove reasoning/tool parser behavior stays unchanged after helper reuse."
+
+  - feature_id: hub.responses_conversation_shared_helpers
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/exec_command_args.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks/tool_args.rs
+      - scripts/architecture/verify-responses-conversation-shared-helpers.mjs
+    contract:
+      - scripts/tests/responses-conversation-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-responses-conversation-shared-helpers.mjs
+      - npm run test:responses-conversation-shared-helpers-cargo
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    smoke:
+      - npm run test:responses-conversation-shared-helpers-red-fixtures
+      - npm run verify:responses-conversation-shared-helpers
+      - npm run verify:responses-history-protocol-contract
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+    notes:
+      - "This gate proves exact duplicate nested-key helper mechanics are not locally reintroduced in Responses conversation or exec_command blocks."
+      - "Focused Responses history tests must prove continuation/store behavior stays unchanged after helper reuse."
 
   - feature_id: hub.web_search_tool_governance
     change_risk: high
@@ -2405,6 +2554,7 @@ verification:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
     integration: []
     smoke:
       - npm run verify:client-response-internal-carrier-surface

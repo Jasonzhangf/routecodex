@@ -2,13 +2,14 @@ use serde_json::{json, Map, Value};
 
 use crate::resp_process_stage1_tool_governance_blocks::apply_patch_schema_args::normalize_apply_patch_schema_args;
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_args::{
-    args_contain_direct_or_nested_key, normalize_exec_command_text, read_command_from_args,
+    normalize_exec_command_text, read_command_from_args,
 };
 use crate::resp_process_stage1_tool_governance_blocks::exec_command_guard::{
     build_dangerous_command_blocked_object, build_exec_command_object_with_shape,
     detect_dangerous_command,
 };
 use crate::resp_process_stage1_tool_governance_blocks::json_args::parse_json_record;
+use crate::shared_json_utils::args_contain_direct_or_nested_key;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
 use crate::shared_tooling::strip_provider_tool_sentinel_residue;
 

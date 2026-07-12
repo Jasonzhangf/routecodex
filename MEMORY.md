@@ -1,3 +1,8 @@
+# 2026-07-12: Provider-response host split checker closeout
+
+- `hub.provider_response_host_split` closeout evidence must treat `src/modules/llmswitch/bridge/provider-response-converter-host.ts` as orchestration-only; implementation assertions for native call wrapping, metadata effect projection, and runtime effects belong to `provider-response-native-calls.ts`, `provider-response-metadata-effects.ts`, and `provider-response-effects.ts`.
+- Focused provider-response stopless behavior is Rust-owned: when a continue schema response is missing `current_goal`, the projected `reasoningStop` command uses `triggerHint:"invalid_schema"` with `schemaFeedback.reasonCode:"stop_schema_current_goal_missing"` and `missingFields:["current_goal"]`; tests must not force `non_terminal_schema` for that malformed payload.
+
 # 2026-07-12: Responses relay resume strips route/provider pins before handler pipeline truth
 
 - Rust `build_responses_resume_control_for_continuation_context_for_http_json` preserves `providerKey` only for `continuationOwner=direct`; relay resume strips `routeHint`, `providerKey`, session/conversation mirrors, payload mirrors, and full input mirrors.
@@ -2523,6 +2528,16 @@
 - Verified slice: `hub.runtime_ingress_bridge` / `vr.route_host_effects` test reference contraction. `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts` mock `routing-native-host.js`, not broad `native-exports.js`.
 - Rule: do not force white-box host wiring tests into direct-native helpers when the test needs to inspect mocked native-call arguments. Mock the owner-specific host instead. Reserve `tests/sharedmodule/helpers/*direct-native*` for pure Rust/NAPI output evidence.
 - Evidence: focused Jest 3 suites / 240 tests, exact migrated-test `native-exports` scan zero hits, strict TS shell audit, rustification audit, function/mainline/resource gates, VR no-TS runtime, minimal TS surface, `git diff --check`, and `build:base` passed.
+
+[2026-07-12] Responses request-bridge host wiring tests use owner-specific fake
+
+- `tests/modules/llmswitch/bridge/responses-request-bridge.*.spec.ts` host wiring tests must import `tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts` when they need deterministic handler-host behavior.
+- Do not reintroduce `tests/providers/helpers/llmswitch-native-exports-fake.js`, `createNativeExportsMock`, or broad `native-exports.ts` mocks for those white-box request-bridge tests. The helper is mapped under metadata/request-bridge owner surfaces and protected by `verify:hub-pipeline-native-reference-gate`.
+
+[2026-07-12] Provider-response host split gates follow helper source anchors
+
+- After provider-response converter host is split, gate/map evidence must follow the real helper owner files: `provider-response-native-calls.ts` for shared native JSON invocation, `provider-response-effects.ts` for servertool fail-fast/effect execution, and `provider-response-metadata-effects.ts` for MetadataCenter readers/writers.
+- Do not satisfy stale gates by moving helper logic back into `provider-response-converter-host.ts`. Update function-map/mainline-call-map/verifiers so they check the split helper files while `convertProviderResponse` remains orchestration-only.
 
 [2026-07-12] Handler/executor monitored tests use responses handler host fake
 
