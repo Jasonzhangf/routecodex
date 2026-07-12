@@ -199,7 +199,10 @@ pub struct ErrorErr03RuntimeClassifiedDecision {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorErr05ExecutionDecisionInput {
-    pub classification: FailureClassification,
+    #[serde(default)]
+    pub classification: Option<FailureClassification>,
+    #[serde(default)]
+    pub error_err02_host_captured: Option<ErrorErr02HostCapturedInput>,
     #[serde(default)]
     pub stage: Option<String>,
     #[serde(default)]
@@ -283,6 +286,12 @@ fn error_err05_switch_plan() -> ErrorErr05RetrySwitchPlan {
 pub fn resolve_error_err05_execution_decision(
     input: ErrorErr05ExecutionDecisionInput,
 ) -> ErrorErr05ExecutionDecision {
+    let classification = input.classification.or_else(|| {
+        input
+            .error_err02_host_captured
+            .clone()
+            .and_then(|captured| classify_error_err02_host_captured(captured).classification)
+    });
     let provider_key = input
         .provider_key
         .as_deref()
@@ -311,14 +320,15 @@ pub fn resolve_error_err05_execution_decision(
             excluded_provider_keys: excluded,
         };
     }
-    let retryable = input.classification == FailureClassification::Recoverable;
+    let retryable = classification == Some(FailureClassification::Recoverable);
     let has_alternative_before_exclusion = route_pool.iter().any(|candidate| {
-        Some(candidate.as_str()) != provider_key
-            && !excluded.iter().any(|value| value == candidate)
+        Some(candidate.as_str()) != provider_key && !excluded.iter().any(|value| value == candidate)
     });
     let only_current_provider = provider_key.is_some()
         && !route_pool.is_empty()
-        && route_pool.iter().all(|candidate| Some(candidate.as_str()) == provider_key);
+        && route_pool
+            .iter()
+            .all(|candidate| Some(candidate.as_str()) == provider_key);
     let eligible_last_provider_stage = matches!(
         input.stage.as_deref(),
         Some("provider.send" | "provider.http" | "provider.sse_decode")
@@ -332,27 +342,58 @@ pub fn resolve_error_err05_execution_decision(
         && input.attempt < input.max_attempts
         && eligible_last_provider_stage
         && retryable;
+    if may_retry_verified_last_provider {
+        return ErrorErr05ExecutionDecision {
+            should_retry: true,
+            excluded_current_provider: false,
+            allow_retry_beyond_attempt_budget: false,
+            retry_switch_plan: None,
+            retry_execution_policy_reason: None,
+            route_pool_remaining_after_exclusion: remaining(&excluded),
+            default_pool_available: input.default_pool_available,
+            policy_exhausted: false,
+            may_project: false,
+            excluded_provider_keys: excluded,
+        };
+    }
+    let continuing_reroute_chain = provider_key.is_some()
+        && !excluded.is_empty()
+        && !excluded
+            .iter()
+            .any(|value| Some(value.as_str()) == provider_key);
     let unproven_last_provider = !input.route_pool_is_authoritative
         && provider_key.is_some()
         && retryable
         && (input.stage.as_deref() == Some("provider.runtime_resolve")
             || !route_pool.is_empty()
-            || normalize_code(input.error_code.as_deref()).as_deref() == Some("ERR_PROVIDER_NOT_FOUND")
-            || normalize_code(input.upstream_code.as_deref()).as_deref() == Some("ERR_PROVIDER_NOT_FOUND"))
+            || normalize_code(input.error_code.as_deref()).as_deref()
+                == Some("ERR_PROVIDER_NOT_FOUND")
+            || normalize_code(input.upstream_code.as_deref()).as_deref()
+                == Some("ERR_PROVIDER_NOT_FOUND"))
         && !has_alternative_before_exclusion;
+    let suppress_force_exclude = matches!(
+        input.stage.as_deref(),
+        Some("host.response_contract" | "provider.followup")
+    ) || normalize_code(input.error_code.as_deref()).as_deref()
+        == Some("CLIENT_TOOL_ARGS_INVALID")
+        || normalize_code(input.upstream_code.as_deref()).as_deref()
+            == Some("CLIENT_TOOL_ARGS_INVALID");
     let native_policy = resolve_retry_execution_policy(ProviderRetryExecutionPolicyInput {
-        classification: input.classification,
+        classification: classification.unwrap_or(FailureClassification::Unrecoverable),
         is_streaming_request: input.is_streaming_request,
         host_contract_failure: input.host_contract_failure,
-        force_exclude_current_provider_on_retry: input.force_exclude_current_provider_on_retry,
+        force_exclude_current_provider_on_retry: input.force_exclude_current_provider_on_retry
+            && !suppress_force_exclude,
         prompt_too_long: input.prompt_too_long,
-        existing_exclusion: has_alternative_before_exclusion && !input.host_contract_failure,
+        existing_exclusion: has_alternative_before_exclusion
+            && !suppress_force_exclude
+            && !input.host_contract_failure,
     });
     let should_exclude = !input.host_contract_failure
-        && !may_retry_verified_last_provider
         && provider_key.is_some()
         && (has_alternative_before_exclusion
             || unproven_last_provider
+            || continuing_reroute_chain
             || input.default_pool_available)
         && (native_policy.exclude_current_provider || retryable || input.prompt_too_long);
     if should_exclude {
@@ -362,7 +403,10 @@ pub fn resolve_error_err05_execution_decision(
         }
     }
     let remaining_after_exclusion = remaining(&excluded);
-    let policy_exhausted = remaining_after_exclusion.is_empty() && !input.default_pool_available;
+    let terminal_policy_exhausted = remaining_after_exclusion.is_empty()
+        && !input.default_pool_available
+        && !unproven_last_provider
+        && !continuing_reroute_chain;
     let has_reroute_target = !remaining_after_exclusion.is_empty() || input.default_pool_available;
     if input.provider_owned_continuation && should_exclude {
         return ErrorErr05ExecutionDecision {
@@ -373,23 +417,23 @@ pub fn resolve_error_err05_execution_decision(
             retry_execution_policy_reason: None,
             route_pool_remaining_after_exclusion: remaining_after_exclusion,
             default_pool_available: input.default_pool_available,
-            policy_exhausted,
-            may_project: policy_exhausted,
+            policy_exhausted: terminal_policy_exhausted,
+            may_project: terminal_policy_exhausted,
             excluded_provider_keys: excluded,
         };
     }
-    let should_retry = may_retry_verified_last_provider
-        || (should_exclude && (has_reroute_target || unproven_last_provider));
+    let should_retry = should_exclude
+        && (has_reroute_target || unproven_last_provider || continuing_reroute_chain);
     ErrorErr05ExecutionDecision {
         should_retry,
         excluded_current_provider: should_exclude,
-        allow_retry_beyond_attempt_budget: should_exclude && has_reroute_target,
+        allow_retry_beyond_attempt_budget: should_retry,
         retry_switch_plan: should_retry.then(error_err05_switch_plan),
         retry_execution_policy_reason: should_retry.then_some(native_policy.reason),
         route_pool_remaining_after_exclusion: remaining_after_exclusion,
         default_pool_available: input.default_pool_available,
-        policy_exhausted,
-        may_project: !should_retry && policy_exhausted,
+        policy_exhausted: terminal_policy_exhausted,
+        may_project: !should_retry && terminal_policy_exhausted,
         excluded_provider_keys: excluded,
     }
 }
@@ -432,13 +476,12 @@ fn is_error_err02_client_disconnect(input: &ErrorErr02HostCapturedInput) -> bool
     if contains_client_disconnect_hint(message) {
         return true;
     }
-    input.error_name.as_deref() == Some("AbortError")
-        && {
-            let lowered = message.to_ascii_lowercase();
-            lowered.contains("client_request_aborted")
-                || lowered.contains("client_response_closed")
-                || lowered.contains("client_timeout_hint_expired")
-        }
+    input.error_name.as_deref() == Some("AbortError") && {
+        let lowered = message.to_ascii_lowercase();
+        lowered.contains("client_request_aborted")
+            || lowered.contains("client_response_closed")
+            || lowered.contains("client_timeout_hint_expired")
+    }
 }
 
 fn is_error_err02_network_transport_like(input: &ErrorErr02HostCapturedInput) -> bool {
@@ -453,7 +496,11 @@ fn is_error_err02_network_transport_like(input: &ErrorErr02HostCapturedInput) ->
     {
         return true;
     }
-    let message = input.error_message.as_deref().unwrap_or_default().to_ascii_lowercase();
+    let message = input
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     input.error_name.as_deref() == Some("AbortError")
         || message.contains("operation was aborted")
         || [
@@ -491,7 +538,12 @@ pub fn classify_error_err02_host_captured(
         let recoverable = [error_code.as_deref(), upstream_code.as_deref()]
             .into_iter()
             .flatten()
-            .any(|code| matches!(code, "EMPTY_ASSISTANT_RESPONSE" | "MISSING_REQUIRED_TOOL_CALL"));
+            .any(|code| {
+                matches!(
+                    code,
+                    "EMPTY_ASSISTANT_RESPONSE" | "MISSING_REQUIRED_TOOL_CALL"
+                )
+            });
         return ErrorErr03RuntimeClassifiedDecision {
             classification: recoverable.then_some(FailureClassification::Recoverable),
             client_disconnect: false,
@@ -578,8 +630,14 @@ pub fn classify_error_err02_host_captured(
         || nested_param.starts_with("messages.")
         || nested_param.starts_with("input.")
         || nested_type.as_deref() == Some("INVALID_REQUEST_ERROR")
-        || nested_type.as_deref().map(|value| value.starts_with("INVALID_")).unwrap_or(false)
-        || nested_code.as_deref().map(|value| value.starts_with("INVALID_")).unwrap_or(false)
+        || nested_type
+            .as_deref()
+            .map(|value| value.starts_with("INVALID_"))
+            .unwrap_or(false)
+        || nested_code
+            .as_deref()
+            .map(|value| value.starts_with("INVALID_"))
+            .unwrap_or(false)
         || code_matches("INVALID_REQUEST_ERROR")
         || reason.contains("invalid request payload")
         || reason.contains("\"message\":\"bad request\"")
@@ -1383,7 +1441,10 @@ mod tests {
             detail_upstream_message: Some("client abort request".to_string()),
             ..Default::default()
         });
-        assert_eq!(decision.classification, Some(FailureClassification::Unrecoverable));
+        assert_eq!(
+            decision.classification,
+            Some(FailureClassification::Unrecoverable)
+        );
         assert!(decision.client_disconnect);
         assert!(!decision.network_transport_like);
     }
@@ -1398,7 +1459,10 @@ mod tests {
             error_message: Some("stream closed before response.completed".to_string()),
             ..Default::default()
         });
-        assert_eq!(decision.classification, Some(FailureClassification::Recoverable));
+        assert_eq!(
+            decision.classification,
+            Some(FailureClassification::Recoverable)
+        );
         assert!(!decision.client_disconnect);
     }
 
@@ -1421,7 +1485,10 @@ mod tests {
             error_code: Some("EMPTY_ASSISTANT_RESPONSE".to_string()),
             ..Default::default()
         });
-        assert_eq!(recoverable.classification, Some(FailureClassification::Recoverable));
+        assert_eq!(
+            recoverable.classification,
+            Some(FailureClassification::Recoverable)
+        );
 
         let rejected = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
             stage: Some("host.response_contract".to_string()),
@@ -1433,7 +1500,8 @@ mod tests {
 
     fn error_err05_input() -> ErrorErr05ExecutionDecisionInput {
         ErrorErr05ExecutionDecisionInput {
-            classification: FailureClassification::Recoverable,
+            classification: Some(FailureClassification::Recoverable),
+            error_err02_host_captured: None,
             stage: Some("provider.send".to_string()),
             error_code: Some("HTTP_503".to_string()),
             upstream_code: Some("HTTP_503".to_string()),
@@ -1458,7 +1526,10 @@ mod tests {
         let decision = resolve_error_err05_execution_decision(error_err05_input());
         assert!(decision.should_retry);
         assert!(decision.excluded_current_provider);
-        assert_eq!(decision.route_pool_remaining_after_exclusion, vec!["p2.model"]);
+        assert_eq!(
+            decision.route_pool_remaining_after_exclusion,
+            vec!["p2.model"]
+        );
         assert!(!decision.may_project);
     }
 
@@ -1496,12 +1567,39 @@ mod tests {
     #[test]
     fn error_err05_terminal_only_after_route_and_default_empty() {
         let mut input = error_err05_input();
-        input.classification = FailureClassification::Unrecoverable;
+        input.classification = Some(FailureClassification::Unrecoverable);
         input.route_pool.clear();
         input.route_pool_is_authoritative = true;
         let decision = resolve_error_err05_execution_decision(input);
         assert!(!decision.should_retry);
         assert!(decision.policy_exhausted);
         assert!(decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_classifies_captured_error_inside_rust_owner() {
+        let mut input = error_err05_input();
+        input.classification = None;
+        input.error_err02_host_captured = Some(ErrorErr02HostCapturedInput {
+            status_code: Some(503),
+            error_code: Some("HTTP_503".to_string()),
+            ..Default::default()
+        });
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+    }
+
+    #[test]
+    fn error_err05_suppresses_forced_exclusion_for_client_tool_args() {
+        let mut input = error_err05_input();
+        input.classification = Some(FailureClassification::Unrecoverable);
+        input.error_code = Some("CLIENT_TOOL_ARGS_INVALID".to_string());
+        input.upstream_code = None;
+        input.force_exclude_current_provider_on_retry = true;
+        input.error_err02_host_captured = None;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(!decision.should_retry);
+        assert!(!decision.excluded_current_provider);
     }
 }

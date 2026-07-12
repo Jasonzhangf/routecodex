@@ -11,9 +11,6 @@ import {
   buildProviderRetryTelemetryPlan
 } from './request-executor-retry-telemetry.js';
 import {
-  resolveProviderFailureClassification,
-} from '../../../../providers/core/runtime/provider-failure-policy.js';
-import {
   reportRequestExecutorProviderError,
   resolveRequestExecutorProviderErrorReportPlan
 } from './request-executor-provider-failure.js';
@@ -102,40 +99,14 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     retryError: args.retryError,
     stage: args.stage
   });
-  const topCode = typeof (args.error as { code?: unknown } | undefined)?.code === 'string'
-    ? String((args.error as { code: string }).code).trim().toUpperCase()
-    : undefined;
-  const topUpstreamCode = typeof (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode === 'string'
-    ? String((args.error as { upstreamCode: string }).upstreamCode).trim().toUpperCase()
-    : undefined;
-  const errorCode = typeof args.retryError.errorCode === 'string'
-    ? args.retryError.errorCode.trim().toUpperCase()
-    : undefined;
-  const upstreamCode = typeof args.retryError.upstreamCode === 'string'
-    ? args.retryError.upstreamCode.trim().toUpperCase()
-    : undefined;
-  const classification = resolveProviderFailureClassification({
-    error: args.error,
-    stage: reportPlan.stageHint,
-    statusCode: reportPlan.statusCode,
-    errorCode: reportPlan.errorCode,
-    upstreamCode: reportPlan.upstreamCode,
-    reason: args.retryError.reason
-  });
-  const suppressForceExclude =
-    topCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || topUpstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || errorCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || reportPlan.stageHint === 'host.response_contract'
-    || reportPlan.stageHint === 'provider.followup';
-  const forceExcludeCurrentProviderOnRetry =
-    suppressForceExclude
-      ? false
-      : args.forceExcludeCurrentProviderOnRetry === true;
   const retryExecutionPlan = await resolveProviderRetryExecutionPlan({
     error: args.error,
-    retryError: args.retryError,
+    retryError: {
+      ...args.retryError,
+      ...(reportPlan.statusCode !== undefined ? { statusCode: reportPlan.statusCode } : {}),
+      ...(reportPlan.errorCode ? { errorCode: reportPlan.errorCode } : {}),
+      ...(reportPlan.upstreamCode ? { upstreamCode: reportPlan.upstreamCode } : {}),
+    },
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,
     stage: reportPlan.stageHint as RequestExecutorProviderErrorStage,
@@ -153,7 +124,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     contextOverflowRetries: args.contextOverflowRetries,
     maxContextOverflowRetries: args.maxContextOverflowRetries,
     status: args.status,
-    forceExcludeCurrentProviderOnRetry,
+    forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry,
     defaultTierAvailable: args.defaultTierAvailable,
     isStreamingRequest: args.isStreamingRequest,
     providerOwnedContinuation: args.providerOwnedContinuation,

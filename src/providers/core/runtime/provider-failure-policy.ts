@@ -4,6 +4,7 @@ export {
   isProviderFailureClientDisconnect,
   isProviderFailureNetworkTransportLike,
   resolveProviderFailureClassification,
+  buildErrorErr02HostCapturedInput,
   resolveProviderFailureOutcome,
   resolveProviderFailureActionPlan,
   isProviderFailureHealthNeutral,

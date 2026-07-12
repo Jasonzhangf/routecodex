@@ -84,7 +84,8 @@ export function classifyErrorErr02HostCapturedNative(
 }
 
 export type ErrorErr05ExecutionDecisionInput = {
-  classification: 'recoverable' | 'unrecoverable';
+  classification?: 'recoverable' | 'unrecoverable';
+  errorErr02HostCaptured?: ErrorErr02HostCapturedInput;
   stage?: string;
   errorCode?: string;
   upstreamCode?: string;

@@ -210,6 +210,20 @@ export function resolveProviderFailureClassification(args: {
   upstreamCode?: string;
   reason?: string;
 }): ProviderFailureClassification | undefined {
+  const nativeDecision = classifyErrorErr02HostCapturedNative(
+    buildErrorErr02HostCapturedInput(args)
+  );
+  return nativeDecision.classification;
+}
+
+export function buildErrorErr02HostCapturedInput(args: {
+  error: unknown;
+  stage?: string;
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}) {
   const error = args.error && typeof args.error === 'object' && !Array.isArray(args.error)
     ? args.error as Record<string, unknown>
     : {};
@@ -225,7 +239,7 @@ export function resolveProviderFailureClassification(args: {
   const nestedError = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
     ? data.error as Record<string, unknown>
     : {};
-  const nativeDecision = classifyErrorErr02HostCapturedNative({
+  return {
     stage: args.stage,
     statusCode: typeof args.statusCode === 'number'
       ? args.statusCode
@@ -249,8 +263,7 @@ export function resolveProviderFailureClassification(args: {
     providerStatusCode: typeof details.providerStatusCode === 'number'
       ? details.providerStatusCode
       : undefined,
-  });
-  return nativeDecision.classification;
+  };
 }
 export function resolveProviderFailureOutcome(args: {
   error: unknown;

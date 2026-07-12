@@ -1217,9 +1217,9 @@ owners:
   - feature_id: error.provider_failure_policy
     status: active
     summary: "provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate"
-    owner_kind: provider_runtime
+    owner_kind: rust_ssot
     owner_scope: "provider/server error cataloging, runtime classification, router policy application, availability/cooldown truth"
-    owner_module: src/providers/core/runtime
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     resource_bindings:
       writes:
         - error.chain@ErrorErr03RuntimeClassified
@@ -1233,10 +1233,14 @@ owners:
       - ErrorErr03RuntimeClassified
       - ErrorErr04RouterPolicyApplied
     canonical_builders:
-      - normalizeKnownProviderError
-      - resolveProviderFailureOutcome
-      - resolveProviderFailureClassification
+      - classify_error_err02_host_captured
+      - resolve_error_err05_execution_decision
+      - resolve_error_err05_execution_decision_json
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/providers/core/runtime
       - src/server/runtime/http-server/executor
     forbidden_paths:
@@ -1258,6 +1262,7 @@ owners:
       - "Client-disconnect 499 and upstream_stream_incomplete both flow through the same provider policy chain; client projection remains a separate ErrorErr06 owner."
       - "Provider availability/quota/upstream transport errors are provider/server truth, not session truth."
       - "429/502/503/504, fetch-failed, provider-unavailable, and pool-exhaustion class errors must not write session_storm cooldown state."
+      - "Rust owns ErrorErr02 classification and ErrorErr05 retry/reroute/exhaustion decisions; TS may only capture JSON fields, invoke NAPI, and apply request-local effects."
 
   - feature_id: server.runtime_key_resolution
     status: active

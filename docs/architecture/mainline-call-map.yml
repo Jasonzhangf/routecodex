@@ -976,10 +976,10 @@ chains:
       - step_id: err-02
         from_node: ErrorErr02HostCaptured
         to_node: ErrorErr03RuntimeClassified
-        caller_symbol: classifyProviderFailure
+        caller_symbol: resolveProviderFailureClassification
         caller_file: src/providers/core/runtime/provider-failure-policy-impl.ts
-        callee_symbol: classifyProviderFailure
-        callee_file: src/providers/core/runtime/provider-failure-policy-impl.ts
+        callee_symbol: classify_error_err02_host_captured
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
         owner_feature_id: error.provider_failure_policy
         semantic_input: "host-captured provider error event"
         semantic_output: "classified provider/server failure with availability-vs-session boundary"
@@ -1010,8 +1010,8 @@ chains:
         to_node: ErrorErr05ExecutionDecision
         caller_symbol: resolveProviderRetryExecutionPlan
         caller_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
-        callee_symbol: resolveProviderRetryExecutionPlan
-        callee_file: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+        callee_symbol: resolve_error_err05_execution_decision
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
         owner_feature_id: error.execution_decision_consumer
         semantic_input: "router-policy-applied error event + retry/error snapshot"
         semantic_output: "executor-visible provider failover/default-pool/client-projection decision; session_storm may not intercept provider availability truth"
@@ -1943,7 +1943,7 @@ shared_multi_reference_functions:
     owner_feature_id: error.execution_decision_consumer
     reused_by_chains:
       - error.mainline
-    note: "Executor consumes classified provider failure and materializes retry/reroute/fail-fast decision."
+    note: "Thin executor host captures ErrorErr02 JSON, invokes Rust ErrorErr05 truth once, and applies request-local attempt/exclusion effects."
   - function_id: runtime.lifecycle.pid_cache_writer
     binding_status: confirmed
     symbol: writeServerPidCache

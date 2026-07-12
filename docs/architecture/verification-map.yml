@@ -594,6 +594,7 @@ verification:
   - feature_id: error.provider_failure_policy
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - src/providers/core/runtime/provider-error-catalog.ts
       - src/providers/core/runtime/http-request-executor.ts
@@ -602,6 +603,7 @@ verification:
       - src/providers/core/runtime/provider-request-header-orchestrator.ts
       - src/providers/core/runtime/transport/oauth-header-preflight.ts
     contract:
+      - tests/red-tests/error_execution_decision_consumer_no_ts_orchestration.test.mjs
       - tests/red-tests/error_chain_singleton_truth.test.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
@@ -2986,12 +2988,14 @@ verification:
   - feature_id: error.execution_decision_consumer
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
       - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/direct-decision.ts
       - src/server/runtime/http-server/direct-client-disconnect.ts
     contract:
+      - tests/red-tests/error_execution_decision_consumer_no_ts_orchestration.test.mjs
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
       - tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
     integration:
