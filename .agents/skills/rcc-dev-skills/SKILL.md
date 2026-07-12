@@ -175,6 +175,7 @@ description: RouteCodex 调试与架构路由入口
 - 资源 source-binding gate 边界：第四层 `119/119` 后，runtime refactor 前必须先跑 `verify:resource-source-bindings` 和红测 fixture；资源 owner 必须能经 function-map `owner_module` / `allowed_paths` 找到真实 `feature_id:` source anchor，查不到只能标 `binding pending`，禁止伪造 symbol/resource/edge。source-binding 绿门禁必须留在 `verify:architecture-review-surface-light`，红测 fixture 必须留在 `verify:architecture-ci-longtail` 并由 `verify:function-map-build-wiring` 锁住。
 - 首个 runtime slice 准入：先用 `.agent-collab` claim 精确 `feature_id` / `resource_id` / `mainline_node_id`，再证明 owner/source/map/gate 可查；对 dry-run 相关 slice，runtime 改动前必须先有 request dry-run 最终 provider request 样本和 response dry-run converter 黑盒结果，后续修复先加失败 dry-run 样本再改唯一 owner。
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
+- Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
 
 ## 快查命令
 - 查 owner：

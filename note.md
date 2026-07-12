@@ -29381,3 +29381,11 @@ Pure Rust NAPI candidates:
 - In-session restart proof for `0.90.3932`: install/restart signaled old child `node:11617` under supervisor `41955`; `process-lifecycle.jsonl` records `SIGUSR2 -> restart_delegate_parent_supervisor -> exitCode 75`; current listener is `node:49119` with the same parent `41955` running `node ~/.rcc/install/current/dist/cli.js start --snap`.
 - Live negative proof rerun: `ROUTECODEX_START_DAEMON=0 RCC_START_DAEMON=0 rcc start --restart --port 5520` exits `1` with `start_takeover_refused`; stop-intent mtime remains `1783818045 -> 1783818045`; listener remains `node:49119`.
 - Installed dist residue scan still has zero matches for `adoptCurrentRuntimeViaStart`, `targetsNeedRuntimeAdoption`, `getExpectedVersion`, `start --restart`, `adopt_release_runtime_for_port`, `install-release.runtime-version-adoption`, and `cli.start.restart_takeover`.
+
+# 2026-07-12: Hub/VR routing-native-host test reference contraction
+
+- Scope: continue Hub Pipeline / Virtual Router external native bridge convergence; no runtime behavior change and no live restart/install.
+- Change: `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts` now mock owner-specific `src/modules/llmswitch/bridge/routing-native-host.js` instead of broad `native-exports.js`.
+- Gate update: `hub-pipeline-stage-residue-audit` now requires those Hub runtime ingress tests to stay off broad `native-exports` and on `routing-native-host`; function/verification map and the external reference closeout plan document the owner-specific mock boundary.
+- Verification PASS: focused Jest 3 suites / 240 tests; exact `git grep` found zero `native-exports` hits in the two migrated tests; `llmswitch-rustification-audit`; strict `llmswitch-ts-shell-reference-audit`; function-map compile; architecture mainline call map; resource source/operation gates; VR no-TS runtime; minimal TS surface; `git diff --check`; `build:base`.
+- Boundary: this is host bridge test/reference contraction only. White-box host wiring tests should mock owner-specific hosts; pure native output evidence tests should move to direct-native helpers.

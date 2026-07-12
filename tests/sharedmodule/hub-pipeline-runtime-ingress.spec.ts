@@ -12,7 +12,7 @@ const nativeCalls = {
   markConcurrencyScopeBusy: jest.fn<(handle: string, scopeKey: string) => void>(),
 };
 
-jest.unstable_mockModule('../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+jest.unstable_mockModule('../../src/modules/llmswitch/bridge/routing-native-host.js', () => ({
   getRouterHotpathJsonBindingSync: () => ({
     createHubPipelineEngineJson: nativeCalls.create,
     hubPipelineExecuteJson: nativeCalls.execute,
@@ -31,6 +31,8 @@ jest.unstable_mockModule('../../src/modules/llmswitch/bridge/native-exports.js',
     })),
     finalizeVirtualRouterRouteHostEffectsJson: jest.fn(() => JSON.stringify('[virtual-router-hit] test')),
   }),
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(),
+  resolveEntryProtocolFromEndpointNative: jest.fn(),
 }));
 
 const { NativeHubPipelineTestWrapper: HubPipeline } = await import('../helpers/native-hub-pipeline-test-wrapper.js');

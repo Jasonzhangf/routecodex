@@ -14,7 +14,7 @@ const nativeCalls = {
 };
 
 jest.unstable_mockModule(
-  '../../src/modules/llmswitch/bridge/native-exports.js',
+  '../../src/modules/llmswitch/bridge/routing-native-host.js',
   () => ({
     getRouterHotpathJsonBindingSync: () => ({
       createHubPipelineEngineJson: nativeCalls.create,
@@ -27,6 +27,8 @@ jest.unstable_mockModule(
       hubPipelineVirtualRouterStatusJson: nativeCalls.getStatus,
       hubPipelineVirtualRouterMarkConcurrencyScopeBusyJson: nativeCalls.markConcurrencyScopeBusy,
     }),
+    buildRequestStageRuntimeControlWritePlanNative: jest.fn(),
+    resolveEntryProtocolFromEndpointNative: jest.fn(),
   }),
 );
 

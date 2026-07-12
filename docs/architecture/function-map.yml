@@ -2373,6 +2373,7 @@ owners:
     notes:
       - "Runtime ingress handle owner is Rust `hub_pipeline_engine::registry`; the old aggregate TS wrapper `native-hub-pipeline-orchestration-semantics.ts` is physically deleted and must not be restored."
       - "TS owns only host/native-call glue that passes native Hub engine handles and invokes Rust lifecycle/deps APIs; it must not become the semantic owner."
+      - "Hub/VR runtime ingress tests must mock `routing-native-host.ts`, not broad `native-exports.ts`, so the owner-specific host stays the only test seam for this bridge."
       - "Native register/unregister/updateDeps failures must fail-fast; no non-blocking lifecycle swallow or fallback."
       - "Route selection, health, cooldown, and dependency semantics remain in Rust/native owners."
       - "HubPipeline object construction is retired; server/runtime stores native handle strings only."

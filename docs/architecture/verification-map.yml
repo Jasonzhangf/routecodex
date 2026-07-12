@@ -1145,7 +1145,7 @@ verification:
     notes:
       - "HubPipeline runtime ingress bridge is Rust-owned; TS bridge is host/native-call glue only, and native engine handle/lifecycle/deps call failures must be surfaced, not logged as non-blocking."
       - "HubPipeline nested policy/tool-surface/request-metadata type shells must stay internal and absent from the public type barrel."
-      - "The old aggregate runtime ingress wrapper `native-hub-pipeline-orchestration-semantics.ts` must stay physically deleted; tests must mock the direct `router_hotpath_napi` binding through `routing-integrations`/`native-exports`, not the retired wrapper."
+      - "The old aggregate runtime ingress wrapper `native-hub-pipeline-orchestration-semantics.ts` must stay physically deleted; tests must mock the direct `router_hotpath_napi` binding through `routing-integrations`/`routing-native-host`, not broad `native-exports` or the retired wrapper."
 
   - feature_id: hub.request_stage_pipeline_bridge
     change_risk: medium

@@ -2492,3 +2492,8 @@
 - In-session restart proof for the final build: old child `11617` under supervisor parent `41955` received `SIGUSR2`, emitted `restart_delegate_parent_supervisor`, and exited with code `75`; current listener is pid `49119` with the same parent `41955` running `node ~/.rcc/install/current/dist/cli.js start --snap`.
 - Live negative proof for final build: global `rcc start --restart --port 5520` exits `1` with `start_takeover_refused`, leaves listener `node:49119` running, and preserves the existing stop-intent mtime `1783818045`.
 - Installed dist scan has zero takeover-adoption residue for `start --restart`, `cli.start.restart_takeover`, and retired install/runtime adoption helper names.
+[2026-07-12] Hub/VR host wiring tests use owner-specific host mocks
+
+- Verified slice: `hub.runtime_ingress_bridge` / `vr.route_host_effects` test reference contraction. `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts` mock `routing-native-host.js`, not broad `native-exports.js`.
+- Rule: do not force white-box host wiring tests into direct-native helpers when the test needs to inspect mocked native-call arguments. Mock the owner-specific host instead. Reserve `tests/sharedmodule/helpers/*direct-native*` for pure Rust/NAPI output evidence.
+- Evidence: focused Jest 3 suites / 240 tests, exact migrated-test `native-exports` scan zero hits, strict TS shell audit, rustification audit, function/mainline/resource gates, VR no-TS runtime, minimal TS surface, `git diff --check`, and `build:base` passed.

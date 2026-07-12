@@ -321,6 +321,10 @@ require / Jest mock references.
      under `tests/sharedmodule/helpers/*direct-native.ts`.
    - Do the same for bridge facade tests that only assert Rust output, leaving
      handler/runtime integration tests on the real host boundary.
+   - Hub/VR host wiring white-box tests that still need mocked native calls
+     must mock the owner-specific host, such as
+     `src/modules/llmswitch/bridge/routing-native-host.ts`, rather than broad
+     `native-exports.ts`.
    - Expected first shrink: the 34 test refs to `native-exports.ts` and the
      high test ref counts on `routing-integrations.ts`, `runtime-integrations.ts`,
      and response/request facades.

@@ -1141,11 +1141,23 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'tests/modules/llmswitch/bridge/routing-integrations.native-error.spec.ts'),
       'utf8',
     );
+    const runtimeIngressTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts'),
+      'utf8',
+    );
+    const metadataCenterTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts'),
+      'utf8',
+    );
 
     expect(routingSource).not.toContain("from './native-exports.js'");
     expect(routingSource).toContain("from './routing-native-host.js'");
     expect(routingTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
     expect(routingTestSource).toContain('src/modules/llmswitch/bridge/routing-native-host.js');
+    expect(runtimeIngressTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(runtimeIngressTestSource).toContain('src/modules/llmswitch/bridge/routing-native-host.js');
+    expect(metadataCenterTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(metadataCenterTestSource).toContain('src/modules/llmswitch/bridge/routing-native-host.js');
   });
 
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
