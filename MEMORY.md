@@ -2641,3 +2641,7 @@
 
 - Port mode, effective `sameProtocolBehavior`, provider availability, and inbound/provider protocol compatibility are one eligibility decision owner. Rust emits `skip`, `resolve_provider`, or `execute_direct`; TS performs provider lookup/protocol extraction/IO only.
 - A two-stage Rust plan prevents unnecessary provider lookup for an already-skipped port without moving branching truth back into TS. Impossible native actions must fail-fast; they are not an invitation for a TS default/fallback branch.
+# 2026-07-13: direct payload audit selection is Rust diagnostic truth
+
+- Direct route audit observes only ordered top-level `model`, `reasoning`, `thinking`, and `max_tokens`. Rust owns this allowlist/order; TS only retains the payload reference and applies the returned projection to request-local audit context.
+- Explicit null is preserved, absent/nested lookalikes are omitted, and audit output cannot become provider/client payload or MetadataCenter truth.

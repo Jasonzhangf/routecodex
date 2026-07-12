@@ -200,6 +200,9 @@ describe('router-direct-pipeline', () => {
         expect(result.externalLatencyMs).toBe(2345);
         const ctx = result.auditContext;
         expect(ctx.observedFields).toBeDefined();
+        expect(ctx.observedFields).toEqual([
+          { field: 'model', value: 'gpt-4o' },
+        ]);
         expect(ctx.payload).toBe(input.requestPayload);
         expect(ctx.providerKey).toBe('openai.gpt-4');
         expect(ctx.inboundProtocol).toBe('openai-chat');

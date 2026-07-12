@@ -29687,3 +29687,8 @@ Pure Rust NAPI candidates:
 - `hub.router_direct_eligibility_plan` now owns port mode, effective same-protocol behavior, provider availability, and protocol-match actions in Rust. It emits `skip`, `resolve_provider`, or `execute_direct`; TS resolves entry protocol/provider handle and executes only the planned branch.
 - Positive: router default/explicit direct plus matching protocol executes. Negative: provider mode, relay, missing provider, and protocol mismatch skip with Rust-owned reasons; impossible native actions fail-fast.
 - Evidence: missing native export produced focused red; Rust 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.
+# 2026-07-13: router-direct audit projection moved to Rust
+
+- `hub.router_direct_audit_projection` owns the ordered diagnostic selection of `model`, `reasoning`, `thinking`, and `max_tokens` in Rust. TS preserves the provider payload object reference and assigns only the returned `observedFields`.
+- Explicit null remains observable; missing fields and nested lookalikes are omitted. The projection is diagnostic-only and cannot mutate provider/client payload or become metadata truth.
+- Evidence: missing native export produced focused red; Rust 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.

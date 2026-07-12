@@ -3257,3 +3257,26 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive locks cover router default/explicit direct and matching protocols; negative locks cover provider mode, relay, missing provider, mismatch, impossible plan action, and TS decision revival."
+
+  - feature_id: hub.router_direct_audit_projection
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_audit_projection.rs
+      - src/modules/llmswitch/bridge/direct-route-audit-projection-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+    contract:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi direct_route_audit_projection --lib -- --nocapture
+    integration:
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts --runInBand --silent
+    smoke:
+      - npm run test:direct-route-audit-projection-rust-only-red-fixtures
+      - npm run verify:direct-route-audit-projection-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks order/value preservation; negative locks absent/nested omission, explicit null, payload identity, and TS field-list revival."

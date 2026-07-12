@@ -6689,3 +6689,44 @@ owners:
     notes:
       - "The two-step resolve_provider action avoids provider lookup for an already-skipped port while keeping all branching semantics in Rust."
       - "TS must fail-fast on an impossible native action rather than inventing a fallback action."
+
+  - feature_id: hub.router_direct_audit_projection
+    status: active
+    summary: "router-direct observable payload field projection is Rust-owned diagnostic truth"
+    owner_kind: rust_ssot
+    owner_scope: "Rust selects and orders model/reasoning/thinking/max_tokens observations; TS preserves the payload reference and assigns the returned diagnostic projection"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_audit_projection.rs
+    resource_bindings:
+      observes:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - response.client_payload@ServerRespOutbound05ClientFrame
+    canonical_types:
+      - DirectRouteAuditProjection
+    canonical_builders:
+      - project_direct_route_audit_fields_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_audit_projection.rs
+      - src/modules/llmswitch/bridge/direct-route-audit-projection-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-direct-route-audit-projection-rust-only.mjs
+      - scripts/tests/direct-route-audit-projection-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run test:direct-route-audit-projection-rust-only-red-fixtures
+      - npm run verify:direct-route-audit-projection-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "The projection is diagnostic-only and must never mutate provider wire/client payload or become metadata truth."
+      - "Explicit null is observable; absent and nested lookalike fields are omitted."

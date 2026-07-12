@@ -47,6 +47,7 @@ import {
 } from '../../../modules/llmswitch/bridge/direct-route-model-hooks-host.js';
 import { planDirectRouteResponseErrorNative } from '../../../modules/llmswitch/bridge/direct-route-response-error-host.js';
 import { planDirectRouteEligibilityNative } from '../../../modules/llmswitch/bridge/direct-route-eligibility-host.js';
+import { projectDirectRouteAuditFieldsNative } from '../../../modules/llmswitch/bridge/direct-route-audit-projection-host.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -399,16 +400,9 @@ function recordPayloadAudit(
   ctx: RouterDirectAuditContext,
 ): Record<string, unknown> {
   ctx.payload = payload;
-  for (const field of OBSERVABLE_FIELDS) {
-    if (field in payload) {
-      ctx.observedFields.push({ field, value: payload[field] });
-    }
-  }
+  ctx.observedFields = projectDirectRouteAuditFieldsNative(payload).observedFields;
   return payload;
 }
-
-/** Fields surfaced in audit logs/snapshots for traceability. */
-const OBSERVABLE_FIELDS = ['model', 'reasoning', 'thinking', 'max_tokens'] as const;
 
 // ---------------------------------------------------------------------------
 // Public helpers
