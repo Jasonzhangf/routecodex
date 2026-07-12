@@ -1792,6 +1792,14 @@ describe('hub pipeline stage residue audit', () => {
       path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-recorder.ts'),
       'utf8',
     );
+    const hostSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/modules/llmswitch/bridge/snapshot-hooks-host.ts'),
+      'utf8',
+    );
+    const snapshotTestSource = fs.readFileSync(
+      path.join(process.cwd(), 'tests/sharedmodule/snapshot-recorder-native-plan.spec.ts'),
+      'utf8',
+    );
     const retiredCoverageScript = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/scripts/tests/coverage-hub-snapshot-hooks-utils-recorder.mjs',
@@ -1804,6 +1812,12 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
     expect(fs.existsSync(retiredCoverageScript)).toBe(false);
     expect(source).toContain('export async function createSnapshotRecorder');
+    expect(source).toContain("from './snapshot-hooks-host.js'");
+    expect(source).not.toContain("from './native-exports.js'");
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('getSnapshotHooksNativeBindingSync');
+    expect(snapshotTestSource).toContain('src/modules/llmswitch/bridge/snapshot-hooks-host.js');
+    expect(snapshotTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
   });
 
   it('legacy concrete TS format adapter implementations must be physically removed', () => {

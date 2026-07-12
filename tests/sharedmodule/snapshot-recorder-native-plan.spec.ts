@@ -16,11 +16,11 @@ const buildSnapshotRecorderWriteOptionsWithNativeMock = jest.fn((input: Record<s
 const writeSnapshotViaHooksWithNativeMock = jest.fn();
 
 jest.unstable_mockModule(
-  '../../src/modules/llmswitch/bridge/native-exports.js',
+  '../../src/modules/llmswitch/bridge/snapshot-hooks-host.js',
   () => ({
     shouldRecordSnapshotsNative: () => true,
     writeSnapshotViaHooksNative: writeSnapshotViaHooksWithNativeMock,
-    getRouterHotpathJsonBindingSync: () => ({
+    getSnapshotHooksNativeBindingSync: () => ({
       normalizeSnapshotStagePayloadJson: (_stage: string, payloadJson: string) => payloadJson,
       buildSnapshotRecorderWriteOptionsJson: (inputJson: string) => JSON.stringify(
         buildSnapshotRecorderWriteOptionsWithNativeMock(JSON.parse(inputJson) as Record<string, unknown>),

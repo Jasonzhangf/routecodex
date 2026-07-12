@@ -14,7 +14,7 @@ import {
   classifyRuntimeErrorSignalNative,
   classifyEmptyResponseSignalNative,
   detectToolExecutionFailuresNative,
-  getRouterHotpathJsonBindingSync,
+  getSnapshotHooksNativeBindingSync,
   resetSnapshotRecorderErrorsampleStateNative,
   resolveRequestTailSummaryNative,
   shouldInspectRuntimeErrorFastNative,
@@ -26,7 +26,7 @@ import {
   summarizeSnapshotStageTraceNative,
   summarizeClientToolObservationNative,
   writeSnapshotViaHooksNative
-} from './native-exports.js';
+} from './snapshot-hooks-host.js';
 
 export { resetSnapshotRecorderErrorsampleStateForTests };
 
@@ -288,7 +288,7 @@ function readMetadataCenterSnapshotFromAnyBoundTarget(target: unknown): Record<s
 }
 
 function callSnapshotNativeJson(capability: string, args: unknown[]): unknown {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+  const binding = getSnapshotHooksNativeBindingSync() as Record<string, ((...args: unknown[]) => unknown) | undefined>;
   const fn = binding[capability];
   if (typeof fn !== 'function') {
     throw new Error(`[llmswitch-bridge] ${capability} not available`);
