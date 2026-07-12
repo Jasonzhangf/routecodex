@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { buildChoicesArrayBridgeDebugDetailsWithNative } from '../../../../../src/modules/llmswitch/bridge/provider-response-native-calls.js';
 import { shouldAllowDirectResponsesPrebuiltSsePassthrough } from '../../../../../src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,6 +11,10 @@ const __dirname = path.dirname(__filename);
 const sharedBlocksSourcePath = path.resolve(
   __dirname,
   '../../../../../src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts'
+);
+const converterSourcePath = path.resolve(
+  __dirname,
+  '../../../../../src/server/runtime/http-server/executor/provider-response-converter.ts'
 );
 
 describe('provider-response shared pure blocks', () => {
@@ -24,6 +29,35 @@ describe('provider-response shared pure blocks', () => {
     expect(source).not.toContain("entry.includes('/v1/responses')");
     expect(source).not.toContain("args.providerProtocol !== 'openai-responses'");
     expect(source).not.toContain("args.continuationOwner === 'direct'");
+  });
+
+  it('keeps choices-array bridge debug details Rust-owned', () => {
+    const source = fs.readFileSync(converterSourcePath, 'utf8');
+
+    expect(source).toContain('buildChoicesArrayBridgeDebugDetailsWithNative');
+    expect(source).not.toContain('function buildChoicesArrayBridgeDebugDetails');
+    expect(source).not.toContain("args.message.toLowerCase().includes('choices array')");
+    expect(source).not.toContain('bridgePayloadHasDataChoices: Array.isArray');
+
+    expect(buildChoicesArrayBridgeDebugDetailsWithNative({
+      message: 'plain validation error',
+      bridgeProviderProtocol: 'openai-responses',
+      bridgeSeed: { body: { data: { choices: [] } } },
+      bridgePayload: { data: { choices: [] } }
+    })).toEqual({});
+
+    expect(buildChoicesArrayBridgeDebugDetailsWithNative({
+      message: 'Expected choices array in provider response',
+      bridgeProviderProtocol: 'openai-responses',
+      bridgeSeed: { body: {}, status: 200 },
+      bridgePayload: { data: { choices: [] } }
+    })).toEqual({
+      bridgeProviderProtocol: 'openai-responses',
+      bridgeSeedKeys: ['body', 'status'],
+      bridgePayloadKeys: ['data'],
+      bridgePayloadHasChoices: false,
+      bridgePayloadHasDataChoices: true
+    });
   });
 
   it('allows prebuilt responses SSE passthrough only for direct same-protocol responses', () => {

@@ -37,6 +37,7 @@ export {
 
 export {
   asFlatRecord,
+  buildChoicesArrayBridgeDebugDetailsWithNative,
   containsBroadKillCommand,
   extractBridgeProviderResponsePayload,
   extractContentTextForStoplessScan,

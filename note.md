@@ -1,3 +1,10 @@
+# 2026-07-12 23:02 CST: provider-response choices-array bridge debug details moved to Rust
+- Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`, diagnostic projection sub-slice only.
+- Change: `convertProviderResponseIfNeeded` no longer contains local TS `buildChoicesArrayBridgeDebugDetails`; it calls `buildChoicesArrayBridgeDebugDetailsWithNative`, backed by Rust/NAPI `buildChoicesArrayBridgeDebugDetailsJson`.
+- Positive/negative lock: Rust unit covers `choices array` diagnostics and non-choices no-op; Jest source scan rejects reintroduced local TS helper and local `Array.isArray` bridge payload probes.
+- Validation: `npm run test:provider-response-shared-pure-blocks-cargo` passed 34 tests; `npm run build:native-hotpath` passed; focused Jest `provider-response-shared-pure-blocks` + `provider-response-converter.bridge-seed` passed 9 tests.
+- Boundary: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, usage/timing, and stream/body capture remain TS host glue and need separate red/dry-run samples before migration.
+
 # 2026-07-12 22:08 CST: provider-response direct prebuilt SSE passthrough predicate moved to Rust
 - Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`.
 - Change: `shouldAllowDirectResponsesPrebuiltSsePassthrough` no longer contains local TS endpoint/protocol/continuation-owner predicate logic; it calls Rust/NAPI `shouldAllowDirectResponsesPrebuiltSsePassthroughJson` through `provider-response-native-calls.ts`.

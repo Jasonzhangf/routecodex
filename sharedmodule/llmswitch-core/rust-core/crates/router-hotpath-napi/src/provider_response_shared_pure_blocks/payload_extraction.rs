@@ -5,7 +5,7 @@
 //!
 //! All functions are deterministic, no I/O, no external state.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
 // Type helpers
@@ -318,6 +318,44 @@ pub fn should_allow_direct_responses_prebuilt_sse_passthrough(input: &Value) -> 
         == "direct"
 }
 
+pub fn build_choices_array_bridge_debug_details(input: &Value) -> Value {
+    let input_map = match input {
+        Value::Object(map) => map,
+        _ => return json!({}),
+    };
+    let message = input_map
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !message.contains("choices array") {
+        return json!({});
+    }
+    let bridge_payload = input_map
+        .get("bridgePayload")
+        .and_then(Value::as_object);
+    let nested_data = bridge_payload
+        .and_then(|payload| payload.get("data"))
+        .and_then(Value::as_object);
+    json!({
+        "bridgeProviderProtocol": input_map.get("bridgeProviderProtocol").and_then(Value::as_str),
+        "bridgeSeedKeys": input_map
+            .get("bridgeSeed")
+            .and_then(Value::as_object)
+            .map(|seed| seed.keys().cloned().collect::<Vec<String>>()),
+        "bridgePayloadKeys": bridge_payload
+            .map(|payload| payload.keys().cloned().collect::<Vec<String>>()),
+        "bridgePayloadHasChoices": bridge_payload
+            .and_then(|payload| payload.get("choices"))
+            .and_then(Value::as_array)
+            .is_some(),
+        "bridgePayloadHasDataChoices": nested_data
+            .and_then(|data| data.get("choices"))
+            .and_then(Value::as_array)
+            .is_some()
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -603,5 +641,34 @@ mod tests {
                 "continuationOwner": "direct"
             })
         ));
+    }
+
+    #[test]
+    fn choices_array_bridge_debug_details_only_for_choices_array_errors() {
+        assert_eq!(
+            build_choices_array_bridge_debug_details(&json!({
+                "message": "plain validation error",
+                "bridgeProviderProtocol": "openai-responses",
+                "bridgeSeed": {"body": {"data": {"choices": []}}},
+                "bridgePayload": {"data": {"choices": []}}
+            })),
+            json!({})
+        );
+
+        assert_eq!(
+            build_choices_array_bridge_debug_details(&json!({
+                "message": "Expected choices array in provider response",
+                "bridgeProviderProtocol": "openai-responses",
+                "bridgeSeed": {"body": {}, "status": 200},
+                "bridgePayload": {"data": {"choices": []}}
+            })),
+            json!({
+                "bridgeProviderProtocol": "openai-responses",
+                "bridgeSeedKeys": ["body", "status"],
+                "bridgePayloadKeys": ["data"],
+                "bridgePayloadHasChoices": false,
+                "bridgePayloadHasDataChoices": true
+            })
+        );
     }
 }

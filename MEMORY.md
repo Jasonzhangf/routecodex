@@ -1,3 +1,10 @@
+# 2026-07-12: Provider-response choices-array bridge debug details are Rust-owned
+
+- `convertProviderResponseIfNeeded` must not locally rebuild `choices array` bridge debug details in TS. It calls `buildChoicesArrayBridgeDebugDetailsWithNative(...)` and spreads that Rust-owned projection into error log details.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_choices_array_bridge_debug_details`; NAPI entry: `buildChoicesArrayBridgeDebugDetailsJson`.
+- Required lock: Rust unit covers positive `choices array` diagnostics and negative non-choices errors; Jest source scan rejects reintroduced local TS `function buildChoicesArrayBridgeDebugDetails`, `args.message.toLowerCase().includes('choices array')`, and local `bridgePayloadHasDataChoices: Array.isArray(...)`.
+- This closes only a diagnostic projection sub-slice. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage recorder, usage/timing, and stream/body capture; those remain separate owner slices.
+
 # 2026-07-12: Provider-response direct prebuilt SSE passthrough predicate is Rust-owned
 
 - `shouldAllowDirectResponsesPrebuiltSsePassthrough` in `src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts` must stay a TS shell over Rust/NAPI; it calls `shouldAllowDirectResponsesPrebuiltSsePassthroughJson` through `provider-response-native-calls.ts`.

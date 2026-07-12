@@ -250,6 +250,24 @@ export function shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative(input
   )(stringifyNativeJsonArg('shouldAllowDirectResponsesPrebuiltSsePassthroughJson', input, { label })) === true;
 }
 
+export function buildChoicesArrayBridgeDebugDetailsWithNative(input: {
+  message: string;
+  bridgeProviderProtocol?: string;
+  bridgeSeed?: Record<string, unknown>;
+  bridgePayload?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const raw = requireNativeFunction(
+    getProviderResponseNativeBindingSync,
+    'buildChoicesArrayBridgeDebugDetailsJson',
+    { label }
+  )(stringifyNativeJsonArg('buildChoicesArrayBridgeDebugDetailsJson', input, { label }));
+  return parseNativeJsonResult<Record<string, unknown>>(
+    'buildChoicesArrayBridgeDebugDetailsJson',
+    raw,
+    { label }
+  );
+}
+
 export function executeHubPipelineWithNative(input: {
   config: Record<string, unknown>;
   request: Record<string, unknown>;

@@ -3775,6 +3775,13 @@ pub fn should_allow_direct_responses_prebuilt_sse_passthrough_json(
     Ok(payload_extraction::should_allow_direct_responses_prebuilt_sse_passthrough(&raw))
 }
 
+#[napi]
+pub fn build_choices_array_bridge_debug_details_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
+    Ok(payload_extraction::build_choices_array_bridge_debug_details(&raw).to_string())
+}
+
 // ---------------------------------------------------------------------------
 // direct_decision NAPI exports — Rust migration batch #4
 // ---------------------------------------------------------------------------

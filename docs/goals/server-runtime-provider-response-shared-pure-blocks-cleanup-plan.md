@@ -94,3 +94,18 @@ Test design:
 - Module black-box: `provider-response-shared-pure-blocks.spec.ts` calls the TS shell and scans source to forbid reintroduced local predicate branches.
 - Project black-box: `test:pipeline-dry-run-blackbox-fixtures` proves response dry-run still produces black-box converter output and request dry-run still validates final provider request artifacts.
 - Known gap: broader `convertProviderResponseIfNeeded` TS error remap and MetadataCenter sync remain TS host glue; they require separate red samples before migration.
+
+## 2026-07-12 Update: Choices Array Bridge Debug Details
+
+Closed sub-slice:
+- `convertProviderResponseIfNeeded` no longer owns the `choices array` bridge debug-detail projection in TS.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_choices_array_bridge_debug_details`.
+- NAPI entry: `buildChoicesArrayBridgeDebugDetailsJson`.
+- TS shell: `src/server/runtime/http-server/executor/provider-response-converter.ts` only spreads `buildChoicesArrayBridgeDebugDetailsWithNative(...)` into error logs.
+
+Test design:
+- Lifecycle: response conversion error diagnostics may include bridge seed/payload key probes when Rust response conversion reports a `choices array` shape error.
+- White-box: Rust unit test covers the positive `choices array` case and the negative non-choices error case.
+- Module black-box: `provider-response-shared-pure-blocks.spec.ts` calls the native wrapper and scans `provider-response-converter.ts` to reject a reintroduced local TS helper.
+- Project black-box: request/response dry-run remains the closeout proof for final provider request samples and response converter output; this sub-slice does not change provider/client payload shape.
+- Known gap: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, usage/timing, and stream/body capture remain TS host glue; each needs a separate red/dry-run sample before migration.

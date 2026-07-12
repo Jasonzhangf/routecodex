@@ -4,6 +4,7 @@ import type { ProviderHandle, ProviderProtocol } from '../types.js';
 import { asRecord } from '../provider-utils.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
+  buildChoicesArrayBridgeDebugDetailsWithNative,
 } from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
@@ -73,30 +74,6 @@ export function buildBridgeProviderResponseSeed(
     seed.headers = response.headers;
   }
   return seed;
-}
-
-function buildChoicesArrayBridgeDebugDetails(args: {
-  message: string;
-  bridgeProviderProtocol?: string;
-  bridgeSeed?: Record<string, unknown>;
-  bridgePayload?: Record<string, unknown>;
-}): Record<string, unknown> {
-  if (!args.message.toLowerCase().includes('choices array')) {
-    return {};
-  }
-  const nestedData =
-    args.bridgePayload?.data
-    && typeof args.bridgePayload.data === 'object'
-    && !Array.isArray(args.bridgePayload.data)
-      ? (args.bridgePayload.data as Record<string, unknown>)
-      : undefined;
-  return {
-    bridgeProviderProtocol: args.bridgeProviderProtocol,
-    bridgeSeedKeys: args.bridgeSeed ? Object.keys(args.bridgeSeed) : undefined,
-    bridgePayloadKeys: args.bridgePayload ? Object.keys(args.bridgePayload) : undefined,
-    bridgePayloadHasChoices: Array.isArray(args.bridgePayload?.choices),
-    bridgePayloadHasDataChoices: Array.isArray(nestedData?.choices)
-  };
 }
 
 const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
@@ -598,7 +575,7 @@ export async function convertProviderResponseIfNeeded(
         upstreamCode: upstreamCode || detailUpstreamCode,
         reason: detailReason,
         message,
-        ...buildChoicesArrayBridgeDebugDetails({
+        ...buildChoicesArrayBridgeDebugDetailsWithNative({
           message,
           bridgeProviderProtocol: bridgeProviderProtocolForError,
           bridgeSeed: bridgeSeedForError,
@@ -661,7 +638,7 @@ export async function convertProviderResponseIfNeeded(
       upstreamCode: upstreamCode || detailUpstreamCode,
       reason: detailReason,
       message,
-      ...buildChoicesArrayBridgeDebugDetails({
+      ...buildChoicesArrayBridgeDebugDetailsWithNative({
         message,
         bridgeProviderProtocol: bridgeProviderProtocolForError,
         bridgeSeed: bridgeSeedForError,
