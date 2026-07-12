@@ -589,6 +589,7 @@
   "consumeResponsesPassthroughByAliasesJson",
   "buildRouterDirectRouteMetadataJson",
   "buildDirectProviderRuntimeMetadataJson",
+  "planRouterDirectRuntimeMetadataEffectJson",
   "planDirectRouteRequestHooksJson",
   "planDirectRouteModelObservationEffectsJson",
   "rewriteDirectRouteResponseModelJson",

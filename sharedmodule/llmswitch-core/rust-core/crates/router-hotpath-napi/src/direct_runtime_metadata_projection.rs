@@ -303,6 +303,25 @@ fn build_provider_projection(input: &Value) -> Value {
     Value::Object(out)
 }
 
+// feature_id: hub.router_direct_runtime_metadata_effect_plan
+fn plan_router_direct_runtime_metadata_effect(input: &Value) -> Value {
+    if input.get("runtimeMetadataPresent").and_then(Value::as_bool) != Some(true) {
+        return serde_json::json!({"action":"skip"});
+    }
+    let mut projected = Map::new();
+    if let Some(source) = record(input.get("pipelineMetadata")) {
+        copy_dry_run(source, &mut projected);
+    }
+    let dry_run_control = projected
+        .get("__routecodexPipelineDryRun")
+        .or_else(|| projected.get("__rccDryRunSerialized"))
+        .cloned();
+    serde_json::json!({
+        "action":"attach",
+        "dryRunControl": dry_run_control,
+    })
+}
+
 fn run_projection(input_json: String, builder: fn(&Value) -> Value) -> NapiResult<String> {
     let input: Value = serde_json::from_str(&input_json).map_err(|error| {
         napi::Error::from_reason(format!(
@@ -324,6 +343,11 @@ pub fn build_router_direct_route_metadata_json(input_json: String) -> NapiResult
 #[napi(js_name = "buildDirectProviderRuntimeMetadataJson")]
 pub fn build_direct_provider_runtime_metadata_json(input_json: String) -> NapiResult<String> {
     run_projection(input_json, build_provider_projection)
+}
+
+#[napi(js_name = "planRouterDirectRuntimeMetadataEffectJson")]
+pub fn plan_router_direct_runtime_metadata_effect_json(input_json: String) -> NapiResult<String> {
+    run_projection(input_json, plan_router_direct_runtime_metadata_effect)
 }
 
 #[cfg(test)]
@@ -350,5 +374,24 @@ mod tests {
         assert_eq!(output["entryPort"], 5520);
         assert_eq!(output["__responsesDirectPassthrough"], true);
         assert!(output.get("input").is_none());
+    }
+
+    #[test]
+    fn runtime_metadata_effect_requires_carrier_and_projects_only_valid_dry_run() {
+        let control = serde_json::json!({"enabled":true,"kind":"provider_request","requestId":"dry-1"});
+        let attach = plan_router_direct_runtime_metadata_effect(&serde_json::json!({
+            "runtimeMetadataPresent":true,
+            "pipelineMetadata":{"__rccDryRunSerialized":control,"payload":{"secret":true}}
+        }));
+        assert_eq!(attach["action"], "attach");
+        assert_eq!(attach["dryRunControl"]["requestId"], "dry-1");
+        assert_eq!(plan_router_direct_runtime_metadata_effect(&serde_json::json!({
+            "runtimeMetadataPresent":false,
+            "pipelineMetadata":{"__rccDryRunSerialized":control}
+        }))["action"], "skip");
+        assert!(plan_router_direct_runtime_metadata_effect(&serde_json::json!({
+            "runtimeMetadataPresent":true,
+            "pipelineMetadata":{"__rccDryRunSerialized":{"enabled":false,"kind":"provider_request"}}
+        })).get("dryRunControl").is_some_and(Value::is_null));
     }
 }

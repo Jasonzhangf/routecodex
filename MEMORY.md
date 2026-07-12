@@ -2659,3 +2659,7 @@
 
 - Commit `2a2e5cf` is installed at version `0.90.3932`; global CLIs, install/current, and managed 5555 health versions match.
 - Live 5555 Responses provider-request dry-run proves the installed path stops before provider send and emits the final provider request with the expected canonical model. Latest canonical client response sample is HTTP 200.
+# 2026-07-13: router-direct runtime metadata attach uses a Rust action plan
+
+- Carrier existence and valid provider-request dry-run control determine a closed Rust `skip` / `attach` action. TS may preserve opaque/non-JSON carrier fields and execute symbol attachment, but cannot infer attach or propagate dry-run independently.
+- Invalid or disabled dry-run control projects to no control; missing runtime carrier always skips. Unknown actions fail-fast with no attach fallback.

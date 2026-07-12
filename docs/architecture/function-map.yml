@@ -6816,3 +6816,46 @@ owners:
     notes:
       - "A missing client/provider override pair yields zero writes; TS cannot synthesize keys, values, or reasons."
       - "MetadataCenter mutation stays host IO and never leaks observation fields into provider/client normal payload."
+
+  - feature_id: hub.router_direct_runtime_metadata_effect_plan
+    status: active
+    summary: "router-direct runtime metadata carrier attach and provider-request dry-run propagation are Rust-planned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust selects skip/attach and validates/projects the optional provider-request dry-run control; TS preserves opaque carrier fields and executes symbol attachment"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+    resource_bindings:
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      writes:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+    canonical_types:
+      - RouterDirectRuntimeMetadataEffectPlan
+    canonical_builders:
+      - plan_router_direct_runtime_metadata_effect_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+      - src/modules/llmswitch/bridge/direct-runtime-metadata-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-router-direct-runtime-metadata-effect-rust-only.mjs
+      - scripts/tests/router-direct-runtime-metadata-effect-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run test:router-direct-runtime-metadata-effect-rust-only-red-fixtures
+      - npm run verify:router-direct-runtime-metadata-effect-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "Opaque carrier keys remain TS-preserved IO; Rust receives only carrier existence and cycle-safe pipeline metadata facts."
+      - "Unknown actions fail-fast; missing carrier or invalid dry-run never becomes an attach fallback."

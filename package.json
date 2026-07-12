@@ -70,6 +70,8 @@
     "test:direct-route-response-action-rust-only-red-fixtures": "node scripts/tests/direct-route-response-action-rust-only-red-fixtures.mjs",
     "verify:direct-route-model-observation-effect-rust-only": "node scripts/architecture/verify-direct-route-model-observation-effect-rust-only.mjs",
     "test:direct-route-model-observation-effect-rust-only-red-fixtures": "node scripts/tests/direct-route-model-observation-effect-rust-only-red-fixtures.mjs",
+    "verify:router-direct-runtime-metadata-effect-rust-only": "node scripts/architecture/verify-router-direct-runtime-metadata-effect-rust-only.mjs",
+    "test:router-direct-runtime-metadata-effect-rust-only-red-fixtures": "node scripts/tests/router-direct-runtime-metadata-effect-rust-only-red-fixtures.mjs",
     "verify:provider-response-host-split": "node scripts/architecture/verify-provider-response-host-split.mjs",
     "test:provider-response-host-split-red-fixtures": "node scripts/tests/provider-response-host-split-red-fixtures.mjs",
     "test:provider-response-shared-pure-blocks-cargo": "cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi provider_response_shared_pure_blocks --lib -- --nocapture",

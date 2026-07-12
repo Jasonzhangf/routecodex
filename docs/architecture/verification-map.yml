@@ -3326,3 +3326,26 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive locks paired client/assigned model writes; negatives lock missing-pair no-write, payload isolation, and TS key/reason revival."
+
+  - feature_id: hub.router_direct_runtime_metadata_effect_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+      - src/modules/llmswitch/bridge/direct-runtime-metadata-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+    contract:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi direct_runtime_metadata_projection --lib -- --nocapture
+    integration:
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts --runInBand --silent
+    smoke:
+      - npm run test:router-direct-runtime-metadata-effect-rust-only-red-fixtures
+      - npm run verify:router-direct-runtime-metadata-effect-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks carrier attach plus valid provider-request dry-run; negatives lock missing carrier, invalid dry-run, unknown action, and TS fallback revival."

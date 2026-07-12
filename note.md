@@ -29710,3 +29710,8 @@ Pure Rust NAPI candidates:
 - Version truth aligned at `0.90.3932`: global `routecodex`, global `rcc`, `~/.rcc/install/current/package.json`, and 5555 `/health.version`; health reports ready/pipelineReady.
 - Same-entry `/v1/responses` provider-request dry-run on 5555 returned HTTP 200 `routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`, provider snapshot written, and final provider body preserved `model=gpt-5.5`.
 - The first immediate post-restart curl returned 502 without body capture; the repeated same request succeeded and canonical new sample `req_1783887672816_a79cd601` records client response status 200. Historical July 4/7 startup errors in the log predate this install and are not new runtime failures.
+# 2026-07-13: router-direct runtime metadata effect planning moved to Rust
+
+- `hub.router_direct_runtime_metadata_effect_plan` now owns `skip` / `attach` selection and validation/projection of provider-request dry-run control in Rust.
+- TS preserves opaque runtime carrier fields, executes the returned dry-run control attachment, and attaches the non-enumerable symbol carrier to the actual provider payload. Unknown actions fail-fast.
+- Red: pre-native focused router-direct suite failed 21 cases on the missing capability. Green: router-direct 36/36, Rust runtime metadata 3/3, root TypeScript, residue/red, function/resource/mainline/native-reference/rustification/native/base-build gates passed.

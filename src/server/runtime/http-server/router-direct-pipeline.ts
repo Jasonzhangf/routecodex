@@ -35,9 +35,11 @@ import {
   extractProviderRuntimeMetadata
 } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import {
+  attachPipelineDryRunControl,
   isProviderRequestDryRunResponse,
-  propagatePipelineDryRunControl
 } from '../../../debug/pipeline-dry-run.js';
+import type { PipelineDryRunControl } from '../../../debug/pipeline-dry-run.js';
+import { planRouterDirectRuntimeMetadataEffectNative } from '../../../modules/llmswitch/bridge/direct-runtime-metadata-host.js';
 import {
   planDirectRouteRequestHooksNative,
   planDirectRouteModelObservationEffectsNative,
@@ -225,15 +227,21 @@ export async function executeRouterDirectPipeline(
 
   const payloadToSend = recordPayloadAudit(hookResult.payload, auditContext);
   const runtimeMetadata = extractProviderRuntimeMetadata(input.requestPayload);
-  if (runtimeMetadata) {
+  const runtimeMetadataPlan = planRouterDirectRuntimeMetadataEffectNative({
+    runtimeMetadataPresent: Boolean(runtimeMetadata),
+    pipelineMetadata: input.pipelineMetadata,
+  });
+  if (runtimeMetadataPlan.action === 'attach' && runtimeMetadata) {
     const runtimeMetadataRecord = (
       runtimeMetadata.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
         ? runtimeMetadata.metadata as Record<string, unknown>
         : undefined
     ) ?? {};
     runtimeMetadata.metadata = runtimeMetadataRecord;
-    propagatePipelineDryRunControl(input.pipelineMetadata, runtimeMetadataRecord);
+    attachPipelineDryRunControl(runtimeMetadataRecord, runtimeMetadataPlan.dryRunControl as PipelineDryRunControl | undefined);
     attachProviderRuntimeMetadata(payloadToSend, runtimeMetadata);
+  } else if (runtimeMetadataPlan.action !== 'skip') {
+    throw new Error(`invalid router-direct runtime metadata action: ${runtimeMetadataPlan.action}`);
   }
 
   input.onSnapshotBefore?.(payloadToSend, auditContext);

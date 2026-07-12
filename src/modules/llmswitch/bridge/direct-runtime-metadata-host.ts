@@ -1,7 +1,8 @@
 import { getRouterHotpathJsonBindingSync } from './native-exports.js';
 
 // Rust canonical builders: build_router_direct_route_metadata_json,
-// build_direct_provider_runtime_metadata_json. This host performs transport only.
+// build_direct_provider_runtime_metadata_json,
+// plan_router_direct_runtime_metadata_effect_json. This host performs transport only.
 
 type JsonObject = Record<string, unknown>;
 
@@ -44,4 +45,14 @@ export function buildRouterDirectRouteMetadataNative(input: unknown): JsonObject
 
 export function buildDirectProviderRuntimeMetadataNative(input: unknown): JsonObject {
   return callProjection('buildDirectProviderRuntimeMetadataJson', input);
+}
+
+export function planRouterDirectRuntimeMetadataEffectNative(input: unknown): {
+  action: 'skip' | 'attach';
+  dryRunControl?: Record<string, unknown>;
+} {
+  return callProjection('planRouterDirectRuntimeMetadataEffectJson', input) as {
+    action: 'skip' | 'attach';
+    dryRunControl?: Record<string, unknown>;
+  };
 }
