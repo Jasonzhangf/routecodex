@@ -195,7 +195,7 @@
         <h2>Owner / Allowed / Forbidden Path Summary</h2>
         <ul>
           <li>Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src</code>.</li>
-          <li>Allowed paths include Rust <code>servertool-core</code>, Rust <code>router-hotpath-napi</code>, and <code>src/modules/llmswitch/bridge/native-exports.ts</code> as the Host N-API shell.</li>
+          <li>Allowed paths include Rust <code>servertool-core</code>, Rust <code>router-hotpath-napi</code>, and owner-specific <code>src/modules/llmswitch/bridge/*-host.ts</code> shells. <code>src/modules/llmswitch/bridge/native-exports.ts</code> is allowed only as the private loader behind those hosts and must not be the stopless semantic owner surface.</li>
           <li>Forbidden paths: <code>src/providers</code>, <code>src/server/runtime/http-server/executor</code>, and deleted <code>sharedmodule/llmswitch-core/src/servertool/**</code> TS surfaces.</li>
         </ul>
         <h2>Required Gates</h2>

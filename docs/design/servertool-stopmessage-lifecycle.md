@@ -97,7 +97,7 @@ No stopless step in this loop may depend on tmux, `ROUTECODEX_SESSION_DIR`, file
 - Goal state scope: removed; do not reintroduce stopless goal state.
 - Orchestration action: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_orchestration_contract.rs`
 - Native bridge: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
-- TS thin shell: `src/modules/llmswitch/bridge/native-exports.ts`
+- TS host call surface: owner-specific `src/modules/llmswitch/bridge/*-host.ts` shells; `src/modules/llmswitch/bridge/native-exports.ts` is only the private loader and must not become the servertool/stopless semantic owner surface.
 - Runtime side effects: Rust effect plans executed by Host IO; old `sharedmodule/llmswitch-core/src/servertool/engine-orchestration-shell.ts` is deleted and must not be restored.
 
 ## Stop Schema

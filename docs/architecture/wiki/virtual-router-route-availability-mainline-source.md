@@ -108,8 +108,10 @@ Rust source of truth:
 - NAPI / host bridge:
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs`
     - `resolve_error_err05_route_availability_decision_json`
-  - `src/modules/llmswitch/bridge/native-exports.ts`
+  - `src/modules/llmswitch/bridge/route-availability-host.ts`
     - `resolveErrorErr05RouteAvailabilityDecisionNative`
+  - `src/modules/llmswitch/bridge/native-exports.ts`
+    - private loader behind `route-availability-host.ts`; must not be the route availability owner surface
 - TS consumers:
   - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
     - `resolveErrorErr05RouteAvailabilityDecision`

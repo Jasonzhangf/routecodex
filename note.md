@@ -29500,3 +29500,10 @@ Pure Rust NAPI candidates:
 - Verification PASS: red fixtures; `verify:responses-conversation-shared-helpers`; focused Rust `shared_responses_conversation_utils` cargo tests with 86 passed; `verify:responses-history-protocol-contract`; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:architecture-thin-wrapper-only`; `verify:llmswitch-rustification-audit`; `build:native-hotpath`; `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`; `git diff --check`.
 - Build generated `src/build-info.ts` timestamp was precisely restored because this source/architecture slice must not carry generated build metadata. Evidence recorded under `.agent-collab/runs/20260712T134952Z-Macstudio.local-9969-responses-shared-helper/evidence.jsonl`; claim marked `validated`.
 - Remaining active goal: Rust large-file shared-helper audit/splitting remains open for `servertool_core_blocks.rs` and `hub_pipeline_lib/engine.rs`; any further `shared_responses_conversation_utils.rs` split must remain exact-semantics and owner-preserving.
+
+# 2026-07-12: Hub Pipeline docs native owner surface contraction
+
+- Scope: doc/wiki-only continuation while active runtime/shared-map claims were dirty; no runtime behavior, provider, VR, install, restart, release, function-map, verification-map, or package script changed.
+- Change: current stopless/servertool and VR route-availability docs now name owner-specific `src/modules/llmswitch/bridge/*-host.ts` shells as the host call surface and explicitly restrict `src/modules/llmswitch/bridge/native-exports.ts` to private-loader status.
+- Verification PASS: `verify:hub-pipeline-native-reference-gate`; `test:hub-pipeline-native-reference-gate-red-fixtures`; `verify:architecture-wiki-sync`; `verify:architecture-wiki-html-sync`; targeted stale phrase scan; targeted `git diff --check`.
+- Remaining runtime work is still blocked/owned by active claims for provider-response runtime closeout, servertool core shared helpers, and provider runtime tests; `hub_pipeline_lib/engine.rs` remains a later unclaimed slice once active shared `src` claims clear.

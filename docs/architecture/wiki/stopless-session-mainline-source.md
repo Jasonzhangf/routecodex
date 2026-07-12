@@ -102,7 +102,7 @@ flowchart LR
 ## Owner / Allowed / Forbidden Path Summary
 
 - Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src`.
-- Allowed paths include Rust `servertool-core`, Rust `router-hotpath-napi`, and `src/modules/llmswitch/bridge/native-exports.ts` as the Host N-API shell.
+- Allowed paths include Rust `servertool-core`, Rust `router-hotpath-napi`, and owner-specific `src/modules/llmswitch/bridge/*-host.ts` shells. `src/modules/llmswitch/bridge/native-exports.ts` is allowed only as the private loader behind those hosts and must not be the stopless semantic owner surface.
 - Forbidden paths: `src/providers`, `src/server/runtime/http-server/executor`, and deleted `sharedmodule/llmswitch-core/src/servertool/**` TS surfaces.
 
 ## Required Gates
