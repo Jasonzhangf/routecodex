@@ -871,6 +871,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('sanitizeProviderOutboundPayload');
   });
 
+  it('request executor route availability must use its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const executorSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/request-executor-core-utils.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/route-availability-host.ts'),
+      'utf8',
+    );
+
+    expect(executorSource).toContain('../../../../modules/llmswitch/bridge/route-availability-host.js');
+    expect(executorSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('evaluateSingletonRoutePoolExhaustionNative');
+    expect(hostSource).toContain('planPrimaryExhaustedToDefaultPoolNative');
+    expect(hostSource).toContain('resolveErrorErr05RouteAvailabilityDecisionNative');
+  });
+
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {
     const repoRoot = process.cwd();
     const retiredPaths = [

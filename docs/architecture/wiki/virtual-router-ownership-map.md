@@ -268,6 +268,7 @@ Canonical builders:
 
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
+- `src/modules/llmswitch/bridge/route-availability-host.ts`
 - `src/server/runtime/http-server/http-server-bootstrap.ts`
 - `src/server/runtime/http-server/index.ts`
 - `src/server/runtime/http-server/request-executor.ts`
@@ -321,6 +322,7 @@ Canonical builders:
 Allowed paths:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
 - `src/modules/llmswitch/bridge/native-exports.ts`
+- `src/modules/llmswitch/bridge/route-availability-host.ts`
 - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
 - `docs`
 

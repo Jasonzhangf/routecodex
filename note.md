@@ -1,3 +1,22 @@
+# 2026-07-12: session log color broad native bridge ref narrowed
+
+- Scope: external reference contraction for `src/utils/session-log-color.ts`.
+- Change: added `src/modules/llmswitch/bridge/session-log-color-host.ts` as a narrow host surface for `resolveSessionColorStr` / `resolveSessionLogColorKeyJson`; `session-log-color.ts` no longer imports broad `native-exports.js` directly.
+- Boundary: no color hashing, color assignment, hit-log formatting, provider parsing, or route policy moved into TS. Rust `virtual_router_hit_log.rs` remains semantic owner.
+- Map/wiki update: `vr.hit_log_projection` function/verification maps and generated virtual-router ownership wiki/html include the narrow host.
+- Verification PASS: focused Jest 258/258 (`request-log-color`, `request-start-log`, `virtual-router-hit-log`, residue audit); `verify:function-map-compile-gate`; root `tsc --noEmit`; strict `llmswitch-ts-shell-reference-audit`; `llmswitch-rustification-audit`; `verify-llmswitch-minimal-ts-surface`; `build:base` after regenerating architecture wiki/html.
+- Release/live evidence PASS: committed as `008b254`; `scripts/install-release.sh` installed snapshot `0.90.3912`; `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, installer `/health` on 5520, installed runtime file `dist/modules/llmswitch/bridge/session-log-color-host.js`, and manual `routecodex restart --port 5555` + `http://127.0.0.1:5555/health` all verified `0.90.3912` deployment.
+
+# 2026-07-12: finish-reason broad native bridge ref narrowed
+
+- Scope: external reference contraction for `src/server/utils/finish-reason.ts/js`.
+- Change: added `src/modules/llmswitch/bridge/finish-reason-host.ts` as a narrow host surface over Rust-owned `deriveFinishReasonNative`; `finish-reason` now imports that host instead of broad `native-exports.js`.
+- Boundary: no finish-reason classification logic moved into TS/JS. Rust `chat_node_result_semantics.rs` remains semantic owner; the TS utility keeps only debug logging and native call orchestration.
+- Map update: `sse.responses_encode_projection` function/verification maps now include finish-reason direct tests and the narrow host boundary note.
+- Verification PASS: focused Jest 220/220 (`finish-reason`, visible success, residue audit); `verify:function-map-compile-gate`; root `tsc --noEmit`; strict `llmswitch-ts-shell-reference-audit` (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); `llmswitch-rustification-audit`; `verify-llmswitch-minimal-ts-surface`; `build:base`.
+- Release/live evidence PASS: committed as `f753a0fe0`; `scripts/install-release.sh` installed snapshot `0.90.3911`; `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, installer `/health` on 5520, and manual `routecodex restart --port 5555` + `http://127.0.0.1:5555/health` all reported `0.90.3911`.
+- Worktree boundary: unrelated dirty files preserved; only the five finish-reason/map files were staged in commit.
+
 # 2026-07-10: routing-integrations VR host-effects moved behind Rust plan/finalize
 
 - Scope: shrink `src/modules/llmswitch/bridge/routing-integrations.ts` by removing local VR route host-effects decisions.
@@ -28907,6 +28926,15 @@ Pure Rust NAPI candidates:
 - Evidence: MemPalace search located the prior candidate note; focused Rust test `build_responses_conversation_port_scope_for_http_matches_handler_contract` passed; focused Jest passed 5 suites / 33 tests; `verify:function-map-compile-gate`, strict `llmswitch-ts-shell-reference-audit`, minimal TS surface audit, rustification audit, `verify:architecture-deleted-path`, `verify:architecture-thin-wrapper-only`, `npx tsc --noEmit`, `npm run build:base`, and touched-file `git diff --check` passed.
 - Architecture review: no JS backfill, no fallback, no duplicate TS semantic owner. Remaining active bridge references are `provider-response-converter-host.ts` and snapshot recorder host IO files; they are not deletion candidates without deeper owner migration.
 - Known non-target gap: broad `handler-request-executor.unified-semantics.e2e.spec.ts` still fails legacy/mock expectations when run directly; it was not used as closeout evidence for this pure port-scope native slice.
+# 2026-07-12: config native bridge split from routing-integrations
+
+- Scope: continue llmswitch external-reference closeout by splitting Rust-owned config/path/TOML/provider/profile wrappers out of mixed `routing-integrations.ts`.
+- Change: added `src/modules/llmswitch/bridge/config-integrations.ts` as the config/profile native-call shell; production `src/config/*`, `provider-profile-loader`, and `http-server-bootstrap` config resolver imports now use it. `routing-integrations.ts` keeps VR bootstrap plus HubPipeline/VR handle-mode only.
+- Map: config features in function/verification maps now point to `config-integrations.ts`; `config.user_config_materialization.mainline` cfg-load-01/02 moved to config bridge while VR bootstrap remains on routing bridge; generated mainline graph/manifests refreshed.
+- Test adjustment: `http-server-runtime-setup.provider-merge` now mocks config bridge separately and asserts native handle-mode strings instead of old object pipeline facade.
+- Evidence PASS: config/profile focused Jest 13 suites/77 tests; runtime setup + hub policy focused Jest 2 suites/9 tests; root `tsc`; strict llmswitch shell audit (`prodTsShellCount=0`, `shellsWithProdImporters=0`); deleted-path; thin-wrapper-only; function-map gate; mainline call-map; manifest sync; `git diff --check`; `build:base`.
+- Boundary: no global install/restart/live replay claimed; this is source/reference contraction and behavior-equivalent native bridge split. A broad request-executor/router-direct mock group was started but stopped after 60s no output, so it is not evidence for this slice.
+
 ## 2026-07-11 grok/xAI opencode align (auth headers stay Grok Build)
 - Decision: wire headers keep cli-chat-proxy (Authorization + X-XAI-Token-Auth + x-grok-*); OAuth/refresh/multi-token align opencode xAI plugin.
 - Changed: src/providers/auth/grok-auth.ts (+ OAuth constants, PKCE, device-code helpers, JWT exp skew 120s, writeGrokOAuthTokenFile); README; unit tests 12 green.
@@ -29056,6 +29084,23 @@ Pure Rust NAPI candidates:
 - Verification PASS: focused red test, full `responses-provider.direct-passthrough` + `pipeline-dry-run` Jest suites, `npx tsc --noEmit --pretty false`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `build:base`, `git diff --check`.
 - Not executed: no global install, managed restart, or live 5520 same-entry replay; live closure still requires installed build + in-session restart + old-sample/live SSE replay.
 
+# 2026-07-12: Hub Pipeline / VR host bridge external reference audit
+
+- Scope: return to the Hub Pipeline / VR external reference rustification audit; no runtime code changed.
+- Current verified state: `sharedmodule/llmswitch-core/src` has no tracked TS-like files; strict llmswitch shell audit, rustification audit, minimal TS surface audit, and VR no-TS-runtime gate all pass with zero production/non-native TS metrics.
+- Current remaining references are host bridge references under `src/modules/llmswitch`: current working tree has 9 existing TS files plus README; `git ls-files` still tracks pending-deleted `responses-sse-bridge.ts` from a separate dirty slice. The largest active refs on existing files are `native-exports.ts` (65), `routing-integrations.ts` (55), `runtime-integrations.ts` (42), `snapshot-recorder.ts` (16), `responses-response-bridge.ts` (14), and `provider-response-converter-host.ts` (13).
+- Conclusion: remaining work is not "llmswitch-core/VR runtime still TS"; it is host bridge external-reference contraction. First shrink test-only imports and split `routing-integrations.ts` / `native-exports.ts` by owner; keep host IO shells until stream/MetadataCenter/store/snapshot/file IO has an explicit replacement owner.
+- Audit doc updated: `docs/goals/llmswitch-external-reference-rust-closeout-plan.md` section `2026-07-12 Hub Pipeline / VR Host Bridge External Reference Audit`.
+
+# 2026-07-12: provider-request / response dry-run live closure
+
+- Fixed provider-request dry-run propagation for Responses direct/router-direct paths: direct runtime metadata now receives dry-run control from pipeline metadata, `ResponsesProvider` cuts before provider transport, and dry-run control survives metadata object spread via serialized carrier.
+- Fixed response dry-run protocol inference for existing samples where the entry/sample directory is `openai-chat` but the provider payload is `object=response`; `scripts/dry-run-codex-response.ts` now identifies `openai-responses` from provider payload truth before path/entry inference.
+- Global install succeeded as `0.90.3882`; `routecodex --version`, `rcc --version`, and `~/.rcc/install/current/package.json` all report `0.90.3882`; `/health` on `5555`, `5520`, `4444`, and `10000` reports `ready=true`, `pipelineReady=true`, `version=0.90.3882`.
+- Request dry-run installed replay PASS: `node scripts/replay-codex-sample.mjs --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783772710226_e00fe86c/client-request.json --base http://127.0.0.1:5520 --dry-run provider-request --label verify-installed-0.90.3882` wrote `dry-run.provider-request.json` with `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `provider.providerProtocol=openai-responses`, `providerRequest.endpoint=/responses`, `providerRequest.body.model=gpt-5.5`, and `evidence.stoppedBeforeProviderSend=true`.
+- Response dry-run blackbox PASS without protocol override: `npm run dry-run:codex-response -- --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783783139322_87bd6dfa/provider-response.json --out-dir /tmp/rcc-response-dryrun-installed-0.90.3882` produced `providerProtocol=openai-responses`, `bodyObject=chat.completion`, `bodyModel=gpt-5.5`, content `pong\npong\npong`.
+- Regression/static evidence PASS: focused dry-run/router-direct/responses-provider Jest 62/62, `npx tsc --noEmit --pretty false`, `git diff --check`, `build:native-hotpath`, `build:base`, and `install:release`.
+
 # 2026-07-12: Responses SSE bridge facade deletion slice
 
 - Scope: continue host bridge external-reference contraction by deleting duplicate `src/modules/llmswitch/bridge/responses-sse-bridge.ts`.
@@ -29072,9 +29117,58 @@ Pure Rust NAPI candidates:
 - Verification PASS: focused Jest 3 suites / 9 tests, strict `llmswitch-ts-shell-reference-audit --json`, and `git diff --check`.
 - Boundary: source/test contraction only; no runtime behavior change, global install, restart, or live replay claimed.
 
+# 2026-07-12 01:46 CST: Responses response bridge facade deleted
+
+- Scope: continued llmswitch external-reference closeout. `src/modules/llmswitch/bridge/responses-response-bridge.ts` had no remaining active source/test/script import after moving the sole production importer.
+- Change: `handler-response-utils.ts` now holds handler-local request log context / JSON dispatch orchestration and calls Rust/NAPI via `native-exports.ts` (`planResponsesJsonClientDispatchNative`, `buildResponsesPayloadFromChatNative`, `projectResponsesClientPayloadForClientNative`). No JS/TS facade was restored or created.
+- Deletion: physically deleted `src/modules/llmswitch/bridge/responses-response-bridge.ts`; residue gates now require it to remain absent.
+- Map/wiki: updated function map, verification map, mainline call map, generated wiki markdown, and generated wiki HTML so response `resp-03` and continuation `rct-05` bind to `handler-response-utils.ts -> native-exports.ts`.
+- Verification PASS: response handler single-bridge gate, responses SSE business-module gate, client-response internal carrier surface gate, focused Jest 3 suites / 235 tests, root `tsc`, strict llmswitch shell audit, deleted-path, thin-wrapper-only, function-map compile, mainline call map, `git diff --check`, and `build:base`.
+- Boundary: source/gate closeout only; no global install/restart/live replay claimed because this slice removes an unneeded facade and keeps behavior equivalent through the same native calls.
+
+# 2026-07-12 01:59 CST: llmswitch core-loader shell deleted
+
+- Scope: continued external-reference closeout after response bridge facade deletion.
+- Exact pre-delete scan showed `src/modules/llmswitch/core-loader.ts` had one active production importer (`native-exports.ts`) plus docs/residue mentions; no test/script active consumer required the standalone shell.
+- Change: moved package/dist native binding path resolution into private helper code inside `src/modules/llmswitch/bridge/native-exports.ts`, deleted `src/modules/llmswitch/core-loader.ts`, updated llmswitch module READMEs, and added deleted-path/residue gates.
+- Verification PASS: exact active ref scan shows no `core-loader.js` import and only residue/deleted-path mentions plus private `resolveCorePackageDir`; root `tsc`; focused `hub-pipeline-stage-residue-audit` Jest 214/214; strict `llmswitch-ts-shell-reference-audit`; `verify:architecture-deleted-path`; `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `git diff --check`; `build:base`.
+- Commit: `8a7fc8564 refactor(llmswitch): delete core loader shell`.
+
 # 2026-07-12: SSE handler response-bridge mock contraction
 
 - Scope: continue test external-reference contraction for `responses-response-bridge.ts` after the direct JSON guard was moved to native helper evidence.
 - Change: removed `responses-response-bridge.js` mocks from prestart client-close, keepalive protocol, and SSE usage-log tests; these tests now exercise `handler-response-utils.ts` with the real response bridge facade and only mock `native-exports.js`.
 - Verification PASS: focused SSE handler Jest 3 suites / 5 tests; strict `llmswitch-ts-shell-reference-audit --json`; `git diff --check`; exact `rg` found 0 `responses-response-bridge` imports/mocks in the three touched tests.
 - Boundary: test reference contraction only; no runtime behavior change, global install, restart, or live replay claimed.
+
+# 2026-07-12 02:23 CST: native evidence tests stop importing host native-exports bridge
+
+- Scope: external-reference contraction only; no production runtime code changed.
+- Change: native evidence tests for Responses metadata projection, mimoweb text harvest, provider runtime ingress, request-executor continuation/tool-result semantics, and the responses store direct-native helper now load direct Rust/NAPI helpers instead of importing `src/modules/llmswitch/bridge/native-exports.js`.
+- Verification PASS: focused Jest 4 suites / 13 tests; root `tsc`; strict `llmswitch-ts-shell-reference-audit` (`prodTsShellCount=0`, `shellsWithProdImporters=0`, `shellsWithHostTextRefs=0`); `verify:architecture-thin-wrapper-only`; `verify:function-map-compile-gate`; `build:base`.
+- Boundary: test/reference closeout only; no global install/restart/live replay claimed.
+
+# 2026-07-12 02:41 CST: Responses SSE contract test stops importing host native-exports bridge
+
+- Scope: external-reference contraction only; no production runtime code changed.
+- Change: `tests/modules/llmswitch/bridge/native-exports.responses-sse-contract.spec.ts` now uses `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` for SSE frame projection, contract probe, and terminal transport state instead of importing host `native-exports.js`.
+- Helper update: direct native helper gained `updateResponsesSseTransportTerminalStateWithNative` for `updateResponsesSseTransportTerminalStateJson`.
+- Verification PASS: focused Jest 1 suite / 4 tests; root `tsc`; exact touched-file scan found no old host import/wrapper names; strict shell audit; deleted-path; thin-wrapper-only; function-map compile; `git diff --check`; `build:base`.
+- Boundary: test/reference closeout only; no global install/restart/live replay claimed.
+
+# 2026-07-12: release snapshot missing dependency startup failure closed
+
+- Symptom: 5520 restart/start crashed with `ERR_MODULE_NOT_FOUND Cannot find package 'rcc-errorhandling'` imported from installed `/Volumes/extension/.rcc/install/releases/routecodex-0.90.3917-2026-07-11T220201Z/dist/error-handling/route-error-hub.js`.
+- Root cause: the installed release snapshot copied an incomplete production `node_modules`; installed package dependencies were missing `ajv`, `axios`, `open`, `openai`, and `rcc-errorhandling`, while repo `dist` import succeeded.
+- Change: `install-release.sh` now verifies production dependency closure before reusing an existing `node_modules`; `install-release-snapshot.mjs` verifies all declared production dependencies and key runtime imports before switching `install/current`.
+- Red/green: added snapshot missing-dependency test that failed before install/current was written, plus install dependency-closure script guard; both were red before fix and green after.
+- Verification PASS: focused Jest 7/7; `verify:function-map-build-wiring`; `verify:function-map-compile-gate`; `npx tsc --noEmit --pretty false`; `git diff --check`; `npm run install:release`; global `routecodex --version` and `rcc --version` both `0.90.3917`; `/Users/fanzhang/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` both point to `routecodex-0.90.3917-2026-07-12T005746Z` with no missing production deps; installed `route-error-hub.js` import passes; `/health` on 5520/5555/4444/10000 all ok/ready/pipelineReady version `0.90.3917`.
+
+# 2026-07-12: route availability host bridge contraction and release copy EINTR closeout
+
+- Scope: continue host bridge external-reference contraction for VR route availability/default-floor native calls.
+- Change: added `src/modules/llmswitch/bridge/route-availability-host.ts` as a narrow native re-export for `evaluateSingletonRoutePoolExhaustionNative`, `planPrimaryExhaustedToDefaultPoolNative`, and `resolveErrorErr05RouteAvailabilityDecisionNative`; `request-executor-core-utils.ts` now imports this host instead of broad `native-exports.js`.
+- Map/wiki/gates: updated function map, verification map, mainline call map, generated VR wiki markdown/html, red availability test, and hub pipeline residue audit to lock the narrow host.
+- Install blocker found and fixed: release snapshot copy failed visibly with `EINTR` while copying `node_modules/zod-to-json-schema/.../zod/v4/core`; `install-release-snapshot.mjs` now retries only interrupted `fs.cpSync` calls after removing the partial target, while still failing visible and preserving dependency/runtime import verification before switching `install/current`.
+- Verification PASS: focused Jest route availability/red/residue 235/235; install snapshot/dependency Jest 8/8; `npx tsc --noEmit --pretty false`; function-map compile; architecture mainline call map; strict llmswitch TS shell reference audit; llmswitch rustification audit; minimal TS surface audit; VR default-floor gate; deleted-path; thin-wrapper-only; `build:base`.
+- Release/live evidence PASS: first `0.90.3919` install failed at the EINTR copy point; after the copy retry fix, `bash -x scripts/install-release.sh` installed `routecodex-0.90.3919-2026-07-12T012132Z`; `routecodex --version`, `rcc --version`, and `~/.rcc/install/current/package.json` all report `0.90.3919`; installed `dist/modules/llmswitch/bridge/route-availability-host.js` exists and only re-exports native functions; `/health` on 5520 and restarted 5555 both report ok/ready/pipelineReady version `0.90.3919`.

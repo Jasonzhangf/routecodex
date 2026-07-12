@@ -767,6 +767,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/primary_exhausted_to_default_pool.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/primary_exhausted_to_default_pool_blocks.rs
+      - src/modules/llmswitch/bridge/route-availability-host.ts
       - src/server/runtime/http-server/http-server-bootstrap.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
@@ -801,6 +802,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
       - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/route-availability-host.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
       - tests/red-tests/vr_route_availability_floor_singleton_truth.test.ts

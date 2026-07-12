@@ -144,10 +144,36 @@ prepare_isolated_build_root() {
   fi
 }
 
+production_dependencies_ready() {
+  INSTALL_BUILD_ROOT="$INSTALL_BUILD_ROOT" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const root = process.env.INSTALL_BUILD_ROOT;
+const pkgPath = path.join(root, 'package.json');
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+const dependencies = Object.keys(pkg.dependencies || {}).sort();
+const missing = dependencies.filter((dependencyName) => {
+  const packageJsonPath = path.join(root, 'node_modules', ...dependencyName.split('/'), 'package.json');
+  return !fs.existsSync(packageJsonPath);
+});
+if (missing.length > 0) {
+  console.error(`missing production dependencies: ${missing.join(', ')}`);
+  process.exit(1);
+}
+NODE
+}
+
 prepare_dependencies() {
   if [ -d "$INSTALL_BUILD_ROOT/node_modules" ]; then
-    echo "✅ 根项目依赖已存在，跳过安装"
-    return
+    if production_dependencies_ready; then
+      echo "✅ 根项目依赖闭包已验证，跳过安装"
+      return
+    fi
+    echo "⚠️  根项目 node_modules 依赖闭包不完整，重建依赖"
+    if [ "$INSTALL_BUILD_ROOT" != "$SOURCE_ROOT" ]; then
+      rm -rf "$INSTALL_BUILD_ROOT/node_modules"
+    fi
   fi
 
   echo "📦 安装根项目依赖..."
@@ -157,6 +183,9 @@ prepare_dependencies() {
     (cd "$INSTALL_BUILD_ROOT" && npm ci --no-audit --no-fund --ignore-scripts --loglevel=warn)
   else
     (cd "$INSTALL_BUILD_ROOT" && npm install --no-audit --no-fund --ignore-scripts --prefer-offline --progress=false --loglevel=warn)
+  fi
+  if ! production_dependencies_ready; then
+    fail "根项目 production dependency closure 仍不完整"
   fi
 }
 

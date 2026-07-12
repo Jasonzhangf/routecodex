@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,13 +56,44 @@ function sanitizeReleaseId(value) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-');
 }
 
+function isInterruptedSystemCall(error) {
+  return Boolean(error && typeof error === 'object' && error.code === 'EINTR');
+}
+
+function retryDelayMs(attempt) {
+  return 50 * attempt;
+}
+
+function waitBeforeRetry(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function copyPathSync(sourcePath, targetPath, options) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      fs.cpSync(sourcePath, targetPath, options);
+      return;
+    } catch (error) {
+      if (!isInterruptedSystemCall(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+      console.warn(
+        `[release-snapshot] copy interrupted by EINTR, retrying (${attempt}/${maxAttempts - 1}): ${targetPath}`
+      );
+      removeIfExists(targetPath);
+      waitBeforeRetry(retryDelayMs(attempt));
+    }
+  }
+}
+
 function copyIntoSnapshot(relativePath, targetRoot) {
   const sourcePath = requireExisting(relativePath);
   const targetPath = path.join(targetRoot, relativePath);
   const stat = fs.statSync(sourcePath);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   if (stat.isDirectory()) {
-    fs.cpSync(sourcePath, targetPath, {
+    copyPathSync(sourcePath, targetPath, {
       recursive: true,
       dereference: true,
       preserveTimestamps: true,
@@ -70,7 +102,7 @@ function copyIntoSnapshot(relativePath, targetRoot) {
     return;
   }
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.cpSync(sourcePath, targetPath, {
+  copyPathSync(sourcePath, targetPath, {
     dereference: true,
     preserveTimestamps: true,
     force: true
@@ -101,7 +133,7 @@ function replaceSnapshotLlmsSymlink(snapshotRoot) {
     }
     const targetPath = path.join(targetLinkPath, relativePath);
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    fs.cpSync(sourcePath, targetPath, {
+    copyPathSync(sourcePath, targetPath, {
       recursive: true,
       dereference: true,
       preserveTimestamps: true,
@@ -124,7 +156,7 @@ function copyOptionalIntoSnapshot(relativePath, targetRoot) {
   const targetPath = path.join(targetRoot, relativePath);
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
-    fs.cpSync(sourcePath, targetPath, {
+    copyPathSync(sourcePath, targetPath, {
       recursive: true,
       dereference: true,
       preserveTimestamps: true,
@@ -133,7 +165,7 @@ function copyOptionalIntoSnapshot(relativePath, targetRoot) {
     return true;
   }
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.cpSync(sourcePath, targetPath, {
+  copyPathSync(sourcePath, targetPath, {
     dereference: true,
     preserveTimestamps: true,
     force: true
@@ -148,6 +180,55 @@ function removeIfExists(targetPath) {
 function writeManifest(snapshotRoot, manifest) {
   const manifestPath = path.join(snapshotRoot, 'install-manifest.json');
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+}
+
+function readJsonFile(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function dependencyPackageJsonPath(rootDir, packageName) {
+  return path.join(rootDir, 'node_modules', ...packageName.split('/'), 'package.json');
+}
+
+function verifySnapshotProductionDependencies(snapshotRoot) {
+  const snapshotPackage = readJsonFile(path.join(snapshotRoot, 'package.json'));
+  const dependencies = Object.keys(snapshotPackage.dependencies || {}).sort();
+  const missing = dependencies.filter((dependencyName) => {
+    return !fs.existsSync(dependencyPackageJsonPath(snapshotRoot, dependencyName));
+  });
+  if (missing.length > 0) {
+    throw new Error(`snapshot production dependencies missing: ${missing.join(', ')}`);
+  }
+}
+
+function verifySnapshotRuntimeImports(snapshotRoot) {
+  const importCandidates = [
+    'dist/error-handling/route-error-hub.js',
+    'dist/error-handling/quiet-error-handling-center.js',
+    'dist/utils/error-handler-registry.js'
+  ].filter((relativePath) => fs.existsSync(path.join(snapshotRoot, relativePath)));
+
+  if (importCandidates.length === 0) {
+    return;
+  }
+
+  const source = `
+    import path from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    const snapshotRoot = process.argv[1];
+    const importCandidates = JSON.parse(process.argv[2]);
+    for (const relativePath of importCandidates) {
+      await import(pathToFileURL(path.join(snapshotRoot, relativePath)).href);
+    }
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', source, snapshotRoot, JSON.stringify(importCandidates)], {
+    cwd: snapshotRoot,
+    encoding: 'utf8'
+  });
+  if ((result.status ?? 0) !== 0) {
+    const detail = `${String(result.stdout || '').trim()}\n${String(result.stderr || '').trim()}`.trim();
+    throw new Error(`snapshot runtime import verification failed: ${detail || 'unknown error'}`);
+  }
 }
 
 function readPackageVersion() {
@@ -225,28 +306,36 @@ function main() {
   removeIfExists(stagingDir);
   fs.mkdirSync(stagingDir, { recursive: true });
 
-  for (const relativePath of REQUIRED_COPY_PATHS) {
-    copyIntoSnapshot(relativePath, stagingDir);
-  }
-  replaceSnapshotLlmsSymlink(stagingDir);
-  for (const relativePath of OPTIONAL_COPY_PATHS) {
-    copyOptionalIntoSnapshot(relativePath, stagingDir);
-  }
+  try {
+    for (const relativePath of REQUIRED_COPY_PATHS) {
+      copyIntoSnapshot(relativePath, stagingDir);
+    }
+    replaceSnapshotLlmsSymlink(stagingDir);
+    for (const relativePath of OPTIONAL_COPY_PATHS) {
+      copyOptionalIntoSnapshot(relativePath, stagingDir);
+    }
 
-  writeManifest(stagingDir, {
-    kind: 'routecodex-release-snapshot',
-    releaseId,
-    version,
-    buildMode,
-    installedAt,
-    sourceRepoRoot: resolveSourceRepoRoot(),
-    buildRepoRoot: repoRoot,
-    installRoot,
-    distCli: path.join(releaseDir, 'dist', 'cli.js')
-  });
+    writeManifest(stagingDir, {
+      kind: 'routecodex-release-snapshot',
+      releaseId,
+      version,
+      buildMode,
+      installedAt,
+      sourceRepoRoot: resolveSourceRepoRoot(),
+      buildRepoRoot: repoRoot,
+      installRoot,
+      distCli: path.join(releaseDir, 'dist', 'cli.js')
+    });
 
-  removeIfExists(releaseDir);
-  fs.renameSync(stagingDir, releaseDir);
+    verifySnapshotProductionDependencies(stagingDir);
+    verifySnapshotRuntimeImports(stagingDir);
+
+    removeIfExists(releaseDir);
+    fs.renameSync(stagingDir, releaseDir);
+  } catch (error) {
+    removeIfExists(stagingDir);
+    throw error;
+  }
   updateCurrentSymlink(installRoot, releaseDir);
   const removedReleases = pruneOldReleases(releasesDir, releaseId, 3);
 

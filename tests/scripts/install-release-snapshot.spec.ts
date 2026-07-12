@@ -14,6 +14,50 @@ afterEach(() => {
 });
 
 describe('install-release-snapshot', () => {
+  function writeTextFile(filePath: string, content = '') {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+  }
+
+  function createMinimalSnapshotProject() {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-release-snapshot-project-'));
+    tempDirs.push(projectRoot);
+
+    fs.mkdirSync(path.join(projectRoot, 'scripts'), { recursive: true });
+    fs.copyFileSync(
+      path.resolve('scripts/install-release-snapshot.mjs'),
+      path.join(projectRoot, 'scripts', 'install-release-snapshot.mjs')
+    );
+
+    writeTextFile(
+      path.join(projectRoot, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'routecodex',
+          version: '0.0.0-test',
+          type: 'module',
+          dependencies: {
+            'rcc-errorhandling': '^1.0.10',
+            'rcc-llmswitch-core': 'file:sharedmodule/llmswitch-core'
+          }
+        },
+        null,
+        2
+      )
+    );
+    writeTextFile(path.join(projectRoot, 'dist', 'cli.js'), 'export {};\n');
+    writeTextFile(path.join(projectRoot, 'dist', 'index.js'), 'export {};\n');
+    writeTextFile(path.join(projectRoot, 'dist', 'build-info.js'), "export const buildInfo = { mode: 'release' };\n");
+    writeTextFile(path.join(projectRoot, 'config', '.keep'));
+    writeTextFile(path.join(projectRoot, 'configsamples', '.keep'));
+    writeTextFile(path.join(projectRoot, 'samples', 'mock-provider', '.keep'));
+    writeTextFile(path.join(projectRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'native', 'router_hotpath_napi.node'));
+    writeTextFile(path.join(projectRoot, 'node_modules', 'rcc-llmswitch-core', 'package.json'), '{"name":"rcc-llmswitch-core"}\n');
+    writeTextFile(path.join(projectRoot, 'node_modules', 'rcc-llmswitch-core', 'dist', 'native', 'router_hotpath_napi.node'));
+
+    return projectRoot;
+  }
+
   function runInstallReleaseSnapshot(tempHome: string) {
     execFileSync(
       process.execPath,
@@ -56,6 +100,46 @@ describe('install-release-snapshot', () => {
     );
 
     expect(fs.existsSync(requiredFile)).toBe(true);
+  });
+
+  test('fails before installing current when a production dependency is missing from snapshot node_modules', () => {
+    const projectRoot = createMinimalSnapshotProject();
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-release-snapshot-'));
+    tempDirs.push(tempHome);
+
+    let failed = false;
+    try {
+      execFileSync(
+        process.execPath,
+        ['scripts/install-release-snapshot.mjs'],
+        {
+          cwd: projectRoot,
+          env: {
+            ...process.env,
+            RCC_HOME: tempHome,
+            ROUTECODEX_RELEASE_SOURCE_ROOT: process.cwd()
+          },
+          stdio: 'pipe'
+        }
+      );
+    } catch (error) {
+      failed = true;
+      const stderr = String((error as { stderr?: Buffer }).stderr || '');
+      expect(stderr).toContain('snapshot production dependencies missing: rcc-errorhandling');
+    }
+
+    expect(failed).toBe(true);
+    expect(fs.existsSync(path.join(tempHome, 'install', 'current'))).toBe(false);
+  });
+
+  test('retries interrupted snapshot copy without weakening dependency verification', () => {
+    const scriptSource = fs.readFileSync(path.resolve('scripts/install-release-snapshot.mjs'), 'utf8');
+
+    expect(scriptSource).toContain("error.code === 'EINTR'");
+    expect(scriptSource).toContain('copy interrupted by EINTR, retrying');
+    expect(scriptSource).toContain('removeIfExists(targetPath);');
+    expect(scriptSource).toContain('verifySnapshotProductionDependencies(stagingDir);');
+    expect(scriptSource).toContain('verifySnapshotRuntimeImports(stagingDir);');
   });
 
   test('writes manifest with stable release metadata', () => {

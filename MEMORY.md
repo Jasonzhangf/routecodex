@@ -2278,6 +2278,20 @@
 - Fixed owner: `src/providers/core/runtime/responses-provider.ts` `processIncomingDirect()` must build context from the current request runtime carrier, not provider instance `getCurrentRuntimeMetadata()`. Previous behavior allowed stale `__rccDryRunSerialized` from a prior dry-run to stop later live direct SSE before upstream send.
 - Regression lock: `tests/providers/runtime/responses-provider.direct-passthrough.spec.ts` includes `direct SSE does not inherit provider-request dry-run from previous provider runtime metadata`.
 
+# 2026-07-12: Dry-run closure for provider request/response bugs
+
+- Request-side provider bugs must be verified by provider-request dry-run on the real entry or captured `client-request.json`: evidence is `object=routecodex.pipeline_dry_run`, `kind=provider_request`, final `providerRequest.body/endpoint/headers`, and `evidence.stoppedBeforeProviderSend=true`. If dry-run returns ordinary upstream content, the dry-run loop is broken and must be fixed first.
+- Response-side provider bugs must be verified by `npm run dry-run:codex-response -- --sample <provider-response.json>` through `convertProviderResponseIfNeeded`; the script must not grow a second response converter.
+- Same-protocol direct chat entry samples can contain Responses provider payloads. For response dry-run, provider payload truth (`object=response`) overrides sample directory/entry endpoint inference, so an `openai-chat` sample may correctly run as `providerProtocol=openai-responses`.
+- Offline response dry-run requires materialized body text for SSE. Serialized live `sseStream` snapshots without `bodyText`, `raw`, `text`, or `sseBodyText` are invalid replay inputs and require recapture or a different provider-response sample.
+- Installed closeout evidence for this rule: global `0.90.3882`, four live ports healthy, request sample `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783772710226_e00fe86c/client-request.json` dry-runs to provider `/responses` with body model `gpt-5.5` and stops before provider send, and response sample `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783783139322_87bd6dfa/provider-response.json` dry-runs to `chat.completion` model `gpt-5.5`.
+
+# 2026-07-12: Hub Pipeline / VR external refs are host bridge refs, not core runtime TS
+
+- `sharedmodule/llmswitch-core/src` currently has zero tracked TS-like files, strict llmswitch shell audit reports `prodTsShellCount=0`, rustification/minimal-surface audits report zero production/non-native TS, and `verify-vr-no-ts-runtime` reports zero VR production TS.
+- Current Hub Pipeline / VR external-reference closeout work is therefore concentrated in RouteCodex host bridge files under `src/modules/llmswitch`, especially `native-exports.ts` and `routing-integrations.ts`; do not describe these as llmswitch-core or VR runtime TS residue. Current dirty worktree also has a pending deletion of `responses-sse-bridge.ts`, so current-state audits must distinguish tracked-file history from existing working-tree files.
+- Correct closeout order: shrink test-only bridge imports first, split broad facades by owner, migrate any remaining TS semantic helper into Rust/NAPI, then delete only zero-ref leaves with residue gates. Host IO shells for streams, MetadataCenter, response store, snapshot writes, and SSE transport remain until an explicit replacement owner exists.
+
 # 2026-07-12: Responses SSE bridge facade is deleted
 
 - `src/modules/llmswitch/bridge/responses-sse-bridge.ts` is physically deleted. `handler-response-sse.ts` is now the only TS transport facade for `/v1/responses` SSE framing and calls `projectResponsesSseFrameForClientNative` / `updateResponsesSseTransportTerminalStateNative` directly through `native-exports.ts`.
@@ -2290,7 +2304,34 @@
 - `tests/sharedmodule/helpers/resp-semantics-direct-native.ts` exposes `planResponsesJsonClientDispatchWithNative` and allows the existing client payload helper to pass context into `projectResponsesClientPayloadForClientJson`, so the test can prove Rust-owned model/metadata cleanup without preserving a TS bridge test dependency.
 - This is a test external-reference contraction only. `responses-response-bridge.ts` remains an active production facade through `handler-response-utils.ts` and is not a dead deletion candidate yet.
 
-# 2026-07-12: SSE handler tests no longer mock response bridge facade
+# 2026-07-12: Responses response bridge facade is deleted
 
-- `tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts`, `handler-response-utils.responses-keepalive-protocol.spec.ts`, and `handler-response-utils.sse-usage-log.spec.ts` no longer mock `src/modules/llmswitch/bridge/responses-response-bridge.js`; they load the real production facade while mocking only the Rust/NAPI native export boundary needed by the transport tests.
-- This reduces test-side external references to the response bridge facade without moving bridge semantics into the SSE handler. `responses-response-bridge.ts` remains active production glue through `handler-response-utils.ts`.
+- `src/modules/llmswitch/bridge/responses-response-bridge.ts` is physically deleted after active production/test/script imports were removed. `handler-response-utils.ts` now calls `planResponsesJsonClientDispatchNative`, `buildResponsesPayloadFromChatNative`, and `projectResponsesClientPayloadForClientNative` directly through `native-exports.ts`.
+- Handler-side code remains HTTP/log/snapshot dispatch glue only: request log context and `stripInternalKeysDeep` stay local IO/projection plumbing, while client-visible Responses payload semantics and dispatch policy remain Rust/NAPI-owned.
+- Architecture maps and generated wiki pages now bind response mainline `resp-03` and continuation `rct-05` to `handler-response-utils.ts -> native-exports.ts`; gates require the deleted response bridge facade to stay absent.
+
+# 2026-07-12: llmswitch core-loader shell is deleted
+
+- `src/modules/llmswitch/core-loader.ts` is physically deleted. Native binding package/dist resolution is now private plumbing inside `src/modules/llmswitch/bridge/native-exports.ts`.
+- Do not restore `core-loader.ts` or a `core-loader.js` source mirror for tests/scripts. Consumers that need the native binding loader should use the approved `native-exports.ts` surface.
+- Residue coverage: `hub-pipeline-stage-residue-audit` and `verify:architecture-deleted-path` both lock the standalone core-loader path absent.
+
+# 2026-07-12: Test-only native evidence should bypass host native-exports bridge
+
+- Supersedes the 2026-07-10 test guidance that pointed native evidence tests at `src/modules/llmswitch/bridge/native-exports.js`.
+- For test-only native evidence, prefer `tests/sharedmodule/helpers/*-direct-native.ts` or `native-router-hotpath-loader.ts` direct Rust/NAPI helpers, not host `native-exports.js`.
+- Runtime/server boundary code may still use host `native-exports.ts` as the N-API shell; this rule is specifically for reducing external test/script references that keep broad host bridge surfaces sticky.
+- Current migrated examples: `responses-openai-bridge-metadata-boundary.spec.ts`, `mimoweb-text-harvest.spec.ts`, `provider-runtime-ingress.spec.ts`, `request-executor-native-semantics.spec.ts`, `responses-conversation-store-direct-native.ts`, and `native-exports.responses-sse-contract.spec.ts`.
+
+# 2026-07-12: release snapshot startup requires dependency closure plus import gate
+
+- Installed release startup can fail even when repo `dist` imports pass if `~/.rcc/install/current/node_modules` is incomplete. Verified failure: old `0.90.3917` snapshot missed `ajv`, `axios`, `open`, `openai`, and `rcc-errorhandling`, causing `route-error-hub.js` to crash with `ERR_MODULE_NOT_FOUND`.
+- Release install truth now includes two gates: `scripts/install-release.sh` must verify production dependency closure before reusing `node_modules`, and `scripts/install-release-snapshot.mjs` must verify dependency closure plus key runtime imports before switching `install/current`.
+- Startup closeout evidence for this class must include installed snapshot dependency scan, direct installed import probe, global `routecodex/rcc --version`, and live `/health` for the target port group. Verified current install: `routecodex-0.90.3917-2026-07-12T005746Z`, no missing production deps, installed `route-error-hub.js` import ok, ports 5520/5555/4444/10000 ready.
+
+# 2026-07-12: route availability uses narrow host and release copy retries EINTR only
+
+- VR route availability/default-floor host calls are contracted through `src/modules/llmswitch/bridge/route-availability-host.ts`; `request-executor-core-utils.ts` must not import broad `native-exports.js` for `evaluateSingletonRoutePoolExhaustionNative`, `planPrimaryExhaustedToDefaultPoolNative`, or `resolveErrorErr05RouteAvailabilityDecisionNative`.
+- `route-availability-host.ts` is a thin native re-export only. Rust/NAPI remains the semantic owner for singleton route-pool exhaustion, primary-exhausted default-pool planning, and ErrorErr05 availability decisions.
+- Release snapshot install can fail during large `node_modules` copy with `EINTR`. The allowed fix is a limited `fs.cpSync` retry for `EINTR` after deleting the partial target, while still failing visible after retry exhaustion and still running dependency closure/runtime import gates before switching `install/current`.
+- Verified install evidence: `0.90.3919` installed after the retry fix; CLI/current package and `/health` on 5520/5555 all report `0.90.3919`; installed route availability host exists and only re-exports native functions.

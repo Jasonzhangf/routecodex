@@ -8,6 +8,12 @@ describe('install-release dependency installation', () => {
     expect(releaseScript).not.toContain('--omit=optional');
   });
 
+  it('validates production dependency closure before reusing an existing node_modules tree', () => {
+    expect(releaseScript).toContain('production_dependencies_ready');
+    expect(releaseScript).toContain('✅ 根项目依赖闭包已验证，跳过安装');
+    expect(releaseScript).not.toContain('✅ 根项目依赖已存在，跳过安装');
+  });
+
   it('does not stop an existing runtime during release verification adoption', () => {
     expect(releaseScript).not.toContain('adopt_release_runtime_for_port');
     expect(releaseScript).not.toContain('/shutdown');

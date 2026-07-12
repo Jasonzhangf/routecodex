@@ -3,7 +3,7 @@ import {
   evaluateSingletonRoutePoolExhaustionNative,
   planPrimaryExhaustedToDefaultPoolNative,
   resolveErrorErr05RouteAvailabilityDecisionNative
-} from '../../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../../modules/llmswitch/bridge/route-availability-host.js';
 import { asRecord } from '../provider-utils.js';
 import type { PipelineExecutionInput } from '../../../handlers/types.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
