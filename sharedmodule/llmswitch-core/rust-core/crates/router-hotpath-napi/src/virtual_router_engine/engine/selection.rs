@@ -866,11 +866,14 @@ impl VirtualRouterEngineCore {
                 let mut default_floor_protected = false;
                 if route_name == DEFAULT_ROUTE
                     && available.is_empty()
-                    && floor_candidates.len() == 1
+                    && !floor_candidates.is_empty()
+                    && (floor_candidates.len() == 1
+                        || (requested_route != DEFAULT_ROUTE
+                            && route_has_targets(&self.routing, requested_route)))
                 {
                     let default_floor_available = self.apply_standard_filters(
                         env,
-                        &floor_candidates,
+                        &floor_candidates[..1],
                         routing_state,
                         &HashSet::new(),
                         server_tool_required,

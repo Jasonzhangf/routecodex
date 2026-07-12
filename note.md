@@ -29659,3 +29659,9 @@ Pure Rust NAPI candidates:
 - Rust fix: forced selection now sets `reasoning_tag=forced`, and route projection treats forced truth as authoritative rather than appending classification; malformed retry keys remain normal selection and never gain a forced tag.
 - Maps: `vr.route_retry_pin_surface` now binds the adjacent `route.rs` parse/projection and `selection.rs` forced-target consumer; generic route selection stays under `vr.route_selection`.
 - Evidence: positive/negative focused Rust tests pass, route module 12/12 passes, required VR Jest 7/7 passes, resource/VR/native-reference/rustification/function-map/native-build/build-base gates pass.
+# 2026-07-13: VR default forwarder floor slice
+
+- Red: when a non-default route and its default route shared two forwarders, request exclusions emptied both resolved pools and VR returned `PROVIDER_NOT_AVAILABLE` although default-floor truth still had ordered real providers.
+- Root cause: default-floor protection only activated when `floor_candidates.len()==1`; forwarder expansion produced three real candidates, so the default pool never retained its required last ordered provider.
+- Rust fix: when a configured non-default primary route falls through, the default floor now probes only the first ordered floor candidate while ignoring request exclusions; direct/default-only retries still exhaust multi-provider forwarders after all real providers are excluded. Singleton default-floor behavior remains protected.
+- Evidence: target red→green; singleton positive, priority/round-robin exhaustion negatives, and default-only diagnostics negative pass; selection module 44/44; full Rust 2337 pass/1 ignored; required route-floor gate and four Jest suites 26/26; function-map/native-reference/rustification/native-build/build-base gates pass.
