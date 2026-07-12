@@ -2663,3 +2663,7 @@
 
 - Carrier existence and valid provider-request dry-run control determine a closed Rust `skip` / `attach` action. TS may preserve opaque/non-JSON carrier fields and execute symbol attachment, but cannot infer attach or propagate dry-run independently.
 - Invalid or disabled dry-run control projects to no control; missing runtime carrier always skips. Unknown actions fail-fast with no attach fallback.
+# 2026-07-13: provider-request dry-run relay defect confirmed
+
+- On 5555, a provider-request dry-run is green on same-protocol direct but fails with HTTP 502 when VR selects a relay OpenAI-chat target: the `routecodex.pipeline_dry_run` envelope incorrectly enters Hub response parsing and is rejected for missing `choices` (`500-220`).
+- This is deterministic by selected route, not a restart readiness race. The repair owner must make provider-request dry-run terminal before relay response conversion while preserving the final provider request evidence; retrying until a direct provider is selected is invalid verification.

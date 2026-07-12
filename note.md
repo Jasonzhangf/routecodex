@@ -29715,3 +29715,8 @@ Pure Rust NAPI candidates:
 - `hub.router_direct_runtime_metadata_effect_plan` now owns `skip` / `attach` selection and validation/projection of provider-request dry-run control in Rust.
 - TS preserves opaque runtime carrier fields, executes the returned dry-run control attachment, and attaches the non-enumerable symbol carrier to the actual provider payload. Unknown actions fail-fast.
 - Red: pre-native focused router-direct suite failed 21 cases on the missing capability. Green: router-direct 36/36, Rust runtime metadata 3/3, root TypeScript, residue/red, function/resource/mainline/native-reference/rustification/native/base-build gates passed.
+# 2026-07-13: runtime metadata effect release/live verification and discovered relay dry-run defect
+
+- Release install and managed 5555 restart passed at version `0.90.3932`; global `routecodex`, `rcc`, install/current, and `/health.version` align with ready/pipelineReady true.
+- Direct provider-request dry-run succeeded when VR selected `cc.key1.gpt-5.5`: HTTP 200, `stoppedBeforeProviderSend=true`, provider snapshot written, final model `gpt-5.5`.
+- Repeated HTTP 502 was not restart readiness: both reproductions selected relay target `orangeai.key1.glm-5.2`; provider-request dry-run then incorrectly entered Rust Hub response parsing with the dry-run envelope and failed `OpenAI chat response must contain choices array` (`500-220`). This is a separate dry-run terminal-action owner defect and must be the next slice; it cannot be hidden by retrying until direct is selected.
