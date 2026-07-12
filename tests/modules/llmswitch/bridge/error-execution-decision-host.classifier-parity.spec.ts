@@ -99,6 +99,44 @@ const cases = [
       responseErrorMessage: 'returned JSON instead of SSE', reason: 'returned JSON instead of SSE',
     },
   },
+  {
+    name: 'provider runtime request contract',
+    input: {
+      stage: 'provider.send', statusCode: 400, errorCode: 'PROVIDER_RUNTIME_ERROR',
+      reason: 'provider-runtime-error: responses payload missing "input" or "instructions"',
+    },
+  },
+  {
+    name: 'local response contract validation',
+    input: {
+      stage: 'provider.send', statusCode: 502, errorCode: 'MALFORMED_RESPONSE',
+      reason: '[mimoweb] upstream assistant response was empty',
+    },
+  },
+  {
+    name: 'nested invalid tool request',
+    input: {
+      stage: 'provider.send', statusCode: 400, responseErrorType: 'invalid_request_error',
+      responseErrorParam: 'tools.0.function.parameters', responseErrorMessage: 'bad schema',
+      reason: 'invalid request payload',
+    },
+  },
+  {
+    name: 'invalid API key text',
+    input: { stage: 'provider.send', statusCode: 400, reason: 'invalid api key supplied' },
+  },
+  {
+    name: 'blocked AK status 434',
+    input: { stage: 'provider.send', statusCode: 434, reason: 'access to the current AK has been blocked' },
+  },
+  {
+    name: 'network transport failure',
+    input: { stage: 'provider.send', errorCode: 'NETWORK_ERROR', reason: 'fetch failed', errorMessage: 'fetch failed' },
+  },
+  {
+    name: 'ordinary generic provider failure defaults recoverable',
+    input: { stage: 'provider.send', statusCode: 500, errorCode: 'HTTP_500', reason: 'internal server error' },
+  },
 ] as const;
 
 describe('ErrorErr02 Rust classifier parity', () => {

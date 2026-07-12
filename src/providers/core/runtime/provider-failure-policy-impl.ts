@@ -12,18 +12,11 @@ import type {
   ProviderFailureActionPlan,
   ProviderFailureOutcome,
 } from './provider-failure-policy.js';
-import { loadNativeFailurePolicyBridge } from './provider-failure-policy-native.js';
 import {
-  normalizeKnownProviderError,
-  PROVIDER_BLOCKING_RECOVERABLE_CODES,
   PROVIDER_NETWORK_CODES,
-  PROVIDER_UNRECOVERABLE_CODES
 } from './provider-error-catalog.js';
+import { classifyErrorErr02HostCapturedNative } from '../../../modules/llmswitch/bridge/error-execution-decision-host.js';
 
-// Phase 2: SSOT composition - provider-agnostic catalog.
-const UNRECOVERABLE_CODE_SET: ReadonlySet<string> = new Set<string>([
-  ...PROVIDER_UNRECOVERABLE_CODES
-]);
 const NETWORK_ERROR_CODE_SET: ReadonlySet<string> = PROVIDER_NETWORK_CODES;
 
 export function normalizeProviderFailureCodeKey(value: unknown): string | undefined {
@@ -217,427 +210,48 @@ export function resolveProviderFailureClassification(args: {
   upstreamCode?: string;
   reason?: string;
 }): ProviderFailureClassification | undefined {
-  const errorCode = normalizeProviderFailureCodeKey(args.errorCode ?? (args.error as { code?: unknown } | undefined)?.code);
-  const upstreamCode = normalizeProviderFailureCodeKey(
-    args.upstreamCode ?? (args.error as { upstreamCode?: unknown } | undefined)?.upstreamCode
-  );
-  if (args.stage === 'provider.followup') {
-    return undefined;
-  }
-  if (args.stage === 'host.response_contract') {
-    if (errorCode === 'EMPTY_ASSISTANT_RESPONSE'
-      || errorCode === 'MISSING_REQUIRED_TOOL_CALL'
-      || upstreamCode === 'EMPTY_ASSISTANT_RESPONSE'
-      || upstreamCode === 'MISSING_REQUIRED_TOOL_CALL') {
-      return 'recoverable';
-    }
-    return undefined;
-  }
-  if (isProviderFailureClientDisconnect(args.error)) {
-    return 'unrecoverable';
-  }
-  const statusCode =
-    typeof args.statusCode === 'number'
+  const error = args.error && typeof args.error === 'object' && !Array.isArray(args.error)
+    ? args.error as Record<string, unknown>
+    : {};
+  const details = error.details && typeof error.details === 'object' && !Array.isArray(error.details)
+    ? error.details as Record<string, unknown>
+    : {};
+  const response = error.response && typeof error.response === 'object' && !Array.isArray(error.response)
+    ? error.response as Record<string, unknown>
+    : {};
+  const data = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+    ? response.data as Record<string, unknown>
+    : {};
+  const nestedError = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
+    ? data.error as Record<string, unknown>
+    : {};
+  const nativeDecision = classifyErrorErr02HostCapturedNative({
+    stage: args.stage,
+    statusCode: typeof args.statusCode === 'number'
       ? args.statusCode
-      : extractProviderFailureStatusCode(args.error);
-  const reason = String(args.reason || (args.error as { message?: unknown } | undefined)?.message || '')
-    .trim()
-    .toLowerCase();
-  const nested = (() => {
-    if (!args.error || typeof args.error !== 'object') {
-      return {} as {
-        code?: string;
-        type?: string;
-        param?: string;
-        message?: string;
-      };
-    }
-    const response = (args.error as { response?: unknown }).response;
-    if (!response || typeof response !== 'object') {
-      return {} as {
-        code?: string;
-        type?: string;
-        param?: string;
-        message?: string;
-      };
-    }
-    const data = (response as { data?: unknown }).data;
-    if (!data || typeof data !== 'object') {
-      return {} as {
-        code?: string;
-        type?: string;
-        param?: string;
-        message?: string;
-      };
-    }
-    const nestedError = (data as { error?: unknown }).error;
-    if (!nestedError || typeof nestedError !== 'object' || Array.isArray(nestedError)) {
-      return {} as {
-        code?: string;
-        type?: string;
-        param?: string;
-        message?: string;
-      };
-    }
-    const record = nestedError as Record<string, unknown>;
-    return {
-      code: typeof record.code === 'string' ? record.code : undefined,
-      type: typeof record.type === 'string' ? record.type : undefined,
-      param: typeof record.param === 'string' ? record.param : undefined,
-      message: typeof record.message === 'string' ? record.message : undefined
-    };
-  })();
-  const nestedCode = normalizeProviderFailureCodeKey(nested.code);
-  const nestedType = normalizeProviderFailureCodeKey(nested.type);
-  const nestedParam = typeof nested.param === 'string' ? nested.param.trim().toLowerCase() : '';
-  const nestedMessage = typeof nested.message === 'string' ? nested.message.toLowerCase() : '';
-  const protocolDetails = (() => {
-    if (!args.error || typeof args.error !== 'object' || Array.isArray(args.error)) {
-      return {} as {
-        reason?: string;
-        upstreamCode?: string;
-        providerStatusCode?: number;
-      };
-    }
-    const details = (args.error as { details?: unknown }).details;
-    if (!details || typeof details !== 'object' || Array.isArray(details)) {
-      return {} as {
-        reason?: string;
-        upstreamCode?: string;
-        providerStatusCode?: number;
-      };
-    }
-    const record = details as Record<string, unknown>;
-    return {
-      reason: typeof record.reason === 'string' ? record.reason : undefined,
-      upstreamCode: typeof record.upstreamCode === 'string' ? record.upstreamCode : undefined,
-      providerStatusCode: typeof record.providerStatusCode === 'number' ? record.providerStatusCode : undefined
-    };
-  })();
-  const protocolReason = typeof protocolDetails.reason === 'string' ? protocolDetails.reason.trim().toLowerCase() : '';
-  const protocolUpstreamCode = normalizeProviderFailureCodeKey(protocolDetails.upstreamCode);
-  const matches2013 = (value: unknown): boolean => {
-    if (typeof value === 'number') {
-      return value === 2013;
-    }
-    if (typeof value !== 'string') {
-      return false;
-    }
-    const normalized = value.trim().toUpperCase();
-    if (!normalized) {
-      return false;
-    }
-    return normalized === '2013' || /(?:^|_)2013(?:_|$)/.test(normalized);
-  };
-  const has2013Signal =
-    matches2013(errorCode)
-    || matches2013(upstreamCode)
-    || matches2013(nestedCode)
-    || matches2013(protocolUpstreamCode)
-    || matches2013(protocolDetails.providerStatusCode);
-  const isMalformedProviderBusiness2013 =
-    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
-    && (
-      protocolUpstreamCode === 'PROVIDER_STATUS_2013'
-      || upstreamCode === 'PROVIDER_STATUS_2013'
-      || nestedCode === 'PROVIDER_STATUS_2013'
-      || protocolDetails.providerStatusCode === 2013
-      || matches2013(protocolUpstreamCode)
-      || matches2013(upstreamCode)
-      || matches2013(nestedCode)
-    );
-
-  if (isProviderRuntimeRequestContractError(reason)) {
-    return 'unrecoverable';
-  }
-
-  if (
-    has2013Signal
-    && (
-      protocolReason === 'context_length_exceeded'
-      || reason.includes('context_length_exceeded')
-      || nestedMessage.includes('context_length_exceeded')
-      || isPromptTooLongLike({
-        error: args.error,
-        statusCode,
-        errorCode: protocolUpstreamCode || errorCode,
-        upstreamCode: protocolUpstreamCode || upstreamCode,
-        reason: protocolReason || nestedMessage || reason
-      })
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  const isHttp429Business2013 =
-    statusCode === 429
-    && has2013Signal
-    && !isMalformedProviderBusiness2013;
-  if (isHttp429Business2013) {
-    return 'recoverable';
-  }
-
-  if (
-    has2013Signal
-    && !isMalformedProviderBusiness2013
-    && (
-      reason.includes('当前请求量较高')
-      || reason.includes('请稍后重试')
-      || reason.includes('traffic saturation')
-      || reason.includes('rate limited')
-      || reason.includes('too many requests')
-      || reason.includes('token plan')
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    errorCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || upstreamCode === 'ERR_HTTP2_STREAM_CANCEL'
-    || nestedCode === 'ERR_HTTP2_STREAM_CANCEL'
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    reason.includes('glm business error (514)')
-    || errorCode === '514'
-    || upstreamCode === '514'
-    || nestedCode === '514'
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    errorCode === 'MALFORMED_REQUEST'
-    || upstreamCode === 'MALFORMED_REQUEST'
-    || nestedCode === 'MALFORMED_REQUEST'
-  ) {
-    return 'unrecoverable';
-  }
-
-  if (
-    errorCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || upstreamCode === 'CLIENT_TOOL_ARGS_INVALID'
-    || nestedCode === 'CLIENT_TOOL_ARGS_INVALID'
-  ) {
-    return 'unrecoverable';
-  }
-
-  if (isLocalResponseContractValidationError(reason)) {
-    return 'unrecoverable';
-  }
-
-  if (
-    statusCode === 520
-    && (
-      upstreamCode === 'PROVIDER_STATUS_1000'
-      || nestedCode === 'PROVIDER_STATUS_1000'
-      || reason.includes('unknown error, 520')
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
-    && (
-      protocolUpstreamCode === 'PROVIDER_STATUS_2056'
-      || upstreamCode === 'PROVIDER_STATUS_2056'
-      || nestedCode === 'PROVIDER_STATUS_2056'
-      || reason.includes('usage limit exceeded')
-    )
-  ) {
-    // 2056 = upstream rotation/overload (MiniMax). Typically transient.
-    // Keep as recoverable so the provider retries internally. After 6 attempts,
-    // the error is escalated naturally by the retry engine.
-    return 'recoverable';
-  }
-
-  if (
-    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
-    && (
-      protocolUpstreamCode === 'SERVER_ERROR'
-      || upstreamCode === 'SERVER_ERROR'
-      || nestedCode === 'SERVER_ERROR'
-      || nestedType === 'SERVER_ERROR'
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    (errorCode === 'MALFORMED_RESPONSE' || upstreamCode === 'MALFORMED_RESPONSE' || nestedCode === 'MALFORMED_RESPONSE')
-    && (
-      protocolUpstreamCode === 'PROVIDER_STATUS_2013'
-      || upstreamCode === 'PROVIDER_STATUS_2013'
-      || nestedCode === 'PROVIDER_STATUS_2013'
-      || protocolDetails.providerStatusCode === 2013
-      || matches2013(protocolUpstreamCode)
-      || matches2013(upstreamCode)
-      || matches2013(nestedCode)
-    )
-    && !(
-      has2013Signal
-      && (
-        protocolReason === 'context_length_exceeded'
-        || reason.includes('context_length_exceeded')
-        || nestedMessage.includes('context_length_exceeded')
-        || isPromptTooLongLike({
-          error: args.error,
-          statusCode,
-          errorCode: protocolUpstreamCode || errorCode,
-          upstreamCode: protocolUpstreamCode || upstreamCode,
-          reason: protocolReason || nestedMessage || reason
-        })
-      )
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    statusCode === 200
-    && (
-      errorCode === 'MALFORMED_RESPONSE'
-      || upstreamCode === 'MALFORMED_RESPONSE'
-      || nestedCode === 'MALFORMED_RESPONSE'
-    )
-    && (
-      reason.includes('instead of sse')
-      || nestedMessage.includes('instead of sse')
-      || protocolReason.includes('instead of sse')
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    (errorCode === 'MALFORMED_RESPONSE'
-      || upstreamCode === 'MALFORMED_RESPONSE'
-      || nestedCode === 'MALFORMED_RESPONSE')
-    && (
-      protocolReason === 'context_length_exceeded'
-      || protocolUpstreamCode === 'CONTEXT_LENGTH_EXCEEDED'
-      || protocolDetails.providerStatusCode === 2013
-      || reason.includes('context_length_exceeded')
-      || nestedMessage.includes('context_length_exceeded')
-      || isPromptTooLongLike({
-        ...args,
-        statusCode,
-        errorCode: protocolUpstreamCode || errorCode,
-        upstreamCode: protocolUpstreamCode || upstreamCode,
-        reason: protocolReason || reason
-      })
-    )
-  ) {
-    return 'recoverable';
-  }
-
-  if (
-    errorCode === 'MALFORMED_RESPONSE'
-    || upstreamCode === 'MALFORMED_RESPONSE'
-    || nestedCode === 'MALFORMED_RESPONSE'
-  ) {
-    return 'unrecoverable';
-  }
-  if (isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason })) {
-    return 'recoverable';
-  }
-  if (errorCode === 'CONTEXT_LENGTH_EXCEEDED' || upstreamCode === 'CONTEXT_LENGTH_EXCEEDED') {
-    return 'recoverable';
-  }
-  if (
-    isLocalRequestContractValidationError({
-      statusCode,
-      nestedParam,
-      nestedType,
-      nestedCode,
-      errorCode,
-      upstreamCode,
-      reason
-    })
-    && !isPromptTooLongLike({ ...args, statusCode, errorCode, upstreamCode, reason: nestedMessage || reason })
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    typeof statusCode === 'number'
-    && (statusCode === 401 || statusCode === 402 || statusCode === 403)
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    typeof statusCode === 'number'
-    && statusCode === 404
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    (errorCode && UNRECOVERABLE_CODE_SET.has(errorCode))
-    || (upstreamCode && UNRECOVERABLE_CODE_SET.has(upstreamCode))
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    typeof statusCode === 'number'
-    && statusCode === 434
-    && (
-      reason.includes('blocked due to unauthorized requests')
-      || reason.includes('access to the current ak has been blocked')
-    )
-  ) {
-    return 'unrecoverable';
-  }
-  if (
-    reason.includes('invalid api key')
-    || reason.includes('invalid access token')
-    || reason.includes('token expired')
-    || reason.includes('insufficient_quota')
-    || reason.includes('quota exceeded')
-    || reason.includes('model is not supported')
-    || reason.includes('model not supported')
-    || reason.includes('access denied')
-    || reason.includes('account suspended')
-    || reason.includes('account disabled')
-    || reason.includes('blocked due to unauthorized requests')
-  ) {
-    return 'unrecoverable';
-  }
-
-  const known = normalizeKnownProviderError({
-    statusCode,
-    code: errorCode,
-    upstreamCode: protocolUpstreamCode || upstreamCode,
-    message: reason,
+      : extractProviderFailureStatusCode(args.error),
+    errorCode: normalizeProviderFailureCodeKey(args.errorCode ?? error.code),
+    upstreamCode: normalizeProviderFailureCodeKey(args.upstreamCode ?? error.upstreamCode),
+    reason: typeof args.reason === 'string'
+      ? args.reason
+      : typeof error.message === 'string'
+        ? error.message
+        : undefined,
+    errorMessage: typeof error.message === 'string' ? error.message : undefined,
+    errorName: typeof error.name === 'string' ? error.name : undefined,
+    detailReason: typeof details.reason === 'string' ? details.reason : undefined,
+    detailUpstreamCode: typeof details.upstreamCode === 'string' ? details.upstreamCode : undefined,
+    detailUpstreamMessage: typeof details.upstreamMessage === 'string' ? details.upstreamMessage : undefined,
+    responseErrorMessage: typeof nestedError.message === 'string' ? nestedError.message : undefined,
+    responseErrorCode: typeof nestedError.code === 'string' ? nestedError.code : undefined,
+    responseErrorType: typeof nestedError.type === 'string' ? nestedError.type : undefined,
+    responseErrorParam: typeof nestedError.param === 'string' ? nestedError.param : undefined,
+    providerStatusCode: typeof details.providerStatusCode === 'number'
+      ? details.providerStatusCode
+      : undefined,
   });
-  if (known?.class === 'unrecoverable') {
-    return 'unrecoverable';
-  }
-  if (known?.class === 'recoverable') {
-    return 'recoverable';
-  }
-
-  // Final fallback: consume native Rust failure_policy for generic classification
-  try {
-    const isNetworkError = isProviderFailureNetworkTransportLike(args.error);
-    const nativeMod = loadNativeFailurePolicyBridge();
-    if (nativeMod?.classifyProviderFailure) {
-      const nativeResult = nativeMod.classifyProviderFailure(statusCode, errorCode, upstreamCode, isNetworkError);
-      if (
-        nativeResult === 'unrecoverable'
-        || nativeResult === 'recoverable'
-      ) {
-        return nativeResult;
-      }
-    }
-  } catch (_nativeBridgeError) {
-    // Native bridge not available; fall through to TS-side default
-  }
-  return 'recoverable';
+  return nativeDecision.classification;
 }
-
 export function resolveProviderFailureOutcome(args: {
   error: unknown;
   stage?: string;

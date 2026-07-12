@@ -362,6 +362,45 @@ pub fn classify_error_err02_host_captured(
     ]
     .iter()
     .any(|hint| reason.contains(hint));
+    let provider_runtime_request_contract = [
+        "provider-runtime-error: responses payload missing \"input\" or \"instructions\"",
+        "provider-runtime-error: responses provider received chat-style \"messages\"",
+        "provider-runtime-error: responses payload must be an object",
+        "provider-runtime-error: missing model from direct passthrough responses payload",
+    ]
+    .iter()
+    .any(|hint| reason.contains(hint));
+    let nested_param = input
+        .response_error_param
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let local_request_contract = nested_param.starts_with("tools.")
+        || nested_param.starts_with("messages.")
+        || nested_param.starts_with("input.")
+        || nested_type.as_deref() == Some("INVALID_REQUEST_ERROR")
+        || nested_type.as_deref().map(|value| value.starts_with("INVALID_")).unwrap_or(false)
+        || nested_code.as_deref().map(|value| value.starts_with("INVALID_")).unwrap_or(false)
+        || code_matches("INVALID_REQUEST_ERROR")
+        || reason.contains("invalid request payload")
+        || reason.contains("\"message\":\"bad request\"")
+        || reason.contains("signature-invalid");
+    let auth_or_account_text = [
+        "invalid api key",
+        "invalid access token",
+        "token expired",
+        "insufficient_quota",
+        "quota exceeded",
+        "model is not supported",
+        "model not supported",
+        "access denied",
+        "account suspended",
+        "account disabled",
+        "blocked due to unauthorized requests",
+    ]
+    .iter()
+    .any(|hint| reason.contains(hint));
     let classification = if client_disconnect {
         Some(FailureClassification::Unrecoverable)
     } else if prompt_too_long
@@ -401,8 +440,14 @@ pub fn classify_error_err02_host_captured(
         Some(FailureClassification::Recoverable)
     } else if code_matches("MALFORMED_REQUEST")
         || code_matches("CLIENT_TOOL_ARGS_INVALID")
+        || provider_runtime_request_contract
         || local_response_contract
+        || (local_request_contract && !prompt_too_long)
         || matches!(input.status_code, Some(401 | 402 | 403 | 404))
+        || (input.status_code == Some(434)
+            && (reason.contains("blocked due to unauthorized requests")
+                || reason.contains("access to the current ak has been blocked")))
+        || auth_or_account_text
         || (malformed_response
             && !reason.contains("context_length_exceeded")
             && !reason.contains("instead of sse")
