@@ -2645,3 +2645,8 @@
 
 - Direct route audit observes only ordered top-level `model`, `reasoning`, `thinking`, and `max_tokens`. Rust owns this allowlist/order; TS only retains the payload reference and applies the returned projection to request-local audit context.
 - Explicit null is preserved, absent/nested lookalikes are omitted, and audit output cannot become provider/client payload or MetadataCenter truth.
+# 2026-07-13: router-direct response action is Rust-owned
+
+- Direct response shape/stream action selection is owned by `direct_route_response_action.rs`; TS may observe and preserve non-JSON stream references and execute stream/HTTP IO, but must not decide passthrough vs JSON/SSE projection.
+- The native action vocabulary is closed. Unknown or impossible combinations fail-fast; there is no TS default action or fallback path.
+- Verified evidence: Rust 2/2, router-direct Jest 36/36, residue/red and required architecture gates, native build, and base build passed.

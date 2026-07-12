@@ -29692,3 +29692,9 @@ Pure Rust NAPI candidates:
 - `hub.router_direct_audit_projection` owns the ordered diagnostic selection of `model`, `reasoning`, `thinking`, and `max_tokens` in Rust. TS preserves the provider payload object reference and assigns only the returned `observedFields`.
 - Explicit null remains observable; missing fields and nested lookalikes are omitted. The projection is diagnostic-only and cannot mutate provider/client payload or become metadata truth.
 - Evidence: missing native export produced focused red; Rust 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.
+# 2026-07-13: router-direct response action planning moved to Rust
+
+- `feature_id:hub.router_direct_response_action_plan` now owns the direct response action selection: `passthrough`, `project_json_model`, `project_sse_headers_only`, or `project_sse_headers_and_model_stream`.
+- TS only observes whether an opaque live stream reference exists, preserves that non-JSON reference, and executes the Rust-selected JSON/SSE/header projection. Unknown or impossible native actions fail-fast.
+- Positive/negative evidence: Rust 2/2, router-direct Jest 36/36, residue/red fixtures, function/resource/mainline/native-reference/rustification gates, native build, and `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base` passed.
+- `build:base` exposed a pre-existing strict TypeScript cast defect in the prior direct-response-error host; the host now crosses the validated record boundary through `unknown`, and the full base build passes. Generated `src/build-info.ts` was restored and remains excluded.

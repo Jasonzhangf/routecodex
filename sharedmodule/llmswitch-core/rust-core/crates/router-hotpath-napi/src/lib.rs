@@ -30,6 +30,7 @@ mod direct_route_model_hooks;
 mod direct_route_response_error;
 mod direct_route_eligibility;
 mod direct_route_audit_projection;
+mod direct_route_response_action;
 mod failure_policy;
 mod followup_mainline_blocks;
 mod gemini_openai_codec;

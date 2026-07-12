@@ -6730,3 +6730,46 @@ owners:
     notes:
       - "The projection is diagnostic-only and must never mutate provider wire/client payload or become metadata truth."
       - "Explicit null is observable; absent and nested lookalike fields are omitted."
+
+  - feature_id: hub.router_direct_response_action_plan
+    status: active
+    summary: "router-direct passthrough, JSON model projection, and SSE projection action selection are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust selects passthrough/project_json_model/project_sse_headers_only/project_sse_headers_and_model_stream and normalizes client model; TS preserves stream references and executes Transform/native projection IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+    resource_bindings:
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+      writes:
+        - response.client_payload@ServerRespOutbound05ClientFrame
+      forbidden:
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - DirectRouteResponseActionPlan
+    canonical_builders:
+      - plan_direct_route_response_action_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+      - src/modules/llmswitch/bridge/direct-route-response-action-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-direct-route-response-action-rust-only.mjs
+      - scripts/tests/direct-route-response-action-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/providers/core/runtime
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run test:direct-route-response-action-rust-only-red-fixtures
+      - npm run verify:direct-route-response-action-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "The TS host may report responseIsRecord/hasSseStream facts because stream references cannot cross JSON, but it cannot choose the action."
+      - "SSE transport remains TS IO; frame/header/model projection and action selection remain Rust-owned."

@@ -48,6 +48,7 @@ import {
 import { planDirectRouteResponseErrorNative } from '../../../modules/llmswitch/bridge/direct-route-response-error-host.js';
 import { planDirectRouteEligibilityNative } from '../../../modules/llmswitch/bridge/direct-route-eligibility-host.js';
 import { projectDirectRouteAuditFieldsNative } from '../../../modules/llmswitch/bridge/direct-route-audit-projection-host.js';
+import { planDirectRouteResponseActionNative } from '../../../modules/llmswitch/bridge/direct-route-response-action-host.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -362,29 +363,31 @@ export function applyDirectRouteResponseHooks(
   response: unknown,
   options: { originalClientModel?: string }
 ): unknown {
-  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+  const responseIsRecord = Boolean(response) && typeof response === 'object' && !Array.isArray(response);
+  const sourceRecord = responseIsRecord ? response as Record<string, unknown> : undefined;
+  const plan = planDirectRouteResponseActionNative({
+    responseIsRecord,
+    hasSseStream: sourceRecord?.sseStream !== undefined && sourceRecord?.sseStream !== null,
+    clientModel: options.originalClientModel,
+  });
+  if (plan.action === 'passthrough') {
     return response;
   }
-  const clientModel =
-    typeof options.originalClientModel === 'string' && options.originalClientModel.trim()
-      ? options.originalClientModel.trim()
-      : '';
-  const record = { ...(response as Record<string, unknown>) };
-  const hasSse = record.sseStream !== undefined && record.sseStream !== null;
-
-  if (hasSse) {
+  if (!sourceRecord) {
+    throw new Error(`invalid router-direct response action for non-record: ${plan.action}`);
+  }
+  if (plan.action === 'project_json_model') {
+    return rewriteDirectRouteResponseModelNative(sourceRecord, plan.clientModel as string);
+  }
+  if (plan.action === 'project_sse_headers_only' || plan.action === 'project_sse_headers_and_model_stream') {
+    const record = { ...sourceRecord };
     record.headers = projectDirectRouteSseHeadersNative(record.headers);
-    if (clientModel) {
-      record.sseStream = wrapDirectSseStreamWithClientModel(record.sseStream, clientModel);
+    if (plan.action === 'project_sse_headers_and_model_stream') {
+      record.sseStream = wrapDirectSseStreamWithClientModel(record.sseStream, plan.clientModel as string);
     }
     return record;
   }
-
-  if (!clientModel) {
-    return response;
-  }
-
-  return rewriteDirectRouteResponseModelNative(record, clientModel);
+  throw new Error(`unknown router-direct response action: ${String((plan as { action?: unknown }).action)}`);
 }
 
 // ---------------------------------------------------------------------------
