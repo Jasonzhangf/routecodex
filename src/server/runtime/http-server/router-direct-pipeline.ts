@@ -28,7 +28,6 @@ import type { PortConfig } from './port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
 import { resolveInboundProtocolFromEntryPath } from './provider-direct-pipeline.js';
 import { extractResponseStatus } from './executor/provider-response-utils.js';
-import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
 import {
@@ -41,6 +40,7 @@ import {
 } from '../../../debug/pipeline-dry-run.js';
 import {
   planDirectRouteRequestHooksNative,
+  planDirectRouteModelObservationEffectsNative,
   projectDirectRouteSseHeadersNative,
   rewriteDirectRouteResponseModelNative,
   rewriteDirectRouteSseFrameNative,
@@ -205,50 +205,20 @@ export async function executeRouterDirectPipeline(
   }
   auditContext.providerModelId = hookResult.providerModelId;
 
-  // Write model override info to metadata center (on the metadata carrier)
-  if (hookResult.originalClientModel) {
-    // Use a clone of requestPayload for MetadataCenter to avoid attaching
-    // control-plane carrier to the data-plane outbound body
-    const metadataCarrier = { ...input.requestPayload };
-    const metadataCenterAttached = MetadataCenter.attach(metadataCarrier);
-    const pipelineMetadataCenter =
-      input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)
-        ? MetadataCenter.attach(input.pipelineMetadata)
-        : undefined;
-    auditContext.originalClientModel = hookResult.originalClientModel;
-    // Write both on the metadata carrier for consumption by caller
-    writeMetadataCenterSlot({
-      target: metadataCarrier,
-      family: 'provider_observation',
-      key: 'clientModelId',
-      value: hookResult.originalClientModel,
-      writer: HTTP_DIRECT_MODEL_OVERRIDE_WRITER,
-      reason: 'direct route: original client model before model override'
-    });
-    writeMetadataCenterSlot({
-      target: metadataCarrier,
-      family: 'provider_observation',
-      key: 'assignedModelId',
-      value: hookResult.payload.model as string,
-      writer: HTTP_DIRECT_MODEL_OVERRIDE_WRITER,
-      reason: 'direct route: provider-assigned model after override'
-    });
-    if (pipelineMetadataCenter && input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)) {
+  const observationPlan = planDirectRouteModelObservationEffectsNative({
+    originalClientModel: hookResult.originalClientModel,
+    providerModelId: hookResult.providerModelId,
+  });
+  auditContext.originalClientModel = observationPlan.originalClientModel;
+  if (input.pipelineMetadata && typeof input.pipelineMetadata === 'object' && !Array.isArray(input.pipelineMetadata)) {
+    for (const write of observationPlan.writes) {
       writeMetadataCenterSlot({
         target: input.pipelineMetadata,
-        family: 'provider_observation',
-        key: 'clientModelId',
-        value: hookResult.originalClientModel,
+        family: write.family,
+        key: write.key,
+        value: write.value,
         writer: HTTP_DIRECT_MODEL_OVERRIDE_WRITER,
-        reason: 'direct route: original client model before model override'
-      });
-      writeMetadataCenterSlot({
-        target: input.pipelineMetadata,
-        family: 'provider_observation',
-        key: 'assignedModelId',
-        value: hookResult.payload.model as string,
-        writer: HTTP_DIRECT_MODEL_OVERRIDE_WRITER,
-        reason: 'direct route: provider-assigned model after override'
+        reason: write.reason,
       });
     }
   }

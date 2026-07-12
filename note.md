@@ -29698,3 +29698,9 @@ Pure Rust NAPI candidates:
 - TS only observes whether an opaque live stream reference exists, preserves that non-JSON reference, and executes the Rust-selected JSON/SSE/header projection. Unknown or impossible native actions fail-fast.
 - Positive/negative evidence: Rust 2/2, router-direct Jest 36/36, residue/red fixtures, function/resource/mainline/native-reference/rustification gates, native build, and `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base` passed.
 - `build:base` exposed a pre-existing strict TypeScript cast defect in the prior direct-response-error host; the host now crosses the validated record boundary through `unknown`, and the full base build passes. Generated `src/build-info.ts` was restored and remains excluded.
+# 2026-07-13: router-direct model observation effects moved to Rust
+
+- `hub.router_direct_model_observation_effect_plan` now emits the paired `provider_observation.clientModelId` / `assignedModelId` write effects, including reasons, from Rust.
+- TS only executes returned MetadataCenter writes when the request-local pipeline carrier exists. The dead cloned request metadata carrier and TS-owned keys/reasons were physically removed.
+- Red: before native rebuild, the focused router-direct suite failed on missing `planDirectRouteModelObservationEffectsJson`; green: router-direct 36/36 and Rust model-hooks 4/4.
+- Required residue/function/resource/mainline/native-reference/rustification/native/base-build gates passed; generated build-info was restored.

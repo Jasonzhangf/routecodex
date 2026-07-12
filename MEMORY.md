@@ -2650,3 +2650,8 @@
 - Direct response shape/stream action selection is owned by `direct_route_response_action.rs`; TS may observe and preserve non-JSON stream references and execute stream/HTTP IO, but must not decide passthrough vs JSON/SSE projection.
 - The native action vocabulary is closed. Unknown or impossible combinations fail-fast; there is no TS default action or fallback path.
 - Verified evidence: Rust 2/2, router-direct Jest 36/36, residue/red and required architecture gates, native build, and base build passed.
+# 2026-07-13: direct model observation writes use a Rust effect plan
+
+- The existence, family, keys, values, and reasons for router-direct model observation writes are Rust truth. TS only applies the returned effects to an available request-local MetadataCenter carrier.
+- A valid effect requires both original client alias and assigned provider wire model; a missing half emits zero writes. Never recreate the pair or reason strings in TS.
+- The prior cloned request payload carrier was dead: it was written but neither returned nor consumed. It is physically removed rather than retained as a second metadata path.

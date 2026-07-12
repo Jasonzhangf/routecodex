@@ -69,6 +69,33 @@ fn plan_request_hooks(input: &Value) -> Value {
     })
 }
 
+// feature_id: hub.router_direct_model_observation_effect_plan
+fn plan_model_observation_effects(input: &Value) -> Value {
+    let original_client_model = trimmed(input.get("originalClientModel"));
+    let provider_model_id = trimmed(input.get("providerModelId"));
+    let writes = match (original_client_model, provider_model_id) {
+        (Some(client_model), Some(assigned_model)) => vec![
+            json!({
+                "family": "provider_observation",
+                "key": "clientModelId",
+                "value": client_model,
+                "reason": "direct route: original client model before model override",
+            }),
+            json!({
+                "family": "provider_observation",
+                "key": "assignedModelId",
+                "value": assigned_model,
+                "reason": "direct route: provider-assigned model after override",
+            }),
+        ],
+        _ => Vec::new(),
+    };
+    json!({
+        "originalClientModel": original_client_model,
+        "writes": writes,
+    })
+}
+
 fn rewrite_model_fields(value: &Value, client_model: &str) -> Value {
     let Some(record) = value.as_object() else {
         return value.clone();
@@ -146,6 +173,11 @@ pub fn plan_direct_route_request_hooks_json(input_json: String) -> NapiResult<St
     run(input_json, plan_request_hooks)
 }
 
+#[napi(js_name = "planDirectRouteModelObservationEffectsJson")]
+pub fn plan_direct_route_model_observation_effects_json(input_json: String) -> NapiResult<String> {
+    run(input_json, plan_model_observation_effects)
+}
+
 #[napi(js_name = "rewriteDirectRouteResponseModelJson")]
 pub fn rewrite_direct_route_response_model_json(input_json: String) -> NapiResult<String> {
     let input: Value = serde_json::from_str(&input_json)
@@ -185,6 +217,21 @@ mod tests {
         assert_eq!(output["originalClientModel"], "deepseek-v4-pro");
         assert_eq!(output["payload"]["reasoning_effort"], "xhigh");
         assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn model_observation_effects_require_a_real_override_pair() {
+        let output = plan_model_observation_effects(&json!({
+            "originalClientModel":" client-alias ",
+            "providerModelId":" Wire-Model "
+        }));
+        assert_eq!(output["originalClientModel"], "client-alias");
+        assert_eq!(output["writes"][0]["key"], "clientModelId");
+        assert_eq!(output["writes"][0]["value"], "client-alias");
+        assert_eq!(output["writes"][1]["key"], "assignedModelId");
+        assert_eq!(output["writes"][1]["value"], "Wire-Model");
+        assert_eq!(plan_model_observation_effects(&json!({"providerModelId":"Wire"}))["writes"], json!([]));
+        assert_eq!(plan_model_observation_effects(&json!({"originalClientModel":"client"}))["writes"], json!([]));
     }
 
     #[test]

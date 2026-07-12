@@ -6773,3 +6773,46 @@ owners:
     notes:
       - "The TS host may report responseIsRecord/hasSseStream facts because stream references cannot cross JSON, but it cannot choose the action."
       - "SSE transport remains TS IO; frame/header/model projection and action selection remain Rust-owned."
+
+  - feature_id: hub.router_direct_model_observation_effect_plan
+    status: active
+    summary: "router-direct model override provider_observation write effects are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust decides whether model observation writes exist and emits family/key/value/reason; TS only executes MetadataCenter writes against an available request-local carrier"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+    resource_bindings:
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+      writes:
+        - provider_runtime.observation@MetaReq05ProviderObservationProjected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+    canonical_types:
+      - DirectRouteModelObservationEffectPlan
+    canonical_builders:
+      - plan_direct_route_model_observation_effects_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-direct-route-model-observation-effect-rust-only.mjs
+      - scripts/tests/direct-route-model-observation-effect-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/providers/core/runtime
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run test:direct-route-model-observation-effect-rust-only-red-fixtures
+      - npm run verify:direct-route-model-observation-effect-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "A missing client/provider override pair yields zero writes; TS cannot synthesize keys, values, or reasons."
+      - "MetadataCenter mutation stays host IO and never leaks observation fields into provider/client normal payload."

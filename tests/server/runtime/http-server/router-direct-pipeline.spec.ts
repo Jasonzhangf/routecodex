@@ -7,6 +7,7 @@ import {
   attachProviderRuntimeMetadata,
   extractProviderRuntimeMetadata
 } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
+import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const {
   applyDirectRouteResponseHooks,
@@ -686,6 +687,7 @@ describe('router-direct-pipeline', () => {
         model: 'gpt-5.5',
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
       };
+      const pipelineMetadata: Record<string, unknown> = {};
       const result = await executeRouterDirectPipeline({
         portConfig: createRouterPortConfig(),
         providerPayload: { model: 'grok-build' },
@@ -698,6 +700,7 @@ describe('router-direct-pipeline', () => {
         },
         routingDecision: { routeName: 'search' },
         requestInfo: { path: '/v1/responses', headers: {} },
+        pipelineMetadata,
         resolveProviderByRuntimeKey: () => handle,
       });
 
@@ -705,6 +708,10 @@ describe('router-direct-pipeline', () => {
       const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
       expect(sentPayload.model).toBe('grok-build');
       expect(result.auditContext.originalClientModel).toBe('gpt-5.5');
+      expect(MetadataCenter.read(pipelineMetadata)?.readProviderObservation()).toMatchObject({
+        clientModelId: 'gpt-5.5',
+        assignedModelId: 'grok-build',
+      });
       expect((result.response as { body?: { model?: string } }).body?.model).toBe('gpt-5.5');
     });
 

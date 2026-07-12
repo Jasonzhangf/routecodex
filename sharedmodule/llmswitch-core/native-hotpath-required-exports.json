@@ -590,6 +590,7 @@
   "buildRouterDirectRouteMetadataJson",
   "buildDirectProviderRuntimeMetadataJson",
   "planDirectRouteRequestHooksJson",
+  "planDirectRouteModelObservationEffectsJson",
   "rewriteDirectRouteResponseModelJson",
   "rewriteDirectRouteSseFrameJson",
   "projectDirectRouteSseHeadersJson",
