@@ -1,5 +1,5 @@
 import { PassThrough, type Readable } from 'node:stream';
-import { getRouterHotpathJsonBindingSync } from './native-exports.js';
+import { getProviderResponseNativeBindingSync } from './provider-response-native-host.js';
 import {
   recordResponsesResponse,
   finalizeResponsesConversationRequestRetention,
@@ -13,7 +13,7 @@ export {
   isToolCallContinuationResponseNative,
   isToolResultFollowupTurnNative,
   resolveProviderResponseRequestSemanticsNative,
-} from './native-exports.js';
+} from './provider-response-native-host.js';
 
 type AdapterContext = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
@@ -135,7 +135,7 @@ const METADATA_CENTER_SYMBOL = Symbol.for('routecodex.metadataCenter');
 const RUST_SNAPSHOT_SYMBOL = Symbol.for('routecodex.metadataCenter.rustSnapshot');
 
 function requireNativeBindingFunction(capability: string): (...args: string[]) => unknown {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const binding = getProviderResponseNativeBindingSync();
   const fn = binding[capability];
   if (typeof fn !== 'function') {
     throw new Error(`[provider-response-converter-host] ${capability} not available`);
@@ -180,7 +180,7 @@ function parseProviderResponseNativeBooleanResult(raw: unknown): boolean {
 }
 
 function requireProviderResponseNativeJsonFunction(name: string): (...args: string[]) => unknown {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const binding = getProviderResponseNativeBindingSync();
   const fn = binding[name];
   if (typeof fn !== 'function') {
     throw new Error(`router-hotpath native export missing: ${name}`);
@@ -397,7 +397,7 @@ function planChatProcessSessionUsageWithNative(input: {
   context: Record<string, unknown>;
   usage?: Record<string, unknown>;
 }): unknown {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const binding = getProviderResponseNativeBindingSync();
   const fn = binding.planChatProcessSessionUsageJson as undefined | ((inputJson: string) => string);
   if (typeof fn !== 'function') {
     throw new Error('[provider-response-converter-host] native routing state.planChatProcessSessionUsageJson not available');
@@ -411,7 +411,7 @@ function buildSseFramesFromJsonWithNative(input: {
   requestId: string;
   model: string;
 }): NativeSseFramesOutput {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const binding = getProviderResponseNativeBindingSync();
   const fn = binding.buildSseFramesFromJsonJson as undefined | ((inputJson: string) => string);
   if (typeof fn !== 'function') {
     throw new Error('[provider-response-converter-host] native sse runtime.buildSseFramesFromJsonJson not available');
@@ -548,7 +548,7 @@ function applyNativeRuntimeControlWritePlan(args: {
 function projectNativeMetadataWritePlanToRuntimeControlWritePlan(plan: unknown): {
   runtimeControl?: Record<string, unknown>;
 } {
-  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const binding = getProviderResponseNativeBindingSync();
   const fn = binding.projectMetadataWritePlanToRuntimeControlWritePlanJson as undefined | ((inputJson: string) => string);
   if (typeof fn !== 'function') {
     throw new Error('[provider-response-converter-host] native metadata writer.projectMetadataWritePlanToRuntimeControlWritePlanJson not available');

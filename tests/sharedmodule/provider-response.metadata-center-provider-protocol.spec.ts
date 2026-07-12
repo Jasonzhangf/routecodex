@@ -15,11 +15,21 @@ const buildSseFramesFromJsonWithNativeMock = jest.fn(() => ({
   frames: ['event: response.completed\ndata: {"type":"response.completed"}\n\n'],
   stats: { protocol: 'openai-responses' }
 }));
+const unusedProviderResponseNativeExportMock = jest.fn(() => {
+  throw new Error('provider response native export was not expected in this test');
+});
 
 jest.unstable_mockModule(
-  '../../src/modules/llmswitch/bridge/native-exports.js',
+  '../../src/modules/llmswitch/bridge/provider-response-native-host.js',
   () => ({
-    getRouterHotpathJsonBindingSync: () => ({
+    detectRetryableEmptyAssistantResponseNative: unusedProviderResponseNativeExportMock,
+    hasRequestedToolsInSemanticsNative: unusedProviderResponseNativeExportMock,
+    isProviderNativeResumeContinuationNative: unusedProviderResponseNativeExportMock,
+    isRequiredToolCallTurnNative: unusedProviderResponseNativeExportMock,
+    isToolCallContinuationResponseNative: unusedProviderResponseNativeExportMock,
+    isToolResultFollowupTurnNative: unusedProviderResponseNativeExportMock,
+    resolveProviderResponseRequestSemanticsNative: unusedProviderResponseNativeExportMock,
+    getProviderResponseNativeBindingSync: () => ({
       executeHubPipelineJson: (inputJson: string) => JSON.stringify(executeHubPipelineWithNativeMock(JSON.parse(inputJson))),
       buildProviderResponseMetadataSnapshotJson: (inputJson: string) => {
         const {

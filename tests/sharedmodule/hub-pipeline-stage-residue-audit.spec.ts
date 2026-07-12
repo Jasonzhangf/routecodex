@@ -729,12 +729,25 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
       'utf8',
     );
+    const nativeHostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-native-host.ts'),
+      'utf8',
+    );
+    const metadataProtocolTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts'),
+      'utf8',
+    );
 
     expect(sharedSource).toContain('../../../../modules/llmswitch/bridge/provider-response-converter-host.js');
     expect(validationSource).toContain('../../../../modules/llmswitch/bridge/provider-response-converter-host.js');
     expect(sharedSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
     expect(validationSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
-    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain("from './provider-response-native-host.js'");
+    expect(hostSource).not.toContain("from './native-exports.js'");
+    expect(nativeHostSource).toContain("from './native-exports.js'");
+    expect(nativeHostSource).toContain('getProviderResponseNativeBindingSync');
+    expect(metadataProtocolTestSource).toContain('src/modules/llmswitch/bridge/provider-response-native-host.js');
+    expect(metadataProtocolTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
     expect(hostSource).toContain('asFlatRecordJson');
     expect(hostSource).toContain('validateCanonicalClientToolCallJson');
   });
