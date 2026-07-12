@@ -1,6 +1,7 @@
 // feature_id: vr.metadata_center_surface
 use serde_json::Value;
 
+use super::utils::normalize_trimmed_string_values;
 use crate::shared_json_utils::read_trimmed_string;
 
 fn read_conversation_scope(metadata_center_snapshot: &Value) -> Option<String> {
@@ -87,22 +88,13 @@ pub(crate) fn build_scoped_session_key(scope: &str) -> String {
 }
 
 pub(crate) fn extract_excluded_provider_keys(metadata_center_snapshot: &Value) -> Vec<String> {
-    let mut out = Vec::new();
     let Some(list) = metadata_center_snapshot
         .get("excludedProviderKeys")
         .and_then(|v| v.as_array())
     else {
-        return out;
+        return Vec::new();
     };
-    for entry in list {
-        if let Some(text) = entry.as_str() {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                out.push(trimmed.to_string());
-            }
-        }
-    }
-    out
+    normalize_trimmed_string_values(list.iter())
 }
 
 pub(crate) fn extract_runtime_now_ms(metadata_center_snapshot: &Value) -> Option<i64> {

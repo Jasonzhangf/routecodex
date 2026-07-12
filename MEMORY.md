@@ -2562,3 +2562,9 @@
 
 - `hub.servertool_core_shared_helpers` owns only Rust JSON parse/stringify bridge mechanics in `shared_json_utils.rs` (`parse_json_with_context`, `stringify_json_with_context`); `servertool_core_blocks.rs` consumes those helpers broadly while servertool-core remains the semantic owner for engine/stopless/hook/orchestration/CLI/timeout/policy contracts.
 - Required evidence for this slice: `test:servertool-core-shared-helpers-red-fixtures`, `verify:servertool-core-shared-helpers`, `test:servertool-core-shared-helpers-cargo`, servertool rust-only/function-map/mainline/thin-wrapper/rustification gates, native hotpath build, build:base, and wiki sync if generated ownership pages change.
+
+# 2026-07-12: VR shared helper first-slice boundary
+
+- `vr.shared_function_library_helpers` owns only exact duplicate Rust VR pure helper mechanics for string/list normalization and reuse of existing tool constants. Its canonical builders are `trim_nonempty_str`, `push_unique_trimmed`, `normalize_unique_trimmed_strings`, and `normalize_trimmed_string_values` under `virtual_router_engine/routing/utils.rs`.
+- Bool/number/provider-key/forwarder/default-floor helpers remain out of this first slice; do not merge them until caller-specific semantics are locked by dedicated red tests and route availability / forwarder gates.
+- Required evidence for this slice: `test:vr-shared-function-library-helpers-red-fixtures`, `verify:vr-shared-function-library-helpers`, `test:vr-shared-function-library-helpers-cargo`, VR no-TS runtime, function-map compile, mainline call map, llmswitch rustification audit, wiki sync, `build:base`, and `git diff --check`.

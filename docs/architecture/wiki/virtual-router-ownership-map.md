@@ -14,6 +14,7 @@ Feature scope: `vr.* / virtual_router.*`
 | feature_id | summary | owner kind | owner module | required gates |
 | --- | --- | --- | --- | --- |
 | `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity`<br/>`npm run verify:resource-operation-map` |
+| `vr.shared_function_library_helpers` | Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners | `rust_helper` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run test:vr-shared-function-library-helpers-red-fixtures`<br/>`npm run verify:vr-shared-function-library-helpers`<br/>`npm run test:vr-shared-function-library-helpers-cargo`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run build:base` |
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
 | `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability`<br/>`npm run verify:resource-operation-map` |
 | `vr.hit_log_projection` | Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs` | `npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime` |
@@ -64,6 +65,69 @@ Required gates:
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
 - Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.
+
+## vr.shared_function_library_helpers
+
+Summary: Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners
+
+Owner kind: `rust_helper`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
+Owner scope: VR shared helper placement for exact duplicate string/list mechanics and tool-detection constant reuse only; no route-selection, availability, forwarder, provider, or payload semantic movement
+
+Canonical types:
+- `Value`
+- `HashSet`
+
+Canonical builders:
+- `trim_nonempty_str`
+- `push_unique_trimmed`
+- `normalize_unique_trimmed_strings`
+- `normalize_trimmed_string_values`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/mod.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs`
+- `scripts/architecture/verify-vr-shared-function-library-helpers.mjs`
+- `scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs`
+- `docs/architecture/function-map.yml`
+- `docs/architecture/verification-map.yml`
+- `docs/architecture/wiki/virtual-router-ownership-map.md`
+- `docs/architecture/wiki/html/virtual-router-ownership-map.html`
+- `docs/goals/virtual-router-shared-function-library-convergence-plan.md`
+- `package.json`
+
+Forbidden paths:
+- `src/server/runtime/http-server/executor`
+- `src/providers`
+- `src/client`
+- `sharedmodule/llmswitch-core/src/router`
+
+Required tests:
+- `scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs`
+- `scripts/architecture/verify-vr-shared-function-library-helpers.mjs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs`
+
+Required gates:
+- `npm run test:vr-shared-function-library-helpers-red-fixtures`
+- `npm run verify:vr-shared-function-library-helpers`
+- `npm run test:vr-shared-function-library-helpers-cargo`
+- `npm run verify:vr-no-ts-runtime`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:llmswitch-rustification-audit`
+- `npm run build:base`
+
+Notes:
+- This helper owner only removes exact duplicate pure mechanics from VR Rust files; it must not decide route policy, forwarder availability, default-floor terminal projection, provider shape, or payload repair.
+- Bool, number, provider-key, forwarder, and default-floor helpers are intentionally excluded until their caller-specific semantics are locked by dedicated red tests.
+- Red fixtures must fail if monitored VR files reintroduce local trim/dedupe helpers or local tool-detection constant arrays.
 
 ## vr.metadata_center_surface
 

@@ -137,6 +137,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
+        <tr><td><code>vr.shared_function_library_helpers</code></td><td>Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners</td><td><code>rust_helper</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run test:vr-shared-function-library-helpers-red-fixtures</code>&lt;br/&gt;<code>npm run verify:vr-shared-function-library-helpers</code>&lt;br/&gt;<code>npm run test:vr-shared-function-library-helpers-cargo</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
         <tr><td><code>vr.metadata_center_surface</code></td><td>Virtual Router read-only metadata-center-backed route surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-owner-queryability</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
         <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
         <tr><td><code>vr.hit_log_projection</code></td><td>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code></td><td><code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
@@ -190,6 +191,71 @@
         <ul>
           <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
           <li>Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.</li>
+        </ul>
+        <h2>vr.shared_function_library_helpers</h2>
+        <p>Summary: Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners</p>
+        <p>Owner kind: <code>rust_helper</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code> Owner scope: VR shared helper placement for exact duplicate string/list mechanics and tool-detection constant reuse only; no route-selection, availability, forwarder, provider, or payload semantic movement</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>Value</code></li>
+          <li><code>HashSet</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>trim_nonempty_str</code></li>
+          <li><code>push_unique_trimmed</code></li>
+          <li><code>normalize_unique_trimmed_strings</code></li>
+          <li><code>normalize_trimmed_string_values</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/mod.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs</code></li>
+          <li><code>scripts/architecture/verify-vr-shared-function-library-helpers.mjs</code></li>
+          <li><code>scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs</code></li>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/verification-map.yml</code></li>
+          <li><code>docs/architecture/wiki/virtual-router-ownership-map.md</code></li>
+          <li><code>docs/architecture/wiki/html/virtual-router-ownership-map.html</code></li>
+          <li><code>docs/goals/virtual-router-shared-function-library-convergence-plan.md</code></li>
+          <li><code>package.json</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/providers</code></li>
+          <li><code>src/client</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs</code></li>
+          <li><code>scripts/architecture/verify-vr-shared-function-library-helpers.mjs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run test:vr-shared-function-library-helpers-red-fixtures</code></li>
+          <li><code>npm run verify:vr-shared-function-library-helpers</code></li>
+          <li><code>npm run test:vr-shared-function-library-helpers-cargo</code></li>
+          <li><code>npm run verify:vr-no-ts-runtime</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
+          <li><code>npm run verify:llmswitch-rustification-audit</code></li>
+          <li><code>npm run build:base</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>This helper owner only removes exact duplicate pure mechanics from VR Rust files; it must not decide route policy, forwarder availability, default-floor terminal projection, provider shape, or payload repair.</li>
+          <li>Bool, number, provider-key, forwarder, and default-floor helpers are intentionally excluded until their caller-specific semantics are locked by dedicated red tests.</li>
+          <li>Red fixtures must fail if monitored VR files reintroduce local trim/dedupe helpers or local tool-detection constant arrays.</li>
         </ul>
         <h2>vr.metadata_center_surface</h2>
         <p>Summary: Virtual Router read-only metadata-center-backed route surface</p>

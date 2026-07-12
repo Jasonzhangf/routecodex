@@ -8,6 +8,7 @@ use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::profile_utils::{
     build_runtime_key, normalize_capability_list, normalize_positive_integer, read_context_tokens,
 };
+use crate::virtual_router_engine::routing::push_unique_trimmed;
 
 const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS: i64 = 8192;
 const DEFAULT_MODEL_CONTEXT_TOKENS: i64 = 200_000;
@@ -658,7 +659,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                         {
                             compatibility_profiles.insert(model_id.trim().to_string(), profile);
                         }
-                        push_unique_string(&mut collected, &mut seen, model_id);
+                        push_unique_trimmed(&mut collected, &mut seen, &model_id);
                     }
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
                         if let Some(alias) = read_optional_string(model_obj.get("alias")) {
@@ -685,7 +686,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
             Value::Object(models_map) => {
                 for (model_name, model_raw) in models_map {
                     let canonical_model_id = model_name.trim().to_string();
-                    push_unique_string(&mut collected, &mut seen, canonical_model_id.clone());
+                    push_unique_trimmed(&mut collected, &mut seen, &canonical_model_id);
                     if let Some(model_obj) = model_raw.as_object() {
                         if let Some(profile) =
                             read_optional_string(model_obj.get("compatibilityProfile"))
@@ -2337,12 +2338,5 @@ fn parse_bool_like(value: &Value) -> Option<bool> {
             }
         }
         _ => None,
-    }
-}
-
-fn push_unique_string(list: &mut Vec<String>, seen: &mut HashSet<String>, value: String) {
-    let trimmed = value.trim();
-    if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
-        list.push(trimmed.to_string());
     }
 }

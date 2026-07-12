@@ -1410,6 +1410,69 @@ owners:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
       - "Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns."
 
+  - feature_id: vr.shared_function_library_helpers
+    status: active
+    summary: "Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners"
+    owner_kind: rust_helper
+    owner_scope: "VR shared helper placement for exact duplicate string/list mechanics and tool-detection constant reuse only; no route-selection, availability, forwarder, provider, or payload semantic movement"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+    canonical_types:
+      - Value
+      - HashSet
+    canonical_builders:
+      - trim_nonempty_str
+      - push_unique_trimmed
+      - normalize_unique_trimmed_strings
+      - normalize_trimmed_string_values
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/mod.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs
+      - scripts/architecture/verify-vr-shared-function-library-helpers.mjs
+      - scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/wiki/virtual-router-ownership-map.md
+      - docs/architecture/wiki/html/virtual-router-ownership-map.html
+      - docs/goals/virtual-router-shared-function-library-convergence-plan.md
+      - package.json
+    forbidden_paths:
+      - src/server/runtime/http-server/executor
+      - src/providers
+      - src/client
+      - sharedmodule/llmswitch-core/src/router
+    forbidden_mentions_allowlist:
+      - vr-shared-function-library-helpers
+      - vr.shared_function_library_helpers
+      - trim_nonempty_str
+      - push_unique_trimmed
+      - normalize_unique_trimmed_strings
+      - normalize_trimmed_string_values
+    required_tests:
+      - scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-vr-shared-function-library-helpers.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs
+    required_gates:
+      - npm run test:vr-shared-function-library-helpers-red-fixtures
+      - npm run verify:vr-shared-function-library-helpers
+      - npm run test:vr-shared-function-library-helpers-cargo
+      - npm run verify:vr-no-ts-runtime
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "This helper owner only removes exact duplicate pure mechanics from VR Rust files; it must not decide route policy, forwarder availability, default-floor terminal projection, provider shape, or payload repair."
+      - "Bool, number, provider-key, forwarder, and default-floor helpers are intentionally excluded until their caller-specific semantics are locked by dedicated red tests."
+      - "Red fixtures must fail if monitored VR files reintroduce local trim/dedupe helpers or local tool-detection constant arrays."
+
   - feature_id: hub.route_selection_bridge
     status: active
     summary: "Hub req-03 Rust bridge that seals virtual-router decisions into `VrRoute04SelectedTarget`"

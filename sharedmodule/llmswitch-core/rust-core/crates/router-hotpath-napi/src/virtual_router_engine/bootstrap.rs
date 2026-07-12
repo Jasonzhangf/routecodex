@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
 use crate::virtual_router_engine::error::format_virtual_router_error;
+use crate::virtual_router_engine::routing::{push_unique_trimmed, trim_nonempty_str};
 
 pub(crate) fn bootstrap_virtual_router_config_json(input_json: String) -> NapiResult<String> {
     let input_value: Value = serde_json::from_str(&input_json)
@@ -95,11 +96,12 @@ pub(crate) fn bootstrap_virtual_router_config_json(input_json: String) -> NapiRe
     let mut config = Map::new();
     config.insert("routing".to_string(), routing.clone());
     config.insert("providers".to_string(), profiles.clone());
-    if let Some(routing_policy_group) = read_non_empty_string(
-        section
-            .get("routingPolicyGroup")
-            .or_else(|| section.get("routing_policy_group")),
-    ) {
+    if let Some(routing_policy_group) = section
+        .get("routingPolicyGroup")
+        .or_else(|| section.get("routing_policy_group"))
+        .and_then(Value::as_str)
+        .and_then(trim_nonempty_str)
+    {
         config.insert(
             "routingPolicyGroup".to_string(),
             Value::String(routing_policy_group),
@@ -247,7 +249,7 @@ fn collect_routed_target_keys(
     let mut out = Vec::new();
     if let Some(targets) = target_keys.as_array() {
         for target in targets.iter().filter_map(Value::as_str) {
-            push_unique(&mut out, &mut seen, target);
+            push_unique_trimmed(&mut out, &mut seen, target);
         }
     }
     collect_forwarder_target_keys(forwarders, alias_index, &mut out, &mut seen);
@@ -264,8 +266,11 @@ fn collect_forwarder_target_keys(
         return;
     };
     for forwarder in forwarder_map.values().filter_map(Value::as_object) {
-        let Some(model) =
-            read_non_empty_string(forwarder.get("modelId").or_else(|| forwarder.get("model")))
+        let Some(model) = forwarder
+            .get("modelId")
+            .or_else(|| forwarder.get("model"))
+            .and_then(Value::as_str)
+            .and_then(trim_nonempty_str)
         else {
             continue;
         };
@@ -273,38 +278,21 @@ fn collect_forwarder_target_keys(
             continue;
         };
         for target in targets.iter().filter_map(Value::as_object) {
-            let Some(provider_id) = read_non_empty_string(
-                target
-                    .get("providerId")
-                    .or_else(|| target.get("providerKey")),
-            ) else {
+            let Some(provider_id) = target
+                .get("providerId")
+                .or_else(|| target.get("providerKey"))
+                .and_then(Value::as_str)
+                .and_then(trim_nonempty_str)
+            else {
                 continue;
             };
             let Some(aliases) = alias_index.get(&provider_id).and_then(Value::as_array) else {
                 continue;
             };
             for alias in aliases.iter().filter_map(Value::as_str) {
-                push_unique(out, seen, &format!("{}.{}.{}", provider_id, alias, model));
+                push_unique_trimmed(out, seen, &format!("{}.{}.{}", provider_id, alias, model));
             }
         }
-    }
-}
-
-fn read_non_empty_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn push_unique(out: &mut Vec<String>, seen: &mut HashSet<String>, value: &str) {
-    let normalized = value.trim();
-    if normalized.is_empty() {
-        return;
-    }
-    if seen.insert(normalized.to_string()) {
-        out.push(normalized.to_string());
     }
 }
 

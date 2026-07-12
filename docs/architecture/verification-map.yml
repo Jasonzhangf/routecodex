@@ -669,6 +669,41 @@ verification:
       - "If route instruction parsing changes, include routing instruction regression set."
       - "Current-turn media routing must prove a user image in the active turn still routes multimodal even when trailing tool entries make latest_role non-user."
 
+  - feature_id: vr.shared_function_library_helpers
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/mod.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features/tools.rs
+      - scripts/architecture/verify-vr-shared-function-library-helpers.mjs
+    contract:
+      - scripts/tests/vr-shared-function-library-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-vr-shared-function-library-helpers.mjs
+      - npm run test:vr-shared-function-library-helpers-cargo
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/wiki/virtual-router-ownership-map.md
+      - docs/goals/virtual-router-shared-function-library-convergence-plan.md
+      - package.json
+    smoke:
+      - npm run test:vr-shared-function-library-helpers-red-fixtures
+      - npm run verify:vr-shared-function-library-helpers
+      - npm run verify:vr-no-ts-runtime
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:base
+    notes:
+      - "This gate proves exact duplicate VR pure helper mechanics are not locally reintroduced after centralization."
+      - "Focused Rust tests must prove string/list normalization, route availability input normalization, and tool classification behavior stay unchanged."
+      - "Provider-key, bool/number, forwarder, and default-floor behavior are explicitly out of this first helper slice."
+
   - feature_id: hub.route_selection_bridge
     change_risk: high
     unit:

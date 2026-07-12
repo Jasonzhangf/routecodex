@@ -1,4 +1,6 @@
+// feature_id: vr.shared_function_library_helpers
 use serde_json::{Number, Value};
+use std::collections::HashSet;
 
 /// Extract a trimmed string from a JSON value (string or number).
 pub(crate) fn scalar_to_trimmed_string(value: &Value) -> Option<String> {
@@ -21,6 +23,46 @@ pub(crate) fn scalar_to_trimmed_string(value: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+pub(crate) fn trim_nonempty_str(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+pub(crate) fn push_unique_trimmed(out: &mut Vec<String>, seen: &mut HashSet<String>, value: &str) {
+    let Some(normalized) = trim_nonempty_str(value) else {
+        return;
+    };
+    if seen.insert(normalized.clone()) {
+        out.push(normalized);
+    }
+}
+
+pub(crate) fn normalize_unique_trimmed_strings<'a, I>(values: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for value in values {
+        push_unique_trimmed(&mut out, &mut seen, value);
+    }
+    out
+}
+
+pub(crate) fn normalize_trimmed_string_values<'a, I>(values: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a Value>,
+{
+    values
+        .into_iter()
+        .filter_map(|value| value.as_str().and_then(trim_nonempty_str))
+        .collect()
 }
 
 /// Parse a JSON value as a boolean, treating string "true"/"false" as boolean.
@@ -91,6 +133,30 @@ mod tests {
         assert_eq!(scalar_to_trimmed_string(&json!(12)), Some("12".to_string()));
         assert_eq!(scalar_to_trimmed_string(&json!("   ")), None);
         assert_eq!(scalar_to_trimmed_string(&json!(true)), None);
+    }
+
+    #[test]
+    fn vr_shared_function_library_helpers_normalize_string_lists() {
+        assert_eq!(trim_nonempty_str("  key1  "), Some("key1".to_string()));
+        assert_eq!(trim_nonempty_str("   "), None);
+
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        push_unique_trimmed(&mut out, &mut seen, " key1 ");
+        push_unique_trimmed(&mut out, &mut seen, "key1");
+        push_unique_trimmed(&mut out, &mut seen, " key2 ");
+        assert_eq!(out, vec!["key1".to_string(), "key2".to_string()]);
+
+        let values = [" a ", "", "a", " b "];
+        assert_eq!(
+            normalize_unique_trimmed_strings(values),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        let json_values = [json!(" a "), json!(1), json!(""), json!(" a ")];
+        assert_eq!(
+            normalize_trimmed_string_values(json_values.iter()),
+            vec!["a".to_string(), "a".to_string()]
+        );
     }
 
     #[test]

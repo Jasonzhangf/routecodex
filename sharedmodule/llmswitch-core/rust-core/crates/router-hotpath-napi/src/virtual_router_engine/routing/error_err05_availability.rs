@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use super::utils::{normalize_unique_trimmed_strings, trim_nonempty_str};
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorErr05RouteAvailabilityDecisionInput {
@@ -57,14 +59,16 @@ pub struct ErrorErr05RouteAvailabilityDecision {
 pub fn resolve_error_err05_route_availability_decision(
     input: &ErrorErr05RouteAvailabilityDecisionInput,
 ) -> ErrorErr05RouteAvailabilityDecision {
-    let route_pool = normalize_string_list(&input.route_pool);
-    let excluded: HashSet<String> = normalize_string_list(&input.excluded_provider_keys)
+    let route_pool = normalize_unique_trimmed_strings(input.route_pool.iter().map(String::as_str));
+    let excluded: HashSet<String> = normalize_unique_trimmed_strings(
+        input.excluded_provider_keys.iter().map(String::as_str),
+    )
         .into_iter()
         .collect();
     let provider_key = input
         .provider_key
         .as_ref()
-        .and_then(|value| trim_nonempty(value));
+        .and_then(|value| trim_nonempty_str(value));
     let default_pool_available = resolve_default_pool_available(input, &route_pool, &excluded);
     let remaining: Vec<String> = route_pool
         .iter()
@@ -124,7 +128,7 @@ fn resolve_default_pool_available(
     let route_name = input
         .route_name
         .as_ref()
-        .and_then(|value| trim_nonempty(value))
+        .and_then(|value| trim_nonempty_str(value))
         .map(|value| value.to_ascii_lowercase());
     let mut tiers = input.route_tiers.clone();
     if route_name
@@ -142,7 +146,7 @@ fn resolve_default_pool_available(
         return false;
     };
     default_tier.targets.iter().any(|target| {
-        let Some(normalized) = trim_nonempty(target) else {
+            let Some(normalized) = trim_nonempty_str(target) else {
             return false;
         };
         !excluded.contains(&normalized) && !route_pool_set.contains(normalized.as_str())
@@ -153,35 +157,12 @@ fn configured_route_candidates(tiers: &[ErrorErr05RouteTierInput]) -> HashSet<St
     let mut out = HashSet::new();
     for tier in tiers {
         for target in &tier.targets {
-            if let Some(normalized) = trim_nonempty(target) {
+            if let Some(normalized) = trim_nonempty_str(target) {
                 out.insert(normalized);
             }
         }
     }
     out
-}
-
-fn normalize_string_list(values: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for value in values {
-        let Some(normalized) = trim_nonempty(value) else {
-            continue;
-        };
-        if seen.insert(normalized.clone()) {
-            out.push(normalized);
-        }
-    }
-    out
-}
-
-fn trim_nonempty(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 #[cfg(test)]

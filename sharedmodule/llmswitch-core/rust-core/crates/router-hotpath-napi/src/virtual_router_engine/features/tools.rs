@@ -1,3 +1,4 @@
+// feature_id: vr.shared_function_library_helpers
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -161,33 +162,16 @@ pub(super) fn detect_coding_tool(tools: Option<&Value>) -> bool {
         Some(list) => list,
         None => return false,
     };
-    let write_keywords = [
-        "write", "patch", "modify", "edit", "create", "update", "append", "replace", "save",
-    ];
-    let write_exact = [
-        "edit",
-        "write",
-        "multiedit",
-        "apply_patch",
-        "write_file",
-        "create_file",
-        "modify_file",
-        "edit_file",
-        "update_file",
-        "save_file",
-        "append_file",
-        "replace_file",
-    ];
     tools.iter().any(|tool| {
         let name = extract_tool_name(tool).to_lowercase();
         let desc = extract_tool_description(tool).to_lowercase();
         if name.is_empty() && desc.is_empty() {
             return false;
         }
-        if write_exact.iter().any(|item| *item == name) || name == "exec_command" {
+        if WRITE_TOOL_EXACT.iter().any(|item| *item == name) || name == "exec_command" {
             return true;
         }
-        write_keywords
+        WRITE_TOOL_KEYWORDS
             .iter()
             .any(|keyword| name.contains(keyword) || desc.contains(keyword))
     })
@@ -198,20 +182,10 @@ pub(super) fn detect_web_tool(tools: Option<&Value>) -> bool {
         Some(list) => list,
         None => return false,
     };
-    let web_tool_keywords = [
-        "websearch",
-        "web_search",
-        "web-search",
-        "webfetch",
-        "web_fetch",
-        "web_request",
-        "search_web",
-        "internet_search",
-    ];
     tools.iter().any(|tool| {
         let name = extract_tool_name(tool).to_lowercase();
         let desc = extract_tool_description(tool).to_lowercase();
-        web_tool_keywords
+        WEB_TOOL_KEYWORDS
             .iter()
             .any(|keyword| name.contains(keyword) || desc.contains(keyword))
     })
@@ -924,10 +898,50 @@ fn shell_script_looks_like_read(command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_tool_call_for_report, detect_last_assistant_tool_category,
+        classify_tool_call_for_report, detect_coding_tool, detect_last_assistant_tool_category,
+        detect_web_tool,
         extract_meaningful_declared_tool_names,
     };
     use serde_json::json;
+
+    #[test]
+    fn detect_coding_tool_reuses_shared_write_constants() {
+        let tools = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Create a source file"
+                }
+            }
+        ]);
+        assert!(detect_coding_tool(Some(&tools)));
+
+        let description_only = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "workspace_action",
+                    "description": "Apply patch to a file"
+                }
+            }
+        ]);
+        assert!(detect_coding_tool(Some(&description_only)));
+    }
+
+    #[test]
+    fn detect_web_tool_reuses_shared_web_constants() {
+        let tools = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_fetch",
+                    "description": "Fetch a URL"
+                }
+            }
+        ]);
+        assert!(detect_web_tool(Some(&tools)));
+    }
 
     #[test]
     fn multi_tool_messages_use_latest_tool_call_not_prior_search() {
