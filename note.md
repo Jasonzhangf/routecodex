@@ -29646,3 +29646,9 @@ Pure Rust NAPI candidates:
 - Current gates: `verify:function-map-compile-gate` passed; `verify:architecture-thin-wrapper-only` passed; `verify:llmswitch-rustification-audit` passed; `git diff --check` passed.
 - Blocking gate remains identical: `verify:architecture-mainline-call-map` and nested `verify:architecture-review-surface-light` still fail because `error.mainline` edge `err-02` binds `classifyProviderFailure`, while current source has `resolveProviderFailureClassification` / `classifyErrorErr02HostCapturedNative`.
 - This is the third consecutive goal-audit turn seeing the same active error claim map drift blocker. The Hub Pipeline shared-library goal cannot be completed or verified until the active owner claim updates/hands off the error mainline map and architecture review turns green.
+# 2026-07-13: apply_patch canonical carrier regression closed
+
+- Root cause: `ed9d94e7c` changed the shared Rust `build_canonical_apply_patch_args` owner to emit both `patch` and `input`, contradicting the active single-freeform-carrier contract and breaking ten response-governance tests.
+- Change: commit `a87733e8b` restores canonical output to `{patch}` only; the arg-key repair regression and verifier now explicitly reject an emitted `input` alias while still accepting legacy input aliases at ingress.
+- Evidence: focused response governance 216 passed/1 ignored; apply_patch freeform/regression gates passed with 41 samples and zero mismatches; chat-process contract 5/5; required architecture/native/build gates passed; release install and managed 5555 restart passed at version 0.90.3932; live `/v1/responses` returned `requires_action` with function arguments containing `patch` and no `input`.
+- Full Rust suite improved from 2323 pass/13 fail to 2333 pass/3 fail. Remaining failures belong to shared-json deletion gate and two VR owner slices.
