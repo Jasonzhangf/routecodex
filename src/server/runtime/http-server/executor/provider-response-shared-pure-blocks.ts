@@ -17,6 +17,7 @@ import {
   isContextLengthExceededError,
   isGenericBridgeResponseContractError,
   isRetryableNetworkSseWrapperError,
+  shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative,
   tryParseJsonLikeString,
   validateCanonicalClientToolCall,
 } from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
@@ -104,17 +105,7 @@ export function shouldAllowDirectResponsesPrebuiltSsePassthrough(args: {
   hasSseStream: boolean;
   continuationOwner?: 'direct' | 'relay';
 }): boolean {
-  if (!args.hasSseStream) {
-    return false;
-  }
-  const entry = String(args.entryEndpoint || '').toLowerCase();
-  if (!entry.includes('/v1/responses')) {
-    return false;
-  }
-  if (args.providerProtocol !== 'openai-responses') {
-    return false;
-  }
-  return args.continuationOwner === 'direct';
+  return shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative(args);
 }
 
 // ---------------------------------------------------------------------------

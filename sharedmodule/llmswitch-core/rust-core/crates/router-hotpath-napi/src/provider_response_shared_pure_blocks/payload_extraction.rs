@@ -282,6 +282,42 @@ pub fn extract_bridge_provider_response_payload(body: &Value) -> Option<Value> {
     None
 }
 
+pub fn should_allow_direct_responses_prebuilt_sse_passthrough(input: &Value) -> bool {
+    let input_map = match input {
+        Value::Object(map) => map,
+        _ => return false,
+    };
+    if input_map
+        .get("hasSseStream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        != true
+    {
+        return false;
+    }
+    let entry_endpoint = input_map
+        .get("entryEndpoint")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !entry_endpoint.contains("/v1/responses") {
+        return false;
+    }
+    if input_map
+        .get("providerProtocol")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        != "openai-responses"
+    {
+        return false;
+    }
+    input_map
+        .get("continuationOwner")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        == "direct"
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -523,5 +559,49 @@ mod tests {
             extract_bridge_provider_response_payload(&json!("string")),
             None
         );
+    }
+
+    #[test]
+    fn direct_responses_prebuilt_sse_passthrough_allows_only_same_protocol_direct() {
+        assert!(should_allow_direct_responses_prebuilt_sse_passthrough(
+            &json!({
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-responses",
+                "hasSseStream": true,
+                "continuationOwner": "direct"
+            })
+        ));
+        assert!(!should_allow_direct_responses_prebuilt_sse_passthrough(
+            &json!({
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-responses",
+                "hasSseStream": true,
+                "continuationOwner": "relay"
+            })
+        ));
+        assert!(!should_allow_direct_responses_prebuilt_sse_passthrough(
+            &json!({
+                "entryEndpoint": "/v1/chat/completions",
+                "providerProtocol": "openai-responses",
+                "hasSseStream": true,
+                "continuationOwner": "direct"
+            })
+        ));
+        assert!(!should_allow_direct_responses_prebuilt_sse_passthrough(
+            &json!({
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "anthropic-messages",
+                "hasSseStream": true,
+                "continuationOwner": "direct"
+            })
+        ));
+        assert!(!should_allow_direct_responses_prebuilt_sse_passthrough(
+            &json!({
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-responses",
+                "hasSseStream": false,
+                "continuationOwner": "direct"
+            })
+        ));
     }
 }

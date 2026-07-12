@@ -1,3 +1,10 @@
+# 2026-07-12: Provider-response direct prebuilt SSE passthrough predicate is Rust-owned
+
+- `shouldAllowDirectResponsesPrebuiltSsePassthrough` in `src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts` must stay a TS shell over Rust/NAPI; it calls `shouldAllowDirectResponsesPrebuiltSsePassthroughJson` through `provider-response-native-calls.ts`.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::should_allow_direct_responses_prebuilt_sse_passthrough`.
+- Required lock: Rust unit must cover the allowed direct same-protocol `/v1/responses` prebuilt SSE case and negative relay/wrong-endpoint/wrong-provider/no-stream cases; Jest source scan must reject local TS predicate branches returning the same decision.
+- This closes one small runtime host conversion handoff sub-slice only. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage logging, and stream/body capture; those need separate red/dry-run samples before migration.
+
 # 2026-07-12: Provider-response host split checker closeout
 
 - `hub.provider_response_host_split` closeout evidence must treat `src/modules/llmswitch/bridge/provider-response-converter-host.ts` as orchestration-only; implementation assertions for native call wrapping, metadata effect projection, and runtime effects belong to `provider-response-native-calls.ts`, `provider-response-metadata-effects.ts`, and `provider-response-effects.ts`.
@@ -2543,3 +2550,8 @@
 
 - `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`, `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`, and `tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` must import `tests/providers/helpers/responses-handler-host-fakes.ts`, not broad `tests/providers/helpers/llmswitch-native-exports-fake.ts`.
 - `verify:hub-pipeline-native-reference-gate` now rejects monitored white-box imports of broad `llmswitch-native-exports-fake` in addition to broad `native-exports` mocks and `createNativeExportsMock`.
+
+# 2026-07-12: servertool_core_blocks contextual JSON bridge helpers
+
+- `hub.servertool_core_shared_helpers` owns only Rust JSON parse/stringify bridge mechanics in `shared_json_utils.rs` (`parse_json_with_context`, `stringify_json_with_context`); `servertool_core_blocks.rs` consumes those helpers broadly while servertool-core remains the semantic owner for engine/stopless/hook/orchestration/CLI/timeout/policy contracts.
+- Required evidence for this slice: `test:servertool-core-shared-helpers-red-fixtures`, `verify:servertool-core-shared-helpers`, `test:servertool-core-shared-helpers-cargo`, servertool rust-only/function-map/mainline/thin-wrapper/rustification gates, native hotpath build, build:base, and wiki sync if generated ownership pages change.

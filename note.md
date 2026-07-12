@@ -1,3 +1,11 @@
+# 2026-07-12 22:08 CST: provider-response direct prebuilt SSE passthrough predicate moved to Rust
+- Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`.
+- Change: `shouldAllowDirectResponsesPrebuiltSsePassthrough` no longer contains local TS endpoint/protocol/continuation-owner predicate logic; it calls Rust/NAPI `shouldAllowDirectResponsesPrebuiltSsePassthroughJson` through `provider-response-native-calls.ts`.
+- Positive/negative lock: Rust unit covers direct `/v1/responses` + `openai-responses` + `continuationOwner=direct` as the only allowed case, and rejects relay, wrong endpoint, wrong provider protocol, and no-stream cases. Jest source scan rejects reintroduced TS local branch strings.
+- Baseline proof before edit: `test:provider-response-host-split-red-fixtures`, `verify:provider-response-host-split`, `verify:hub-bridge-native-json-invoker-singleton`, `verify:rust-napi-json-wrapper-helper`, and `test:pipeline-dry-run-blackbox-fixtures` passed.
+- Validation after edit: Rust focused `provider_response_shared_pure_blocks` passed 33 tests; `build:native-hotpath` passed and exposed the new NAPI capability; focused Jest `provider-response-shared-pure-blocks` + `provider-response-converter.bridge-seed` passed 8 tests; provider-response/native helper verifiers passed.
+- Boundary: broader `convertProviderResponseIfNeeded` TS error remap, MetadataCenter sync, logging, and stream/body capture remain host glue and need separate red/dry-run samples before migration.
+
 # 2026-07-12: provider-response host split checker closeout
 
 - Scope: independent checker for `hub.provider_response_host_split`; no provider/VR/Hub runtime behavior change, no live config/restart/install/release.
@@ -29507,3 +29515,13 @@ Pure Rust NAPI candidates:
 - Change: current stopless/servertool and VR route-availability docs now name owner-specific `src/modules/llmswitch/bridge/*-host.ts` shells as the host call surface and explicitly restrict `src/modules/llmswitch/bridge/native-exports.ts` to private-loader status.
 - Verification PASS: `verify:hub-pipeline-native-reference-gate`; `test:hub-pipeline-native-reference-gate-red-fixtures`; `verify:architecture-wiki-sync`; `verify:architecture-wiki-html-sync`; targeted stale phrase scan; targeted `git diff --check`.
 - Remaining runtime work is still blocked/owned by active claims for provider-response runtime closeout, servertool core shared helpers, and provider runtime tests; `hub_pipeline_lib/engine.rs` remains a later unclaimed slice once active shared `src` claims clear.
+
+# 2026-07-12: Servertool core shared-helper slice validated
+
+- Scope: Hub Pipeline shared-library simplification slice for `feature_id:hub.servertool_core_shared_helpers`; no intended runtime behavior change, no servertool contract owner move, no public NAPI name change, no provider/client payload shape change, no fallback, and no TS semantic expansion.
+- Change: added `parse_json_with_context` / `stringify_json_with_context` to `shared_json_utils.rs`; `servertool_core_blocks.rs` now reuses them for broad contextual JSON parse/stringify bridge mechanics instead of repeating local `serde_json::{from_str,to_string}.map_err(format!(...))` wrappers.
+- Gate/map update: added `verify:servertool-core-shared-helpers`, `test:servertool-core-shared-helpers-red-fixtures`, and `test:servertool-core-shared-helpers-cargo`; wired red/verify gates into `verify:architecture-ci-longtail`; represented owner and required gates in function-map / verification-map and shared-library simplification plan; regenerated architecture wiki pages after `build:base` found stale `servertool-ownership-map`.
+- Boundary: servertool-core remains semantic owner for engine, stopless, hook, orchestration, CLI, timeout, and policy contracts. This slice only shares Rust JSON bridge mechanics.
+- Verification PASS: red fixtures; `verify:servertool-core-shared-helpers`; focused Rust contextual helper test 1 passed; focused Rust `servertool_core_blocks` 68 passed; `verify:servertool-rust-only`; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:architecture-thin-wrapper-only`; `verify:llmswitch-rustification-audit`; `build:native-hotpath`; regenerated wiki; `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`; `git diff --check`.
+- Build generated `src/build-info.ts` timestamp was precisely restored to `2026-07-12T07:34:50.349Z`. Evidence recorded under `.agent-collab/runs/20260712T140307Z-Macstudio.local-10032-servertool-core-shared/evidence.jsonl`; claim marked `validated`.
+- Remaining active goal: Rust large-file shared-helper audit/splitting remains open for `hub_pipeline_lib/engine.rs`; any further servertool core split must remain exact-mechanics or owner-preserving only.

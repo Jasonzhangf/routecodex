@@ -2727,6 +2727,59 @@ owners:
       - "Responses continuation/store semantics, exec_command command extraction semantics, public NAPI names, and provider/client payload shapes must not change."
       - "Red fixtures must fail if `args_contain_direct_or_nested_key` is locally reintroduced in shared_responses_conversation_utils.rs or exec_command_args.rs."
 
+  - feature_id: hub.servertool_core_shared_helpers
+    status: active
+    summary: "servertool_core_blocks reuses shared Rust contextual JSON bridge helpers"
+    owner_kind: rust_helper
+    owner_scope: "shared helper placement for JSON parse/stringify bridge mechanics only; no servertool contract or NAPI public JSON semantic movement"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+    canonical_types:
+      - DeserializeOwned
+      - Serialize
+    canonical_builders:
+      - parse_json_with_context
+      - stringify_json_with_context
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - scripts/architecture/verify-servertool-core-shared-helpers.mjs
+      - scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+      - sharedmodule/llmswitch-core/src/servertool/handlers
+    forbidden_mentions_allowlist:
+      - servertool-core-shared-helpers
+      - parse_json_with_context
+      - stringify_json_with_context
+    required_tests:
+      - scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-servertool-core-shared-helpers.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+    required_gates:
+      - npm run test:servertool-core-shared-helpers-red-fixtures
+      - npm run verify:servertool-core-shared-helpers
+      - npm run test:servertool-core-shared-helpers-cargo
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This owner only removes repeated JSON parse/stringify error-context wrapper mechanics from servertool_core_blocks by reusing shared_json_utils."
+      - "servertool-core remains the contract owner for engine, stopless, hook, orchestration, CLI, timeout, and policy semantics."
+      - "Public NAPI names, JSON input/output contracts, provider/client payload shapes, and servertool business decisions must not change."
+      - "Red fixtures must fail if broad local contextual serde_json parse/stringify wrappers are reintroduced in servertool_core_blocks.rs."
+
   - feature_id: hub.chat_envelope_type_surface
     status: retired
     summary: "retired Hub ChatEnvelope/StandardizedRequest TS bridge type surface"
@@ -4921,6 +4974,7 @@ owners:
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
       - docs
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/conversion
@@ -4931,12 +4985,15 @@ owners:
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
     required_gates:
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
+      - npm run test:provider-response-shared-pure-blocks-cargo
     migration_target: rust
     notes:
       - "This host shell may only capture transport payloads, call Rust/bridge planners, and execute followup IO; it must not restore TS response-conversion fallback or custom projection semantics."
+      - "Direct Responses prebuilt SSE passthrough gating is Rust-owned through `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`; TS shared blocks may only call the native helper."
   - feature_id: server.response_inspection_helpers
     status: active
     summary: "request-executor response inspection helpers stay pure and queryable as one file-scoped owner"

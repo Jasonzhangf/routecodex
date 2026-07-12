@@ -79,3 +79,18 @@ Runtime/live verification:
 - All required checks pass.
 - Commit created for this slice.
 - Remaining server Rustification candidates are reported separately.
+
+## 2026-07-12 Update: Direct Responses Prebuilt SSE Passthrough Gate
+
+Closed sub-slice:
+- `shouldAllowDirectResponsesPrebuiltSsePassthrough` no longer owns the same-protocol direct Responses prebuilt SSE passthrough predicate in TS.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::should_allow_direct_responses_prebuilt_sse_passthrough`.
+- NAPI entry: `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`.
+- TS shell: `src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts` only calls `shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative(args)`.
+
+Test design:
+- Lifecycle: `response.host_conversion_handoff` decides whether a direct same-protocol `/v1/responses` prebuilt SSE stream may bypass bridge conversion before Rust response conversion.
+- White-box: Rust unit test covers allowed direct same-protocol case plus relay, wrong endpoint, wrong provider protocol, and no-stream negatives.
+- Module black-box: `provider-response-shared-pure-blocks.spec.ts` calls the TS shell and scans source to forbid reintroduced local predicate branches.
+- Project black-box: `test:pipeline-dry-run-blackbox-fixtures` proves response dry-run still produces black-box converter output and request dry-run still validates final provider request artifacts.
+- Known gap: broader `convertProviderResponseIfNeeded` TS error remap and MetadataCenter sync remain TS host glue; they require separate red samples before migration.

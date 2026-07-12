@@ -1502,6 +1502,34 @@ verification:
       - "This gate proves exact duplicate nested-key helper mechanics are not locally reintroduced in Responses conversation or exec_command blocks."
       - "Focused Responses history tests must prove continuation/store behavior stays unchanged after helper reuse."
 
+  - feature_id: hub.servertool_core_shared_helpers
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
+      - scripts/architecture/verify-servertool-core-shared-helpers.mjs
+    contract:
+      - scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-servertool-core-shared-helpers.mjs
+      - npm run test:servertool-core-shared-helpers-cargo
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    smoke:
+      - npm run test:servertool-core-shared-helpers-red-fixtures
+      - npm run verify:servertool-core-shared-helpers
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+    notes:
+      - "This gate proves servertool_core_blocks reuses shared contextual JSON parse/stringify bridge mechanics without changing servertool contracts."
+      - "Focused Rust tests must prove servertool_core_blocks behavior and contextual helper error labeling stay unchanged after helper reuse."
+
   - feature_id: hub.web_search_tool_governance
     change_risk: high
     unit:
@@ -2478,17 +2506,20 @@ verification:
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
     integration:
       - tests/server/runtime/request-executor.unified-semantics.spec.ts
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
+      - npm run test:provider-response-shared-pure-blocks-cargo
     build:
       - npm run build:base
     notes:
       - "Host converter must stay on stream/body capture plus Rust handoff; TS fallback projection must not reappear."
       - "Host converter must only consume protocol truth already fixed by entry and VR metadata; payload-shape protocol inference is forbidden."
+      - "Direct Responses prebuilt SSE passthrough gating is Rust-owned through `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`; TS shared blocks may only call the native helper."
 
   - feature_id: server.response_inspection_helpers
     change_risk: medium

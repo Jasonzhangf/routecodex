@@ -237,6 +237,19 @@ export function extractBridgeProviderResponsePayload(
   return parseProviderResponseNativeRecord(raw);
 }
 
+export function shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative(input: {
+  entryEndpoint?: string;
+  providerProtocol?: string;
+  hasSseStream: boolean;
+  continuationOwner?: 'direct' | 'relay';
+}): boolean {
+  return requireNativeFunction(
+    getProviderResponseNativeBindingSync,
+    'shouldAllowDirectResponsesPrebuiltSsePassthroughJson',
+    { label }
+  )(stringifyNativeJsonArg('shouldAllowDirectResponsesPrebuiltSsePassthroughJson', input, { label })) === true;
+}
+
 export function executeHubPipelineWithNative(input: {
   config: Record<string, unknown>;
   request: Record<string, unknown>;

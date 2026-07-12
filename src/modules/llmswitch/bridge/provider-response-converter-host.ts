@@ -49,6 +49,7 @@ export {
   isContextLengthExceededError,
   isGenericBridgeResponseContractError,
   isRetryableNetworkSseWrapperError,
+  shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative,
   tryParseJsonLikeString,
   validateCanonicalClientToolCall,
 } from './provider-response-native-calls.js';

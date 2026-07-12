@@ -1,4 +1,19 @@
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{Map, Value};
+
+pub(crate) fn parse_json_with_context<T: DeserializeOwned>(
+    input_json: &str,
+    context: &str,
+) -> Result<T, String> {
+    serde_json::from_str(input_json).map_err(|error| format!("{context}: {error}"))
+}
+
+pub(crate) fn stringify_json_with_context<T: Serialize>(
+    value: &T,
+    context: &str,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| format!("{context}: {error}"))
+}
 
 pub(crate) fn as_object(value: &Value) -> Option<&Map<String, Value>> {
     value.as_object()
@@ -286,9 +301,10 @@ mod tests {
     use super::{
         as_object, extract_balanced_json_array_at, extract_balanced_json_candidate_at,
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
-        parse_js_number_like, read_first_object_trimmed_string, read_object_trimmed_string,
-        read_string_array_command, read_trimmed_string, read_workdir_from_args,
-        split_command_string, value_as_object_or_empty,
+        parse_json_with_context, parse_js_number_like, read_first_object_trimmed_string,
+        read_object_trimmed_string, read_string_array_command, read_trimmed_string,
+        read_workdir_from_args, split_command_string, stringify_json_with_context,
+        value_as_object_or_empty,
     };
     use serde_json::json;
 
@@ -376,6 +392,22 @@ mod tests {
     fn read_trimmed_string_returns_trimmed_non_empty_string() {
         let value = json!("  hello  ");
         assert_eq!(read_trimmed_string(Some(&value)), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn contextual_json_helpers_preserve_error_context() {
+        let parsed: serde_json::Value =
+            parse_json_with_context(r#"{"ok":true}"#, "deserialize test payload")
+                .expect("parse contextual json");
+        assert_eq!(parsed, json!({"ok": true}));
+
+        let serialized =
+            stringify_json_with_context(&parsed, "serialize test payload").expect("stringify");
+        assert_eq!(serialized, r#"{"ok":true}"#);
+
+        let error = parse_json_with_context::<serde_json::Value>("{", "deserialize broken")
+            .expect_err("invalid json must keep context");
+        assert!(error.contains("deserialize broken:"));
     }
 
     #[test]

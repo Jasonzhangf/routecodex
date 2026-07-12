@@ -45,6 +45,8 @@ use servertool_core::stopless_orchestration_contract;
 use servertool_core::text_extraction;
 use uuid::Uuid;
 
+use crate::shared_json_utils::{parse_json_with_context, stringify_json_with_context};
+
 const SERVERTOOL_INTERNAL_TOOL_NAMES: &[&str] = &[
     "continue_execution",
     "stop_message_auto",
@@ -76,47 +78,46 @@ struct ServertoolCliProjectionRuntimeBranchOutput {
 
 /// Inspect a response payload and return the stop gateway context as JSON.
 pub fn inspect_stop_gateway_signal(payload_json: &str) -> Result<String, String> {
-    let payload: serde_json::Value =
-        serde_json::from_str(payload_json).map_err(|e| format!("deserialize payload: {e}"))?;
+    let payload: serde_json::Value = parse_json_with_context(payload_json, "deserialize payload")?;
     let context = stop_gateway_context::inspect(&payload);
-    serde_json::to_string(&context).map_err(|e| format!("serialize context: {e}"))
+    stringify_json_with_context(&context, "serialize context")
 }
 
 /// Check stop eligibility (returns JSON bool).
 pub fn is_stop_eligible(payload_json: &str) -> Result<String, String> {
-    let payload: serde_json::Value =
-        serde_json::from_str(payload_json).map_err(|e| format!("deserialize payload: {e}"))?;
+    let payload: serde_json::Value = parse_json_with_context(payload_json, "deserialize payload")?;
     let eligible = stop_gateway_context::is_stop_eligible(&payload);
     Ok(if eligible { "true" } else { "false" }.to_string())
 }
 
 pub fn normalize_stop_gateway_context_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop gateway context input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stop gateway context input")?;
     let context = stop_gateway_context::normalize_stop_gateway_context(&input);
-    serde_json::to_string(&context).map_err(|e| format!("serialize stop gateway context: {e}"))
+    stringify_json_with_context(&context, "serialize stop gateway context")
 }
 
 pub fn extract_stop_message_blocked_report_from_messages_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize blocked-report messages input: {e}"))?;
-    serde_json::to_string(&blocked_report_contract::extract_blocked_report_from_messages(&input))
-        .map_err(|e| format!("serialize blocked-report output: {e}"))
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize blocked-report messages input")?;
+    stringify_json_with_context(
+        &blocked_report_contract::extract_blocked_report_from_messages(&input),
+        "serialize blocked-report output",
+    )
 }
 
 pub fn normalize_stop_message_compare_context_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop-message compare context input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stop-message compare context input")?;
     let context = stop_message_compare_context::normalize_stop_message_compare_context(&input);
-    serde_json::to_string(&context)
-        .map_err(|e| format!("serialize stop-message compare context: {e}"))
+    stringify_json_with_context(&context, "serialize stop-message compare context")
 }
 
 pub fn format_stop_message_compare_context_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop-message compare format input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stop-message compare format input")?;
     serde_json::to_string(
         &stop_message_compare_context::format_stop_message_compare_context(Some(&input)),
     )
@@ -126,9 +127,9 @@ pub fn format_stop_message_compare_context_json(input_json: &str) -> Result<Stri
 /// Evaluate stop-message loop guard.
 pub fn evaluate_loop_guard(input_json: &str) -> Result<String, String> {
     let input: stop_message_loop_guard::LoopGuardInput =
-        serde_json::from_str(input_json).map_err(|e| format!("deserialize LoopGuardInput: {e}"))?;
+        parse_json_with_context(input_json, "deserialize LoopGuardInput")?;
     let output = stop_message_loop_guard::evaluate(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize output: {e}"))
+    stringify_json_with_context(&output, "serialize output")
 }
 
 /// Calculate budget after a finish_reason event.
@@ -141,7 +142,7 @@ pub fn calculate_budget_json(
     let snapshot = match snapshot_json {
         Some(json) => {
             let s: stop_message_counter::BudgetSnapshot =
-                serde_json::from_str(json).map_err(|e| format!("deserialize snapshot: {e}"))?;
+                parse_json_with_context(json, "deserialize snapshot")?;
             Some(s)
         }
         None => None,
@@ -149,7 +150,7 @@ pub fn calculate_budget_json(
     let config = match default_config_json {
         Some(json) => {
             let c: stop_message_counter::DefaultBudgetConfig =
-                serde_json::from_str(json).map_err(|e| format!("deserialize config: {e}"))?;
+                parse_json_with_context(json, "deserialize config")?;
             Some(c)
         }
         None => None,
@@ -160,54 +161,60 @@ pub fn calculate_budget_json(
         snapshot.as_ref(),
         config.as_ref(),
     );
-    serde_json::to_string(&decision).map_err(|e| format!("serialize decision: {e}"))
+    stringify_json_with_context(&decision, "serialize decision")
 }
 
 pub fn plan_budget_state_update_json(input_json: &str) -> Result<String, String> {
-    let input: stop_message_counter::BudgetStateUpdateInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize BudgetStateUpdateInput: {e}"))?;
+    let input: stop_message_counter::BudgetStateUpdateInput =
+        parse_json_with_context(input_json, "deserialize BudgetStateUpdateInput")?;
     let plan = stop_message_counter::plan_budget_state_update(input);
-    serde_json::to_string(&plan).map_err(|e| format!("serialize budget state update plan: {e}"))
+    stringify_json_with_context(&plan, "serialize budget state update plan")
 }
 
 pub fn resolve_servertool_state_key_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool state key input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::resolve_servertool_state_key(&input))
-        .map_err(|e| format!("serialize servertool state key: {e}"))
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize servertool state key input")?;
+    stringify_json_with_context(
+        &persisted_lookup::resolve_servertool_state_key(&input),
+        "serialize servertool state key",
+    )
 }
 
 pub fn resolve_runtime_stop_message_state_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize runtime stop-message state input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize runtime stop-message state input")?;
     let snapshot = persisted_lookup::resolve_runtime_stop_message_state(&input);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize runtime stop-message state: {e}"))
+    stringify_json_with_context(&snapshot, "serialize runtime stop-message state")
 }
 
 pub fn resolve_runtime_stop_message_state_from_metadata_center_json(
     input_json: &str,
 ) -> Result<String, String> {
     let input: persisted_lookup::RuntimeStopMessageStateFromMetadataCenterInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize runtime stop-message metadata center input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize runtime stop-message metadata center input",
+        )?;
     let snapshot =
         persisted_lookup::resolve_runtime_stop_message_state_from_metadata_center(&input);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize runtime stop-message metadata center state: {e}"))
+    stringify_json_with_context(
+        &snapshot,
+        "serialize runtime stop-message metadata center state",
+    )
 }
 
 pub fn read_runtime_stop_message_stage_mode_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize runtime stop-message stage mode input: {e}"))?;
+    let input: serde_json::Value = parse_json_with_context(
+        input_json,
+        "deserialize runtime stop-message stage mode input",
+    )?;
     let stage_mode = persisted_lookup::read_runtime_stop_message_stage_mode(&input);
-    serde_json::to_string(&stage_mode)
-        .map_err(|e| format!("serialize runtime stop-message stage mode: {e}"))
+    stringify_json_with_context(&stage_mode, "serialize runtime stop-message stage mode")
 }
 
 pub fn normalize_stop_message_stage_mode_value_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop-message stage mode input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stop-message stage mode input")?;
     serde_json::to_string(&persisted_lookup::normalize_stop_message_stage_mode_value(
         &input,
     ))
@@ -215,8 +222,8 @@ pub fn normalize_stop_message_stage_mode_value_json(input_json: &str) -> Result<
 }
 
 pub fn has_armed_stop_message_state_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize armed stop-message state input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize armed stop-message state input")?;
     Ok(if persisted_lookup::has_armed_stop_message_state(&input) {
         "true"
     } else {
@@ -226,9 +233,10 @@ pub fn has_armed_stop_message_state_json(input_json: &str) -> Result<String, Str
 }
 
 pub fn plan_stop_message_routing_snapshot_json(input_json: &str) -> Result<String, String> {
-    let input: persisted_lookup::StopMessageRoutingSnapshotPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message routing snapshot input: {e}"))?;
+    let input: persisted_lookup::StopMessageRoutingSnapshotPlanInput = parse_json_with_context(
+        input_json,
+        "deserialize stop-message routing snapshot input",
+    )?;
     serde_json::to_string(&persisted_lookup::plan_stop_message_routing_snapshot(
         &input,
     ))
@@ -242,23 +250,22 @@ pub fn plan_stop_message_persisted_state_selection_json(
         serde_json::from_str(input_json).map_err(|e| {
             format!("deserialize persisted stop-message state selection input: {e}")
         })?;
-    serde_json::to_string(&persisted_lookup::plan_stop_message_persisted_state_selection(&input))
-        .map_err(|e| format!("serialize persisted stop-message state selection: {e}"))
+    stringify_json_with_context(
+        &persisted_lookup::plan_stop_message_persisted_state_selection(&input),
+        "serialize persisted stop-message state selection",
+    )
 }
 
 pub fn plan_stop_message_routing_state_apply_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::StopMessageRoutingStateApplyPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message routing apply input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize stop-message routing apply input")?;
     let plan = persisted_lookup::plan_stop_message_routing_state_apply(&input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize stop-message routing apply plan: {e}"))
+    stringify_json_with_context(&plan, "serialize stop-message routing apply plan")
 }
 
 pub fn plan_stop_message_routing_state_clear_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::StopMessageRoutingStateClearPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message routing clear input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize stop-message routing clear input")?;
     serde_json::to_string(&persisted_lookup::plan_stop_message_routing_state_clear(
         &input,
     ))
@@ -267,8 +274,10 @@ pub fn plan_stop_message_routing_state_clear_json(input_json: &str) -> Result<St
 
 pub fn plan_stopless_decision_context_signals_json(input_json: &str) -> Result<String, String> {
     let input: stopless_decision_context_signals::StoplessDecisionContextSignalsInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stopless decision context signals input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize stopless decision context signals input",
+        )?;
     serde_json::to_string(
         &stopless_decision_context_signals::plan_stopless_decision_context_signals(&input),
     )
@@ -277,24 +286,25 @@ pub fn plan_stopless_decision_context_signals_json(input_json: &str) -> Result<S
 
 pub fn plan_stop_message_default_config_json(input_json: &str) -> Result<String, String> {
     let input: stop_message_default_config::StopMessageDefaultConfigInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message default config input: {e}"))?;
-    serde_json::to_string(&stop_message_default_config::plan_stop_message_default_config(&input))
-        .map_err(|e| format!("serialize stop-message default config plan: {e}"))
+        parse_json_with_context(input_json, "deserialize stop-message default config input")?;
+    stringify_json_with_context(
+        &stop_message_default_config::plan_stop_message_default_config(&input),
+        "serialize stop-message default config plan",
+    )
 }
 
 pub fn plan_stop_message_persist_snapshot_json(input_json: &str) -> Result<String, String> {
     let input: stop_message_persist_plan::StopMessagePersistPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message persist plan input: {e}"))?;
-    serde_json::to_string(&stop_message_persist_plan::plan_stop_message_persist_snapshot(&input))
-        .map_err(|e| format!("serialize stop-message persist plan: {e}"))
+        parse_json_with_context(input_json, "deserialize stop-message persist plan input")?;
+    stringify_json_with_context(
+        &stop_message_persist_plan::plan_stop_message_persist_snapshot(&input),
+        "serialize stop-message persist plan",
+    )
 }
 
 pub fn resolve_bd_working_directory_for_record_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::ServertoolRecordRuntimeMetadataInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize bd working directory input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize bd working directory input")?;
     serde_json::to_string(&persisted_lookup::resolve_bd_working_directory_for_record(
         &input,
     ))
@@ -302,23 +312,28 @@ pub fn resolve_bd_working_directory_for_record_json(input_json: &str) -> Result<
 }
 
 pub fn resolve_stop_message_followup_provider_key_json(input_json: &str) -> Result<String, String> {
-    let input: persisted_lookup::ServertoolRecordRuntimeMetadataInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message followup provider key input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::resolve_stop_message_followup_provider_key(&input))
-        .map_err(|e| format!("serialize stop-message followup provider key: {e}"))
+    let input: persisted_lookup::ServertoolRecordRuntimeMetadataInput = parse_json_with_context(
+        input_json,
+        "deserialize stop-message followup provider key input",
+    )?;
+    stringify_json_with_context(
+        &persisted_lookup::resolve_stop_message_followup_provider_key(&input),
+        "serialize stop-message followup provider key",
+    )
 }
 
 pub fn resolve_client_connection_state_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize client connection state input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::resolve_client_connection_state(&input))
-        .map_err(|e| format!("serialize client connection state: {e}"))
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize client connection state input")?;
+    stringify_json_with_context(
+        &persisted_lookup::resolve_client_connection_state(&input),
+        "serialize client connection state",
+    )
 }
 
 pub fn has_compaction_flag_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize compaction flag input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize compaction flag input")?;
     Ok(if persisted_lookup::has_compaction_flag(&input) {
         "true"
     } else {
@@ -328,10 +343,12 @@ pub fn has_compaction_flag_json(input_json: &str) -> Result<String, String> {
 }
 
 pub fn resolve_entry_endpoint_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize entry endpoint input: {e}"))?;
-    serde_json::to_string(&persisted_lookup::resolve_entry_endpoint(&input))
-        .map_err(|e| format!("serialize entry endpoint: {e}"))
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize entry endpoint input")?;
+    stringify_json_with_context(
+        &persisted_lookup::resolve_entry_endpoint(&input),
+        "serialize entry endpoint",
+    )
 }
 
 pub fn resolve_stop_message_followup_tool_content_max_chars_json(
@@ -349,17 +366,14 @@ pub fn resolve_stop_message_followup_tool_content_max_chars_json(
 
 pub fn plan_persist_stop_message_state_json(input_json: &str) -> Result<String, String> {
     let input: persisted_lookup::PersistStopMessageStatePlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize persist stop-message state input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize persist stop-message state input")?;
     let plan = persisted_lookup::plan_persist_stop_message_state(&input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize persist stop-message state plan: {e}"))
+    stringify_json_with_context(&plan, "serialize persist stop-message state plan")
 }
 
 pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, String> {
     let input: auto_hook_runtime_contract::AutoHookRuntimeAttemptInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize auto-hook runtime attempt input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize auto-hook runtime attempt input")?;
     serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_runtime_attempt(
         input,
     ))
@@ -368,16 +382,22 @@ pub fn plan_auto_hook_runtime_attempt_json(input_json: &str) -> Result<String, S
 
 pub fn plan_auto_hook_caller_finalization_json(input_json: &str) -> Result<String, String> {
     let input: auto_hook_runtime_contract::AutoHookCallerFinalizationInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize auto-hook caller finalization input: {e}"))?;
-    serde_json::to_string(&auto_hook_runtime_contract::plan_auto_hook_caller_finalization(input)?)
-        .map_err(|e| format!("serialize auto-hook caller finalization plan: {e}"))
+        parse_json_with_context(
+            input_json,
+            "deserialize auto-hook caller finalization input",
+        )?;
+    stringify_json_with_context(
+        &auto_hook_runtime_contract::plan_auto_hook_caller_finalization(input)?,
+        "serialize auto-hook caller finalization plan",
+    )
 }
 
 pub fn plan_auto_hook_caller_result_projection_json(input_json: &str) -> Result<String, String> {
     let input: auto_hook_runtime_contract::AutoHookCallerResultProjectionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize auto-hook caller result projection input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize auto-hook caller result projection input",
+        )?;
     serde_json::to_string(
         &auto_hook_runtime_contract::plan_auto_hook_caller_result_projection(input)?,
     )
@@ -386,10 +406,11 @@ pub fn plan_auto_hook_caller_result_projection_json(input_json: &str) -> Result<
 
 pub fn plan_servertool_execution_branch_json(input_json: &str) -> Result<String, String> {
     let input: execution_branch_contract::ServertoolExecutionBranchPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool execution branch input: {e}"))?;
-    serde_json::to_string(&execution_branch_contract::plan_servertool_execution_branch(input))
-        .map_err(|e| format!("serialize servertool execution branch plan: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool execution branch input")?;
+    stringify_json_with_context(
+        &execution_branch_contract::plan_servertool_execution_branch(input),
+        "serialize servertool execution branch plan",
+    )
 }
 
 pub fn plan_servertool_execution_branch_application_json(
@@ -401,16 +422,19 @@ pub fn plan_servertool_execution_branch_application_json(
         })?;
     let plan = execution_branch_contract::plan_servertool_execution_branch_application(input)
         .map_err(|e| format!("plan servertool execution branch application: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool execution branch application plan: {e}"))
+    stringify_json_with_context(
+        &plan,
+        "serialize servertool execution branch application plan",
+    )
 }
 
 pub fn plan_servertool_engine_preflight_json(input_json: &str) -> Result<String, String> {
     let input: engine_preflight_contract::ServertoolEnginePreflightInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine preflight input: {e}"))?;
-    serde_json::to_string(&engine_preflight_contract::plan_servertool_engine_preflight(input))
-        .map_err(|e| format!("serialize servertool engine preflight plan: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool engine preflight input")?;
+    stringify_json_with_context(
+        &engine_preflight_contract::plan_servertool_engine_preflight(input),
+        "serialize servertool engine preflight plan",
+    )
 }
 
 pub fn plan_servertool_engine_orchestration_preflight_action_json(
@@ -445,17 +469,20 @@ pub fn plan_servertool_engine_orchestration_preflight_application_json(
 
 pub fn plan_servertool_engine_runtime_action_json(input_json: &str) -> Result<String, String> {
     let input: engine_runtime_action_contract::ServertoolEngineRuntimeActionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine runtime action input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool engine runtime action input",
+        )?;
     let plan = engine_runtime_action_contract::plan_servertool_engine_runtime_action(input)?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool engine runtime action plan: {e}"))
+    stringify_json_with_context(&plan, "serialize servertool engine runtime action plan")
 }
 
 pub fn plan_servertool_engine_trigger_observation_json(input_json: &str) -> Result<String, String> {
     let input: engine_runtime_action_contract::ServertoolEngineTriggerObservationInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine trigger observation input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool engine trigger observation input",
+        )?;
     serde_json::to_string(
         &engine_runtime_action_contract::plan_servertool_engine_trigger_observation(input),
     )
@@ -464,20 +491,22 @@ pub fn plan_servertool_engine_trigger_observation_json(input_json: &str) -> Resu
 
 pub fn plan_servertool_engine_skip_json(input_json: &str) -> Result<String, String> {
     let input: engine_skip_contract::ServertoolEngineSkipInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine skip input: {e}"))?;
-    serde_json::to_string(&engine_skip_contract::plan_servertool_engine_skip(input))
-        .map_err(|e| format!("serialize servertool engine skip plan: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool engine skip input")?;
+    stringify_json_with_context(
+        &engine_skip_contract::plan_servertool_engine_skip(input),
+        "serialize servertool engine skip plan",
+    )
 }
 
 pub fn plan_servertool_engine_skip_application_json(input_json: &str) -> Result<String, String> {
     let input: engine_skip_contract::ServertoolEngineSkipApplicationInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine skip application input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool engine skip application input",
+        )?;
     let plan = engine_skip_contract::plan_servertool_engine_skip_application(input)
         .map_err(|e| format!("plan servertool engine skip application: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool engine skip application plan: {e}"))
+    stringify_json_with_context(&plan, "serialize servertool engine skip application plan")
 }
 
 pub fn plan_servertool_execution_outcome_runtime_action_json(
@@ -527,8 +556,10 @@ pub fn plan_servertool_execution_loop_runtime_action_json(
 
 pub fn plan_servertool_execution_loop_effect_json(input_json: &str) -> Result<String, String> {
     let input: execution_loop_effect_contract::ServertoolExecutionLoopEffectInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool execution loop effect input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool execution loop effect input",
+        )?;
     serde_json::to_string(
         &execution_loop_effect_contract::plan_servertool_execution_loop_effect(input),
     )
@@ -656,10 +687,11 @@ pub fn materialize_servertool_response_stage_orchestration_output_json(
 
 pub fn plan_servertool_entry_preflight_json(input_json: &str) -> Result<String, String> {
     let input: server_side_tool_entry_contract::ServertoolEntryPreflightInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool entry preflight input: {e}"))?;
-    serde_json::to_string(&server_side_tool_entry_contract::plan_servertool_entry_preflight(input))
-        .map_err(|e| format!("serialize servertool entry preflight plan: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool entry preflight input")?;
+    stringify_json_with_context(
+        &server_side_tool_entry_contract::plan_servertool_entry_preflight(input),
+        "serialize servertool entry preflight plan",
+    )
 }
 
 pub fn plan_servertool_entry_preflight_application_json(
@@ -671,8 +703,10 @@ pub fn plan_servertool_entry_preflight_application_json(
         })?;
     let plan = server_side_tool_entry_contract::plan_servertool_entry_preflight_application(input)
         .map_err(|e| format!("plan servertool entry preflight application: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool entry preflight application plan: {e}"))
+    stringify_json_with_context(
+        &plan,
+        "serialize servertool entry preflight application plan",
+    )
 }
 
 pub fn plan_servertool_run_engine_entry_preflight_application_json(
@@ -694,16 +728,19 @@ pub fn plan_servertool_run_engine_entry_preflight_application_json(
 
 pub fn plan_servertool_entry_context_json(input_json: &str) -> Result<String, String> {
     let input: server_side_tool_entry_contract::ServertoolEntryContextInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool entry context input: {e}"))?;
-    serde_json::to_string(&server_side_tool_entry_contract::plan_servertool_entry_context(input))
-        .map_err(|e| format!("serialize servertool entry context plan: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool entry context input")?;
+    stringify_json_with_context(
+        &server_side_tool_entry_contract::plan_servertool_entry_context(input),
+        "serialize servertool entry context plan",
+    )
 }
 
 pub fn plan_servertool_engine_prepass_action_json(input_json: &str) -> Result<String, String> {
     let input: engine_prepass_action_contract::ServertoolEnginePrepassActionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool engine prepass action input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool engine prepass action input",
+        )?;
     serde_json::to_string(
         &engine_prepass_action_contract::plan_servertool_engine_prepass_action(input),
     )
@@ -720,14 +757,17 @@ pub fn plan_servertool_run_engine_prepass_application_json(
     let plan =
         engine_prepass_action_contract::plan_servertool_run_engine_prepass_application(input)
             .map_err(|e| format!("plan servertool run-engine prepass application: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool run-engine prepass application plan: {e}"))
+    stringify_json_with_context(
+        &plan,
+        "serialize servertool run-engine prepass application plan",
+    )
 }
 
 pub fn plan_servertool_registry_lookup_action_json(input_json: &str) -> Result<String, String> {
-    let input: registry_contract::ServertoolRegistryLookupActionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool registry lookup action input: {e}"))?;
+    let input: registry_contract::ServertoolRegistryLookupActionInput = parse_json_with_context(
+        input_json,
+        "deserialize servertool registry lookup action input",
+    )?;
     serde_json::to_string(&registry_contract::plan_servertool_registry_lookup_action(
         input,
     ))
@@ -743,34 +783,42 @@ pub fn plan_servertool_registry_auto_hook_descriptors_json(
         })?;
     let plan = registry_contract::plan_servertool_registry_auto_hook_descriptors(input)
         .map_err(|e| format!("plan servertool registry auto hook descriptors: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool registry auto hook descriptors plan: {e}"))
+    stringify_json_with_context(
+        &plan,
+        "serialize servertool registry auto hook descriptors plan",
+    )
 }
 
 pub fn plan_servertool_registry_projection_json(input_json: &str) -> Result<String, String> {
-    let input: registry_contract::ServertoolRegistryProjectionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool registry projection input: {e}"))?;
+    let input: registry_contract::ServertoolRegistryProjectionInput = parse_json_with_context(
+        input_json,
+        "deserialize servertool registry projection input",
+    )?;
     let plan = registry_contract::plan_servertool_registry_projection(input)
         .map_err(|e| format!("plan servertool registry projection: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool registry projection plan: {e}"))
+    stringify_json_with_context(&plan, "serialize servertool registry projection plan")
 }
 
 pub fn plan_servertool_registry_source_projection_json(input_json: &str) -> Result<String, String> {
     let input: registry_contract::ServertoolRegistrySourceProjectionInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool registry source projection input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool registry source projection input",
+        )?;
     let plan = registry_contract::plan_servertool_registry_source_projection(input)
         .map_err(|e| format!("plan servertool registry source projection: {e}"))?;
-    serde_json::to_string(&plan)
-        .map_err(|e| format!("serialize servertool registry source projection plan: {e}"))
+    stringify_json_with_context(
+        &plan,
+        "serialize servertool registry source projection plan",
+    )
 }
 
 pub fn plan_stopless_cli_projection_context_json(input_json: &str) -> Result<String, String> {
     let input: stopless_cli_projection_context_contract::StoplessCliProjectionContextInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stopless cli projection context input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize stopless cli projection context input",
+        )?;
     serde_json::to_string(
         &stopless_cli_projection_context_contract::plan_stopless_cli_projection_context(input),
     )
@@ -780,8 +828,8 @@ pub fn plan_stopless_cli_projection_context_json(input_json: &str) -> Result<Str
 pub fn normalize_stopless_trigger_hint_for_metadata_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stopless trigger hint input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stopless trigger hint input")?;
     let reason_code = input
         .get("reasonCode")
         .or_else(|| input.get("reason_code"))
@@ -793,8 +841,7 @@ pub fn normalize_stopless_trigger_hint_for_metadata_json(
 
 pub fn plan_engine_selection_start_json(input_json: &str) -> Result<String, String> {
     let input: engine_selection_contract::EngineSelectionStartInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize engine selection start input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize engine selection start input")?;
     serde_json::to_string(&engine_selection_contract::plan_engine_selection_start(
         input,
     ))
@@ -803,8 +850,7 @@ pub fn plan_engine_selection_start_json(input_json: &str) -> Result<String, Stri
 
 pub fn plan_engine_selection_after_run_json(input_json: &str) -> Result<String, String> {
     let input: engine_selection_contract::EngineSelectionAfterRunInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize engine selection after-run input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize engine selection after-run input")?;
     serde_json::to_string(&engine_selection_contract::plan_engine_selection_after_run(
         input,
     ))
@@ -812,8 +858,10 @@ pub fn plan_engine_selection_after_run_json(input_json: &str) -> Result<String, 
 }
 
 pub fn plan_servertool_execution_dispatch_error_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool execution-dispatch error input: {e}"))?;
+    let input: serde_json::Value = parse_json_with_context(
+        input_json,
+        "deserialize servertool execution-dispatch error input",
+    )?;
     let kind = input
         .get("kind")
         .and_then(serde_json::Value::as_str)
@@ -863,17 +911,21 @@ pub fn build_servertool_postflight_observation_summary_json(
     input_json: &str,
 ) -> Result<String, String> {
     let input: postflight_observation_contract::ServertoolPostflightObservationInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool postflight observation input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool postflight observation input",
+        )?;
     let output =
         postflight_observation_contract::build_servertool_postflight_observation_summary(input)?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize servertool postflight observation summary: {e}"))
+    stringify_json_with_context(
+        &output,
+        "serialize servertool postflight observation summary",
+    )
 }
 
 pub fn resolve_servertool_engine_match_hit_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool engine match hit input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize servertool engine match hit input")?;
     let flow_id = input
         .get("execution")
         .and_then(|execution| execution.get("flowId"))
@@ -881,14 +933,18 @@ pub fn resolve_servertool_engine_match_hit_json(input_json: &str) -> Result<Stri
         .map(str::trim)
         .filter(|flow_id| !flow_id.is_empty())
         .ok_or_else(|| "Servertool match hit requires execution.flowId".to_string())?;
-    serde_json::to_string(&serde_json::json!({ "flowId": flow_id }))
-        .map_err(|e| format!("serialize servertool engine match hit output: {e}"))
+    stringify_json_with_context(
+        &serde_json::json!({ "flowId": flow_id }),
+        "serialize servertool engine match hit output",
+    )
 }
 
 pub fn plan_servertool_handler_materialization_json(input_json: &str) -> Result<String, String> {
     let input: execution_handler_contract::ServertoolHandlerMaterializationInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool handler materialization input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool handler materialization input",
+        )?;
     serde_json::to_string(
         &execution_handler_contract::plan_servertool_handler_materialization(&input),
     )
@@ -896,14 +952,18 @@ pub fn plan_servertool_handler_materialization_json(input_json: &str) -> Result<
 }
 
 pub fn create_servertool_execution_loop_state_json() -> Result<String, String> {
-    serde_json::to_string(&execution_state_contract::create_servertool_execution_loop_state())
-        .map_err(|e| format!("serialize servertool execution loop state: {e}"))
+    stringify_json_with_context(
+        &execution_state_contract::create_servertool_execution_loop_state(),
+        "serialize servertool execution loop state",
+    )
 }
 
 pub fn append_servertool_executed_record_json(input_json: &str) -> Result<String, String> {
     let input: execution_state_contract::ServertoolAppendExecutedRecordInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool append executed record input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool append executed record input",
+        )?;
     serde_json::to_string(&execution_state_contract::append_executed_tool_record(
         input,
     ))
@@ -911,43 +971,42 @@ pub fn append_servertool_executed_record_json(input_json: &str) -> Result<String
 }
 
 pub fn resolve_default_stop_message_snapshot_json(input_json: &str) -> Result<String, String> {
-    let input: persisted_lookup::StopMessageDefaultSnapshotInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize default stop-message snapshot input: {e}"))?;
+    let input: persisted_lookup::StopMessageDefaultSnapshotInput = parse_json_with_context(
+        input_json,
+        "deserialize default stop-message snapshot input",
+    )?;
     let snapshot = persisted_lookup::resolve_default_stop_message_snapshot(&input);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize default stop-message snapshot: {e}"))
+    stringify_json_with_context(&snapshot, "serialize default stop-message snapshot")
 }
 
 pub fn resolve_implicit_gemini_stop_message_snapshot_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: persisted_lookup::StopMessageImplicitGeminiSnapshotInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize implicit Gemini stop-message snapshot input: {e}"))?;
+    let input: persisted_lookup::StopMessageImplicitGeminiSnapshotInput = parse_json_with_context(
+        input_json,
+        "deserialize implicit Gemini stop-message snapshot input",
+    )?;
     let snapshot = persisted_lookup::resolve_implicit_gemini_stop_message_snapshot(&input);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize implicit Gemini stop-message snapshot: {e}"))
+    stringify_json_with_context(&snapshot, "serialize implicit Gemini stop-message snapshot")
 }
 
 pub fn read_servertool_loop_state_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool loop state input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize servertool loop state input")?;
     let snapshot = loop_state_contract::read_servertool_loop_state(&input);
-    serde_json::to_string(&snapshot).map_err(|e| format!("serialize servertool loop state: {e}"))
+    stringify_json_with_context(&snapshot, "serialize servertool loop state")
 }
 
 pub fn plan_servertool_loop_state_json(input_json: &str) -> Result<String, String> {
-    let input: loop_state_contract::ServertoolLoopStatePlanInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool loop state plan input: {e}"))?;
+    let input: loop_state_contract::ServertoolLoopStatePlanInput =
+        parse_json_with_context(input_json, "deserialize servertool loop state plan input")?;
     let snapshot = loop_state_contract::plan_servertool_loop_state(input);
-    serde_json::to_string(&snapshot)
-        .map_err(|e| format!("serialize servertool loop state plan: {e}"))
+    stringify_json_with_context(&snapshot, "serialize servertool loop state plan")
 }
 
 pub fn parse_servertool_timeout_ms_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolTimeoutPolicyInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool timeout input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize servertool timeout input")?;
     serde_json::to_string(&orchestration_policy_contract::parse_servertool_timeout_ms(
         &input,
     )?)
@@ -958,8 +1017,10 @@ pub fn resolve_servertool_timeout_ms_from_env_candidates_json(
     input_json: &str,
 ) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolTimeoutEnvCandidatesInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool timeout env candidates input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool timeout env candidates input",
+        )?;
     serde_json::to_string(
         &orchestration_policy_contract::resolve_servertool_timeout_ms_from_env_candidates(&input)?,
     )
@@ -968,15 +1029,16 @@ pub fn resolve_servertool_timeout_ms_from_env_candidates_json(
 
 pub fn plan_servertool_timeout_watcher_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolTimeoutWatcherInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool timeout watcher input: {e}"))?;
-    serde_json::to_string(&orchestration_policy_contract::plan_servertool_timeout_watcher(&input))
-        .map_err(|e| format!("serialize servertool timeout watcher: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool timeout watcher input")?;
+    stringify_json_with_context(
+        &orchestration_policy_contract::plan_servertool_timeout_watcher(&input),
+        "serialize servertool timeout watcher",
+    )
 }
 
 pub fn is_adapter_client_disconnected_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize adapter client disconnect input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize adapter client disconnect input")?;
     Ok(
         if orchestration_policy_contract::is_adapter_client_disconnected(&input) {
             "true"
@@ -989,16 +1051,19 @@ pub fn is_adapter_client_disconnected_json(input_json: &str) -> Result<String, S
 
 pub fn plan_client_disconnect_watcher_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolClientDisconnectWatcherInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize client disconnect watcher input: {e}"))?;
-    serde_json::to_string(&orchestration_policy_contract::plan_client_disconnect_watcher(&input))
-        .map_err(|e| format!("serialize client disconnect watcher: {e}"))
+        parse_json_with_context(input_json, "deserialize client disconnect watcher input")?;
+    stringify_json_with_context(
+        &orchestration_policy_contract::plan_client_disconnect_watcher(&input),
+        "serialize client disconnect watcher",
+    )
 }
 
 pub fn plan_servertool_client_disconnected_error_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolClientDisconnectedErrorInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool client disconnected error input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize servertool client disconnected error input",
+        )?;
     serde_json::to_string(
         &orchestration_policy_contract::plan_servertool_client_disconnected_error(&input),
     )
@@ -1007,16 +1072,16 @@ pub fn plan_servertool_client_disconnected_error_json(input_json: &str) -> Resul
 
 pub fn plan_servertool_timeout_error_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolTimeoutErrorInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool timeout error input: {e}"))?;
-    serde_json::to_string(&orchestration_policy_contract::plan_servertool_timeout_error(&input)?)
-        .map_err(|e| format!("serialize servertool timeout error: {e}"))
+        parse_json_with_context(input_json, "deserialize servertool timeout error input")?;
+    stringify_json_with_context(
+        &orchestration_policy_contract::plan_servertool_timeout_error(&input)?,
+        "serialize servertool timeout error",
+    )
 }
 
 pub fn plan_servertool_state_load_failed_error_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolStateLoadFailedErrorInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool state-load error input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize servertool state-load error input")?;
     serde_json::to_string(
         &orchestration_policy_contract::plan_servertool_state_load_failed_error(&input)?,
     )
@@ -1038,8 +1103,10 @@ pub fn plan_servertool_required_response_hook_empty_error_json(
 
 pub fn plan_stop_message_fetch_failed_error_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::StopMessageFetchFailedErrorInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stop-message fetch failed error input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize stop-message fetch failed error input",
+        )?;
     serde_json::to_string(
         &orchestration_policy_contract::plan_stop_message_fetch_failed_error(&input)?,
     )
@@ -1047,8 +1114,8 @@ pub fn plan_stop_message_fetch_failed_error_json(input_json: &str) -> Result<Str
 }
 
 pub fn read_client_inject_only_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize client inject metadata input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize client inject metadata input")?;
     Ok(
         if orchestration_policy_contract::read_client_inject_only(&input) {
             "true"
@@ -1061,23 +1128,25 @@ pub fn read_client_inject_only_json(input_json: &str) -> Result<String, String> 
 
 pub fn normalize_client_inject_text_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolClientInjectTextInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize client inject text input: {e}"))?;
-    serde_json::to_string(&orchestration_policy_contract::normalize_client_inject_text(&input)?)
-        .map_err(|e| format!("serialize client inject text: {e}"))
+        parse_json_with_context(input_json, "deserialize client inject text input")?;
+    stringify_json_with_context(
+        &orchestration_policy_contract::normalize_client_inject_text(&input)?,
+        "serialize client inject text",
+    )
 }
 
 pub fn compact_followup_error_reason_json(input_json: &str) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize followup error reason input: {e}"))?;
-    serde_json::to_string(&orchestration_policy_contract::compact_followup_error_reason(&input))
-        .map_err(|e| format!("serialize followup error reason: {e}"))
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize followup error reason input")?;
+    stringify_json_with_context(
+        &orchestration_policy_contract::compact_followup_error_reason(&input),
+        "serialize followup error reason",
+    )
 }
 
 pub fn resolve_adapter_context_provider_key_json(input_json: &str) -> Result<String, String> {
     let input: orchestration_policy_contract::ServertoolProviderKeyInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize adapter provider key input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize adapter provider key input")?;
     serde_json::to_string(
         &orchestration_policy_contract::resolve_adapter_context_provider_key(&input),
     )
@@ -1085,30 +1154,32 @@ pub fn resolve_adapter_context_provider_key_json(input_json: &str) -> Result<Str
 }
 
 pub fn build_client_exec_cli_projection_output_json(input_json: &str) -> Result<String, String> {
-    let input: cli_contract::ClientExecCliProjectionInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize projection input: {e}"))?;
+    let input: cli_contract::ClientExecCliProjectionInput =
+        parse_json_with_context(input_json, "deserialize projection input")?;
     let output =
         cli_contract::plan_client_exec_cli_projection_output(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize projection output: {e}"))
+    stringify_json_with_context(&output, "serialize projection output")
 }
 
 pub fn parse_servertool_cli_projection_tool_arguments_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: cli_contract::ServertoolCliProjectionToolArgumentsInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize cli projection tool arguments input: {e}"))?;
+    let input: cli_contract::ServertoolCliProjectionToolArgumentsInput = parse_json_with_context(
+        input_json,
+        "deserialize cli projection tool arguments input",
+    )?;
     let output = cli_contract::parse_servertool_cli_projection_tool_arguments(input)
         .map_err(|e| e.to_string())?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize cli projection tool arguments: {e}"))
+    stringify_json_with_context(&output, "serialize cli projection tool arguments")
 }
 
 pub fn build_servertool_cli_projection_runtime_branch_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: ServertoolCliProjectionRuntimeBranchInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize cli projection runtime branch input: {e}"))?;
+    let input: ServertoolCliProjectionRuntimeBranchInput = parse_json_with_context(
+        input_json,
+        "deserialize cli projection runtime branch input",
+    )?;
     let parsed_arguments = cli_contract::parse_servertool_cli_projection_tool_arguments(
         cli_contract::ServertoolCliProjectionToolArgumentsInput {
             arguments: input.tool_arguments,
@@ -1139,9 +1210,10 @@ pub fn build_servertool_cli_projection_runtime_branch_json(
         })
         .to_string(),
     )?;
-    let additional_tool_calls: Vec<serde_json::Value> =
-        serde_json::from_str(&additional_tool_calls_json)
-            .map_err(|e| format!("deserialize cli projection additional tool calls: {e}"))?;
+    let additional_tool_calls: Vec<serde_json::Value> = parse_json_with_context(
+        &additional_tool_calls_json,
+        "deserialize cli projection additional tool calls",
+    )?;
     let chat_response = cli_contract::build_client_visible_projection_shell(
         ServertoolClientVisibleProjectionShellInput {
             request_id: input.request_id.clone(),
@@ -1170,14 +1242,12 @@ pub fn build_servertool_cli_projection_runtime_branch_json(
             "execution": execution,
         }),
     };
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize cli projection runtime branch: {e}"))
+    stringify_json_with_context(&output, "serialize cli projection runtime branch")
 }
 
 pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<String, String> {
     let input: stopless_orchestration_contract::StoplessOrchestrationPlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stopless orchestration input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize stopless orchestration input")?;
     serde_json::to_string(
         &stopless_orchestration_contract::plan_stopless_orchestration_action(input),
     )
@@ -1186,56 +1256,55 @@ pub fn plan_stopless_orchestration_action_json(input_json: &str) -> Result<Strin
 
 pub fn plan_stopless_learned_note_write_json(input_json: &str) -> Result<String, String> {
     let input: stopless_learned_note_contract::StoplessLearnedNotePlanInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize stopless learned-note input: {e}"))?;
-    serde_json::to_string(&stopless_learned_note_contract::plan_stopless_learned_note_write(input))
-        .map_err(|e| format!("serialize stopless learned-note plan: {e}"))
+        parse_json_with_context(input_json, "deserialize stopless learned-note input")?;
+    stringify_json_with_context(
+        &stopless_learned_note_contract::plan_stopless_learned_note_write(input),
+        "serialize stopless learned-note plan",
+    )
 }
 
 pub fn validate_servertool_hook_skeleton_phase_json(input_json: &str) -> Result<String, String> {
-    let input: hook_skeleton_contract::ServertoolHookSpec = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize servertool hook skeleton spec: {e}"))?;
+    let input: hook_skeleton_contract::ServertoolHookSpec =
+        parse_json_with_context(input_json, "deserialize servertool hook skeleton spec")?;
     let output =
         hook_skeleton_contract::validate_servertool_hook_spec(&input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize servertool hook skeleton projection: {e}"))
+    stringify_json_with_context(&output, "serialize servertool hook skeleton projection")
 }
 
 pub fn plan_servertool_hook_schedule_json(input_json: &str) -> Result<String, String> {
     let input: hook_skeleton_contract::ServertoolHookSchedulerInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize servertool hook scheduler input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize servertool hook scheduler input")?;
     let output =
         hook_skeleton_contract::plan_servertool_hook_schedule(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize servertool hook scheduler plan: {e}"))
+    stringify_json_with_context(&output, "serialize servertool hook scheduler plan")
 }
 
 pub fn build_client_visible_projection_shell_json(input_json: &str) -> Result<String, String> {
-    let input: ServertoolClientVisibleProjectionShellInput = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize projection shell input: {e}"))?;
+    let input: ServertoolClientVisibleProjectionShellInput =
+        parse_json_with_context(input_json, "deserialize projection shell input")?;
     let output =
         cli_contract::build_client_visible_projection_shell(input).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize projection shell: {e}"))
+    stringify_json_with_context(&output, "serialize projection shell")
 }
 
 pub fn build_servertool_cli_projection_execution_context_json(
     input_json: &str,
 ) -> Result<String, String> {
     let input: cli_contract::ServertoolCliProjectionExecutionContextInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize cli projection execution context input: {e}"))?;
+        parse_json_with_context(
+            input_json,
+            "deserialize cli projection execution context input",
+        )?;
     let output = cli_contract::build_servertool_cli_projection_execution_context(input)
         .map_err(|e| e.to_string())?;
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize cli projection execution context: {e}"))
+    stringify_json_with_context(&output, "serialize cli projection execution context")
 }
 
 pub fn build_servertool_handler_error_tool_output_payload_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize handler error tool output input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize handler error tool output input")?;
     let mut output = input
         .get("base")
         .and_then(serde_json::Value::as_object)
@@ -1278,15 +1347,17 @@ pub fn build_servertool_handler_error_tool_output_payload_json(
             "content": content
         }]),
     );
-    serde_json::to_string(&serde_json::Value::Object(output))
-        .map_err(|e| format!("serialize handler error tool output payload: {e}"))
+    stringify_json_with_context(
+        &serde_json::Value::Object(output),
+        "serialize handler error tool output payload",
+    )
 }
 
 pub fn collect_servertool_additional_client_tool_calls_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize additional client tool calls input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize additional client tool calls input")?;
     let projected_tool_call_id = input
         .get("projectedToolCallId")
         .and_then(serde_json::Value::as_str)
@@ -1327,15 +1398,14 @@ pub fn collect_servertool_additional_client_tool_calls_json(
             !matches!(name, Some(name) if SERVERTOOL_INTERNAL_TOOL_NAMES.contains(&name))
         })
         .collect::<Vec<_>>();
-    serde_json::to_string(&output)
-        .map_err(|e| format!("serialize additional client tool calls output: {e}"))
+    stringify_json_with_context(&output, "serialize additional client tool calls output")
 }
 
 pub fn is_servertool_client_exec_cli_projection_tool_call_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let input: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize cli projection tool call input: {e}"))?;
+    let input: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize cli projection tool call input")?;
     let execution_mode = input
         .get("executionMode")
         .and_then(serde_json::Value::as_str)
@@ -1354,14 +1424,14 @@ pub fn is_servertool_client_exec_cli_projection_tool_call_json(
 pub fn validate_client_exec_command_result_json(raw_output: &str) -> Result<String, String> {
     let output =
         cli_contract::validate_client_exec_command_result(raw_output).map_err(|e| e.to_string())?;
-    serde_json::to_string(&output).map_err(|e| format!("serialize command result: {e}"))
+    stringify_json_with_context(&output, "serialize command result")
 }
 
 pub fn has_stop_message_auto_cli_result_in_request_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize cli result guard input: {e}"))?;
+    let payload: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize cli result guard input")?;
     Ok(
         if cli_result_guard::has_stop_message_auto_cli_result_in_request(&payload) {
             "true"
@@ -1375,8 +1445,8 @@ pub fn has_stop_message_auto_cli_result_in_request_json(
 pub fn extract_servertool_cli_result_route_hint_from_request_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize cli result route hint input: {e}"))?;
+    let payload: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize cli result route hint input")?;
     serde_json::to_string(
         &cli_result_guard::extract_servertool_cli_result_route_hint_from_request(&payload),
     )
@@ -1386,8 +1456,8 @@ pub fn extract_servertool_cli_result_route_hint_from_request_json(
 pub fn extract_stop_message_auto_cli_result_snapshot_from_request_json(
     input_json: &str,
 ) -> Result<String, String> {
-    let payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stopless cli result snapshot input: {e}"))?;
+    let payload: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize stopless cli result snapshot input")?;
     serde_json::to_string(
         &cli_result_guard::extract_stop_message_auto_cli_result_snapshot_from_request(&payload),
     )
@@ -1395,17 +1465,19 @@ pub fn extract_stop_message_auto_cli_result_snapshot_from_request_json(
 }
 
 pub fn extract_text_from_chat_like_json(input_json: &str) -> Result<String, String> {
-    let payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize text extraction payload: {e}"))?;
+    let payload: serde_json::Value =
+        parse_json_with_context(input_json, "deserialize text extraction payload")?;
     let text = text_extraction::extract_text_from_chat_like(&payload);
-    serde_json::to_string(&text).map_err(|e| format!("serialize extracted text: {e}"))
+    stringify_json_with_context(&text, "serialize extracted text")
 }
 
 pub fn extract_current_assistant_stop_text_json(input_json: &str) -> Result<String, String> {
-    let payload: serde_json::Value = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize current assistant stop text payload: {e}"))?;
+    let payload: serde_json::Value = parse_json_with_context(
+        input_json,
+        "deserialize current assistant stop text payload",
+    )?;
     let text = stop_visible_text::extract_current_assistant_stop_text(&payload);
-    serde_json::to_string(&text).map_err(|e| format!("serialize current assistant stop text: {e}"))
+    stringify_json_with_context(&text, "serialize current assistant stop text")
 }
 
 pub fn extract_current_assistant_reasoning_stop_arguments_json(
@@ -1415,25 +1487,25 @@ pub fn extract_current_assistant_reasoning_stop_arguments_json(
         format!("deserialize current assistant reasoningStop arguments payload: {e}")
     })?;
     let arguments = stop_visible_text::extract_current_assistant_reasoning_stop_arguments(&payload);
-    serde_json::to_string(&arguments)
-        .map_err(|e| format!("serialize current assistant reasoningStop arguments: {e}"))
+    stringify_json_with_context(
+        &arguments,
+        "serialize current assistant reasoningStop arguments",
+    )
 }
 
 pub fn strip_stop_schema_control_text_json(input_json: &str) -> Result<String, String> {
-    let text: String = serde_json::from_str(input_json)
-        .map_err(|e| format!("deserialize stop schema text input: {e}"))?;
+    let text: String = parse_json_with_context(input_json, "deserialize stop schema text input")?;
     let stripped = stop_visible_text::strip_stop_schema_control_text(&text);
-    serde_json::to_string(&stripped).map_err(|e| format!("serialize stripped text: {e}"))
+    stringify_json_with_context(&stripped, "serialize stripped text")
 }
 
 pub fn build_stop_message_terminal_visible_payload_json(
     input_json: &str,
 ) -> Result<String, String> {
     let input: stop_visible_text::StopMessageTerminalVisiblePayloadInput =
-        serde_json::from_str(input_json)
-            .map_err(|e| format!("deserialize terminal visible payload input: {e}"))?;
+        parse_json_with_context(input_json, "deserialize terminal visible payload input")?;
     let output = stop_visible_text::build_stop_message_terminal_visible_payload(input);
-    serde_json::to_string(&output).map_err(|e| format!("serialize terminal visible payload: {e}"))
+    stringify_json_with_context(&output, "serialize terminal visible payload")
 }
 
 /// Resolve default max repeats.

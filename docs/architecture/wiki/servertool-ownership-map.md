@@ -37,6 +37,7 @@ Feature scope: `hub.servertool_*`
 | `hub.servertool_loop_warning` | stop-message loop warning text/count injection and seed payload bridge | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/followup-core/src` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
 | `hub.servertool_rust_only_closeout` | servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map` |
 | `hub.servertool_orchestration_policy` | servertool timeout, client-inject, followup error, and adapter provider-key policy | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs` | `npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate` |
+| `hub.servertool_core_shared_helpers` | servertool_core_blocks reuses shared Rust contextual JSON bridge helpers | `rust_helper` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs` | `npm run test:servertool-core-shared-helpers-red-fixtures`<br/>`npm run verify:servertool-core-shared-helpers`<br/>`npm run test:servertool-core-shared-helpers-cargo`<br/>`npm run verify:servertool-rust-only`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-thin-wrapper-only`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run build:native-hotpath` |
 
 ## hub.servertool_followup
 
@@ -1078,3 +1079,59 @@ Notes:
 - TS server-side-tools may only consume `isAdapterClientDisconnected` from the native timeout-error shell; it must not restore local adapter disconnect scanning.
 - TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.
 - Do not restore local `parseTimeoutMs`, `parseBooleanLike`, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.
+
+## hub.servertool_core_shared_helpers
+
+Summary: servertool_core_blocks reuses shared Rust contextual JSON bridge helpers
+
+Owner kind: `rust_helper`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+Owner scope: shared helper placement for JSON parse/stringify bridge mechanics only; no servertool contract or NAPI public JSON semantic movement
+
+Canonical types:
+- `DeserializeOwned`
+- `Serialize`
+
+Canonical builders:
+- `parse_json_with_context`
+- `stringify_json_with_context`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+- `scripts/architecture/verify-servertool-core-shared-helpers.mjs`
+- `scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs`
+- `docs/architecture/function-map.yml`
+- `docs/architecture/verification-map.yml`
+- `docs/goals/hub-pipeline-shared-library-simplification-plan.md`
+- `package.json`
+
+Forbidden paths:
+- `src/modules/llmswitch/bridge`
+- `src/server/runtime/http-server/executor`
+- `src/server/handlers`
+- `src/providers`
+- `sharedmodule/llmswitch-core/src/servertool/handlers`
+
+Required tests:
+- `scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs`
+- `scripts/architecture/verify-servertool-core-shared-helpers.mjs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs`
+
+Required gates:
+- `npm run test:servertool-core-shared-helpers-red-fixtures`
+- `npm run verify:servertool-core-shared-helpers`
+- `npm run test:servertool-core-shared-helpers-cargo`
+- `npm run verify:servertool-rust-only`
+- `npm run verify:function-map-compile-gate`
+- `npm run verify:architecture-mainline-call-map`
+- `npm run verify:architecture-thin-wrapper-only`
+- `npm run verify:llmswitch-rustification-audit`
+- `npm run build:native-hotpath`
+
+Notes:
+- This owner only removes repeated JSON parse/stringify error-context wrapper mechanics from servertool_core_blocks by reusing shared_json_utils.
+- servertool-core remains the contract owner for engine, stopless, hook, orchestration, CLI, timeout, and policy semantics.
+- Public NAPI names, JSON input/output contracts, provider/client payload shapes, and servertool business decisions must not change.
+- Red fixtures must fail if broad local contextual serde_json parse/stringify wrappers are reintroduced in servertool_core_blocks.rs.

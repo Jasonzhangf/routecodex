@@ -20,6 +20,10 @@ describe('provider-response shared pure blocks', () => {
     expect(source).not.toContain('return fallback()');
     expect(source).not.toContain('TS fallback');
     expect(source).not.toContain('fall through');
+    expect(source).toContain('shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative(args)');
+    expect(source).not.toContain("entry.includes('/v1/responses')");
+    expect(source).not.toContain("args.providerProtocol !== 'openai-responses'");
+    expect(source).not.toContain("args.continuationOwner === 'direct'");
   });
 
   it('allows prebuilt responses SSE passthrough only for direct same-protocol responses', () => {

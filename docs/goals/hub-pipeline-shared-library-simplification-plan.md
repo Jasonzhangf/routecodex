@@ -118,6 +118,8 @@
 目标：把大文件按 block owner 拆成 “shared helper + stage block + orchestrator”，不改变 NAPI public JSON contract。
 
 候选 block：
+- `servertool_core_blocks.rs` JSON parse/stringify bridge wrappers
+- `hub_pipeline_lib/engine.rs`
 - `resp_process_stage1_tool_governance/harvest.rs`
 - `resp_process_stage1_tool_governance/apply_patch.rs`
 - `resp_process_stage1_tool_governance/display.rs`

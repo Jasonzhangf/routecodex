@@ -160,6 +160,7 @@
         <tr><td><code>hub.servertool_loop_warning</code></td><td>stop-message loop warning text/count injection and seed payload bridge</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/followup-core/src</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
         <tr><td><code>hub.servertool_rust_only_closeout</code></td><td>servertool hook skeleton closeout gate; proves remaining TS orchestration has been reduced to thin shells before physical deletion and anchors the Rust hook skeleton contract</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code></td></tr>
         <tr><td><code>hub.servertool_orchestration_policy</code></td><td>servertool timeout, client-inject, followup error, and adapter provider-key policy</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs</code></td><td><code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code></td></tr>
+        <tr><td><code>hub.servertool_core_shared_helpers</code></td><td>servertool_core_blocks reuses shared Rust contextual JSON bridge helpers</td><td><code>rust_helper</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs</code></td><td><code>npm run test:servertool-core-shared-helpers-red-fixtures</code>&lt;br/&gt;<code>npm run verify:servertool-core-shared-helpers</code>&lt;br/&gt;<code>npm run test:servertool-core-shared-helpers-cargo</code>&lt;br/&gt;<code>npm run verify:servertool-rust-only</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-thin-wrapper-only</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run build:native-hotpath</code></td></tr>
         </tbody>
         </table>
         <h2>hub.servertool_followup</h2>
@@ -1250,6 +1251,64 @@
           <li>TS server-side-tools may only consume <code>isAdapterClientDisconnected</code> from the native timeout-error shell; it must not restore local adapter disconnect scanning.</li>
           <li>TS timeout-error-block may only execute timer/AbortController/Error-object glue from native plans.</li>
           <li>Do not restore local <code>parseTimeoutMs</code>, <code>parseBooleanLike</code>, text sanitizer, error regex compaction, providerKey walker, stop-gateway wrapper, local disconnect watcher policy, or timeout/error payload builders.</li>
+        </ul>
+        <h2>hub.servertool_core_shared_helpers</h2>
+        <p>Summary: servertool_core_blocks reuses shared Rust contextual JSON bridge helpers</p>
+        <p>Owner kind: <code>rust_helper</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs</code> Owner scope: shared helper placement for JSON parse/stringify bridge mechanics only; no servertool contract or NAPI public JSON semantic movement</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>DeserializeOwned</code></li>
+          <li><code>Serialize</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>parse_json_with_context</code></li>
+          <li><code>stringify_json_with_context</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+          <li><code>scripts/architecture/verify-servertool-core-shared-helpers.mjs</code></li>
+          <li><code>scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs</code></li>
+          <li><code>docs/architecture/function-map.yml</code></li>
+          <li><code>docs/architecture/verification-map.yml</code></li>
+          <li><code>docs/goals/hub-pipeline-shared-library-simplification-plan.md</code></li>
+          <li><code>package.json</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>src/modules/llmswitch/bridge</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>src/server/handlers</code></li>
+          <li><code>src/providers</code></li>
+          <li><code>sharedmodule/llmswitch-core/src/servertool/handlers</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs</code></li>
+          <li><code>scripts/architecture/verify-servertool-core-shared-helpers.mjs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run test:servertool-core-shared-helpers-red-fixtures</code></li>
+          <li><code>npm run verify:servertool-core-shared-helpers</code></li>
+          <li><code>npm run test:servertool-core-shared-helpers-cargo</code></li>
+          <li><code>npm run verify:servertool-rust-only</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run verify:architecture-mainline-call-map</code></li>
+          <li><code>npm run verify:architecture-thin-wrapper-only</code></li>
+          <li><code>npm run verify:llmswitch-rustification-audit</code></li>
+          <li><code>npm run build:native-hotpath</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>This owner only removes repeated JSON parse/stringify error-context wrapper mechanics from servertool_core_blocks by reusing shared_json_utils.</li>
+          <li>servertool-core remains the contract owner for engine, stopless, hook, orchestration, CLI, timeout, and policy semantics.</li>
+          <li>Public NAPI names, JSON input/output contracts, provider/client payload shapes, and servertool business decisions must not change.</li>
+          <li>Red fixtures must fail if broad local contextual serde_json parse/stringify wrappers are reintroduced in servertool_core_blocks.rs.</li>
         </ul>
       </article>
     </section>
