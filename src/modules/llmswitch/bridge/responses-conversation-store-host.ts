@@ -331,6 +331,18 @@ export function getResponsesConversationStoreDebugStats(): StoreMetrics {
   return executeStoreOperation<StoreMetrics>('debug_stats');
 }
 
+export function hasResponsesConversationRequestInStore(requestId?: string): boolean {
+  return executeStoreOperation<boolean>('debug_has_request', { requestId });
+}
+
+export function hasResponsesConversationResponseInStore(responseId?: string): boolean {
+  return executeStoreOperation<boolean>('debug_has_response', { responseId });
+}
+
+export function hasResponsesConversationScopeInStore(scopeKey?: string): boolean {
+  return executeStoreOperation<boolean>('debug_has_scope', { scopeKey });
+}
+
 export function releaseResponsesConversationRequestPayload(requestId?: string): void {
   executeStoreOperation<null>('release_request_payload', { requestId });
 }

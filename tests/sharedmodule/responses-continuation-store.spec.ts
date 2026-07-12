@@ -15,14 +15,12 @@ import {
   resumeResponsesConversation,
   resumeLatestResponsesContinuationByScope,
   getResponsesConversationStoreDebugStats,
+  hasResponsesConversationRequestInStore,
+  hasResponsesConversationResponseInStore,
+  hasResponsesConversationScopeInStore,
   releaseResponsesConversationRequestPayload
 } from '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js';
 import { buildChatRequestFromResponses } from './helpers/responses-openai-bridge-direct-native.js';
-import {
-  hasResponsesConversationRequestInNativeStore,
-  hasResponsesConversationResponseInNativeStore,
-  hasResponsesConversationScopeInNativeStore
-} from './helpers/responses-conversation-store-direct-native';
 import { buildResponsesRequestContextForHttp } from '../../src/modules/llmswitch/bridge/responses-request-bridge.js';
 
 function findOpenAiChatToolOrderingViolation(messages: unknown): string | null {
@@ -1431,7 +1429,7 @@ describe('responses conversation store plain continuation restore', () => {
     ]);
   });
 
-  it('stored continuation history preserves historical images before success release', () => {
+  it('recording a successful relay response strips historical images without a separate release call', () => {
     captureResponsesRequestContext({
       requestId: track('req-resp-store-image-capture-1'),
       sessionId: 'sess-image-capture',
@@ -1485,8 +1483,28 @@ describe('responses conversation store plain continuation restore', () => {
 
     expect(materialized).not.toBeNull();
     const serialized = JSON.stringify(materialized?.payload ?? {});
-    expect(serialized).toContain('data:image/png;base64,HISTORY_RAW');
-    expect(serialized).not.toContain('[Image omitted]');
+    expect(serialized).not.toContain('data:image/png;base64,HISTORY_RAW');
+    expect(serialized).toContain('[Image omitted]');
+    expect(materialized?.payload.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Image omitted]' },
+          { type: 'input_text', text: 'look raw' }
+        ]
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'input_text', text: 'done raw' }]
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'next turn' }]
+      }
+    ]);
   });
 
   it('materializes full input by session scope for local continuation when incoming payload only carries delta', () => {
@@ -2834,12 +2852,12 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestInNativeStore('req-resp-store-1')).toBe(false);
-    expect(hasResponsesConversationRequestInNativeStore('req-resp-store-2')).toBe(true);
-    expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-1')).toBe(false);
-    expect(hasResponsesConversationResponseInNativeStore('resp-store-supersede-2')).toBe(true);
-    expect(hasResponsesConversationScopeInNativeStore('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
-    expect(hasResponsesConversationScopeInNativeStore('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
+    expect(hasResponsesConversationRequestInStore('req-resp-store-1')).toBe(false);
+    expect(hasResponsesConversationRequestInStore('req-resp-store-2')).toBe(true);
+    expect(hasResponsesConversationResponseInStore('resp-store-supersede-1')).toBe(false);
+    expect(hasResponsesConversationResponseInStore('resp-store-supersede-2')).toBe(true);
+    expect(hasResponsesConversationScopeInStore('entry:responses|owner:relay|session:sess-supersede')).toBe(true);
+    expect(hasResponsesConversationScopeInStore('entry:responses|owner:relay|conversation:conv-supersede')).toBe(true);
 
     const restored = resumeLatestResponsesContinuationByScope({
       requestId: 'req-resp-store-3',
@@ -2912,8 +2930,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestInNativeStore('req-pending-old-1')).toBe(false);
-    expect(hasResponsesConversationRequestInNativeStore('req-pending-old-2')).toBe(true);
+    expect(hasResponsesConversationRequestInStore('req-pending-old-1')).toBe(false);
+    expect(hasResponsesConversationRequestInStore('req-pending-old-2')).toBe(true);
 
     const stats = getResponsesConversationStoreDebugStats();
     expect(stats.requestEntriesWithoutLastResponseId).toBeGreaterThanOrEqual(1);
@@ -2952,8 +2970,8 @@ describe('responses conversation store plain continuation restore', () => {
       }
     });
 
-    expect(hasResponsesConversationRequestInNativeStore('req-pending-scope-a-1')).toBe(true);
-    expect(hasResponsesConversationRequestInNativeStore('req-pending-scope-b-1')).toBe(true);
+    expect(hasResponsesConversationRequestInStore('req-pending-scope-a-1')).toBe(true);
+    expect(hasResponsesConversationRequestInStore('req-pending-scope-b-1')).toBe(true);
   });
 
   it('keeps recording when response capture sees synthetic RouteCodex assistant control text', () => {

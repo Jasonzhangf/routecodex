@@ -4116,15 +4116,13 @@ impl ResponsesConversationStoreState {
         let release_plan = plan_responses_release_request_payload(&entry);
         if let Some(row) = entry.as_object_mut() {
             if let Some(plan_obj) = release_plan.as_object() {
-                for key in [
-                    "releasedInputPrefix",
-                    "basePayload",
-                    "releasedPendingToolCallIds",
-                    "input",
-                ] {
+                for key in ["releasedInputPrefix", "basePayload", "releasedPendingToolCallIds"] {
                     if let Some(value) = plan_obj.get(key).cloned() {
                         row.insert(key.to_string(), value);
                     }
+                }
+                if let Some(value) = plan_obj.get("releasedInputPrefix").cloned() {
+                    row.insert("input".to_string(), value);
                 }
             }
         }
@@ -4765,8 +4763,12 @@ fn execute_responses_conversation_store_operation(input: &Value) -> Value {
             responses_store_ok(Value::Null)
         }
         "get_last_prune_at" => responses_store_ok(serde_json::json!(store.last_prune_at)),
-        "debug_stats" => responses_store_ok(store.debug_stats()),
+        "debug_stats" => {
+            store.ensure_persistence_loaded();
+            responses_store_ok(store.debug_stats())
+        }
         "debug_has_request" => {
+            store.ensure_persistence_loaded();
             let exists = payload
                 .as_object()
                 .and_then(|row| read_trimmed_string(row.get("requestId")))
@@ -4775,6 +4777,7 @@ fn execute_responses_conversation_store_operation(input: &Value) -> Value {
             responses_store_ok(Value::Bool(exists))
         }
         "debug_has_response" => {
+            store.ensure_persistence_loaded();
             let exists = payload
                 .as_object()
                 .and_then(|row| read_trimmed_string(row.get("responseId")))
@@ -4783,6 +4786,7 @@ fn execute_responses_conversation_store_operation(input: &Value) -> Value {
             responses_store_ok(Value::Bool(exists))
         }
         "debug_has_scope" => {
+            store.ensure_persistence_loaded();
             let exists = payload
                 .as_object()
                 .and_then(|row| read_trimmed_string(row.get("scopeKey")))
