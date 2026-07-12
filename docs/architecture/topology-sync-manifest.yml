@@ -5,19 +5,5 @@ description: >
   topology SSOT but are not yet consumed by call-map / metadata manifest / wiki
   review surfaces. Any growth or silent drift must fail fast.
 declared_node_count: 33
-referenced_node_count: 19
-allowed_unreferenced_nodes:
-  - ServerReqInbound02PipelineInput
-  - ServerRespOutbound04DispatchPlan
-  - VrRoute01Features
-  - VrRoute02ClassifiedIntent
-  - VrRoute03CandidatePool
-  - VrRoute05DecisionRecord
-  - ProviderReqOutbound07AuthApplied
-  - ProviderReqOutbound08TransportRequest
-  - ProviderRespInbound01RawTransport
-  - ProviderRespInbound02DecodedProtocol
-  - ProviderReqOutbound08TransportSigned
-  - MetaReq02RuntimeCarrier
-  - MetaReq01EntryCaptured
-  - MetaResp04SameRequestCarrier
+referenced_node_count: 33
+allowed_unreferenced_nodes: []

@@ -2415,6 +2415,59 @@ owners:
       - "Rust NAPI/request-stage builders own the request-stage bridge semantics; TS protocol wrapper and test-only direct-native helper are native-call/JSON IO only, not runtime owners."
       - "Preselected-route handoff must stay request-scoped control metadata, not client/provider payload."
 
+  - feature_id: hub.pipeline_rust_residual_reference_closeout
+    status: active
+    summary: "Hub Pipeline Rust residual native reference inventory, owner grouping, and regression gate"
+    owner_kind: gate_doc
+    owner_scope: "architecture inventory and gate surface for broad native-exports, retired TS stage bridge, aggregate host, old helper wrapper, and direct-native helper reference boundaries"
+    owner_module: scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
+    canonical_types:
+      - HubPipelineNativeReferenceGate
+    canonical_builders:
+      - verifyHubPipelineNativeReferenceGate
+    allowed_paths:
+      - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
+      - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
+      - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
+      - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
+      - docs/architecture/wiki/html/hub-pipeline-rust-reference-closeout.html
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+      - .agents/skills/rcc-dev-skills/SKILL.md
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - src/modules/llmswitch/bridge/native-exports.ts # private loader only, not semantic owner
+      - sharedmodule/llmswitch-core/src/native/router-hotpath/native-hub-pipeline-orchestration-semantics.ts # deleted; forbidden
+      - tests/sharedmodule/helpers/*direct-native* # test evidence only; runtime import forbidden
+      - scripts/helpers/*direct-native* # script evidence only; runtime import forbidden
+    forbidden_mentions_allowlist:
+      - native-exports
+      - native-hub-pipeline-orchestration-semantics
+      - direct-native
+      - HubPipeline
+    required_tests:
+      - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
+      - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
+      - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
+      - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
+    required_gates:
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run test:hub-pipeline-native-reference-gate-red-fixtures
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:architecture-review-surface-light
+      - npm run verify:architecture-ci-longtail
+    migration_target: rust
+    notes:
+      - "This is a gate/doc/test-design owner, not a runtime behavior owner."
+      - "Broad `native-exports.ts` may remain a private loader for owner-specific narrow hosts, but must not be a runtime semantic caller seam or doc/wiki owner surface."
+      - "White-box host wiring tests must mock owner-specific narrow hosts; only pure Rust/NAPI black-box evidence may use direct-native helpers."
+      - "Runtime source must never import test/script direct-native helpers."
+
+
   - feature_id: hub.chat_envelope_type_surface
     status: retired
     summary: "retired Hub ChatEnvelope/StandardizedRequest TS bridge type surface"

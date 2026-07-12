@@ -194,6 +194,39 @@ export const MANUAL_WIKI_PAGES = [
       'ServertoolReq04FollowupBuilt',
     ],
   },
+  {
+    path: `${WIKI_ROOT}/topology-residual-node-review.md`,
+    title: '# Topology Residual Node Review',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Main Rule',
+      '## Residual Topology Surface',
+      '## Node Matrix',
+      '## Owner Matrix',
+      '## Review Findings',
+      'topology-residual-gap-01',
+      'ServerReqInbound02PipelineInput',
+      'ProviderReqOutbound08TransportSigned',
+      'MetaResp04SameRequestCarrier',
+    ],
+  },
+  {
+    path: `${WIKI_ROOT}/hub-pipeline-rust-reference-closeout.md`,
+    title: '# Hub Pipeline Rust Reference Closeout',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Main Rule',
+      '## Reference Flow',
+      '## Classification Matrix',
+      '## Owner Matrix',
+      '## Active Claim Boundary',
+      '## Review Findings',
+      'hub-rust-ref-gap-01',
+      'verify:hub-pipeline-native-reference-gate',
+    ],
+  },
 ];
 
 function readText(root, relPath) {

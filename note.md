@@ -1,3 +1,22 @@
+# 2026-07-12: Handler request-executor native host mock contraction
+
+- Scope: active claim `gate_id:handler_request_executor_native_host_reference_contraction`; test/reference-only change, no runtime behavior, no restart/install/live mutation.
+- Change: `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts` no longer mocks broad `src/modules/llmswitch/bridge/native-exports.*`; it mocks owner-specific narrow hosts and keeps server-index `hubBody -> body` normalization inside the test harness.
+- Contract correction: Rust `build_responses_resume_control_for_continuation_context_for_http_json` strips relay `routeHint` and `providerKey`; handler tests now assert those pins are absent from resume/runtime control while keeping `streamIntent` and direct-provider retry pin boundaries.
+- Verification PASS: `npm run jest:run -- --runTestsByPath tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand` (2 suites / 251 tests).
+
+# 2026-07-12: Hub Pipeline Rust residual native reference gate first slice
+
+- Scope: first systematic convergence pass for Hub Pipeline Rust residual reference interfaces; no provider/VR/Hub runtime behavior change, no live config, no restart/install/release.
+- Collaboration: used run `20260712T115923Z-Macstudio.local-5572-333b` and claim `gate_id:hub_pipeline_native_reference_gate`; avoided active provider-runtime, handler-executor, hub runtime ingress, VR host-effects, and lifecycle claims.
+- Inventory: `git ls-files` compact scan found 210 source-controlled hits across runtime/source 61, test 46, doc/map/wiki 82, gate/script 14, other 7. The plan groups these by runtime business caller, TS shell/IO bridge, Jest white-box mock, direct-native black-box evidence, and doc/map stale reference.
+- Change: added `docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md`, feature owner `hub.pipeline_rust_residual_reference_closeout`, verification-map entry, wiki review page + HTML, and package scripts `verify:hub-pipeline-native-reference-gate` / `test:hub-pipeline-native-reference-gate-red-fixtures`.
+- Gate behavior: new verifier rejects runtime imports of broad `native-exports`, monitored white-box tests mocking broad native exports or `createNativeExportsMock`, runtime imports of test/script direct-native helpers, wiki/doc owner surfaces that name broad `native-exports.ts` as owner, and missing map/package script bindings. It allows private loader/narrow-host references, retired/forbidden assertions, Rust `hub_pipeline_` names, and test/script direct-native evidence helpers.
+- Stale doc slice: updated `docs/architecture/wiki/server-responses-sse-bridge-map.md` so the SSE bridge owner surface no longer lists broad `native-exports.ts` as a canonical owner file; regenerated HTML.
+- Verification PASS: `verify:hub-pipeline-native-reference-gate`; `test:hub-pipeline-native-reference-gate-red-fixtures`; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:architecture-mainline-manifest-sync`; `verify:architecture-wiki-sync`; `verify:architecture-wiki-html-sync`; `verify:architecture-review-surface-light`; `verify:architecture-ci-longtail`; `verify:llmswitch-minimal-ts-surface`; `verify:llmswitch-rustification-audit -- --json`; `verify:llmswitch-ts-shell-reference-audit -- --json`; `git diff --check`; `.agent-collab` JSON/JSONL parse.
+- Red fixture coverage: broad runtime native import, broad monitored white-box test mock, runtime direct-native helper import, stale doc owner surface, and missing function-map owner all fail closed.
+- Boundary: this closes a gate/doc/test-design slice only. Active-claim tests such as `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts` and handler/provider runtime tests were not edited.
+
 # 2026-07-12: review closeout for host bridge/resource/snapshot batch
 
 - Scope: review current uncommitted host bridge contraction, resource ownership map/gate, snapshot marker/dry-run owner, and Responses direct SSE dry-run isolation before commit.

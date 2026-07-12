@@ -22,6 +22,8 @@
 | Metadata center mainline source | `docs/architecture/wiki/metadata-center-mainline-source.md` | done | metadata family 分层、写入阶段 owner、未来 request-scoped center 主线 review 面 |
 | Continuation standard contract | `docs/architecture/wiki/continuation-standard-contract.md` | done | continuation `save / restore / materialize / release` 标准行为、协议模式、白盒/黑盒测试矩阵 |
 | Pipeline topology | `docs/design/pipeline-type-topology-and-module-boundaries.md` | done | 结构真源，不放在 wiki 重复写 |
+| Topology residual node review | `docs/architecture/wiki/topology-residual-node-review.md` | done | 原 `topology-sync-manifest.yml` locked debt 的 14 个 residual nodes 已进入 review surface |
+| Hub Pipeline Rust reference closeout | `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md` | done | broad `native-exports` / narrow host / direct-native helper 引用接口第一轮收敛 review surface |
 
 ## Missing Wiki Pages
 

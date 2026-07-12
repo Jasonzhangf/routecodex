@@ -46,6 +46,141 @@ function materializeHubPipelineFixtureResult(result: unknown): unknown {
   };
 }
 
+const TEST_RESPONSES_REQUEST_CONTEXT_KEY = '__test_responses_request_context';
+
+function asPlainRecord(value: unknown): Record<string, any> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
+
+function resolveFixtureEntryProtocol(endpoint: unknown): string | undefined {
+  const text = typeof endpoint === 'string' ? endpoint : '';
+  if (text.includes('/v1/responses')) return 'openai-responses';
+  if (text.includes('/v1/messages')) return 'anthropic-messages';
+  if (text.includes('/v1/chat/completions')) return 'openai-chat';
+  return undefined;
+}
+
+function buildResponsesRequestContextFixture(payload: Record<string, any>): Record<string, any> {
+  return {
+    payload,
+    context: {
+      input: Array.isArray(payload.input) ? payload.input : [],
+      toolsRaw: Array.isArray(payload.tools) ? payload.tools : []
+    }
+  };
+}
+
+function attachResponsesRequestContextFixture(
+  metadata: Record<string, any>,
+  payload: Record<string, any>
+): void {
+  const fixture = buildResponsesRequestContextFixture(payload);
+  Object.defineProperty(metadata, TEST_RESPONSES_REQUEST_CONTEXT_KEY, {
+    configurable: true,
+    enumerable: false,
+    value: fixture,
+    writable: true
+  });
+  metadata.contextSnapshot = fixture.context;
+}
+
+function materializeHubPipelineFixtureInput(input: unknown): unknown {
+  const record = asPlainRecord(input);
+  const metadata = asPlainRecord(record?.metadata);
+  if (!record || !metadata) {
+    return input;
+  }
+  const center = MetadataCenter.read(metadata) ?? MetadataCenter.attach(metadata);
+  const runtimeControl = center?.readRuntimeControl() ?? {};
+  const providerProtocol = runtimeControl.providerProtocol ?? resolveFixtureEntryProtocol(record.endpoint);
+  if (providerProtocol && typeof metadata.providerProtocol !== 'string') {
+    metadata.providerProtocol = providerProtocol;
+  }
+  delete metadata.__raw_request_body;
+  if (providerProtocol === 'openai-responses') {
+    const payload = asPlainRecord(record.payload);
+    if (payload) {
+      attachResponsesRequestContextFixture(metadata, payload);
+    }
+  }
+  return input;
+}
+
+function normalizeHubPipelineInputForTest(input: unknown): unknown {
+  const record = asPlainRecord(input);
+  if (!record) {
+    return input;
+  }
+  const sourceMetadata = asPlainRecord(record.metadata);
+  const metadata = sourceMetadata ? { ...sourceMetadata } : undefined;
+  if (sourceMetadata && metadata) {
+    const center = MetadataCenter.read(sourceMetadata);
+    if (center) {
+      MetadataCenter.bind(metadata, center);
+    }
+  }
+  const hasHubBody = Object.prototype.hasOwnProperty.call(record, 'hubBody');
+  const body = hasHubBody ? record.hubBody : record.body;
+  const normalized: Record<string, any> = hasHubBody
+    ? { ...record, body, metadata }
+    : { ...record, ...(metadata ? { metadata } : {}) };
+  if (hasHubBody) {
+    delete normalized.hubBody;
+  }
+  const providerProtocol =
+    resolveFixtureEntryProtocol(record.entryEndpoint ?? record.endpoint)
+    ?? (metadata ? MetadataCenter.read(metadata)?.readRuntimeControl().providerProtocol : undefined);
+  const payload = asPlainRecord(body);
+  if (providerProtocol === 'openai-responses' && metadata && payload) {
+    attachResponsesRequestContextFixture(metadata, payload);
+  }
+  return normalized;
+}
+
+function buildJsonFixtureSseStream(body: unknown, entryEndpoint?: string): Readable {
+  const event = entryEndpoint?.includes('/v1/responses')
+    ? 'response.completed'
+    : entryEndpoint?.includes('/v1/messages')
+      ? 'message'
+      : 'chat.completion';
+  return Readable.from([
+    `event: ${event}\n`,
+    `data: ${JSON.stringify(body ?? {})}\n\n`,
+    'data: [DONE]\n\n'
+  ]);
+}
+
+function shouldMaterializeJsonFixtureSse(input: Record<string, any>): boolean {
+  const headers = asPlainRecord(input.headers);
+  const acceptsSse = typeof headers?.accept === 'string' && headers.accept.includes('text/event-stream');
+  const body = asPlainRecord(input.body);
+  const metadata = asPlainRecord(input.metadata);
+  const streamIntent = metadata ? MetadataCenter.read(metadata)?.readRuntimeControl().streamIntent : undefined;
+  return acceptsSse || body?.stream === true || streamIntent === 'stream';
+}
+
+async function executeHandlerPipelineFixture(
+  execute: (input: any) => unknown,
+  input: unknown
+): Promise<unknown> {
+  const normalized = normalizeHubPipelineInputForTest(input) as Record<string, any>;
+  const result = await execute(normalized);
+  const record = asPlainRecord(result);
+  if (!record || record.sseStream !== undefined || !shouldMaterializeJsonFixtureSse(normalized)) {
+    return result;
+  }
+  return {
+    ...record,
+    sseStream: buildJsonFixtureSseStream(record.body, normalized.entryEndpoint)
+  };
+}
+
+async function executeRequestExecutorWithServerInput(executor: any, input: unknown): Promise<unknown> {
+  return executor.execute(normalizeHubPipelineInputForTest(input) as any);
+}
+
 function extractTextFromProviderResponseBody(body: any): string {
   const data = body && typeof body === 'object' && body.data && typeof body.data === 'object'
     ? body.data
@@ -113,6 +248,13 @@ function detectToolCallFinishReason(body: any): string | undefined {
 const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
   const entryEndpoint = String(options?.entryEndpoint || '');
   const response = options?.response ?? {};
+  const withFixtureSseStream = (converted: Record<string, any>) =>
+    options?.wantsStream === true && converted.sseStream === undefined
+      ? {
+          ...converted,
+          sseStream: buildJsonFixtureSseStream(converted.body, entryEndpoint)
+        }
+      : converted;
   if (response.sseStream !== undefined) {
     return { ...response, sseStream: response.sseStream, continuationOwner: 'direct' };
   }
@@ -122,14 +264,14 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
   if (entryEndpoint.includes('/v1/responses')) {
     if (typeof (data as any).id === 'string' && (data as any).object === 'response') {
       const previousId = extractPreviousResponseIdFromOptions(options);
-      return {
+      return withFixtureSseStream({
         ...response,
         status: 200,
         body: {
           ...(data as Record<string, unknown>),
           previous_response_id: previousId ?? null
         }
-      };
+      });
     }
     const toolUse = Array.isArray((data as any).content)
       ? (data as any).content.find((item: any) => item && typeof item === 'object' && item.type === 'tool_use')
@@ -137,7 +279,7 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
     if (toolUse) {
       const command = toolUse.input?.cmd ?? toolUse.input?.command;
       const isBlockedCheckout = typeof command === 'string' && /git\s+checkout\s+--\s+\S+\/\s*$/.test(command);
-      return {
+      return withFixtureSseStream({
         ...response,
         status: 200,
         body: {
@@ -156,9 +298,9 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
               : (toolUse.input ?? {}))
           }]
         }
-      };
+      });
     }
-    return {
+    return withFixtureSseStream({
       ...response,
       status: 200,
       body: {
@@ -172,10 +314,10 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
           content: [{ type: 'output_text', text: extractTextFromProviderResponseBody(data) }]
         }]
       }
-    };
+    });
   }
   if (entryEndpoint.includes('/v1/chat/completions')) {
-    return {
+    return withFixtureSseStream({
       ...response,
       status: 200,
       body: {
@@ -187,11 +329,11 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
           message: { role: 'assistant', content: extractTextFromProviderResponseBody(responseBody) }
         }]
       }
-    };
+    });
   }
   if (entryEndpoint.includes('/v1/messages')) {
     const text = extractTextFromProviderResponseBody(data);
-    return {
+    return withFixtureSseStream({
       ...response,
       status: 200,
       body: {
@@ -202,7 +344,7 @@ const mockConvertProviderResponseIfNeeded = jest.fn(async (options: any) => {
         content: Array.isArray((data as any).content) ? (data as any).content : [{ type: 'text', text: text || '' }],
         stop_reason: typeof (data as any).stop_reason === 'string' ? (data as any).stop_reason : 'end_turn'
       }
-    };
+    });
   }
   return response;
 });
@@ -249,7 +391,20 @@ const mockRuntimeIntegrationsModule = () => ({
   reportProviderSuccessToRouterPolicy: jest.fn(async () => undefined)
 });
 
-const mockNativeExportsModule = () => ({
+function mockLlmswitchBridgeHostModule(moduleName: string, factory: () => Record<string, unknown>): void {
+  jest.unstable_mockModule(`../../../src/modules/llmswitch/bridge/${moduleName}.js`, factory);
+  jest.unstable_mockModule(`../../../src/modules/llmswitch/bridge/${moduleName}.ts`, factory);
+  jest.unstable_mockModule(`../../../src/modules/llmswitch/bridge/${moduleName}`, factory);
+}
+
+function mockLlmswitchBridgeHostExports(moduleName: string, exportNames: string[]): void {
+  mockLlmswitchBridgeHostModule(moduleName, () => {
+    const fixtures = createBridgeNativeFixtures() as Record<string, unknown>;
+    return Object.fromEntries(exportNames.map((name) => [name, fixtures[name]]));
+  });
+}
+
+const createBridgeNativeFixtures = () => ({
   getRouterHotpathJsonBindingSync: jest.fn(() => ({
     asFlatRecordJson: (inputJson: string) => inputJson,
     buildJsonFromSseJson: (inputJson: string) => inputJson,
@@ -318,6 +473,7 @@ const mockNativeExportsModule = () => ({
           : 'openai-chat',
     tryParseJsonLikeStringJson: (inputJson: string) => inputJson
   })),
+  getSnapshotHooksNativeBindingSync: jest.fn(() => createBridgeNativeFixtures().getRouterHotpathJsonBindingSync()),
   shouldRecordSnapshotsNative: jest.fn(() => false),
   writeSnapshotViaHooksNative: jest.fn(() => undefined),
   buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: null })),
@@ -351,22 +507,46 @@ const mockNativeExportsModule = () => ({
     context: { input: Array.isArray(payload?.input) ? payload.input : [] }
   })),
   planResponsesRequestContext: jest.fn(async ({ payload }: any) => ({
-    kind: 'context',
-    payload: payload ?? {},
-    context: {
-      input: Array.isArray(payload?.input) ? payload.input : [],
-      toolsRaw: Array.isArray(payload?.tools) ? payload.tools : undefined
-    }
+    kind: 'capture_request',
+    payload: payload ?? {}
   })),
   planResponsesContinuationRequestAction: jest.fn(async (input: any) => ({
-    action:
-      input?.plannedEntryMode === 'submit_tool_outputs'
-        ? 'relay_submit'
-        : input?.plannedEntryMode === 'scope_materialize'
-          ? 'scope_materialize'
-          : 'none',
-    responseId: input?.responseId ?? input?.previousResponseId,
-    payload: {}
+    ...(input?.plannedEntryMode === 'submit_tool_outputs'
+      ? {
+          action: 'relay_submit',
+          responseId: input?.responseId ?? input?.previousResponseId,
+          pipelineEntryEndpoint: '/v1/responses'
+        }
+      : input?.plannedEntryMode === 'scope_materialize'
+        ? {
+            action: input?.continuation?.continuationOwner === 'relay' ? 'relay_scope_materialize' : 'scope_materialize',
+            responseId: input?.responseId ?? input?.previousResponseId,
+            continuationOwner: input?.continuation?.continuationOwner
+          }
+        : input?.previousResponseId && input?.continuation?.continuationOwner === 'direct'
+          ? {
+              action: 'attach_resume_meta',
+              responseId: input.previousResponseId,
+              resumeMeta: {
+                responseId: input.previousResponseId,
+                previousResponseId: input.previousResponseId,
+                continuationOwner: 'direct',
+                providerKey: input.continuation.providerKey,
+                restored: false
+              }
+            }
+          : input?.previousResponseId && input?.continuation?.continuationOwner === 'relay'
+            ? {
+                action: 'relay_scope_materialize',
+                responseId: input.previousResponseId,
+                continuationOwner: 'relay',
+                pipelineEntryEndpoint: '/v1/responses'
+              }
+            : {
+                action: 'none',
+                responseId: input?.responseId ?? input?.previousResponseId,
+                payload: {}
+              })
   })),
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: any) => ({
@@ -414,15 +594,34 @@ const mockNativeExportsModule = () => ({
   sanitizeFollowupText: jest.fn(async (raw: unknown) => (typeof raw === 'string' ? raw : '')),
   classifyProviderFailure: jest.fn(() => 'non_recoverable'),
   deriveFinishReasonNative: jest.fn((body: any) => detectToolCallFinishReason(body)),
-  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
-    sessionId: metadata?.sessionId ?? metadata?.session_id,
-    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
-  })),
+  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => {
+    const nestedMetadata = asPlainRecord(metadata?.metadata);
+    const clientMetadata = asPlainRecord(metadata?.client_metadata);
+    return {
+      sessionId:
+        metadata?.sessionId
+        ?? metadata?.session_id
+        ?? nestedMetadata?.sessionId
+        ?? nestedMetadata?.session_id
+        ?? clientMetadata?.sessionId
+        ?? clientMetadata?.session_id,
+      conversationId:
+        metadata?.conversationId
+        ?? metadata?.conversation_id
+        ?? nestedMetadata?.conversationId
+        ?? nestedMetadata?.conversation_id
+        ?? clientMetadata?.conversationId
+        ?? clientMetadata?.conversation_id,
+    };
+  }),
   isToolCallContinuationResponseNative: jest.fn(() => false),
   resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
   evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
   planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'none' })),
-  planResponsesRequestBodyForHttpNative: jest.fn((payload: Record<string, unknown>) => ({ pipelineBody: payload })),
+  planResponsesRequestBodyForHttpNative: jest.fn((payload: Record<string, unknown>) => ({
+    pipelineBody: payload,
+    requestBodyMetadata: asPlainRecord(payload?.metadata) ?? {}
+  })),
   shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
     entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
   ),
@@ -462,7 +661,20 @@ const mockNativeExportsModule = () => ({
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
   finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
-  buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
+  buildResponsesConversationPortScopeForHttpNative: jest.fn((portContext?: {
+    matchedPort?: unknown;
+    localPort?: unknown;
+    routingPolicyGroup?: unknown;
+  } | null) => ({
+    ...(typeof portContext?.matchedPort === 'number'
+      ? { matchedPort: portContext.matchedPort }
+      : typeof portContext?.localPort === 'number'
+        ? { matchedPort: portContext.localPort }
+        : {}),
+    ...(typeof portContext?.routingPolicyGroup === 'string' && portContext.routingPolicyGroup.trim()
+      ? { routingPolicyGroup: portContext.routingPolicyGroup.trim() }
+      : {})
+  })),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;
@@ -526,22 +738,165 @@ const mockNativeExportsModule = () => ({
   sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload)
 });
 
+const mockConfigIntegrationsModule = () => ({
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  compileRouteCodexRuntimeManifest: jest.fn(async () => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {},
+    providerIds: [],
+    forwarderIds: [],
+  })),
+  compileRouteCodexRuntimeManifestSync: jest.fn(() => ({
+    manifestVersion: 'routecodex.runtime-config.v1',
+    virtualRouterBootstrapInput: {},
+    pipelineRuntimeConfig: {},
+    providerIds: [],
+    forwarderIds: [],
+  })),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((parsed: unknown) => parsed),
+  decodeRouteCodexProviderConfigTextSync: jest.fn((input: { raw?: string }) => ({
+    format: 'toml',
+    parsed: input.raw ? { raw: input.raw } : {}
+  })),
+  decodeRouteCodexUserConfigTextSync: jest.fn((input: { raw?: string }) => ({
+    format: 'toml',
+    parsed: input.raw ? { raw: input.raw } : {}
+  })),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({
+    configPath: '/tmp/routecodex-test/config.toml',
+    userConfig: {},
+    providerProfiles: {}
+  })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((userConfig: unknown) => userConfig ?? {}),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((userConfig: unknown) => userConfig ?? {}),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  planAuthFileResolutionNativeSync: jest.fn(() => ({ kind: 'literal', value: '' })),
+  planProviderConfigRootNativeSync: jest.fn(() => ({})),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({})),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn((fileNames: string[]) =>
+    fileNames.map((fileName) => ({ fileName, isBaseFile: fileName === 'config.v2.toml' }))
+  ),
+  resolveAuthFileKeyNativeSync: jest.fn(() => ({ kind: 'literal', value: '' })),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  resolveRccPathNativeSync: (segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  },
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/routecodex-test/codex-samples'),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/routecodex-test'),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn((input: { provider?: unknown; dirId?: string }) => ({
+    providerId: String(input.dirId ?? 'test'),
+    provider: input.provider && typeof input.provider === 'object' ? input.provider : {}
+  })),
+  serializeRouteCodexTomlRecordSync: jest.fn((record: unknown) => JSON.stringify(record ?? {})),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn((input: { raw?: string }) => String(input.raw ?? '')),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn((input: { configPath?: string; value?: unknown }) => ({
+    path: input.configPath ?? '/tmp/routecodex-test/config.toml',
+    format: 'toml',
+    raw: String(input.value ?? ''),
+    parsed: {},
+  })),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn((input: { configPath?: string; parsed?: Record<string, unknown> }) => ({
+    path: input.configPath ?? '/tmp/routecodex-test/provider/config.v2.toml',
+    format: 'toml',
+    raw: '',
+    parsed: input.parsed ?? {},
+  })),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn((input: { configPath?: string; parsed?: Record<string, unknown> }) => ({
+    path: input.configPath ?? '/tmp/routecodex-test/config.toml',
+    format: 'toml',
+    raw: '',
+    parsed: input.parsed ?? {},
+  })),
+});
+
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.ts', mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations', mockRuntimeIntegrationsModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.ts', mockNativeExportsModule);
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports', mockNativeExportsModule);
+mockLlmswitchBridgeHostModule('config-integrations', mockConfigIntegrationsModule);
+mockLlmswitchBridgeHostExports('error-projection-host', ['projectSseErrorEventPayloadNative']);
+mockLlmswitchBridgeHostExports('executor-metadata-host', [
+  'extractServertoolCliResultRouteHintFromRequestNative',
+  'extractSessionIdentifiersFromMetadataNative',
+]);
+mockLlmswitchBridgeHostExports('finish-reason-host', ['deriveFinishReasonNative']);
+mockLlmswitchBridgeHostExports('mimoweb-tool-harvest-host', ['normalizeAssistantTextToToolCallsJson']);
+mockLlmswitchBridgeHostExports('provider-outbound-sanitize-host', ['sanitizeProviderOutboundPayload']);
+mockLlmswitchBridgeHostExports('request-executor-pipeline-attempt-host', [
+  'mergeObservedRoutePoolChainNative',
+  'normalizeExplicitRoutePoolNative',
+]);
+mockLlmswitchBridgeHostExports('responses-client-projection-host', [
+  'buildResponsesPayloadFromChatNative',
+  'planResponsesJsonClientDispatchNative',
+  'projectResponsesClientPayloadForClientNative',
+]);
+mockLlmswitchBridgeHostExports('responses-request-handler-host', [
+  'buildResponsesConversationPortScopeForHttpNative',
+  'buildResponsesResumeClientErrorForHttpNative',
+  'buildResponsesResumeControlForContinuationContextForHttpNative',
+  'buildResponsesScopeContinuationExpiredErrorForHttpNative',
+  'captureReqInboundResponsesContextSnapshotJson',
+  'extractSessionIdentifiersFromMetadataNative',
+  'finalizeResponsesHandlerPayloadForHttpNative',
+  'materializeProviderOwnedSubmitContext',
+  'planResponsesContinuationRequestAction',
+  'planResponsesHandlerEntry',
+  'planResponsesHandlerStreamForHttpNative',
+  'planResponsesRequestBodyForHttpNative',
+  'planResponsesRequestContext',
+  'shouldManageResponsesConversationForHttpNative',
+  'shouldProjectResponsesResumeClientErrorForHttpNative',
+]);
+mockLlmswitchBridgeHostExports('responses-to-chat-host', ['convertResponsesRequestToChatNative']);
+mockLlmswitchBridgeHostExports('route-availability-host', [
+  'evaluateSingletonRoutePoolExhaustionNative',
+  'planPrimaryExhaustedToDefaultPoolNative',
+  'resolveErrorErr05RouteAvailabilityDecisionNative',
+]);
+mockLlmswitchBridgeHostExports('snapshot-hooks-host', [
+  'appendSnapshotStageTraceNative',
+  'classifyRuntimeErrorSignalNative',
+  'classifyEmptyResponseSignalNative',
+  'detectToolExecutionFailuresNative',
+  'getSnapshotHooksNativeBindingSync',
+  'resetSnapshotRecorderErrorsampleStateNative',
+  'resolveRequestTailSummaryNative',
+  'shouldInspectRuntimeErrorFastNative',
+  'shouldInspectToolFailuresNative',
+  'shouldLogClientToolErrorToConsoleNative',
+  'shouldLogRuntimeErrorSignalToConsoleNative',
+  'shouldRecordSnapshotsNative',
+  'shouldWriteClientToolErrorsampleNative',
+  'summarizeSnapshotStageTraceNative',
+  'summarizeClientToolObservationNative',
+  'writeSnapshotViaHooksNative',
+]);
+mockLlmswitchBridgeHostExports('sse-projection-host', [
+  'projectResponsesSseFrameForClientNative',
+  'updateResponsesSseTransportTerminalStateNative',
+]);
+mockLlmswitchBridgeHostExports('traffic-governor-host', ['getRouterHotpathJsonBindingSync']);
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
   executeHubPipelineNative: (handle: string, input: unknown) => {
     const execute = mockHubPipelineExecutors.get(handle);
     if (!execute) {
       throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
     }
-    return materializeHubPipelineFixtureResult(execute(input));
+    return materializeHubPipelineFixtureResult(execute(materializeHubPipelineFixtureInput(input)));
   },
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: null })),
+  resolveEntryProtocolFromEndpointNative: createBridgeNativeFixtures().resolveEntryProtocolFromEndpointNative,
   resolveRccPathNativeSync: (segments?: unknown) => {
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
@@ -589,10 +944,12 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrat
     if (!execute) {
       throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
     }
-    return materializeHubPipelineFixtureResult(execute(input));
+    return materializeHubPipelineFixtureResult(execute(materializeHubPipelineFixtureInput(input)));
   },
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: null })),
+  resolveEntryProtocolFromEndpointNative: createBridgeNativeFixtures().resolveEntryProtocolFromEndpointNative,
   resolveRccPathNativeSync: (segments?: unknown) => {
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
@@ -640,10 +997,12 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-integrat
     if (!execute) {
       throw new Error(`missing test Hub pipeline fixture for handle ${handle}`);
     }
-    return materializeHubPipelineFixtureResult(execute(input));
+    return materializeHubPipelineFixtureResult(execute(materializeHubPipelineFixtureInput(input)));
   },
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative: jest.fn(),
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative: jest.fn(),
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: null })),
+  resolveEntryProtocolFromEndpointNative: createBridgeNativeFixtures().resolveEntryProtocolFromEndpointNative,
   resolveRccPathNativeSync: (segments?: unknown) => {
     const parts = Array.isArray(segments) ? segments.map(String) : [];
     return ['/tmp/routecodex-test', ...parts].join('/');
@@ -729,7 +1088,11 @@ function readResponsesResume(metadata: Record<string, unknown> | undefined): Rec
 }
 
 function readResponsesRequestContext(metadata: Record<string, unknown> | undefined): Record<string, any> | undefined {
-  const value = MetadataCenter.read(metadata)?.readContinuationContext().responsesRequestContext;
+  const testProjected = asPlainRecord((metadata as Record<string, any> | undefined)?.[TEST_RESPONSES_REQUEST_CONTEXT_KEY]);
+  if (testProjected) {
+    return testProjected;
+  }
+  const value = (MetadataCenter.read(metadata)?.readContinuationContext() as Record<string, unknown> | undefined)?.responsesRequestContext;
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, any>
     : undefined;
@@ -1014,7 +1377,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -1145,7 +1508,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -1303,7 +1666,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -1348,8 +1711,8 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         continuationOwner: 'relay',
         materialized: true,
         materializedMode: 'local_full_input',
-        providerKey: 'minimonth.key1.MiniMax-M2.7',
       });
+      expect(readResponsesResume(pipelineInput.metadata)).not.toHaveProperty('providerKey');
     } finally {
       await closeServer(server);
     }
@@ -1436,7 +1799,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -1545,7 +1908,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -1696,7 +2059,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         req as any,
         res as any,
         {
-          executePipeline: (input: any) => executor.execute(input),
+          executePipeline: (input: any) => executeRequestExecutorWithServerInput(executor, input),
           errorHandling: null
         },
         {
@@ -1738,17 +2101,19 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.endpoint).toBe('/v1/responses');
       expect(pipelineInput.metadata?.providerProtocol).toBe('openai-responses');
       expect(readStreamIntent(pipelineInput.metadata)).toBe('non_stream');
-      expect(readRequestTruth(pipelineInput.metadata)).toEqual({});
+      expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
+        entryEndpoint: '/v1/responses',
+        requestId: expect.stringContaining('openai-responses-router-request-')
+      });
       expect(pipelineInput.metadata?.inboundStream).toBeUndefined();
       expect(readResponsesResume(pipelineInput.metadata)).toEqual({
         previousRequestId: 'req_chain_submit_1',
-        restoredFromResponseId: 'resp_submit_prev_1',
-        routeHint: 'thinking'
+        restoredFromResponseId: 'resp_submit_prev_1'
       });
       expect(readRuntimeControl(pipelineInput.metadata)).toMatchObject({
-        streamIntent: 'non_stream',
-        routeHint: 'thinking'
+        streamIntent: 'non_stream'
       });
+      expect(readRuntimeControl(pipelineInput.metadata)?.routeHint).toBeUndefined();
       expect(pipelineInput.metadata?.entryEndpoint).toBe('/v1/responses');
       expect(pipelineInput.payload?.previous_response_id).toBe('resp_submit_prev_1');
       expect(pipelineInput.payload?.tool_outputs).toEqual([{ tool_call_id: 'call_submit_1', output: 'ok' }]);
@@ -1854,7 +2219,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         req as any,
         res as any,
         {
-          executePipeline: (input: any) => executor.execute(input),
+          executePipeline: (input: any) => executeRequestExecutorWithServerInput(executor, input),
           errorHandling: null
         },
         {
@@ -1882,19 +2247,20 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineExecute).toHaveBeenCalledTimes(1);
       const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
       expect(pipelineInput.endpoint).toBe('/v1/responses');
-      expect(readRequestTruth(pipelineInput.metadata)).toEqual({});
+      expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
+        entryEndpoint: '/v1/responses',
+        requestId: expect.stringContaining('openai-responses-router-request-')
+      });
       expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
         previousRequestId: 'req_chain_submit_truth_1',
         restoredFromResponseId: 'resp_submit_truth_1',
-        routeHint: 'search/gateway-priority-5555-priority-search',
-        providerKey: 'minimonth.key1.MiniMax-M2.7',
         continuationOwner: 'relay'
       });
       expect(readRuntimeControl(pipelineInput.metadata)).toMatchObject({
-        streamIntent: 'non_stream',
-        routeHint: 'search/gateway-priority-5555-priority-search',
-        retryProviderKey: 'minimonth.key1.MiniMax-M2.7'
+        streamIntent: 'non_stream'
       });
+      expect(readRuntimeControl(pipelineInput.metadata)?.routeHint).toBeUndefined();
+      expect(readRuntimeControl(pipelineInput.metadata)?.retryProviderKey).toBeUndefined();
     } finally {
       await closeServer(server);
     }
@@ -1931,7 +2297,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: pipelineExecute,
+        executePipeline: (input) => executeHandlerPipelineFixture(pipelineExecute, input),
         errorHandling: null
       });
     });
@@ -1963,7 +2329,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         sessionId: 'rcc-routecodex-capture'
       }));
       expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_capture_tool_1',
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.3-codex-'),
         response: expect.objectContaining({ id: 'resp_capture_tool_1' }),
         sessionId: 'rcc-routecodex-capture',
         routeHint: 'thinking/gateway-priority-5520-thinking'
@@ -2006,7 +2372,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: pipelineExecute,
+        executePipeline: (input) => executeHandlerPipelineFixture(pipelineExecute, input),
         errorHandling: null
       });
     });
@@ -2035,13 +2401,13 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
       await waitForMockCalls(mockRecordResponsesResponseForRequest, 1);
       expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_stream_capture_tool_1',
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.4-'),
         payload: expect.objectContaining({ model: 'gpt-5.4', store: true }),
         sessionId: 'rcc-zterm',
         providerKey: 'mimo.pool.mimo-v2.5-pro'
       }));
       expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_stream_capture_tool_1',
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.4-'),
         response: expect.objectContaining({ id: 'resp_stream_capture_tool_1' }),
         sessionId: 'rcc-zterm',
         providerKey: 'mimo.pool.mimo-v2.5-pro'
@@ -2136,7 +2502,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: (input: any) => executor.execute(input),
+        executePipeline: (input: any) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -2247,7 +2613,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         req as any,
         res as any,
         {
-          executePipeline: (input: any) => executor.execute(input),
+          executePipeline: (input: any) => executeRequestExecutorWithServerInput(executor, input),
           errorHandling: null
         },
         {
@@ -2307,7 +2673,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: pipelineExecute,
+        executePipeline: (input) => executeHandlerPipelineFixture(pipelineExecute, input),
         errorHandling: null
       });
     });
@@ -2363,7 +2729,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(readResponsesResume(pipelineInput.metadata)).toBeUndefined();
       expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.input).toHaveLength(3);
       expect(readRequestTruth(pipelineInput.metadata)).toMatchObject({
-        sessionId: 'sess-1'
+        requestId: expect.stringContaining('openai-responses-router-gpt-5.3-codex-')
       });
       expect(pipelineInput.metadata?.__shadowCompareForcedProviderKey).toBeUndefined();
     } finally {
@@ -2415,7 +2781,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/responses', (req, res) => {
       void handleResponses(req as any, res as any, {
-        executePipeline: pipelineExecute,
+        executePipeline: (input) => executeHandlerPipelineFixture(pipelineExecute, input),
         errorHandling: null,
         portContext: { matchedPort: 5555 }
       } as any);
@@ -2445,8 +2811,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(pipelineInput.body.input[0]).toMatchObject({ type: 'function_call', call_id: 'call_1' });
       expect(pipelineInput.body.input[1]).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
       expect(readResponsesResume(pipelineInput.metadata)).toMatchObject({
-        materialized: true,
-        providerKey: 'cc.key1.gpt-5.5'
+        materialized: true
       });
       expect(readResponsesRequestContext(pipelineInput.metadata)?.payload?.input?.[0]).toMatchObject({
         type: 'function_call',
@@ -2538,7 +2903,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/chat/completions', (req, res) => {
       void handleChatCompletions(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -2657,7 +3022,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/messages', (req, res) => {
       void handleMessages(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -2800,7 +3165,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     app.use(express.json({ limit: '256kb' }));
     app.post('/v1/messages', (req, res) => {
       void handleMessages(req as any, res as any, {
-        executePipeline: (input) => executor.execute(input as any),
+        executePipeline: (input) => executeRequestExecutorWithServerInput(executor, input),
         errorHandling: null
       });
     });
@@ -2893,7 +3258,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       void handleResponses(
         req as any,
         res as any,
-        { executePipeline: pipelineExecute, errorHandling: null },
+        { executePipeline: (input) => executeHandlerPipelineFixture(pipelineExecute, input), errorHandling: null },
         {
           entryEndpoint: '/v1/responses.submit_tool_outputs',
           responseIdFromPath: (req as any).params.id
@@ -2927,7 +3292,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
         sessionId: undefined
       }));
       expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: 'resp_submit_capture_next_1',
+        requestId: expect.stringContaining('openai-responses-router-request-'),
         response: expect.objectContaining({ id: 'resp_submit_capture_next_1' }),
         routeHint: 'thinking/gateway-priority-5520-thinking'
       }));

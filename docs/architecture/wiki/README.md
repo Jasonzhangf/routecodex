@@ -79,10 +79,18 @@
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-20. `docs/architecture/verification-map.yml`
+20. `docs/architecture/wiki/topology-residual-node-review.md`
+   - 看 topology SSOT 中尚未成为 first-class mainline edge 的 residual nodes。
+   - 这里替代旧 `topology-sync-manifest.yml` debt allowlist，不再把 residual nodes 隐藏成未消费 debt。
+
+21. `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md`
+   - 看 Hub Pipeline Rust 残留引用接口如何从 broad native surface 收敛到 owner-specific narrow host 或 direct-native evidence helper。
+   - 这里是 gate/doc/test-design review 面，不代表 runtime refactor 已开始。
+
+22. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-21. `docs/goals/*`
+23. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -111,6 +119,8 @@
 - `docs/architecture/wiki/server-responses-sse-bridge-map.md`
 - `docs/architecture/wiki/responses-direct-relay-map.md`
 - `docs/architecture/wiki/servertool-followup-call-graph.md`
+- `docs/architecture/wiki/topology-residual-node-review.md`
+- `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md`
 - `docs/architecture/wiki/coverage-matrix.md`
 - `docs/architecture/verification-map.yml`
 - `docs/architecture/README.md`

@@ -934,6 +934,25 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('resolveErrorErr05RouteAvailabilityDecisionNative');
   });
 
+  it('handler request-executor unified semantics test must mock narrow native hosts only', () => {
+    const repoRoot = process.cwd();
+    const testSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts'),
+      'utf8',
+    );
+
+    expect(testSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
+    expect(testSource).not.toContain('src/modules/llmswitch/bridge/native-exports.ts');
+    expect(testSource).not.toContain('src/modules/llmswitch/bridge/native-exports\'');
+    expect(testSource).toContain('responses-request-handler-host');
+    expect(testSource).toContain('responses-client-projection-host');
+    expect(testSource).toContain('sse-projection-host');
+    expect(testSource).toContain('snapshot-hooks-host');
+    expect(testSource).toContain('executor-metadata-host');
+    expect(testSource).toContain('route-availability-host');
+    expect(testSource).toContain('provider-outbound-sanitize-host');
+  });
+
   it('request executor retry execution decision must use its narrow native host', () => {
     const repoRoot = process.cwd();
     const executorSource = fs.readFileSync(

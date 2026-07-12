@@ -1,3 +1,15 @@
+# 2026-07-12: Responses relay resume strips route/provider pins before handler pipeline truth
+
+- Rust `build_responses_resume_control_for_continuation_context_for_http_json` preserves `providerKey` only for `continuationOwner=direct`; relay resume strips `routeHint`, `providerKey`, session/conversation mirrors, payload mirrors, and full input mirrors.
+- Handler/request-executor tests that migrate from broad `native-exports` mocks to owner-specific hosts must assert relay `routeHint` / `providerKey` absence rather than reintroducing those pins through `MetadataCenter` or test fixtures.
+
+# 2026-07-12: Hub Pipeline native reference gate is the first closeout layer
+
+- `hub.pipeline_rust_residual_reference_closeout` is the gate/doc/test-design owner for broad `native-exports`, retired TS stage bridge, aggregate host, old helper wrapper, and direct-native helper reference boundaries. It is not a runtime behavior owner.
+- `npm run verify:hub-pipeline-native-reference-gate` checks broad runtime native imports, monitored white-box broad native mocks/`createNativeExportsMock`, runtime direct-native helper imports, stale wiki/doc owner wording, and required map/package script bindings.
+- `npm run test:hub-pipeline-native-reference-gate-red-fixtures` red-locks broad runtime native import, broad monitored white-box mock, runtime direct-native helper import, stale doc owner surface, and missing function-map owner.
+- Broad `native-exports.ts` may be mentioned as private loader or forbidden legacy surface, but docs/wiki must not present it as a Hub Pipeline semantic owner. White-box host wiring tests should mock owner-specific hosts; direct-native helpers are test/script evidence only.
+
 # 2026-07-09: exec_command/tool governance only blocks dangerous operations
 
 - Verified rule: response-side tool governance must not silently drop client-visible tool calls only because they are absent from `requestedToolNames`; preserve them so client execution or client error becomes the next-turn model feedback.

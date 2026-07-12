@@ -49,7 +49,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `hub.response_provider_sse_materialization` | provider raw stream -> parsed SSE/bodyText semantic materialization | `materialize_provider_response_sse_payload`, `build_provider_sse_stream_read_error_descriptor` | TS server/provider helper reimplementation |
 | `hub.response_responses_client_projection` | client-visible Responses JSON body and SSE frame projection | `project_responses_client_payload_for_client`, `project_responses_client_body_for_client`, `project_responses_sse_frame_for_client` | `provider-response-converter.ts` / shared old response utils duplicate semantics |
-| `server.responses_sse_bridge_surface` | SSE transport facade with deleted duplicate bridge | `src/server/handlers/handler-response-sse.ts`, `src/modules/llmswitch/bridge/native-exports.ts` | TS protocol semantics growing back into handler or deleted bridge restored |
+| `server.responses_sse_bridge_surface` | SSE transport facade with deleted duplicate bridge | `src/server/handlers/handler-response-sse.ts`, owner-specific response/SSE hosts; broad `native-exports.ts` is only a private loader and forbidden owner surface | TS protocol semantics growing back into handler or deleted bridge restored |
 | `server.responses_response_handler_bridge_surface` | final response lifecycle bridge for JSON/SSE dispatch | `sendPipelineResponse`, `sendSsePipelineResponse` mainline edge | second handler-local response protocol owner |
 
 ## JSON / SSE Equality Matrix

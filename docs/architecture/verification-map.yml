@@ -1169,6 +1169,28 @@ verification:
       - "Rust NAPI/request-stage builders own the request-stage bridge semantics; TS protocol wrapper and test helper evidence may call direct native wrappers but no runtime TS request-stage owner may be restored."
       - "Any route-selection or payload-semantics change still belongs to Rust/native Hub mainline owners."
 
+  - feature_id: hub.pipeline_rust_residual_reference_closeout
+    change_risk: medium
+    unit:
+      - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
+      - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
+    contract:
+      - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
+      - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
+    integration: []
+    smoke:
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run test:hub-pipeline-native-reference-gate-red-fixtures
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-wiki-html-sync
+    build:
+      - npm run verify:architecture-review-surface-light
+      - npm run verify:architecture-ci-longtail
+    notes:
+      - "This gate protects the reference interface surface only; passing it does not claim runtime behavior refactor completion."
+      - "Red fixtures must prove broad runtime native import, broad monitored white-box test mock, runtime direct-native helper import, stale doc owner wording, and missing map owner all fail."
+
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low
     unit:
@@ -1327,6 +1349,7 @@ verification:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
     notes:
       - "Provider response context helper semantics must stay Rust-owned; TS may only pass context/runtime metadata into native and map native output field names."
+
 
   - feature_id: hub.web_search_tool_governance
     change_risk: high
