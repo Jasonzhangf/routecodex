@@ -3621,6 +3621,12 @@ pub fn resolve_provider_retry_execution_policy_json(input_json: String) -> NapiR
     serde_json::to_string(&decision).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+#[napi(js_name = "classifyErrorErr02HostCapturedJson")]
+pub fn classify_error_err02_host_captured_json(input_json: String) -> NapiResult<String> {
+    let input: failure_policy::ErrorErr02HostCapturedInput = parse_napi_json(&input_json)?;
+    stringify_napi_json(&failure_policy::classify_error_err02_host_captured(input))
+}
+
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,

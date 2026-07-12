@@ -150,6 +150,164 @@ pub struct ProviderRetryExecutionPolicyDecision {
     pub reason: &'static str,
 }
 
+/// ErrorErr02 host-captured error envelope consumed by the Rust ErrorErr03 owner.
+/// Keep protocol/error fields explicit; do not pass an opaque provider payload.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorErr02HostCapturedInput {
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(default)]
+    pub status_code: Option<u16>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub upstream_code: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub error_name: Option<String>,
+    #[serde(default)]
+    pub detail_reason: Option<String>,
+    #[serde(default)]
+    pub detail_upstream_code: Option<String>,
+    #[serde(default)]
+    pub detail_upstream_message: Option<String>,
+    #[serde(default)]
+    pub response_error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorErr03RuntimeClassifiedDecision {
+    #[serde(default)]
+    pub classification: Option<FailureClassification>,
+    pub client_disconnect: bool,
+    pub network_transport_like: bool,
+}
+
+fn normalize_code(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase())
+}
+
+fn contains_client_disconnect_hint(value: &str) -> bool {
+    let lowered = value.to_ascii_lowercase();
+    lowered.contains("client_disconnected")
+        || lowered.contains("client disconnected")
+        || lowered.contains("client abort request")
+        || lowered.contains("client closed request")
+}
+
+fn is_error_err02_client_disconnect(input: &ErrorErr02HostCapturedInput) -> bool {
+    let code = normalize_code(input.error_code.as_deref());
+    if code.as_deref() == Some("CLIENT_DISCONNECTED") {
+        return true;
+    }
+    let message = input.error_message.as_deref().unwrap_or_default();
+    let status_looks_like_499 = input.status_code == Some(499)
+        || code.as_deref() == Some("HTTP_499")
+        || message.to_ascii_lowercase().contains("http 499");
+    if status_looks_like_499
+        && [
+            message,
+            input.detail_upstream_message.as_deref().unwrap_or_default(),
+            input.response_error_message.as_deref().unwrap_or_default(),
+        ]
+        .iter()
+        .any(|value| contains_client_disconnect_hint(value))
+    {
+        return true;
+    }
+    if contains_client_disconnect_hint(message) {
+        return true;
+    }
+    input.error_name.as_deref() == Some("AbortError")
+        && {
+            let lowered = message.to_ascii_lowercase();
+            lowered.contains("client_request_aborted")
+                || lowered.contains("client_response_closed")
+                || lowered.contains("client_timeout_hint_expired")
+        }
+}
+
+fn is_error_err02_network_transport_like(input: &ErrorErr02HostCapturedInput) -> bool {
+    if is_error_err02_client_disconnect(input) {
+        return false;
+    }
+    let code = normalize_code(input.error_code.as_deref());
+    if code
+        .as_deref()
+        .map(|code| RETRYABLE_NETWORK_CODE_HINTS.contains(&code.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let message = input.error_message.as_deref().unwrap_or_default().to_ascii_lowercase();
+    input.error_name.as_deref() == Some("AbortError")
+        || message.contains("operation was aborted")
+        || [
+            "fetch failed",
+            "network timeout",
+            "socket hang up",
+            "client network socket disconnected",
+            "tls handshake timeout",
+            "unable to verify the first certificate",
+            "network error",
+            "temporarily unreachable",
+        ]
+        .iter()
+        .any(|hint| message.contains(hint))
+}
+
+/// First Rust-owned raw ErrorErr02 -> ErrorErr03 classifier slice.
+/// Missing categories remain explicit in parity tests before the TS owner is removed.
+pub fn classify_error_err02_host_captured(
+    input: ErrorErr02HostCapturedInput,
+) -> ErrorErr03RuntimeClassifiedDecision {
+    let error_code = normalize_code(input.error_code.as_deref());
+    let upstream_code = normalize_code(input.upstream_code.as_deref());
+    if input.stage.as_deref() == Some("provider.followup") {
+        return ErrorErr03RuntimeClassifiedDecision {
+            classification: None,
+            client_disconnect: false,
+            network_transport_like: false,
+        };
+    }
+    if input.stage.as_deref() == Some("host.response_contract") {
+        let recoverable = [error_code.as_deref(), upstream_code.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|code| matches!(code, "EMPTY_ASSISTANT_RESPONSE" | "MISSING_REQUIRED_TOOL_CALL"));
+        return ErrorErr03RuntimeClassifiedDecision {
+            classification: recoverable.then_some(FailureClassification::Recoverable),
+            client_disconnect: false,
+            network_transport_like: false,
+        };
+    }
+    let client_disconnect = is_error_err02_client_disconnect(&input);
+    let network_transport_like = is_error_err02_network_transport_like(&input);
+    let classification = if client_disconnect {
+        Some(FailureClassification::Unrecoverable)
+    } else {
+        Some(classify_failure(
+            input.status_code,
+            error_code.as_deref(),
+            upstream_code.as_deref(),
+            network_transport_like,
+        ))
+    };
+    ErrorErr03RuntimeClassifiedDecision {
+        classification,
+        client_disconnect,
+        network_transport_like,
+    }
+}
+
 pub fn classify_failure(
     status_code: Option<u16>,
     error_code: Option<&str>,
@@ -854,5 +1012,63 @@ mod tests {
             "ProviderProtocolError",
             "[hub_response] non-canonical response payload"
         ));
+    }
+
+    #[test]
+    fn error_err02_499_client_abort_is_health_neutral_disconnect_class() {
+        let decision = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+            stage: Some("provider.send".to_string()),
+            status_code: Some(499),
+            error_code: Some("HTTP_499".to_string()),
+            error_message: Some("HTTP 499".to_string()),
+            detail_upstream_message: Some("client abort request".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(decision.classification, Some(FailureClassification::Unrecoverable));
+        assert!(decision.client_disconnect);
+        assert!(!decision.network_transport_like);
+    }
+
+    #[test]
+    fn error_err02_stream_incomplete_is_recoverable_provider_failure() {
+        let decision = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+            stage: Some("provider.send".to_string()),
+            status_code: Some(502),
+            error_code: Some("UPSTREAM_STREAM_INCOMPLETE".to_string()),
+            upstream_code: Some("UPSTREAM_STREAM_INCOMPLETE".to_string()),
+            error_message: Some("stream closed before response.completed".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(decision.classification, Some(FailureClassification::Recoverable));
+        assert!(!decision.client_disconnect);
+    }
+
+    #[test]
+    fn error_err02_followup_stays_outside_provider_availability_classification() {
+        let decision = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+            stage: Some("provider.followup".to_string()),
+            status_code: Some(502),
+            error_code: Some("HTTP_502".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(decision.classification, None);
+        assert!(!decision.client_disconnect);
+    }
+
+    #[test]
+    fn error_err02_host_contract_only_allows_named_recoverable_contract_errors() {
+        let recoverable = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+            stage: Some("host.response_contract".to_string()),
+            error_code: Some("EMPTY_ASSISTANT_RESPONSE".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(recoverable.classification, Some(FailureClassification::Recoverable));
+
+        let rejected = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+            stage: Some("host.response_contract".to_string()),
+            error_code: Some("MALFORMED_RESPONSE".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(rejected.classification, None);
     }
 }
