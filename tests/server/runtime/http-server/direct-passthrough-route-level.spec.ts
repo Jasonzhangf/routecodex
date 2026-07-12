@@ -49,6 +49,12 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integ
   resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test-config.toml'),
   createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
   executeHubPipelineNative: executeHubPipelineNativeMock,
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({ runtimeControl: {} })),
+  resolveEntryProtocolFromEndpointNative: jest.fn((endpoint: string) => {
+    if (endpoint === '/v1/responses' || endpoint.endsWith('/responses')) return 'openai-responses';
+    if (endpoint === '/v1/messages' || endpoint.endsWith('/messages')) return 'anthropic';
+    return 'openai-chat';
+  }),
   updateHubPipelineVirtualRouterConfigNative: jest.fn(),
   updateHubPipelineEngineDepsNative: jest.fn(),
   routeHubPipelineVirtualRouterNative: jest.fn((_handle: string, request: Record<string, unknown>, metadata: Record<string, unknown>) => {
@@ -1125,7 +1131,7 @@ describe('direct passthrough route-level', () => {
     }));
   });
 
-  it('router same-protocol direct selects VR route then relays relay-owned responses scope materialize continuation', async () => {
+  it('router same-protocol direct rejects relay-owned responses scope materialize instead of entering relay', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
 
@@ -1178,7 +1184,7 @@ describe('direct passthrough route-level', () => {
       diagnostics: {},
     })));
 
-    const result = await (server as any).executePortAwarePipeline(5555, {
+    await expect((server as any).executePortAwarePipeline(5555, {
       requestId: 'req_router_direct_must_skip_relay_owned_scope_materialize',
       entryEndpoint: '/v1/responses',
       method: 'POST',
@@ -1199,17 +1205,10 @@ describe('direct passthrough route-level', () => {
           scopeKey: 'entry:responses|owner:relay|session:test',
         },
       },
-    });
+    })).rejects.toThrow('router-direct failed without relay: relay_owned_responses_continuation');
 
     expect(routerDirectSpy).toHaveBeenCalledTimes(1);
-    expect(executePipelineSpy).toHaveBeenCalledTimes(1);
-    const relayMetadata = executePipelineSpy.mock.calls[0]?.[0]?.metadata as Record<string, unknown>;
-    const preselected = readRuntimeControlProjection(relayMetadata).preselectedRoute;
-    expect(preselected?.target).toMatchObject({
-      providerKey: 'orangeai.key1.glm-5.2',
-      outboundProfile: 'openai-responses',
-    });
-    expect(result?.body).toMatchObject({ object: 'response', id: 'resp_relay_scope_materialize' });
+    expect(executePipelineSpy).not.toHaveBeenCalled();
   });
 
   it('router same-protocol client tools request stays on direct path', async () => {

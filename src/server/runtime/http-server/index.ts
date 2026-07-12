@@ -440,8 +440,7 @@ function buildRouterDirectFailureError(reason: unknown): Error {
 function isRouterDirectRelayableSkip(reason: unknown): boolean {
   const message = typeof reason === 'string' ? reason.trim().toLowerCase() : '';
   return message.startsWith('protocol mismatch:')
-    || message === 'target_outbound_profile_requires_hub_relay'
-    || message === 'relay_owned_responses_continuation';
+    || message === 'target_outbound_profile_requires_hub_relay';
 }
 
 export class RouteCodexHttpServer {
@@ -1715,6 +1714,23 @@ export class RouteCodexHttpServer {
       typeof target.outboundProfile === 'string' && target.outboundProfile.trim()
         ? target.outboundProfile.trim()
         : undefined;
+    if (targetOutboundProfile && targetOutboundProfile !== inboundProtocol) {
+      this.logStage('router-direct.skipped', input.requestId, {
+        reason: 'target_outbound_profile_requires_hub_relay',
+        inboundProtocol,
+        outboundProfile: targetOutboundProfile,
+        providerKey,
+      });
+      return {
+        used: false,
+        reason: 'target_outbound_profile_requires_hub_relay',
+        preselectedRoute: {
+          target,
+          decision: routingDecision,
+          diagnostics: routeResult.diagnostics,
+        },
+      };
+    }
     const forceRelayOwnedResponsesContinuation =
       metadataForHub.responsesResume
       && typeof metadataForHub.responsesResume === 'object'
@@ -1730,23 +1746,6 @@ export class RouteCodexHttpServer {
       return {
         used: false,
         reason: 'relay_owned_responses_continuation',
-        preselectedRoute: {
-          target,
-          decision: routingDecision,
-          diagnostics: routeResult.diagnostics,
-        },
-      };
-    }
-    if (targetOutboundProfile && targetOutboundProfile !== inboundProtocol) {
-      this.logStage('router-direct.skipped', input.requestId, {
-        reason: 'target_outbound_profile_requires_hub_relay',
-        inboundProtocol,
-        outboundProfile: targetOutboundProfile,
-        providerKey,
-      });
-      return {
-        used: false,
-        reason: 'target_outbound_profile_requires_hub_relay',
         preselectedRoute: {
           target,
           decision: routingDecision,
