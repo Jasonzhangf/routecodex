@@ -1,5 +1,5 @@
 import type { PipelineExecutionResult } from '../../../handlers/types.js';
-import { resolveProviderResponseRequestSemanticsNative } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import { resolveProviderResponseRequestSemanticsNative } from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import { readRuntimeProviderObservationProjection } from '../metadata-center/request-truth-readers.js';
 
 export function extractResponseStatus(response: unknown): number | undefined {

@@ -141,8 +141,8 @@ description: RouteCodex 调试与架构路由入口
 1. red test / failing sample
 2. 改唯一 owner
 3. green gate
-4. request dry-run：真实入口或 codex sample 走 `x-routecodex-dry-run: provider-request`，确认最终 provider-request 且未触碰上游
-5. response dry-run：相关 `provider-response*.json` 走 `npm run dry-run:codex-response -- --sample <file>`，确认现有 response converter 输出
+4. request dry-run：真实入口或 codex sample 走 `x-routecodex-dry-run: provider-request`，确认返回 `routecodex.pipeline_dry_run`、最终 `providerRequest` 和 `stoppedBeforeProviderSend=true`；若返回普通 provider response，先修 dry-run loop
+5. response dry-run：相关 `provider-response*.json` 走 `npm run dry-run:codex-response -- --sample <file>`，确认现有 response converter 输出；未 materialize 的 live `sseStream` 样本不能当离线响应证据
 6. live replay old sample
 7. note → MEMORY → lessons
 
@@ -154,10 +154,29 @@ description: RouteCodex 调试与架构路由入口
 - `~/.rcc` 是运行时配置真源
 - server handler 不得长出第二套协议解析
 - gate 只是门禁；完成必须有 live/runtime 证据
+- 资源收拢先建 map/gate：先落 `resource-operation-map`、function-map `resource_bindings`、mainline `resource_flow`，再按资源改 runtime；禁止先写全局 request/response manager。
+- 资源第一层补缺边界：先补 `request.mainline` / `response.mainline` / `responses.continuation.mainline` / `servertool.hook_skeleton.mainline` / `error.mainline` / `vr.route_availability.mainline` / `metadata.center.mainline` 的相邻 `resource_flow` 与 owner `resource_bindings`；config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics 需先扩展资源分类再补。
+- 资源第二层补缺边界：config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics/hit-log 必须先使用独立资源（如 `config.runtime_projection`、`runtime.instance_record`、`debug.internal_error_envelope`、`vr.diagnostic_decision`），禁止借用 request/response/route.selection/debug snapshot 资源凑 coverage；剩余 stopless/SSE/stage_a 属下一层 backlog。
+- 资源第三层补缺边界：补 stopless/SSE/stage_a 时必须使用 `stopless.*`、`sse.protocol_stream_projection` / `sse.provider_stream_aggregate`、`stage_a.*` 资源；主线 edge 可全闭合到 `108/108`，但 feature-level `resource_bindings` backlog 仍需按 owner surfaces 分层处理，禁止为数字把非主线 owner 绑定到不相邻资源。
+- 资源第四层补缺边界：mainline `resource_flow` 已 `108/108` 后，只补 feature-level `resource_bindings`。servertool engine 子功能使用 plan/state/projection/policy 资源族（如 `servertool.engine_action_plan`、`servertool.execution_contract_plan`、`servertool.registry_projection`），不新增假 mainline flow，不把非相邻 owner 绑到 request/response/route 资源凑数。
+- 资源 host/runtime 补缺边界：server/host/CLI surface 要用 entry/handle/transport/projection 资源（如 `runtime.hub_pipeline_handle`、`runtime.http_entry_dispatch`、`server.handler_transport_envelope`、`models.capability_catalog`、`cli.command_dispatch_intent`），不要把 shell/handler owner 硬绑到 request/response/route truth 凑 coverage。
+- 资源 protocol/conversion 补缺边界：provider-wire compat 与协议转换要用 owner-specific `protocol.*` 资源；相邻但不同 feature 的 schema 修补必须拆资源（如 Responses function tool schema 与 tool parameters schema），禁止合并成一个多 writer 模糊资源凑覆盖。`protocol.*` side_channel 只读控制面，禁止进 provider/client body。
+- Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 
 ## 快查命令
 - 查 owner：
   - `rg -n 'feature_id: <id>' docs/architecture/function-map.yml`
+- 查资源 owner：
+  - `rg -n 'resource_id: <id>|<id>@' docs/architecture/resource-operation-map.yml docs/architecture/function-map.yml docs/architecture/mainline-call-map.yml`
+- 查全项目资源覆盖：
+  - `npm run audit:resource-global-coverage`
+  - `sed -n '1,120p' docs/architecture/resource-global-coverage-report.json`
+- 查资源 gate：
+  - `npm run verify:resource-operation-map`
+  - `npm run verify:resource-owner-uniqueness`
+  - `npm run verify:resource-mainline-bindings`
+  - `npm run verify:resource-forbidden-writes`
+  - `npm run verify:resource-side-channel-isolation`
 - 查 gate：
   - `rg -n 'feature_id: <id>' docs/architecture/verification-map.yml`
 - 查源码锚点：

@@ -472,7 +472,32 @@ const mockNativeExportsModule = async () => ({
   })),
 });
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/session-log-color-host.js', () => ({
+  getSessionLogColorBinding: jest.fn(() => ({
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+  })),
+}));
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-client-projection-host.js', async () => {
+  const bridge = await mockNativeExportsModule();
+  return {
+    buildResponsesPayloadFromChatNative: bridge.buildResponsesPayloadFromChatNative,
+    planResponsesJsonClientDispatchNative: bridge.planResponsesJsonClientDispatchNative,
+    projectResponsesClientPayloadForClientNative: bridge.projectResponsesClientPayloadForClientNative,
+  };
+});
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/error-projection-host.js', async () => {
+  const bridge = await mockNativeExportsModule();
+  return {
+    projectSseErrorEventPayloadNative: bridge.projectSseErrorEventPayloadNative,
+  };
+});
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/sse-projection-host.js', async () => {
+  const bridge = await mockNativeExportsModule();
+  return {
+    projectResponsesSseFrameForClientNative: bridge.projectResponsesSseFrameForClientNative,
+    updateResponsesSseTransportTerminalStateNative: bridge.updateResponsesSseTransportTerminalStateNative,
+  };
+});
 jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
   STREAM_LOG_FINISH_REASON_KEY: '__stream_log_finish_reason',
   deriveFinishReason: (body: unknown) => {

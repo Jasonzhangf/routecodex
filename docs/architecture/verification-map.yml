@@ -5,6 +5,35 @@
 
 version: 1
 verification:
+  - feature_id: architecture.resource_ownership_model
+    change_risk: high
+    unit:
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/resource-taxonomy.md
+      - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/audit-resource-global-coverage.mjs
+    contract:
+      - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/audit-resource-global-coverage.mjs
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/resource-global-coverage-report.json
+    smoke:
+      - npm run audit:resource-global-coverage
+      - npm run verify:resource-operation-map
+      - npm run verify:resource-owner-uniqueness
+      - npm run verify:resource-mainline-bindings
+      - npm run verify:resource-forbidden-writes
+      - npm run verify:resource-side-channel-isolation
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:base
+    notes:
+      - "M0 resource ownership is map/gate only. Do not start runtime refactors until resource ownership and mainline resource flow are green."
+
   - feature_id: hub.servertool_followup
     change_risk: high
     unit:
@@ -15,6 +44,7 @@ verification:
     integration:
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
     build:
       - npm run build:base
@@ -33,6 +63,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -54,6 +85,7 @@ verification:
       - tests/servertool/servertool-cli-result-restore.spec.ts
       - tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -87,6 +119,7 @@ verification:
     smoke:
       - npm run verify:stopless-invalid-schema-blackbox
       - npm run verify:servertool-rust-only
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -136,6 +169,7 @@ verification:
       - tests/server/runtime/http-server/provider-binding-resolution.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-fallback-denylist
     build:
@@ -156,6 +190,7 @@ verification:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
       - npm run verify:servertool-rust-only
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -172,6 +207,7 @@ verification:
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -189,6 +225,7 @@ verification:
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -206,6 +243,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -223,6 +261,7 @@ verification:
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -241,6 +280,7 @@ verification:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -258,6 +298,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -276,6 +317,7 @@ verification:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -293,6 +335,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -310,6 +353,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -327,6 +371,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -344,6 +389,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -363,6 +409,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -381,6 +428,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -400,6 +448,7 @@ verification:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -417,6 +466,7 @@ verification:
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -433,6 +483,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -450,6 +501,7 @@ verification:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -469,6 +521,7 @@ verification:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
     build:
@@ -492,6 +545,7 @@ verification:
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
@@ -698,6 +752,7 @@ verification:
       - src/modules/llmswitch/bridge/routing-integrations.ts
     smoke:
       - npm run verify:llmswitch-rustification-audit
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:vr-no-ts-runtime
@@ -801,7 +856,6 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/error_err05_availability.rs
-      - src/modules/llmswitch/bridge/native-exports.ts
       - src/modules/llmswitch/bridge/route-availability-host.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
     contract:
@@ -857,6 +911,7 @@ verification:
       - src/server/runtime/http-server/routes.ts
       - src/cli/commands/port.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:vr-no-ts-runtime
@@ -992,6 +1047,7 @@ verification:
   - feature_id: hub.metadata_center_request_capture
     change_risk: high
     unit:
+      - src/modules/llmswitch/bridge/executor-metadata-host.ts
       - src/server/runtime/http-server/executor-metadata.ts
     contract:
       - tests/server/http-server/executor-metadata.spec.ts
@@ -1039,6 +1095,7 @@ verification:
     integration:
       - tests/server/runtime/http-server/virtual-router-current-turn.blackbox.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npx tsc --noEmit --pretty false
@@ -1103,6 +1160,7 @@ verification:
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:hub-response-anthropic-native
       - node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs
     build:
@@ -1152,6 +1210,7 @@ verification:
     integration:
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:servertool-rust-only
       - npm run verify:llmswitch-core-tsc
     build:
@@ -1164,6 +1223,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
+      - src/modules/llmswitch/bridge/responses-client-projection-host.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
@@ -1219,6 +1279,7 @@ verification:
     integration:
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - cargo test -p router-hotpath-napi resolve_provider_response_context_helpers --lib -- --nocapture
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
@@ -1250,6 +1311,7 @@ verification:
       - tests/cli/config-command.spec.ts
       - tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run build:native-hotpath
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
@@ -1265,6 +1327,7 @@ verification:
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
     contract:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
@@ -1346,6 +1409,7 @@ verification:
     smoke:
       - npm run verify:anthropic-roundtrip
       - npm run verify:hub-response-anthropic-native
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1365,6 +1429,7 @@ verification:
     integration:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:llmswitch-ts-shell-reference-audit
       - npm run verify:llmswitch-rustification-audit
@@ -1387,6 +1452,7 @@ verification:
     integration:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:llmswitch-ts-shell-reference-audit
       - npm run verify:llmswitch-rustification-audit
@@ -1411,6 +1477,7 @@ verification:
       - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     build:
@@ -1434,6 +1501,7 @@ verification:
     smoke:
       - cargo test -p router-hotpath-napi req_process_stage1_tool_governance --lib -- --nocapture
       - npm run verify:servertool-rust-only
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1458,6 +1526,7 @@ verification:
     smoke:
       - cargo test -p router-hotpath-napi resp_process_stage1_tool_governance --lib -- --nocapture
       - npm run verify:servertool-rust-only
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -1477,6 +1546,7 @@ verification:
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - cargo test -p router-hotpath-napi virtual_router_engine::chat_process_session_usage --lib
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
@@ -1493,6 +1563,7 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
       - src/server/handlers/handler-response-utils.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
@@ -1623,6 +1694,7 @@ verification:
       - tests/modules/pipeline/utils/debug-logger.release.spec.ts
       - tests/providers/core/hooks/debug-example-hooks.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:debug-unified-surface
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
@@ -1651,6 +1723,7 @@ verification:
       - "node scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base http://127.0.0.1:<port>"
       - "npm run dry-run:codex-response -- --sample <provider-response.json>"
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     build:
@@ -1682,6 +1755,7 @@ verification:
       - tests/debug/internal-error-numbering.leak-gate.spec.ts
       - tests/architecture/internal-error-numbering-mainline.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:internal-error-numbering
       - npm run verify:debug-unified-surface
       - npm run verify:error-pipeline-contract
@@ -1749,6 +1823,7 @@ verification:
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:openai-chat-single-tool-call-history-compat-rust-only
       - bash -lc 'cd sharedmodule/llmswitch-core/rust-core && cargo test -p router-hotpath-napi openai_chat_single_tool_call_history --lib -- --nocapture'
     build:
@@ -1767,6 +1842,7 @@ verification:
     integration:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:responses-function-tool-normalization-rust-only
     build:
       - npm run build:base
@@ -1783,6 +1859,7 @@ verification:
     integration:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:responses-tool-parameters-normalization-rust-only
     build:
       - npm run build:base
@@ -1799,6 +1876,7 @@ verification:
     integration:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:responses-instructions-to-input-rust-only
     build:
       - npm run build:base
@@ -1943,6 +2021,7 @@ verification:
       - cargo test -p router-hotpath-napi runtime_config_materialization --lib -- --nocapture
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -2052,6 +2131,7 @@ verification:
     smoke:
       - npm run test:webui
       - npm run verify:config-ssot
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:runtime-lifecycle-loop-gate-matrix
     build:
@@ -2134,6 +2214,7 @@ verification:
     integration:
       - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2149,6 +2230,7 @@ verification:
       - tests/server/runtime/http-server/port-context-isolation.red.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2167,6 +2249,7 @@ verification:
     integration:
       - tests/server/runtime/request-executor.unified-semantics.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
     build:
@@ -2183,6 +2266,7 @@ verification:
       - tests/server/runtime/http-server/executor/request-executor-response-inspect.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -2197,6 +2281,7 @@ verification:
       - tests/server/http-server/routes.invalid-json.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:models-capability-contract
       - npm run verify:function-map-compile-gate
     build:
@@ -2220,6 +2305,7 @@ verification:
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
       - tests/server/handlers/handler-utils.metadata.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:server-function-map-boundary
       - npm run verify:architecture-ci
     build:
@@ -2230,6 +2316,7 @@ verification:
     change_risk: high
     unit:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
       - src/server/handlers/responses-handler.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
@@ -2263,7 +2350,6 @@ verification:
     unit:
       - src/server/handlers/handler-response-sse.ts
       - src/modules/llmswitch/bridge/sse-projection-host.ts
-      - src/modules/llmswitch/bridge/native-exports.ts
       - tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts
       - tests/red-tests/server_sse_metadata_guard_e2e.test.ts
       - src/server/handlers/handler-response-common.ts
@@ -2276,6 +2362,7 @@ verification:
       - tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts
       - tests/server/handlers/handler-response-utils.required-action-split-frame.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
       - npm run verify:responses-sse-business-module
@@ -2291,7 +2378,7 @@ verification:
   - feature_id: server.responses_response_handler_bridge_surface
     change_risk: high
     unit:
-      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/responses-client-projection-host.ts
       - tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
@@ -2299,6 +2386,7 @@ verification:
       - tests/sharedmodule/responses-continuation-store.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:client-response-internal-carrier-surface
       - npm run verify:server-function-map-boundary
       - npm run verify:function-map-compile-gate
@@ -2324,6 +2412,7 @@ verification:
       - tests/cli/port-command.spec.ts
       - tests/cli/status-command.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:architecture-ci
     build:
       - npm run build:base
@@ -2339,6 +2428,7 @@ verification:
     integration:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:responses-crs-request-compat-rust-only
     build:
       - npm run build:base
@@ -2358,6 +2448,7 @@ verification:
     integration: []
     smoke:
       - npm run verify:sse-architecture-boundary
+      - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -2371,6 +2462,7 @@ verification:
       - src/server/runtime/http-server/http-server-runtime-setup.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge/runtime-integrations.ts
+      - src/modules/llmswitch/bridge/sse-runtime-host.ts
       - scripts/helpers/sse-direct-native.mjs
       - tests/sharedmodule/helpers/sse-direct-native.ts
     contract:
@@ -2512,6 +2604,7 @@ verification:
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
+      - src/modules/llmswitch/bridge/provider-runtime-ingress-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/utils/http-error-mapper.ts
     contract:
@@ -2532,6 +2625,7 @@ verification:
   - feature_id: error.execution_decision_consumer
     change_risk: high
     unit:
+      - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/direct-decision.ts
@@ -2599,6 +2693,7 @@ verification:
     integration:
       - tests/utils/server-runtime-pid.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
       - npm run build:base
@@ -2615,6 +2710,7 @@ verification:
     integration:
       - tests/utils/managed-server-pids.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
       - npm run build:base
@@ -2630,6 +2726,7 @@ verification:
     integration:
       - tests/utils/runtime-instance-registry.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
     build:
       - npm run build:base
@@ -2645,6 +2742,7 @@ verification:
       - tests/cli/restart-command.probe-host.spec.ts
     integration: []
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     build:
@@ -2663,6 +2761,7 @@ verification:
     integration:
       - tests/cli/start-command.spec.ts
     smoke:
+      - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     build:

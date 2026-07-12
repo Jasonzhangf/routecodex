@@ -34,7 +34,7 @@ import {
   planResponsesHandlerEntry,
   shouldManageResponsesConversationForHttpNative,
   shouldProjectResponsesResumeClientErrorForHttpNative,
-} from './native-exports.js';
+} from './responses-request-handler-host.js';
 import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';

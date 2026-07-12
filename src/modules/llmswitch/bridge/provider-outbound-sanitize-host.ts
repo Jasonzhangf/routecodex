@@ -5,4 +5,7 @@
  * exposes the native capability consumed by HTTP provider transport.
  */
 
-export { sanitizeProviderOutboundPayload } from './native-exports.js';
+export {
+  normalizeResponsesDirectCurrentRequestPayload,
+  sanitizeProviderOutboundPayload,
+} from './native-exports.js';

@@ -1,17 +1,23 @@
 import { Readable, PassThrough } from 'node:stream';
 import { describe, expect, it, jest } from '@jest/globals';
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  getRouterHotpathJsonBindingSync: jest.fn(() => ({
-    resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
-    resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
-    resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/session-log-color-host.js', () => ({
+  getSessionLogColorBinding: jest.fn(() => ({
     resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-client-projection-host.js', () => ({
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
   planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
   projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/error-projection-host.js', () => ({
   projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
+}));
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/sse-projection-host.js', () => ({
   projectResponsesSseFrameForClientNative: jest.fn((input: { frame: string; state: unknown }) => ({
     emit: true,
     frame: input.frame,
@@ -29,10 +35,10 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.j
     return {
       state: {
         ...(input.state ?? {}),
-        observedTerminal: Boolean((input.state ?? {}).observedTerminal) || observedTerminal,
-      },
-      observedTerminal,
-    };
+      observedTerminal: Boolean((input.state ?? {}).observedTerminal) || observedTerminal,
+    },
+    observedTerminal,
+  };
   }),
 }));
 

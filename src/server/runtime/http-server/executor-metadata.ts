@@ -2,8 +2,9 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 // feature_id: hub.metadata_center_request_capture
 import { asRecord } from './provider-utils.js';
 import {
+  extractServertoolCliResultRouteHintFromRequestNative,
   extractSessionIdentifiersFromMetadataNative
-} from '../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../modules/llmswitch/bridge/executor-metadata-host.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import {
   bindMetadataCenterRustMirror,
@@ -20,7 +21,6 @@ import {
 import { formatUnknownError, isRecord } from '../../../utils/common-utils.js';
 import { preserveLiveClientAbortCarriers } from './executor/request-executor-client-abort-block.js';
 import { hasStoplessDirectiveInRequestPayload } from './executor/provider-response-shared-pure-blocks.js';
-import { extractServertoolCliResultRouteHintFromRequestNative } from '../../../modules/llmswitch/bridge/native-exports.js';
 import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 import { propagatePipelineDryRunControl } from '../../../debug/pipeline-dry-run.js';
 

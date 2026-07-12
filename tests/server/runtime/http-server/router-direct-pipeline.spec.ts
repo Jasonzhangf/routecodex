@@ -2,6 +2,11 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { Readable } from 'node:stream';
 import type { PortConfig } from '../../../../src/server/runtime/http-server/port-config-types.js';
 import type { ProviderHandle, ProviderProtocol } from '../../../../src/server/runtime/http-server/types.js';
+import { attachPipelineDryRunControl, readPipelineDryRunControl } from '../../../../src/debug/pipeline-dry-run.js';
+import {
+  attachProviderRuntimeMetadata,
+  extractProviderRuntimeMetadata
+} from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
 
 const {
   applyDirectRouteResponseHooks,
@@ -232,6 +237,54 @@ describe('router-direct-pipeline', () => {
       expect(sentPayload).toBe(input.requestPayload);
       expect(sentPayload.model).toBe('deepseek-v4-flash');
       expect(input.requestPayload.model).toBe('deepseek-v4-flash');
+    });
+
+    it('propagates provider-request dry-run control from pipeline metadata into direct runtime metadata', async () => {
+      const requestPayload = {
+        model: 'gpt-5.5',
+        messages: [{ role: 'user', content: 'raw' }],
+      };
+      const pipelineMetadata: Record<string, unknown> = { entryPort: 5520 };
+      attachPipelineDryRunControl(pipelineMetadata, {
+        enabled: true,
+        kind: 'provider_request',
+        source: 'sample_replay',
+        requestedAtMs: 1
+      });
+      attachProviderRuntimeMetadata(requestPayload, {
+        requestId: 'router_direct_dry_run',
+        providerId: 'mock',
+        providerKey: 'openai.gpt-5.5',
+        providerType: 'mock',
+        providerProtocol: 'openai-chat',
+        metadata: { entryPort: 5520 }
+      });
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'raw' }],
+        },
+        requestPayload,
+        pipelineMetadata,
+        target: {
+          providerKey: 'openai.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: openaiHandle.runtimeKey,
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.gpt-5.5'] },
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      };
+
+      await executeRouterDirectPipeline(input);
+
+      const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      const runtimeMetadata = extractProviderRuntimeMetadata(sentPayload);
+      expect(readPipelineDryRunControl(runtimeMetadata?.metadata)).toMatchObject({
+        kind: 'provider_request',
+        source: 'sample_replay'
+      });
     });
 
     it('overrides direct reasoning effort from route thinking config without entering Hub execute', async () => {

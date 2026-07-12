@@ -19,6 +19,7 @@ const responsesProvider = read('src/providers/core/runtime/responses-provider.ts
 const httpServer = read('src/server/runtime/http-server/index.ts');
 const routerDirectFailureSnapshot = read('src/server/runtime/http-server/router-direct-failure-snapshot.ts');
 const rustHubSnapshotHooks = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs');
+const snapshotRequestRetention = read('src/utils/snapshot-request-retention.ts');
 const testsToRequire = [
   'tests/utils/snapshot-stage-policy.spec.ts',
   'tests/providers/core/utils/snapshot-writer.release-gating.spec.ts',
@@ -60,6 +61,15 @@ if (!providerWriter.includes('forceLocalDiskWriteWhenDisabled: options.forceLoca
 }
 if (!rustHubSnapshotHooks.includes('provider-request body snapshots are disabled')) {
   failures.push('Rust hub snapshot hook must hard-reject provider-request body snapshots');
+}
+if (!snapshotRequestRetention.includes('fsp.link(tmp, target)')) {
+  failures.push('snapshot runtime marker must be atomically published via temp file + link');
+}
+if (snapshotRequestRetention.includes('fsp.writeFile(target')) {
+  failures.push('snapshot runtime marker must not write directly to __runtime.json with a visible half-written file window');
+}
+if (!rustHubSnapshotHooks.includes('invalid_existing_runtime_metadata')) {
+  failures.push('Rust hub snapshot hook must repair invalid existing runtime metadata with an explicit diagnostic');
 }
 for (const [rel, source] of [
   ['src/providers/core/runtime/responses-provider.ts', responsesProvider],

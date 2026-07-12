@@ -2,7 +2,6 @@ import { once } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, jest, test } from '@jest/globals';
-import { buildLlmswitchNativeExportsFake } from '../helpers/llmswitch-native-exports-fake.js';
 import { buildLlmswitchRuntimeIntegrationsFake } from '../helpers/llmswitch-runtime-integrations-fake.js';
 
 const normalizeResponsesDirectCurrentRequestPayloadMock = jest.fn((payload: Record<string, unknown>) => ({
@@ -13,14 +12,18 @@ const sanitizeProviderOutboundPayloadMock = jest.fn(async (input: { payload: Rec
   JSON.parse(JSON.stringify(input.payload)) as Record<string, unknown>
 );
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  ...buildLlmswitchNativeExportsFake({
-    convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/provider-outbound-sanitize-host.js', () => ({
+  normalizeResponsesDirectCurrentRequestPayload: normalizeResponsesDirectCurrentRequestPayloadMock,
+  sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
+}), { virtual: true });
+
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-to-chat-host.js', () => ({
+  convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+    request: {
+      model: payload.model,
       messages: payload.messages ?? [],
       tools: payload.tools
-    }),
-    normalizeResponsesDirectCurrentRequestPayload: normalizeResponsesDirectCurrentRequestPayloadMock,
-    sanitizeProviderOutboundPayload: sanitizeProviderOutboundPayloadMock,
+    }
   }),
 }), { virtual: true });
 
@@ -37,7 +40,6 @@ import type { ModuleDependencies } from '../../../src/modules/pipeline/interface
 import { attachProviderRuntimeMetadata } from '../../../src/providers/core/runtime/provider-runtime-metadata.js';
 import { createProviderContext } from '../../../src/providers/core/runtime/base-provider-runtime-helpers.js';
 import { MetadataCenter } from '../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
-import { attachPipelineDryRunControl } from '../../../src/debug/pipeline-dry-run.js';
 
 const writeProviderSnapshot = jest.fn(async () => undefined);
 const attachProviderSseSnapshotStream = jest.fn((stream: NodeJS.ReadableStream) => stream);
@@ -49,6 +51,7 @@ jest.unstable_mockModule('../../../src/providers/core/utils/snapshot-writer.js',
   shouldCaptureProviderStreamSnapshots: () => captureProviderSseSnapshots
 }));
 
+const { attachPipelineDryRunControl } = await import('../../../src/debug/pipeline-dry-run.js');
 const { ResponsesProvider } = await import('../../../src/providers/core/runtime/responses-provider.js');
 
 const emptyDeps: ModuleDependencies = {
@@ -233,6 +236,106 @@ describe('ResponsesProvider direct passthrough', () => {
         providerRequestSnapshotWritten: true
       }
     });
+  });
+
+  test('direct SSE does not inherit provider-request dry-run from previous provider runtime metadata', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-sse-dry-run-isolation',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    const postStreamOrResponse = jest.fn(async () => {
+      throw new Error('SHOULD_NOT_SEND_DURING_DRY_RUN');
+    });
+    provider.httpClient = {
+      postStreamOrResponse,
+      postStream: jest.fn()
+    };
+
+    const dryRunMetadata: Record<string, unknown> = {
+      entryEndpoint: '/v1/responses',
+      __responsesDirectPassthrough: true,
+      entryPort: 5520
+    };
+    attachPipelineDryRunControl(dryRunMetadata, {
+      enabled: true,
+      kind: 'provider_request',
+      source: 'sample_replay',
+      requestedAtMs: 1
+    });
+    const dryRunInbound = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'dry run' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(dryRunInbound, {
+      requestId: 'dry_run_previous_turn',
+      providerId: 'test',
+      providerKey: 'test.key1.gpt-5.5',
+      providerType: 'responses',
+      providerFamily: 'test',
+      providerProtocol: 'openai-responses',
+      metadata: dryRunMetadata
+    } as any);
+
+    const dryRunResponse = await provider.processIncoming(dryRunInbound) as any;
+    const dryRunBody = dryRunResponse?.data?.body ?? dryRunResponse?.body ?? dryRunResponse;
+    expect(dryRunBody).toMatchObject({
+      object: 'routecodex.pipeline_dry_run',
+      kind: 'provider_request',
+      dryRun: true
+    });
+    expect(postStreamOrResponse).not.toHaveBeenCalled();
+
+    const liveStream = Readable.from([
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_live"}}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_live","status":"completed"}}\n\n'
+    ]);
+    postStreamOrResponse.mockImplementationOnce(async () => ({
+      kind: 'stream',
+      stream: liveStream
+    }));
+    const liveInbound = {
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'live' }] }],
+      stream: true
+    } as any;
+    attachProviderRuntimeMetadata(liveInbound, {
+      requestId: 'live_direct_sse_after_dry_run',
+      providerId: 'test',
+      providerKey: 'test.key1.gpt-5.5',
+      providerType: 'responses',
+      providerFamily: 'test',
+      providerProtocol: 'openai-responses',
+      metadata: {
+        entryEndpoint: '/v1/responses',
+        __responsesDirectPassthrough: true,
+        entryPort: 5520
+      }
+    } as any);
+
+    const liveResponse = await provider.processIncomingDirect(liveInbound) as any;
+
+    expect(postStreamOrResponse).toHaveBeenCalledTimes(1);
+    expect(liveResponse.body).toBeUndefined();
+    expect(liveResponse.sseStream).toBeDefined();
+    expect(writeProviderSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'provider-response',
+      requestId: 'live_direct_sse_after_dry_run',
+      entryEndpoint: '/v1/responses'
+    }));
   });
 
   test('grok direct request applies wire compat and matching model headers before upstream send', async () => {

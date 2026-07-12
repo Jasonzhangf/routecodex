@@ -92,7 +92,7 @@ import {
 } from '../../../modules/llmswitch/bridge/runtime-integrations.js';
 import {
   isToolCallContinuationResponseNative,
-} from '../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import {
   buildProviderRequestDryRunPipelineResult,
   isProviderRequestDryRunResponse,

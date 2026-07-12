@@ -5,6 +5,16 @@ import {
   finalizeResponsesConversationRequestRetention,
 } from './responses-conversation-store-host.js';
 
+export {
+  detectRetryableEmptyAssistantResponseNative,
+  hasRequestedToolsInSemanticsNative,
+  isProviderNativeResumeContinuationNative,
+  isRequiredToolCallTurnNative,
+  isToolCallContinuationResponseNative,
+  isToolResultFollowupTurnNative,
+  resolveProviderResponseRequestSemanticsNative,
+} from './native-exports.js';
+
 type AdapterContext = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
 type StageRecorder = { record(stage: string, payload: object): void };
@@ -140,6 +150,154 @@ function callNativeJsonObject<T>(capability: string, input: unknown): T {
     throw new Error(`[provider-response-converter-host] ${capability} returned empty result`);
   }
   return JSON.parse(raw) as T;
+}
+
+type ProviderResponseToolValidationResult = {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  missingFields?: string[];
+  normalizedArgs?: string;
+};
+
+function parseProviderResponseNativeRecord(raw: unknown): Record<string, unknown> | undefined {
+  if (raw === null || raw === undefined) {
+    return undefined;
+  }
+  const parsed = JSON.parse(String(raw));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('router-hotpath native export returned non-record payload');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseProviderResponseNativeBooleanResult(raw: unknown): boolean {
+  const parsed = parseProviderResponseNativeRecord(raw);
+  if (typeof parsed?.result !== 'boolean') {
+    throw new Error('router-hotpath native export returned malformed boolean result');
+  }
+  return parsed.result;
+}
+
+function requireProviderResponseNativeJsonFunction(name: string): (...args: string[]) => unknown {
+  const binding = getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
+  const fn = binding[name];
+  if (typeof fn !== 'function') {
+    throw new Error(`router-hotpath native export missing: ${name}`);
+  }
+  return fn as (...args: string[]) => unknown;
+}
+
+function callProviderResponseToolValidationNative<T>(
+  functionName: string,
+  input: Record<string, unknown>
+): T {
+  const fn = requireProviderResponseNativeJsonFunction(functionName);
+  try {
+    return JSON.parse(String(fn(JSON.stringify(input)))) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`provider_response_tool_validation_native_failed: ${functionName}: ${message}`);
+  }
+}
+
+export function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
+  const raw = requireProviderResponseNativeJsonFunction('asFlatRecordJson')(JSON.stringify(value));
+  return parseProviderResponseNativeRecord(raw);
+}
+
+export function extractFirstBalancedJsonObject(raw: string): string | undefined {
+  const raw2 = requireProviderResponseNativeJsonFunction('extractFirstBalancedJsonObjectJson')(raw);
+  return raw2 !== null && raw2 !== undefined ? String(raw2) : undefined;
+}
+
+export function tryParseJsonLikeString(raw: string): unknown {
+  const raw2 = requireProviderResponseNativeJsonFunction('tryParseJsonLikeStringJson')(raw);
+  return raw2 !== null && raw2 !== undefined ? JSON.parse(String(raw2)) : undefined;
+}
+
+export function extractContentTextForStoplessScan(content: unknown): string {
+  return String(requireProviderResponseNativeJsonFunction('extractContentTextForStoplessScanJson')(JSON.stringify(content)));
+}
+
+export function extractLatestUserTextForStoplessScan(source: unknown): string {
+  return String(requireProviderResponseNativeJsonFunction('extractLatestUserTextForStoplessScanJson')(JSON.stringify(source)));
+}
+
+export function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
+  return requireProviderResponseNativeJsonFunction('hasStoplessDirectiveInRequestPayloadJson')(JSON.stringify(source)) === true;
+}
+
+export function findNestedRawString(payload: unknown, depth = 3): string {
+  void depth;
+  return String(requireProviderResponseNativeJsonFunction('findNestedRawStringJson')(JSON.stringify(payload)));
+}
+
+export function findNestedErrorMarker(payload: unknown, depth = 3): string {
+  void depth;
+  return String(requireProviderResponseNativeJsonFunction('findNestedErrorMarkerJson')(JSON.stringify(payload)));
+}
+
+export function containsBroadKillCommand(cmd: string): boolean {
+  const parsed = callProviderResponseToolValidationNative<{ result: boolean }>('containsBroadKillCommandJson', { cmd });
+  return parsed.result === true;
+}
+
+export function hasInvalidShellWrapperShape(cmd: string): boolean {
+  const parsed = callProviderResponseToolValidationNative<{ result: boolean }>('hasInvalidShellWrapperShapeJson', { cmd });
+  return parsed.result === true;
+}
+
+export function validateCanonicalClientToolCall(
+  name: string,
+  argsString: string,
+  _declaredToolNames?: Set<string>
+): ProviderResponseToolValidationResult {
+  return callProviderResponseToolValidationNative<ProviderResponseToolValidationResult>(
+    'validateCanonicalClientToolCallJson',
+    { name, argsString }
+  );
+}
+
+export function isGenericBridgeResponseContractError(args: {
+  error: Record<string, unknown>;
+  message: string;
+}): boolean {
+  const raw = requireProviderResponseNativeJsonFunction('isGenericBridgeResponseContractErrorJson')(JSON.stringify({
+    errorCode: String(args.error.code ?? ''),
+    errorName: String(args.error.name ?? ''),
+    message: args.message,
+  }));
+  return parseProviderResponseNativeBooleanResult(raw);
+}
+
+export function isContextLengthExceededError(
+  message: string,
+  upstreamCode?: string,
+  detailReason?: string
+): boolean {
+  const raw = requireProviderResponseNativeJsonFunction('isContextLengthExceededErrorJson')(JSON.stringify({
+    message,
+    upstreamCode: upstreamCode ?? null,
+    detailReason: detailReason ?? null,
+  }));
+  return parseProviderResponseNativeBooleanResult(raw);
+}
+
+export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?: string, statusCode?: number): boolean {
+  const raw = requireProviderResponseNativeJsonFunction('isRetryableNetworkSseWrapperErrorJson')(JSON.stringify({
+    message,
+    upstreamCode: upstreamCode ?? null,
+    statusCode: statusCode ?? null,
+  }));
+  return parseProviderResponseNativeBooleanResult(raw);
+}
+
+export function extractBridgeProviderResponsePayload(
+  body: Record<string, unknown> | null | undefined
+): Record<string, unknown> | undefined {
+  const raw = requireProviderResponseNativeJsonFunction('extractBridgeProviderResponsePayloadJson')(JSON.stringify(body ?? {}));
+  return parseProviderResponseNativeRecord(raw);
 }
 
 function executeHubPipelineWithNative(

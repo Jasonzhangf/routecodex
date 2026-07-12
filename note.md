@@ -1,3 +1,57 @@
+# 2026-07-12: review closeout for host bridge/resource/snapshot batch
+
+- Scope: review current uncommitted host bridge contraction, resource ownership map/gate, snapshot marker/dry-run owner, and Responses direct SSE dry-run isolation before commit.
+- Review fix already applied in this dirty tree: provider-request dry-run snapshot writing is owned by `src/debug/pipeline-dry-run.ts::writeProviderRequestDryRunSnapshot`, while `src/providers/core/runtime/responses-provider.ts` no longer writes `phase: 'provider-request'` directly and direct requests build provider context from the current request runtime carrier.
+- Verification PASS: `verify:architecture-snapshot-stage-contract`, `verify:responses-handler-single-bridge-surface`, full resource gate suite, resource coverage audit (`95/119` active feature bindings, `108/108` mainline edges), function-map compile, mainline/manifest/wiki sync, strict llmswitch shell audit, rustification audit, VR no-TS runtime, zero-TS closeout, deleted-path/thin-wrapper gates, focused Jest 10 suites / 325 tests, root `tsc`, `build:native-hotpath`, `build:base`, Rust `runtime_metadata` tests 8/8, touched `hub_snapshot_hooks.rs` rustfmt, and `git diff --check`.
+- Release/global evidence PASS: `install:release` installed `0.90.3922` at `/Volumes/extension/.rcc/install/releases/routecodex-0.90.3922-2026-07-12T044830Z`; `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on `5520/5555/4444/10000` all report `0.90.3922` with `ready=true` and `pipelineReady=true`.
+- Non-target note: full `cargo fmt --manifest-path ... --check` still reports a pre-existing format diff in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; that file is not in current diff, so it was not mixed into this commit. Touched Rust file formatting is clean.
+
+# 2026-07-12: resource ownership fourth-layer host/runtime surface bindings
+
+- Scope: continue fourth-layer full-project resource convergence after servertool engine feature bindings; no runtime behavior change, no build/global install/live runtime.
+- Added host/runtime resource identities to `docs/architecture/resource-operation-map.yml`: `runtime.provider_binding_resolution`, `runtime.hub_pipeline_handle`, `runtime.http_entry_dispatch`, `runtime.http_lifecycle_context`, `response.host_conversion_handoff`, `response.inspection_signal`, `models.capability_catalog`, `server.handler_transport_envelope`, `cli.command_dispatch_intent`, `hub.chat_session_usage`, and `response.provider_context_projection`.
+- Added function-map `resource_bindings` for `server.runtime_key_resolution`, `hub.runtime_ingress_bridge`, `hub.response_anthropic_client_projection`, `hub.response_post_servertool_client_projection`, `hub.response_provider_context_helpers`, `hub.chat_process_session_usage`, `server.http_runtime_entry`, `server.http_runtime_lifecycle`, `server.provider_response_conversion_host`, `server.response_inspection_helpers`, `server.models_capability_contract`, `server.responses_handler_family`, `server.responses_sse_bridge_surface`, `server.responses_response_handler_bridge_surface`, and `cli.command_surface`.
+- Updated verification-map smoke gates for the same host/runtime batch to include `npm run verify:resource-operation-map`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `75`, active feature bindings `88/119`, mainline edge flows `108/108`. First missing binding moved to `error.backoff_action_queue`.
+- Verification PASS: `verify:resource-operation-map`, `audit:resource-global-coverage`, `verify:resource-owner-uniqueness`, `verify:resource-mainline-bindings`, `verify:resource-forbidden-writes`, `verify:resource-side-channel-isolation`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-wiki-sync`, and `git diff --check`.
+- Architecture review: this batch models host/runtime resources as entry/handle/transport/projection surfaces; no fake mainline flows were added, no request/response global manager was introduced, and no runtime code was changed.
+
+# 2026-07-12: resource ownership fourth-layer servertool engine bindings
+
+- Scope: continue full-project resource convergence after mainline `resource_flow` reached `108/108`; no runtime behavior change, no build/global install/live runtime.
+- Added servertool engine resource identities to `docs/architecture/resource-operation-map.yml`: `servertool.engine_selection_plan`, `servertool.engine_action_plan`, `servertool.auto_hook_execution_plan`, `servertool.execution_contract_plan`, `servertool.execution_state`, `servertool.registry_projection`, `servertool.cli_projection_plan`, `servertool.flow_presentation`, `servertool.loop_warning`, `servertool.hook_closeout_contract`, and `servertool.orchestration_policy`.
+- Added function-map `resource_bindings` for the servertool engine priority batch from `hub.servertool_followup` through `hub.servertool_orchestration_policy`, including closeout and presentation owners. Bindings reference real Rust owner modules/builders already anchored in function-map; no new mainline edges were added.
+- Updated verification-map servertool smoke gates to include `npm run verify:resource-operation-map`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `64`, active feature bindings `73/119`, mainline edge flows `108/108`. First missing binding moved to `server.runtime_key_resolution`.
+- Verification PASS: `verify:resource-operation-map`, `audit:resource-global-coverage`, `verify:resource-owner-uniqueness`, `verify:resource-mainline-bindings`, `verify:resource-forbidden-writes`, `verify:resource-side-channel-isolation`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:architecture-wiki-sync`, and `git diff --check`.
+- Architecture review: this is map/gate-only; no fallback, no provider-specific leakage, no runtime manager, no non-adjacent mainline flow, and no runtime code changed for this slice.
+
+# 2026-07-12: resource ownership second-layer补缺
+
+- Scope: full-project resource convergence second layer, not dry-run-only and no runtime behavior change.
+- Added resources in `docs/architecture/resource-operation-map.yml` for config materialization, WebUI config editor, runtime lifecycle, debug/internal-error, and VR diagnostics/hit-log.
+- Added matching adjacent `resource_flow` to `docs/architecture/mainline-call-map.yml` for `config.user_config_materialization.mainline`, `webui.config_editor_surface.mainline`, `runtime.lifecycle.mainline`, `debug.unified_surface.mainline`, `debug.pipeline_dry_run_loop.mainline` missing edges, `internal_error_numbering.mainline`, `vr.online_diagnostics.mainline`, and `vr.hit_log_projection.mainline`.
+- Added function-map `resource_bindings` for target owner features including config materialization/write/profile surfaces, WebUI config editor, runtime lifecycle owners, debug/internal-error, and VR diagnostic/hit-log owners.
+- Coverage after `npm run audit:resource-global-coverage`: resources `40`, active feature bindings `43/119`, mainline edge flows `91/108`. Remaining resource_flow gaps are next-layer `stopless.session`, `sse.chat_stream_projection`, and `stage_a.p0_rust_migration`.
+- Resource gates already passed: `verify:resource-operation-map`, `verify:resource-mainline-bindings`, `verify:resource-owner-uniqueness`, `verify:resource-forbidden-writes`, `verify:resource-side-channel-isolation` (all route to the comprehensive resource verifier).
+
+# 2026-07-12: resource ownership third-layer mainline flow closeout
+
+- Scope: continue full-project resource convergence after second layer; no runtime behavior change.
+- Added `stopless.*` resources for schema gate state, runtime snapshot, CLI projection/result, guidance rewrite, and schema contract.
+- Added `sse.protocol_stream_projection` and `sse.provider_stream_aggregate` for Anthropic/Gemini SSE JSON-to-SSE and SSE-to-JSON edges.
+- Added `stage_a.*` resources for servertool outcome planning, protocol canonicalization, Responses continuation store state, and request/response Chat Process tool governance.
+- Added matching `resource_flow` to all previously missing mainline edges: `stopless.session.mainline stl-02..stl-08`, `sse.chat_stream_projection.mainline` Anthropic/Gemini edges, and `stage_a.p0_rust_migration.mainline stage-a-p0-01..06`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `53`, active feature bindings `50/119`, mainline edge flows `108/108`. Remaining backlog is feature-level `resource_bindings`, not mainline edge resource_flow.
+
+# 2026-07-12: snapshot runtime metadata InvalidData source closeout
+
+- Symptom: live logs showed `[hub_snapshot_hooks] runtime metadata write skipped ... kind=InvalidData` on openai-responses port 5520 after normal `[virtual-router-hit]`; controlled log count found 2206 occurrences in `server-5520.log` and 173 in `server-4444.log`, so this is not a VR selection issue.
+- Owner: `snapshot.stage_contract`; Rust `hub_snapshot_hooks.rs::upsert_runtime_metadata_file` read existing `__runtime.json` and returned `InvalidData`, while TS `ensureSnapshotRuntimeMarker` used direct `writeFile(..., flag:'wx')`, exposing a possible empty/partial file window.
+- Change: TS marker publication now writes/syncs a temp file and links it atomically to `__runtime.json`; Rust invalid existing runtime metadata is repaired from current runtime truth and writes explicit `runtimeMetadataRepair.reason=invalid_existing_runtime_metadata` instead of logging `write skipped`.
+- Verification PASS: Rust `cargo test ... runtime_metadata --lib -- --nocapture` 8/8 selected; touched Rust `rustfmt --check`; focused snapshot marker Jest; root `tsc`; `build:native-hotpath`; touched `git diff --check`; inline architecture assertion for temp-link/no direct target write/Rust repair diagnostic.
+- Known gap: `npm run verify:architecture-snapshot-stage-contract` is still red on an existing dirty `src/providers/core/runtime/responses-provider.ts` `phase:'provider-request'` assertion unrelated to this marker fix. No global install/restart/live replay claimed because current worktree contains unrelated runtime changes.
+
 # 2026-07-12: session log color broad native bridge ref narrowed
 
 - Scope: external reference contraction for `src/utils/session-log-color.ts`.
@@ -29101,6 +29155,19 @@ Pure Rust NAPI candidates:
 - Response dry-run blackbox PASS without protocol override: `npm run dry-run:codex-response -- --sample /Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783783139322_87bd6dfa/provider-response.json --out-dir /tmp/rcc-response-dryrun-installed-0.90.3882` produced `providerProtocol=openai-responses`, `bodyObject=chat.completion`, `bodyModel=gpt-5.5`, content `pong\npong\npong`.
 - Regression/static evidence PASS: focused dry-run/router-direct/responses-provider Jest 62/62, `npx tsc --noEmit --pretty false`, `git diff --check`, `build:native-hotpath`, `build:base`, and `install:release`.
 
+# 2026-07-12: Resource ownership M0 map/gate
+
+- Goal input read from `/Users/fanzhang/.codex/attachments/432a1b32-0adb-4a15-b2a7-9582725be74d/pasted-text-1.txt`: start top-down resource ownership refactor from resource ownership/relationships/docs/tests before runtime code.
+- Added `docs/architecture/resource-taxonomy.md` defining request/response/metadata/error/route/provider runtime/continuation/dry-run/snapshot/SSE/servertool resources and the no-global-mutable-manager boundary.
+- Added `docs/architecture/resource-operation-map.yml` with 18 M0 resources and 19 mainline resource flows.
+- Added `scripts/architecture/verify-resource-operation-map.mjs` plus `npm run verify:resource-operation-map`.
+- Extended `docs/architecture/function-map.yml` with `architecture.resource_ownership_model` and `resource_bindings` on M0 owner features so resources can be queried by owner feature.
+- Extended `docs/architecture/mainline-call-map.yml` resource_flow on request/direct/response/continuation/dry-run/error/metadata/SSE/stopless key edges.
+- Extended `docs/architecture/verification-map.yml` with `architecture.resource_ownership_model`.
+- Red evidence: temp copy with `request.missing_payload@HubReqInbound02Standardized` in function-map failed `verify-resource-operation-map` with undeclared resource binding.
+- Green evidence: `npm run verify:resource-operation-map`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-mainline-call-map`, `npm run verify:architecture-mainline-manifest-sync`, `npm run verify:architecture-wiki-sync`, and `git diff --check` passed.
+- Boundary: no runtime refactor started; M0 is map/gate/documentation only.
+
 # 2026-07-12: Responses SSE bridge facade deletion slice
 
 - Scope: continue host bridge external-reference contraction by deleting duplicate `src/modules/llmswitch/bridge/responses-sse-bridge.ts`.
@@ -29172,3 +29239,49 @@ Pure Rust NAPI candidates:
 - Install blocker found and fixed: release snapshot copy failed visibly with `EINTR` while copying `node_modules/zod-to-json-schema/.../zod/v4/core`; `install-release-snapshot.mjs` now retries only interrupted `fs.cpSync` calls after removing the partial target, while still failing visible and preserving dependency/runtime import verification before switching `install/current`.
 - Verification PASS: focused Jest route availability/red/residue 235/235; install snapshot/dependency Jest 8/8; `npx tsc --noEmit --pretty false`; function-map compile; architecture mainline call map; strict llmswitch TS shell reference audit; llmswitch rustification audit; minimal TS surface audit; VR default-floor gate; deleted-path; thin-wrapper-only; `build:base`.
 - Release/live evidence PASS: first `0.90.3919` install failed at the EINTR copy point; after the copy retry fix, `bash -x scripts/install-release.sh` installed `routecodex-0.90.3919-2026-07-12T012132Z`; `routecodex --version`, `rcc --version`, and `~/.rcc/install/current/package.json` all report `0.90.3919`; installed `dist/modules/llmswitch/bridge/route-availability-host.js` exists and only re-exports native functions; `/health` on 5520 and restarted 5555 both report ok/ready/pipelineReady version `0.90.3919`.
+
+# 2026-07-12: Resource ownership M0 named gate closeout
+
+- Scope: continue top-down resource ownership refactor from the active goal; no runtime code changed.
+- Change: added package script aliases for resource owner uniqueness, mainline bindings, forbidden writes, and side-channel isolation; function map and verification map now require these named gates for `architecture.resource_ownership_model`.
+- Skill update: `.agents/skills/rcc-dev-skills/SKILL.md` quick commands now list the resource gate suite.
+- Red evidence on temporary copied trees: invalid YAML fails parseability; duplicate `request.normal_payload` resource id fails owner/resource uniqueness; `request.missing_payload` function-map binding fails binding consistency; empty `forbidden_writers` fails forbidden-write queryability; `metadata.runtime_control.may_enter_provider_body=true` fails side-channel isolation.
+- Green evidence: `npm run verify:resource-operation-map`, `npm run verify:resource-owner-uniqueness`, `npm run verify:resource-mainline-bindings`, `npm run verify:resource-forbidden-writes`, `npm run verify:resource-side-channel-isolation`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-mainline-call-map`, `npm run verify:architecture-mainline-manifest-sync`, `npm run verify:architecture-wiki-sync`, and `git diff --check` pass.
+- Boundary: these named scripts currently execute the same comprehensive verifier. They are queryable gate entrypoints, not separate runtime refactors.
+- MemPalace blocker rechecked: `mempalace mine . --wing routecodex` is still not closable without global memory repair because `sqlite3 ~/.mempalace/palace/chroma.sqlite3 'PRAGMA quick_check;'` returns `malformed inverted index for FTS5 table main.embedding_fulltext_search`. `mempalace repair --help` marks `--yes` as destructive changes, so repair requires explicit Jason authorization before goal can close its mine/search requirement.
+
+# 2026-07-12: Resource ownership scope corrected to project-wide
+
+- Correction: the resource refactor scope is the whole RouteCodex project, not `dryrun.provider_request_probe`. Dry-run remains a low-risk sample/pilot only.
+- Added `scripts/architecture/audit-resource-global-coverage.mjs` and `npm run audit:resource-global-coverage` to report full project resource coverage without failing CI yet.
+- Current audit evidence: 18 resources, 19 mainline resource flows, `resource_bindings` coverage `15/119` active features, and `resource_flow` coverage `19/108` mainline edges.
+- Added `docs/architecture/resource-global-coverage-report.json` as the machine-readable backlog for project-wide resource binding and mainline resource_flow expansion.
+- Updated `docs/goals/resource-ownership-refactor-plan.md`, function map, verification map, and local skill so future work starts from global coverage before resource-by-resource runtime refactor.
+
+# 2026-07-12: Resource ownership first-layer coverage补缺
+
+- Scope: first-layer map/doc/gate补缺 only; no runtime code changed.
+- Closed first-layer `resource_flow` gaps for `request.mainline`, `response.mainline`, `responses.continuation.mainline`, `servertool.hook_skeleton.mainline`, `error.mainline`, `vr.route_availability.mainline`, and `metadata.center.mainline`.
+- Added owner `resource_bindings` for request inbound/chatprocess, response/continuation, error policy/decision/projection, VR metadata/availability/diagnostics/host-effects, and MetadataCenter subfeatures where current M0 resources can express the ownership precisely.
+- Coverage moved from `15/119` active features and `19/108` mainline edges to `31/119` active features and `51/108` mainline edges.
+- Verified first-layer target chains have `0` missing resource_flow edges in `docs/architecture/resource-global-coverage-report.json`.
+- Deferred next-layer backlog: config materialization, WebUI config editor, runtime lifecycle, debug/internal-error diagnostics, VR diagnostics/hit-log edge resources, and servertool engine subfeatures outside hook skeleton need resource taxonomy expansion before precise binding.
+- MemPalace status: `sqlite3 ~/.mempalace/palace/chroma.sqlite3 'PRAGMA quick_check;'` still reports `malformed inverted index for FTS5 table main.embedding_fulltext_search`; `mempalace search "Resource ownership first-layer closed priority mainlines" --wing routecodex` returns no results because this new note has not been mined. Per goal, this does not block first-layer补缺 while Jason is repairing MemPalace.
+
+# 2026-07-12: Responses client projection broad native bridge import closed
+
+- Scope: continue host bridge callsite contraction by removing the last non-bridge production import of broad `src/modules/llmswitch/bridge/native-exports.ts`.
+- Change: added `src/modules/llmswitch/bridge/responses-client-projection-host.ts` as a narrow native re-export for `buildResponsesPayloadFromChatNative`, `planResponsesJsonClientDispatchNative`, and `projectResponsesClientPayloadForClientNative`; `handler-response-utils.ts` now imports this host instead of `native-exports.ts`.
+- Map/gate update: `hub.response_responses_client_projection` and `server.responses_response_handler_bridge_surface` now list the narrow host; mainline `resp-03` and shared native response projection binding point at the host; residue audit and `verify:responses-handler-single-bridge-surface` lock the handler away from broad `native-exports.ts`.
+- Verification PASS: direct source scan found 0 `native-exports.js` imports outside `src/modules/llmswitch/bridge`; root `tsc`; focused handler-response Jest 5 suites / 21 tests; focused hub-pipeline residue Jest 227/227; `verify:responses-handler-single-bridge-surface`; function-map compile; architecture mainline call map; strict llmswitch shell audit; llmswitch rustification audit; minimal TS surface audit; VR no-TS runtime; `git diff --check`; `build:base`.
+- Boundary: source/gate closeout only; no global install/restart/live replay claimed because behavior still calls the same Rust/NAPI projection functions through a narrower host.
+
+# 2026-07-12 12:46 CST: Resource ownership fourth-layer protocol/conversion bindings
+
+- Scope: map/doc/gate-only continuation of active resource convergence goal; no runtime code changed, no build/global install/live runtime needed.
+- Closed feature-level resource bindings for `openai_chat.single_tool_call_history_compat`, `responses.function_tool_normalization`, `responses.tool_parameters_normalization`, `responses.instructions_to_input_normalization`, `responses.crs_request_compat`, `hub.web_search_tool_governance`, and `conversion.shared.gemini`.
+- Added/split protocol resources: `protocol.openai_chat_history_compat`, `protocol.responses_function_tool_schema`, `protocol.responses_tool_parameters_schema`, `protocol.responses_instruction_projection`, `protocol.responses_crs_request_compat`, `protocol.gemini_canonical`, and side-channel `protocol.web_search_governance_plan`.
+- Design correction: split Responses function-tool schema and tool-parameters schema into separate resources so two feature owners do not share one ambiguous writer resource.
+- Coverage after `npm run audit:resource-global-coverage`: resources `82`, active feature `resource_bindings` `95/119`, mainline `resource_flow` `108/108`, `missing_resource_flow_edges: []`.
+- Verification PASS: `verify:resource-operation-map`, `audit:resource-global-coverage`, resource owner/mainline/forbidden/side-channel gates, `verify:function-map-compile-gate`, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
+- Remaining first missing group: `error.backoff_action_queue`, VR/pipeline contract surfaces, snapshot/debug surfaces, config codec/path/coercion, manager/daemon surfaces, and SSE residuals.

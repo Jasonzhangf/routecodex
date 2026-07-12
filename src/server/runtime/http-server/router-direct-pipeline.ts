@@ -35,7 +35,10 @@ import {
   attachProviderRuntimeMetadata,
   extractProviderRuntimeMetadata
 } from '../../../providers/core/runtime/provider-runtime-metadata.js';
-import { isProviderRequestDryRunResponse } from '../../../debug/pipeline-dry-run.js';
+import {
+  isProviderRequestDryRunResponse,
+  propagatePipelineDryRunControl
+} from '../../../debug/pipeline-dry-run.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -244,6 +247,13 @@ export async function executeRouterDirectPipeline(
   const payloadToSend = recordPayloadAudit(hookResult.payload, auditContext);
   const runtimeMetadata = extractProviderRuntimeMetadata(input.requestPayload);
   if (runtimeMetadata) {
+    const runtimeMetadataRecord = (
+      runtimeMetadata.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+        ? runtimeMetadata.metadata as Record<string, unknown>
+        : undefined
+    ) ?? {};
+    runtimeMetadata.metadata = runtimeMetadataRecord;
+    propagatePipelineDryRunControl(input.pipelineMetadata, runtimeMetadataRecord);
     attachProviderRuntimeMetadata(payloadToSend, runtimeMetadata);
   }
 

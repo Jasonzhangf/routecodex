@@ -210,3 +210,206 @@ Then replay the same endpoint/sample that proves the installed runtime consumes 
   - `git diff --check` passed.
 - Residual risk:
   - The full `node scripts/tests/responses-continuation-provider-key-blackbox.mjs` still fails in the untouched `direct` scenario because current runtime behavior routes the resumed continuation to `p2` instead of preserving the expected `p1` pin. This is a pre-existing runtime regression outside the relay-branch reference-contraction slice and must be fixed at the direct continuation owner before this blackbox can be fully green.
+
+## 2026-07-12 Hub Pipeline / VR Host Bridge External Reference Audit
+
+### Current answer
+
+There are no remaining production TypeScript runtime modules under
+`sharedmodule/llmswitch-core/src`, and the Virtual Router runtime has no
+production TS surface. The remaining external references are host-side
+RouteCodex bridge references under `src/modules/llmswitch`, not llmswitch-core
+or VR runtime TS modules.
+
+This is a source/doc audit. No runtime behavior changed, so this section does
+not claim new global-install or live replay closure.
+
+### Evidence
+
+- `node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json`
+  passed with `prodTsShellCount=0`, `shellsWithProdImporters=0`,
+  `shellsWithHostTextRefs=0`; the only `coreModuleSubpathRefs` are historical
+  `note.md` entries.
+- `node scripts/ci/llmswitch-rustification-audit.mjs --json` passed with
+  `prodTsFileCount=0`, `prodTsLocTotal=0`, `nonNativeFileCount=0`,
+  `nonNativeLocTotal=0`.
+- `node scripts/ci/verify-llmswitch-minimal-ts-surface.mjs --json` passed with
+  `entries=0`, `current non-native prod TS files=0`, and
+  `explicit native-linked TS shells=0`.
+- `node scripts/architecture/verify-vr-no-ts-runtime.mjs` passed with
+  `VR production TS files: 0`.
+- `git ls-files 'sharedmodule/llmswitch-core/src/**/*.ts' ... '*.d.ts'`
+  returned no tracked TS-like files.
+- `find src/modules/llmswitch -type f` currently shows `README.md` and 7
+  existing concrete `bridge/*.ts` files.
+- `git ls-files 'src/modules/llmswitch/**'` still tracks
+  `responses-sse-bridge.ts`, but the current dirty worktree has that file as a
+  pending deletion from a separate SSE closeout slice. The matrix below uses
+  existing working-tree files and excludes the missing file.
+
+### Current host bridge reference matrix
+
+The reference scan used `git ls-files` over `src`, `tests`, `scripts`, `docs`,
+and package manifests, excluded generated outputs, resolved ESM `.js` imports
+back to tracked `.ts` sources, and counted direct import / dynamic import /
+require / Jest mock references.
+
+| File | LOC | External refs | src refs | test refs | Current classification |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `src/modules/llmswitch/bridge/native-exports.ts` | 1540 | 65 | 31 | 34 | Shrink candidate; central native binding facade, too broad for long-term external imports. |
+| `src/modules/llmswitch/bridge/routing-integrations.ts` | 1120 | 55 | 22 | 33 | Shrink candidate; config codec/materialization and Hub/VR handle lifecycle are mixed in one facade. |
+| `src/modules/llmswitch/bridge/runtime-integrations.ts` | 274 | 42 | 8 | 34 | Keep as host IO shell for now; async wrappers, store calls, stream materialization, runtime ingress. |
+| `src/modules/llmswitch/bridge/snapshot-recorder.ts` | 577 | 16 | 2 | 14 | Keep as host observation/IO shell; not a Hub/VR semantic owner. |
+| `src/modules/llmswitch/bridge/provider-response-converter-host.ts` | 838 | 13 | 1 | 12 | Keep as host stream/MetadataCenter/continuation-save IO shell for now. |
+| `src/modules/llmswitch/bridge/responses-conversation-store-host.ts` | 337 | 11 | 3 | 8 | Keep as host operation shell around Rust store API for now. |
+| `src/modules/llmswitch/bridge/responses-request-bridge.ts` | 878 | 9 | 1 | 8 | Shrink candidate; single handler facade still contains request-side host/context glue. |
+
+### What is already closed
+
+- `sharedmodule/llmswitch-core` production TS is closed at zero. Do not reopen
+  root barrels, source-side native wrappers, VR runtime wrappers, or checked-in
+  JS/d.ts mirrors.
+- `src/modules/llmswitch/bridge/responses-response-bridge.ts` is physically
+  deleted. Response JSON dispatch now uses the handler boundary plus direct
+  native calls through the narrow
+  `src/modules/llmswitch/bridge/responses-client-projection-host.ts`; only
+  history docs and absence gates may mention the old path.
+- Production source outside `src/modules/llmswitch/bridge` no longer imports
+  broad `native-exports.ts` directly. New runtime callers must add or reuse an
+  owner-specific host instead of widening handler/executor imports.
+- `src/modules/llmswitch/core-loader.ts` is physically deleted. Native package
+  path resolution is private loader plumbing inside `native-exports.ts`; do not
+  restore a standalone core-loader shell for tests or docs.
+- VR runtime semantics are Rust-only. `src/modules/llmswitch/bridge` may call
+  Rust/NAPI for VR status, diagnostics, route host effects, and Hub engine
+  lifecycle, but must not own route selection, health, availability, retry pin,
+  hit-log semantic construction, or provider policy.
+- `state-integrations.ts` is not a tracked host bridge file. Active routing
+  state host IO lives in `src/manager/modules/routing/native-routing-state-store.ts`,
+  and request metadata session extraction imports native helpers directly.
+- `responses-sse-bridge.ts` is currently a pending deletion in the dirty
+  worktree. If that slice is kept, SSE transport facade ownership must stay in
+  `handler-response-sse.ts` plus Rust/NAPI projection helpers, and architecture
+  maps/gates that still name the old bridge file must be updated or kept only
+  as negative residue assertions.
+
+### Remaining external reference groups
+
+1. Runtime host importers that must remain until the host boundary is split:
+   server runtime setup, request executor, direct/provider response converter,
+   provider runtime, config loaders/writers, routing manager, debug snapshot
+   writer, and memory observer.
+2. Test importers that still call bridge facades directly. These are the first
+   contraction target when they only need Rust/NAPI evidence.
+3. Architecture and residue tests that mention deleted `sharedmodule` paths as
+   negative assertions. These are not active runtime references and should not
+   be counted as current TS owner evidence.
+
+### Closeout sequence
+
+1. Freeze the current truth with a bridge allowlist.
+   - Extend the existing shell/reference audit or add a focused host-bridge
+     reference manifest that classifies each `src/modules/llmswitch` file as
+     `native facade`, `config facade`, `request handler facade`, `response
+     facade`, `transport facade`, `store operation shell`, or `observation IO`.
+   - Gate each facade by allowed runtime importers and forbidden semantic
+     patterns; do not use line count alone as a closeout signal.
+
+2. Contract test-only external references first.
+   - Move tests that only need direct NAPI proof from
+     `src/modules/llmswitch/bridge/native-exports.ts` to narrow test helpers
+     under `tests/sharedmodule/helpers/*direct-native.ts`.
+   - Do the same for bridge facade tests that only assert Rust output, leaving
+     handler/runtime integration tests on the real host boundary.
+   - Expected first shrink: the 34 test refs to `native-exports.ts` and the
+     high test ref counts on `routing-integrations.ts`, `runtime-integrations.ts`,
+     and response/request facades.
+
+3. Split `routing-integrations.ts` by owner before trying to delete anything.
+   - Config/TOML/path/auth/provider config functions are not Hub/VR runtime
+     semantics. Move or re-export them behind a config-owned native facade so
+     config callers stop depending on the Hub/VR facade name.
+   - Keep only Hub pipeline engine lifecycle, VR route/status/diagnostics, and
+     concurrency-scope calls in the Hub/VR bridge.
+   - Audit `injectVirtualRouterRuntimeMetadataLocal`: it may pass host runtime
+     facts such as time/user-dir, but it must not become route truth or revive
+     flat `__rt` route decisions.
+
+4. Collapse `native-exports.ts` to a smaller native binding loader plus
+   feature-specific facades.
+   - Keep one fail-fast NAPI binding loader and JSON invoke primitive.
+   - Move request/response/SSE/store/snapshot/error/VR helpers to their owning
+     facade modules or direct test helpers.
+   - Migrate local TS semantic candidates into Rust before removing them from
+     the facade. Current candidates to audit first are
+     `extractServertoolCliResultRouteHintFromRequestNative` and
+     `mergeObservedRoutePoolChainNative`; the latter currently converts parse
+     failure to `null`, so it needs explicit owner/gate review before being
+     treated as acceptable optional observation.
+
+5. Shrink `responses-request-bridge.ts`; keep `responses-response-bridge.ts`
+   deleted.
+   - Request bridge must stay the single `/v1/responses` handler facade, but
+     pure endpoint/scope/error/stream planning helpers should be native-owned
+     and direct-testable.
+   - `applySystemPromptOverride` remains a request mutation behind the bridge;
+     closeout requires a Rust/native replacement or an explicit owner removal,
+     not a second handler-side helper.
+   - `responses-response-bridge.ts` is no longer an active facade. Response
+     JSON dispatch now lives in `handler-response-utils.ts` as HTTP/log/snapshot
+     glue around `responses-client-projection-host.ts`. Do not restore a bridge
+     facade or JS mirror to satisfy tests; update tests/scripts to target the
+     handler boundary, the narrow host, or direct native helpers.
+
+6. Keep host IO shells until a real replacement exists.
+   - `provider-response-converter-host.ts`, `runtime-integrations.ts`,
+     `responses-conversation-store-host.ts`, and `snapshot-recorder.ts` are
+     deletion candidates only after their Node stream,
+     MetadataCenter, timer/env/path/logging, and file IO responsibilities have
+     an explicit replacement owner and gates.
+   - Do not delete them merely to reduce TS LOC; that would move IO breakage
+     elsewhere without reducing semantic duplication.
+
+7. Delete only zero-ref leaves.
+   - Use `git ls-files` based scans before deletion, update function/mainline/
+     verification maps in the same slice, then add residue gates that fail if
+     the old path/export/import returns.
+
+### Required gates for each closeout slice
+
+Minimum source/reference gates:
+
+```bash
+node scripts/ci/llmswitch-ts-shell-reference-audit.mjs --strict --json
+node scripts/ci/llmswitch-rustification-audit.mjs --json
+node scripts/ci/verify-llmswitch-minimal-ts-surface.mjs --json
+node scripts/architecture/verify-vr-no-ts-runtime.mjs
+npm run verify:function-map-compile-gate
+npm run verify:architecture-mainline-call-map
+npm run verify:architecture-mainline-manifest-sync
+npm run verify:architecture-deleted-path
+npm run verify:architecture-thin-wrapper-only
+git diff --check
+```
+
+Add feature gates by touched owner:
+
+- VR route/diagnostics: `npm run verify:vr-no-ts-runtime`, VR route/status
+  focused tests, and live VR diagnostics only if runtime behavior is claimed.
+- Responses request handler facade: `npm run verify:responses-handler-single-bridge-surface`.
+- Responses SSE facade: `npm run verify:responses-sse-business-module`.
+- Continuation/store: `npm run verify:responses-history-protocol-contract`.
+- Provider response/SSE materialization: the focused
+  `hub.response_provider_sse_materialization` tests from `verification-map.yml`.
+- Runtime-impacting changes: rebuild, global install, managed restart, `/health`
+  version check, and same-entry live replay before claiming runtime closure.
+
+### Non-goals
+
+- Do not delete `native-exports.ts` or `routing-integrations.ts` wholesale while
+  production importers still depend on them.
+- Do not convert host IO into hidden runtime semantics just to remove a facade.
+- Do not count historical docs, residue tests, `dist`, `target`, `.mempalace`,
+  or local indexes as current code-state evidence.
+- Do not restore any deleted `sharedmodule/llmswitch-core/src` TS runtime shell,
+  source-side JS mirror, or d.ts mirror.

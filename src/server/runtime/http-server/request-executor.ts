@@ -100,7 +100,7 @@ import {
   isProviderNativeResumeContinuationNative,
   isRequiredToolCallTurnNative,
   isToolResultFollowupTurnNative,
-} from '../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import {
   extractRequestExecutorProviderErrorStage,
   isHostRequestExecutorErrorStage,

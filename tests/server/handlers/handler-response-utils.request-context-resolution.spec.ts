@@ -18,27 +18,25 @@ function createMockResponse() {
 }
 
 function mockNativeExports(overrides: Record<string, unknown> = {}) {
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-    getRouterHotpathJsonBindingSync: jest.fn(() => ({
-      resolveRccPathJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
-      resolveRccSnapshotsDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test/codex-samples')),
-      resolveRccUserDirJson: jest.fn(() => JSON.stringify('/tmp/routecodex-test')),
-      resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
-    })),
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-client-projection-host.js', () => ({
     buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
     planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
     projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+    ...overrides,
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/sse-projection-host.js', () => ({
     projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string; state?: unknown }) => ({
       emit: true,
       frame: args.frame ?? '',
       state: args.state,
     })),
-    projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
     updateResponsesSseTransportTerminalStateNative: jest.fn((input: { chunk?: unknown; state?: Record<string, unknown> }) => ({
       state: input.state ?? {},
       observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
     })),
-    ...overrides,
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/error-projection-host.js', () => ({
+    projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
   }));
 }
 

@@ -10,9 +10,9 @@ import {
 } from './metadata-center/dualwrite-api.js';
 import {
   buildRequestStageRuntimeControlWritePlanNative,
+  executeHubPipelineNative,
   resolveEntryProtocolFromEndpointNative
-} from '../../../modules/llmswitch/bridge/native-exports.js';
-import { executeHubPipelineNative } from '../../../modules/llmswitch/bridge/routing-integrations.js';
+} from '../../../modules/llmswitch/bridge/routing-integrations.js';
 import { readHubPipelineNativeHandle } from './hub-pipeline-handle.js';
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);

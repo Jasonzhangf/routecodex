@@ -4,7 +4,12 @@
  * Virtual router bootstrap + hub pipeline constructor.
  */
 
-import { getRouterHotpathJsonBindingSync } from './native-exports.js';
+import { getRouterHotpathJsonBindingSync } from './routing-native-host.js';
+
+export {
+  buildRequestStageRuntimeControlWritePlanNative,
+  resolveEntryProtocolFromEndpointNative,
+} from './routing-native-host.js';
 
 // feature_id: hub.runtime_ingress_bridge
 // Rust owner symbols:

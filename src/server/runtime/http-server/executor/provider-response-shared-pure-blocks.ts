@@ -5,38 +5,36 @@
  * Only deterministic input → output transforms.
  */
 
-import { validateCanonicalClientToolCall } from './provider-response-tool-validation-blocks.js';
-import { getRouterHotpathJsonBindingSync } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import {
+  asFlatRecord,
+  extractBridgeProviderResponsePayload,
+  extractContentTextForStoplessScan,
+  extractFirstBalancedJsonObject,
+  extractLatestUserTextForStoplessScan,
+  findNestedErrorMarker,
+  findNestedRawString,
+  hasStoplessDirectiveInRequestPayload,
+  isContextLengthExceededError,
+  isGenericBridgeResponseContractError,
+  isRetryableNetworkSseWrapperError,
+  tryParseJsonLikeString,
+  validateCanonicalClientToolCall,
+} from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 
-type NativeJsonFunction = (...args: unknown[]) => unknown;
-
-function requireNativeJsonFunction(name: string): NativeJsonFunction {
-  const binding = getRouterHotpathJsonBindingSync() as Record<string, unknown>;
-  const fn = binding[name];
-  if (typeof fn !== 'function') {
-    throw new Error(`router-hotpath native export missing: ${name}`);
-  }
-  return fn as NativeJsonFunction;
-}
-
-function parseNativeRecord(raw: unknown): Record<string, unknown> | undefined {
-  if (raw === null || raw === undefined) {
-    return undefined;
-  }
-  const parsed = JSON.parse(String(raw));
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('router-hotpath native export returned non-record payload');
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function parseNativeBooleanResult(raw: unknown): boolean {
-  const parsed = parseNativeRecord(raw);
-  if (typeof parsed?.result !== 'boolean') {
-    throw new Error('router-hotpath native export returned malformed boolean result');
-  }
-  return parsed.result;
-}
+export {
+  asFlatRecord,
+  extractBridgeProviderResponsePayload,
+  extractContentTextForStoplessScan,
+  extractFirstBalancedJsonObject,
+  extractLatestUserTextForStoplessScan,
+  findNestedErrorMarker,
+  findNestedRawString,
+  hasStoplessDirectiveInRequestPayload,
+  isContextLengthExceededError,
+  isGenericBridgeResponseContractError,
+  isRetryableNetworkSseWrapperError,
+  tryParseJsonLikeString,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -92,51 +90,12 @@ export const FATAL_CONVERSION_ERROR_CODES = new Set([
 
 export const STOPLESS_DIRECTIVE_PATTERN = /<\*\*stopless:[^*]+\*\*>/i;
 
-// ---------------------------------------------------------------------------
-// Type helpers
-// ---------------------------------------------------------------------------
-
-export function asFlatRecord(value: unknown): Record<string, unknown> | undefined {
-  const raw = requireNativeJsonFunction('asFlatRecordJson')(JSON.stringify(value));
-  return parseNativeRecord(raw);
-}
-
 export function readSessionLikeToken(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
   const trimmed = value.trim();
   return trimmed || undefined;
-}
-
-// ---------------------------------------------------------------------------
-// JSON parsing helpers
-// ---------------------------------------------------------------------------
-
-export function extractFirstBalancedJsonObject(raw: string): string | undefined {
-  const raw2 = requireNativeJsonFunction('extractFirstBalancedJsonObjectJson')(raw);
-  return raw2 !== null && raw2 !== undefined ? String(raw2) : undefined;
-}
-
-export function tryParseJsonLikeString(raw: string): unknown {
-  const raw2 = requireNativeJsonFunction('tryParseJsonLikeStringJson')(raw);
-  return raw2 !== null && raw2 !== undefined ? JSON.parse(String(raw2)) : undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Stopless / request scanning
-// ---------------------------------------------------------------------------
-
-export function extractContentTextForStoplessScan(content: unknown): string {
-  return String(requireNativeJsonFunction('extractContentTextForStoplessScanJson')(JSON.stringify(content)));
-}
-
-export function extractLatestUserTextForStoplessScan(source: unknown): string {
-  return String(requireNativeJsonFunction('extractLatestUserTextForStoplessScanJson')(JSON.stringify(source)));
-}
-
-export function hasStoplessDirectiveInRequestPayload(source: unknown): boolean {
-  return requireNativeJsonFunction('hasStoplessDirectiveInRequestPayloadJson')(JSON.stringify(source)) === true;
 }
 
 export function shouldAllowDirectResponsesPrebuiltSsePassthrough(args: {
@@ -191,20 +150,6 @@ export function stringifyToolCallArgumentsForValidation(value: unknown): string 
   } catch {
     return '{}';
   }
-}
-
-// ---------------------------------------------------------------------------
-// Nested payload traversal
-// ---------------------------------------------------------------------------
-
-export function findNestedRawString(payload: unknown, depth = 3): string {
-  void depth;
-  return String(requireNativeJsonFunction('findNestedRawStringJson')(JSON.stringify(payload)));
-}
-
-export function findNestedErrorMarker(payload: unknown, depth = 3): string {
-  void depth;
-  return String(requireNativeJsonFunction('findNestedErrorMarkerJson')(JSON.stringify(payload)));
 }
 
 // ---------------------------------------------------------------------------
@@ -269,53 +214,4 @@ export function normalizeRecoveredToolCalls(
     normalized.push({ name, input: normalizedInput });
   }
   return { toolCalls: normalized };
-}
-
-// ---------------------------------------------------------------------------
-// Error classification (pure predicates)
-// ---------------------------------------------------------------------------
-
-export function isGenericBridgeResponseContractError(args: {
-  error: Record<string, unknown>;
-  message: string;
-}): boolean {
-  const raw = requireNativeJsonFunction('isGenericBridgeResponseContractErrorJson')(JSON.stringify({
-    errorCode: String(args.error.code ?? ''),
-    errorName: String(args.error.name ?? ''),
-    message: args.message,
-  }));
-  return parseNativeBooleanResult(raw);
-}
-
-export function isContextLengthExceededError(
-  message: string,
-  upstreamCode?: string,
-  detailReason?: string
-): boolean {
-  const raw = requireNativeJsonFunction('isContextLengthExceededErrorJson')(JSON.stringify({
-    message,
-    upstreamCode: upstreamCode ?? null,
-    detailReason: detailReason ?? null,
-  }));
-  return parseNativeBooleanResult(raw);
-}
-
-export function isRetryableNetworkSseWrapperError(message: string, upstreamCode?: string, statusCode?: number): boolean {
-  const raw = requireNativeJsonFunction('isRetryableNetworkSseWrapperErrorJson')(JSON.stringify({
-    message,
-    upstreamCode: upstreamCode ?? null,
-    statusCode: statusCode ?? null,
-  }));
-  return parseNativeBooleanResult(raw);
-}
-
-// ---------------------------------------------------------------------------
-// Payload extraction
-// ---------------------------------------------------------------------------
-
-export function extractBridgeProviderResponsePayload(
-  body: Record<string, unknown> | null | undefined
-): Record<string, unknown> | undefined {
-  const raw = requireNativeJsonFunction('extractBridgeProviderResponsePayloadJson')(JSON.stringify(body ?? {}));
-  return parseNativeRecord(raw);
 }

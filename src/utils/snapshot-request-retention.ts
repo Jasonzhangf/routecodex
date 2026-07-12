@@ -1,5 +1,7 @@
 import fsp from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
+import type { FileHandle } from 'node:fs/promises';
 import { formatUnknownError, isRecord } from './common-utils.js';
 
 const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = 50;
@@ -78,12 +80,41 @@ export async function ensureSnapshotRuntimeMarker(
 ): Promise<void> {
   const target = path.join(dir, '__runtime.json');
   const body = buildSnapshotRuntimeMarkerPayload(payload);
-  await fsp.writeFile(target, JSON.stringify(body, null, 2), { encoding: 'utf-8', flag: 'wx' }).catch((error) => {
-    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') {
+  const contents = JSON.stringify(body, null, 2);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const tmp = path.join(
+      dir,
+      `.__runtime.json.tmp-${process.pid}-${Date.now()}-${randomUUID().slice(0, 8)}`
+    );
+    let handle: FileHandle | undefined;
+    try {
+      handle = await fsp.open(tmp, 'wx');
+      await handle.writeFile(contents, { encoding: 'utf-8' });
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await fsp.link(tmp, target);
+      await fsp.unlink(tmp).catch(() => undefined);
       return;
+    } catch (error: unknown) {
+      if (handle) {
+        await handle.close().catch(() => undefined);
+      }
+      await fsp.unlink(tmp).catch(() => undefined);
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'EEXIST') {
+        const targetExists = await fsp.stat(target)
+          .then((stat) => stat.isFile())
+          .catch(() => false);
+        if (targetExists) {
+          return;
+        }
+        continue;
+      }
+      throw error;
     }
-    throw error;
-  });
+  }
+  throw new Error(`[snapshot-retention] unable to allocate runtime marker temp file for ${target}`);
 }
 
 export async function pruneSnapshotRequestDirsKeepRecent(parentDir: string, keepRecent: number): Promise<void> {

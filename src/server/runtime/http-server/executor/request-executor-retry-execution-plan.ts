@@ -8,7 +8,7 @@ import {
 import {
   resolveProviderRetryExecutionPolicyNative,
   resolveErrorErr05RouteAvailabilityDecisionNative,
-} from '../../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../../modules/llmswitch/bridge/error-execution-decision-host.js';
 import {
   hasAlternativeRouteCandidate,
   resolveProviderRetryExclusionPlan

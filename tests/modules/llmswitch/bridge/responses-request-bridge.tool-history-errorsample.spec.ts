@@ -20,7 +20,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
   resumeResponsesConversation: jest.fn(),
 }));
 
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-request-handler-host.js', () => ({
   captureReqInboundResponsesContextSnapshotJson: jest.fn(),
   extractSessionIdentifiersFromMetadataNative: jest.fn(() => ({})),
   materializeProviderOwnedSubmitContext: jest.fn(),

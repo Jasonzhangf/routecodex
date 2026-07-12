@@ -12,7 +12,7 @@ import {
 import {
   normalizeExplicitRoutePoolNative,
   mergeObservedRoutePoolChainNative
-} from '../../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../../modules/llmswitch/bridge/request-executor-pipeline-attempt-host.js';
 
 type PipelineAttemptTarget = HubPipelineResult['target'];
 

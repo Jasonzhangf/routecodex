@@ -9,6 +9,7 @@ import { PassThrough, Readable } from 'node:stream';
 
 import { DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
+import { createProviderContext as createProviderContextFromRequest } from './base-provider-runtime-helpers.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ServiceProfile, ProviderContext } from '../api/provider-types.js';
@@ -24,7 +25,7 @@ import {
 import {
   normalizeResponsesDirectCurrentRequestPayload,
   sanitizeProviderOutboundPayload
-} from '../../../modules/llmswitch/bridge/native-exports.js';
+} from '../../../modules/llmswitch/bridge/provider-outbound-sanitize-host.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { extractProviderRuntimeMetadata, type ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
@@ -59,7 +60,8 @@ import {
 import {
   buildProviderRequestDryRunResponse,
   propagatePipelineDryRunControl,
-  shouldRunProviderRequestDryRun
+  shouldRunProviderRequestDryRun,
+  writeProviderRequestDryRunSnapshot
 } from '../../../debug/pipeline-dry-run.js';
 import type { PreparedHttpRequest } from './http-request-executor.js';
 
@@ -576,7 +578,17 @@ export class ResponsesProvider extends HttpTransportProvider {
     const endpoint = this.getEffectiveEndpoint();
     const baseHeaders = await this.buildRequestHeaders();
     const headers = await this.finalizeRequestHeaders(baseHeaders, directRequest);
-    const context = this.createProviderContext();
+    const { context } = createProviderContextFromRequest({
+      request: directRequest,
+      providerType: this.providerType,
+      runtimeProfile: this.getRuntimeProfile(),
+      configProviderId: this.config.config.providerId,
+      configProviderType: this.config.config.providerType,
+      configExtensions:
+        this.config.config.extensions && typeof this.config.config.extensions === 'object'
+          ? this.config.config.extensions as Record<string, unknown>
+          : undefined
+    });
     const entryEndpoint = extractEntryEndpoint(directRequest) ?? '/v1/responses';
     const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const builtBody = this.buildPassthroughResponsesBody(directRequest);
@@ -1017,18 +1029,9 @@ export class ResponsesProvider extends HttpTransportProvider {
       return undefined;
     }
     const requestInfo = this.buildPreparedRequestForDryRun(options);
-    await writeProviderSnapshot({
-      phase: 'provider-request',
-      requestId: options.context.requestId,
-      data: requestInfo.body,
-      headers: requestInfo.headers,
-      url: requestInfo.targetUrl,
-      entryEndpoint: requestInfo.entryEndpoint,
-      entryPort: readProviderContextSnapshotEntryPort(options.context),
-      clientRequestId: requestInfo.clientRequestId,
-      providerKey: options.context.providerKey,
-      providerId: options.context.providerId,
-      metadata: options.context.metadata
+    await writeProviderRequestDryRunSnapshot({
+      requestInfo,
+      context: options.context
     });
     return buildProviderRequestDryRunResponse({
       requestInfo,

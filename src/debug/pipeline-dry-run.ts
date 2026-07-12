@@ -1,11 +1,13 @@
 import type { PipelineExecutionResult } from '../server/handlers/types.js';
 import type { PreparedHttpRequest } from '../providers/core/runtime/http-request-executor.js';
 import type { ProviderContext } from '../providers/core/api/provider-types.js';
+import { writeProviderSnapshot } from '../providers/core/utils/snapshot-writer.js';
 
 // feature_id: debug.pipeline_dry_run_loop
 
 export const PIPELINE_DRY_RUN_HEADER = 'x-routecodex-dry-run';
 export const PIPELINE_DRY_RUN_METADATA_KEY = '__routecodexPipelineDryRun';
+export const PIPELINE_DRY_RUN_SERIALIZED_METADATA_KEY = '__rccDryRunSerialized';
 export const PROVIDER_REQUEST_DRY_RUN_KIND = 'provider_request';
 
 const PROVIDER_REQUEST_DRY_RUN_RESPONSE_SYMBOL = Symbol.for('routecodex.pipelineDryRun.providerRequestResponse');
@@ -154,6 +156,7 @@ export function attachPipelineDryRunControl(
     configurable: true,
     writable: true
   });
+  metadata[PIPELINE_DRY_RUN_SERIALIZED_METADATA_KEY] = { ...control };
 }
 
 export function propagatePipelineDryRunControl(
@@ -168,10 +171,14 @@ export function readPipelineDryRunControl(metadata: unknown): PipelineDryRunCont
     return undefined;
   }
   const value = Reflect.get(metadata as object, PIPELINE_DRY_RUN_METADATA_KEY);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  const serializedValue = Reflect.get(metadata as object, PIPELINE_DRY_RUN_SERIALIZED_METADATA_KEY);
+  const candidate = value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : serializedValue;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     return undefined;
   }
-  const record = value as Record<string, unknown>;
+  const record = candidate as Record<string, unknown>;
   return record.enabled === true && record.kind === PROVIDER_REQUEST_DRY_RUN_KIND
     ? (record as PipelineDryRunControl)
     : undefined;
@@ -207,22 +214,72 @@ function readEntryPortFromMetadata(metadata: Record<string, unknown> | undefined
   return undefined;
 }
 
+function readContextMetadata(context: ProviderContext): Record<string, unknown> | undefined {
+  const runtimeMetadata =
+    context.runtimeMetadata?.metadata
+    && typeof context.runtimeMetadata.metadata === 'object'
+    && !Array.isArray(context.runtimeMetadata.metadata)
+      ? context.runtimeMetadata.metadata as Record<string, unknown>
+      : undefined;
+  const contextMetadata =
+    context.metadata && typeof context.metadata === 'object' && !Array.isArray(context.metadata)
+      ? context.metadata as Record<string, unknown>
+      : undefined;
+  if (runtimeMetadata && contextMetadata) {
+    return {
+      ...runtimeMetadata,
+      ...contextMetadata
+    };
+  }
+  return runtimeMetadata ?? contextMetadata;
+}
+
+function readEntryPortFromContext(context: ProviderContext): number | undefined {
+  const runtimeMetadata =
+    context.runtimeMetadata && typeof context.runtimeMetadata === 'object' && !Array.isArray(context.runtimeMetadata)
+      ? context.runtimeMetadata as Record<string, unknown>
+      : undefined;
+  return readEntryPortFromMetadata(runtimeMetadata) ?? readEntryPortFromMetadata(readContextMetadata(context));
+}
+
+function readClientRequestIdFromContext(context: ProviderContext): string | undefined {
+  const metadata = readContextMetadata(context);
+  const candidate = metadata?.clientRequestId;
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
+}
+
+export async function writeProviderRequestDryRunSnapshot(args: {
+  requestInfo: PreparedHttpRequest;
+  context: ProviderContext;
+}): Promise<void> {
+  const metadata = readContextMetadata(args.context);
+  await writeProviderSnapshot({
+    phase: 'provider-request',
+    requestId: args.context.requestId,
+    data: args.requestInfo.body,
+    headers: args.requestInfo.headers,
+    url: args.requestInfo.targetUrl,
+    entryEndpoint: args.requestInfo.entryEndpoint,
+    entryPort: readEntryPortFromContext(args.context),
+    clientRequestId: readClientRequestIdFromContext(args.context),
+    providerKey: args.context.providerKey,
+    providerId: args.context.providerId,
+    metadata
+  });
+}
+
 export function buildProviderRequestDryRunResponse(args: {
   requestInfo: PreparedHttpRequest;
   context: ProviderContext;
 }): ProviderRequestDryRunResponse {
-  const metadata = (
-    args.context.runtimeMetadata?.metadata && typeof args.context.runtimeMetadata.metadata === 'object'
-      ? args.context.runtimeMetadata.metadata
-      : args.context.metadata
-  ) as Record<string, unknown> | undefined;
+  const metadata = readContextMetadata(args.context);
   const body: ProviderRequestDryRunBody = {
     object: 'routecodex.pipeline_dry_run',
     kind: PROVIDER_REQUEST_DRY_RUN_KIND,
     dryRun: true,
     requestId: args.context.requestId,
     entryEndpoint: args.requestInfo.entryEndpoint,
-    entryPort: readEntryPortFromMetadata(metadata),
+    entryPort: readEntryPortFromContext(args.context),
     provider: {
       providerKey: args.context.providerKey,
       providerId: args.context.providerId,

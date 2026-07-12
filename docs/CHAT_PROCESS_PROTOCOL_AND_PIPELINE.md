@@ -28,7 +28,7 @@
 3. **outbound 仅使用白名单语义重建客户端协议**（clientRemap），不允许把“可映射语义”回塞到 metadata/透传到客户端。
 
 代码事实（当前实现骨架）：
-- 正常入口：Host 通过 `src/modules/llmswitch/bridge/native-exports.ts` 调用 `router-hotpath-napi`；请求链 Rust 真源在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`、`req_process_stage1_tool_governance.rs` 与相关 request/outbound blocks。
+- 正常入口：Host 通过 owner-specific bridge（例如 `src/modules/llmswitch/bridge/responses-request-handler-host.ts`、`routing-integrations.ts`、`provider-response-converter-host.ts`）调用 `router-hotpath-napi`；请求链 Rust 真源在 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`、`req_process_stage1_tool_governance.rs` 与相关 request/outbound blocks。
 - servertool / stopless followup 重入：由 Rust `servertool-core` + `router-hotpath-napi` effect plan/bridge blocks 规划，TS 只执行外部 IO / N-API 调用壳；已删除的 `sharedmodule/llmswitch-core/src/servertool/engine.ts` 不是当前入口。
 
 ### 2.2 响应侧
@@ -40,10 +40,10 @@
 3. **outbound 仅产出客户端协议白名单字段**；内部 metadata 只用于转换过程，不可泄露到客户端 payload。
 
 代码事实（当前实现骨架）：
-- Host response bridge 通过 `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `native-exports.ts` 调用 Rust/NAPI；已删除的 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 不是当前入口。
+- Host response bridge 通过 `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `responses-client-projection-host.ts` 调用 Rust/NAPI；已删除的 `sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` 不是当前入口。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`：响应链总入口，串联 `RespInboundFormatParse -> RespProcessToolGovernance -> RespProcessFinalize -> RespOutbound*`。
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs` 与 `resp_process_stage1_tool_governance_blocks/`：response tool harvesting / governance 真源。
-- `src/modules/llmswitch/bridge/native-exports.ts`：Host N-API 调用壳；已删除的 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts` 不得恢复为 native JSON/NAPI 薄桥接。
+- `src/modules/llmswitch/bridge/native-exports.ts`：私有 native binding loader / 最后导出壳；运行时调用面应收敛到 owner-specific host，已删除的 `sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts` 不得恢复为 native JSON/NAPI 薄桥接。
 - 已删除的 response governance TS stage wrapper 不得作为当前事实或测试入口恢复。
 
 ## 3) “强制语义映射”规则（进入 chat process 前）
@@ -133,7 +133,7 @@
 
 代码事实（当前实现的 canonicalize 约束点）：
 - provider response 入口先进入 Rust HubPipeline total entry：
-  - `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `src/modules/llmswitch/bridge/native-exports.ts`
+  - `src/modules/llmswitch/bridge/provider-response-converter-host.ts` / `src/modules/llmswitch/bridge/responses-client-projection-host.ts`
 - canonicalize / response tool governance / finalize 在 Rust response chain 内完成：
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`
   - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs`

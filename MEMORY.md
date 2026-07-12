@@ -2185,6 +2185,12 @@
 
 # 2026-07-10: zero-ref bridge d.ts mirrors should be deleted, not preserved
 
+# 2026-07-12: host bridge/resource/snapshot review closeout
+
+- Current host bridge contraction batch is verified as release `0.90.3922`: narrow owner-specific hosts replace broad non-bridge `native-exports` callsites, resource ownership map/gates are queryable, and provider-request dry-run snapshot ownership sits in `debug.pipeline_dry_run_loop` instead of provider runtime.
+- Final installed evidence: `routecodex --version`, `rcc --version`, `~/.rcc/install/current/package.json`, and `/health` on `5520`, `5555`, `4444`, and `10000` all report `0.90.3922` with `ready=true` and `pipelineReady=true`.
+- Review boundary: full crate `cargo fmt --manifest-path ... --check` currently hits an unrelated committed-format issue in `hub_resp_outbound_client_semantics_blocks/client_tool_args.rs`; touched `hub_snapshot_hooks.rs` rustfmt passes, so do not mix that old Rust formatting cleanup into host bridge/resource commits unless explicitly scoped.
+
 - `src/modules/llmswitch/{core-loader,bridge,bridge/index}.d.ts` and `src/modules/llmswitch/bridge/{module-loader,native-exports,provider-response-converter-host,response-converter,responses-request-bridge,responses-response-bridge,responses-sse-bridge,routing-integrations,runtime-integrations,snapshot-recorder-runtime,snapshot-recorder-tool-failures,snapshot-recorder-types,snapshot-recorder,state-integrations}.d.ts` had no active consumer and are physically deleted.
 - For bridge closeout, zero-ref `.d.ts` sidecar mirrors are stale artifacts, not compatibility surfaces. Keep them absent and lock with residue coverage instead of preserving them beside live `.ts`/`.js` files.
 
@@ -2286,7 +2292,21 @@
 - Offline response dry-run requires materialized body text for SSE. Serialized live `sseStream` snapshots without `bodyText`, `raw`, `text`, or `sseBodyText` are invalid replay inputs and require recapture or a different provider-response sample.
 - Installed closeout evidence for this rule: global `0.90.3882`, four live ports healthy, request sample `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783772710226_e00fe86c/client-request.json` dry-runs to provider `/responses` with body model `gpt-5.5` and stops before provider send, and response sample `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783783139322_87bd6dfa/provider-response.json` dry-runs to `chat.completion` model `gpt-5.5`.
 
+# 2026-07-12: Resource ownership refactor starts with map/gate, not a global manager
+
+- Resource convergence must start from `docs/architecture/resource-taxonomy.md`, `docs/architecture/resource-operation-map.yml`, function-map `resource_bindings`, mainline-call-map `resource_flow`, and `verify:resource-operation-map`.
+- M0 resource map currently covers 18 resources: request normal/protocol/provider-semantic, provider wire, response raw/hub/client, metadata runtime/request/response, error chain, route selection, provider runtime observation, continuation scope, dry-run probe, debug snapshot, SSE frame, and servertool followup.
+- Resource identity is global per lifecycle, but writes remain stage-bound and feature-owned. Do not implement a global mutable request/response manager before resource ownership and gates identify a unique owner.
+- Resource gate proved red/green: a temp function-map binding to undeclared `request.missing_payload` fails; real tree passes `verify:resource-operation-map`, function-map compile gate, mainline call map, mainline manifest sync, wiki sync, and diff check.
+- Runtime refactors after M0 must proceed one resource operation at a time. Only remove duplicate/wrong-layer code after resource owner, mainline edge, tests, and relevant live/sample verification prove the old path is not an owner.
+
 # 2026-07-12: Hub Pipeline / VR external refs are host bridge refs, not core runtime TS
+
+# 2026-07-12: snapshot runtime marker InvalidData owner
+
+- `[hub_snapshot_hooks] runtime metadata write skipped ... kind=InvalidData` after a normal `[virtual-router-hit]` is a `snapshot.stage_contract` / runtime marker integrity issue, not VR route selection evidence.
+- Verified source root: TS `ensureSnapshotRuntimeMarker` direct `writeFile(target, flag:'wx')` could expose a visible empty/partial `__runtime.json`; Rust `hub_snapshot_hooks.rs::upsert_runtime_metadata_file` used to treat malformed existing runtime metadata as `InvalidData` and skip metadata enrichment.
+- Current source fix: TS marker publication uses temp file + `fsp.link(tmp, target)` atomic publish; Rust repairs invalid existing runtime metadata from current runtime truth and records `runtimeMetadataRepair.reason=invalid_existing_runtime_metadata`. Source/native verification passed, but no live/global install closeout was claimed for this slice.
 
 - `sharedmodule/llmswitch-core/src` currently has zero tracked TS-like files, strict llmswitch shell audit reports `prodTsShellCount=0`, rustification/minimal-surface audits report zero production/non-native TS, and `verify-vr-no-ts-runtime` reports zero VR production TS.
 - Current Hub Pipeline / VR external-reference closeout work is therefore concentrated in RouteCodex host bridge files under `src/modules/llmswitch`, especially `native-exports.ts` and `routing-integrations.ts`; do not describe these as llmswitch-core or VR runtime TS residue. Current dirty worktree also has a pending deletion of `responses-sse-bridge.ts`, so current-state audits must distinguish tracked-file history from existing working-tree files.
@@ -2335,3 +2355,65 @@
 - `route-availability-host.ts` is a thin native re-export only. Rust/NAPI remains the semantic owner for singleton route-pool exhaustion, primary-exhausted default-pool planning, and ErrorErr05 availability decisions.
 - Release snapshot install can fail during large `node_modules` copy with `EINTR`. The allowed fix is a limited `fs.cpSync` retry for `EINTR` after deleting the partial target, while still failing visible after retry exhaustion and still running dependency closure/runtime import gates before switching `install/current`.
 - Verified install evidence: `0.90.3919` installed after the retry fix; CLI/current package and `/health` on 5520/5555 all report `0.90.3919`; installed route availability host exists and only re-exports native functions.
+
+# 2026-07-12: Responses client projection uses narrow host, not broad native-exports from server handler
+
+- `src/server/handlers/handler-response-utils.ts` must not import broad `src/modules/llmswitch/bridge/native-exports.ts`; Responses JSON client projection calls now go through `src/modules/llmswitch/bridge/responses-client-projection-host.ts`.
+- The narrow host is a thin re-export only. Rust/NAPI remains the semantic owner for `buildResponsesPayloadFromChatNative`, `planResponsesJsonClientDispatchNative`, and `projectResponsesClientPayloadForClientNative`.
+- Source scan now has 0 `native-exports.js` imports outside `src/modules/llmswitch/bridge` (README/docs excluded). Locking evidence: focused handler-response Jest 5 suites / 21 tests, hub-pipeline residue 227/227, `verify:responses-handler-single-bridge-surface`, function-map compile, architecture mainline call map, strict shell audit, rustification/minimal TS/VR gates, `git diff --check`, and `build:base`.
+
+# 2026-07-12: Resource ownership M0 has named machine gates
+
+- Resource ownership M0 now has queryable gate entrypoints: `verify:resource-operation-map`, `verify:resource-owner-uniqueness`, `verify:resource-mainline-bindings`, `verify:resource-forbidden-writes`, and `verify:resource-side-channel-isolation`.
+- These gates currently run the same comprehensive `scripts/architecture/verify-resource-operation-map.mjs` verifier, which validates map parseability, resource id uniqueness, function-map resource binding consistency, mainline resource_flow consistency, required gate script existence, forbidden-writer queryability, and side-channel provider/client body isolation.
+- Red evidence for this verifier must mutate a temp copy only: invalid YAML, duplicate `resource_id`, undeclared function-map resource binding, empty `forbidden_writers`, or side-channel `may_enter_provider_body=true` must fail. Real tree must pass the full resource gate suite plus function-map compile, mainline call map, manifest sync, wiki sync, and diff check.
+- Runtime refactor remains out of M0 unless a resource owner, allowed writers/readers, forbidden paths, mainline edge, and required dry-run/live/sample verification are mapped first.
+
+# 2026-07-12: Resource ownership scope is project-wide
+
+- The RouteCodex resource refactor scope is the whole project, not `dryrun.provider_request_probe` or any single pilot resource. Dry-run may be used as a low-risk sample, but global progress is measured by function-map `resource_bindings` and mainline-call-map `resource_flow` coverage.
+- Use `npm run audit:resource-global-coverage` and `docs/architecture/resource-global-coverage-report.json` before selecting the next resource/domain slice. Current baseline after M0: `15/119` active features have `resource_bindings`; `19/108` mainline edges have `resource_flow`.
+- Do not start runtime refactor for a domain until its feature owners and adjacent mainline edges are resource-bound and the relevant verifier/gate exists.
+
+# 2026-07-12: Resource ownership first-layer closed priority mainlines
+
+- First-layer resource coverage now closes adjacent `resource_flow` for `request.mainline`, `response.mainline`, `responses.continuation.mainline`, `servertool.hook_skeleton.mainline`, `error.mainline`, `vr.route_availability.mainline`, and `metadata.center.mainline`.
+- Current coverage baseline after first-layer补缺: `31/119` active features have `resource_bindings`; `51/108` mainline edges have `resource_flow`.
+- Next-layer resource taxonomy must be expanded before mapping config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics/hit-log and servertool engine subfeatures. Do not overload request/response/snapshot resources to make these edges appear covered.
+
+# 2026-07-12: Resource ownership second-layer closes config/runtime/debug/VR diagnostics
+
+- Second-layer resource coverage closes config materialization, WebUI config editor, runtime lifecycle, debug/internal-error, VR online diagnostics, VR hit-log projection, and the remaining dry-run mainline gaps without runtime behavior changes.
+- Added independent resource identities instead of borrowing request/response/route truth: `config.*` projections, `webui.config_edit_intent`, `runtime.*` lifecycle records, `debug.internal_error_envelope`, `debug.external_error_link`, `debug.client_boundary_proof`, `vr.diagnostic_*`, `vr.hit_log_record`, `vr.telemetry_projection`, and `diagnostic.http_payload`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `40`, active feature `resource_bindings` `43/119`, mainline `resource_flow` `91/108`.
+- Remaining resource_flow backlog is outside the second-layer scope: stopless session sub-edges, Anthropic/Gemini SSE projection edges, and `stage_a.p0_rust_migration` edges. Do not fill those with second-layer resources; define next-layer resource identities first.
+
+# 2026-07-12: Resource ownership mainline resource_flow reaches full coverage
+
+- Third-layer resource coverage closes the remaining mainline resource_flow gaps for `stopless.session.mainline`, Anthropic/Gemini `sse.chat_stream_projection.mainline`, and `stage_a.p0_rust_migration.mainline`.
+- Added independent resources: `stopless.schema_gate_state`, `stopless.runtime_snapshot`, `stopless.cli_projection`, `stopless.cli_result`, `stopless.guidance_rewrite`, `stopless.schema_contract`, `sse.protocol_stream_projection`, `sse.provider_stream_aggregate`, and `stage_a.*` Rust migration boundary resources.
+- Coverage after `npm run audit:resource-global-coverage`: resources `53`, active feature `resource_bindings` `50/119`, mainline `resource_flow` `108/108`.
+- Remaining resource ownership work is feature-level binding coverage for non-mainline owner surfaces. Do not bind those features to unrelated mainline resources; define owner-specific resources only after the source edge/owner is anchored.
+
+# 2026-07-12: Resource ownership fourth-layer servertool engine feature bindings
+
+- Fourth-layer resource coverage starts after mainline `resource_flow` is already complete at `108/108`; it must add feature-level `resource_bindings` for non-mainline owner surfaces without adding fake mainline edges.
+- Servertool engine subfeatures are now represented by owner-specific plan/state/projection/policy resources: `servertool.engine_selection_plan`, `servertool.engine_action_plan`, `servertool.auto_hook_execution_plan`, `servertool.execution_contract_plan`, `servertool.execution_state`, `servertool.registry_projection`, `servertool.cli_projection_plan`, `servertool.flow_presentation`, `servertool.loop_warning`, `servertool.hook_closeout_contract`, and `servertool.orchestration_policy`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `64`, active feature `resource_bindings` `73/119`, mainline `resource_flow` `108/108`. The servertool engine priority batch no longer appears in the missing binding list; next backlog starts at `server.runtime_key_resolution`.
+- Verified gates for this map-only slice: resource operation map, resource owner/mainline/forbidden/side-channel gates, function-map compile gate, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
+- Do not treat umbrella/doc/gate features as runtime resources just to increase coverage. If a feature lacks real source owner evidence, leave it as backlog instead of binding it to request/response/route truth.
+
+# 2026-07-12: Resource ownership fourth-layer host/runtime feature bindings
+
+- Host bridge / runtime surface resource binding must model entry shells, native handles, transport envelopes, and projection catalogs as distinct resources; do not bind those features to request/response/route truth just to increase coverage.
+- Added host/runtime resources: `runtime.provider_binding_resolution`, `runtime.hub_pipeline_handle`, `runtime.http_entry_dispatch`, `runtime.http_lifecycle_context`, `response.host_conversion_handoff`, `response.inspection_signal`, `models.capability_catalog`, `server.handler_transport_envelope`, `cli.command_dispatch_intent`, `hub.chat_session_usage`, and `response.provider_context_projection`.
+- Coverage after `npm run audit:resource-global-coverage`: resources `75`, active feature `resource_bindings` `88/119`, mainline `resource_flow` `108/108`. The host/runtime priority batch no longer appears in the missing binding list; next backlog starts at `error.backoff_action_queue`.
+- Verified gates for this map-only slice: resource operation map, resource owner/mainline/forbidden/side-channel gates, function-map compile gate, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.
+- Runtime behavior did not change in this slice. Build/global install/live runtime validation is not required unless runtime code changes.
+
+# 2026-07-12: Resource ownership fourth-layer protocol/conversion feature bindings
+
+- Protocol/conversion feature-level bindings now close OpenAI Chat single-tool-call history compat, Responses function-tool normalization, Responses tool-parameters normalization, Responses instructions-to-input normalization, Responses CRS request compat, web search governance, and shared Gemini conversion without runtime behavior changes.
+- Protocol resources must stay owner-specific: `protocol.responses_function_tool_schema` belongs to `responses.function_tool_normalization`, while `protocol.responses_tool_parameters_schema` belongs to `responses.tool_parameters_normalization`. Do not collapse them into one `protocol.responses_tool_schema` resource because that creates ambiguous writer ownership.
+- `protocol.web_search_governance_plan` is a `side_channel`; it may be read by Hub/VR/provider outbound control surfaces but must not enter provider body or client body.
+- Coverage after this slice: resources `82`, active feature `resource_bindings` `95/119`, mainline `resource_flow` `108/108`, and no missing mainline resource-flow edges. Verified gates: resource operation map/audit, resource owner/mainline/forbidden/side-channel gates, function-map compile, architecture mainline call map, manifest sync, wiki sync, and `git diff --check`.

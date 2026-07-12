@@ -797,8 +797,24 @@ fn upsert_runtime_metadata_file(target: &Path, payload: &Value) -> Result<(), st
         return write_json_file_if_missing_atomic(target, payload_str.as_str());
     }
     let existing_raw = fs::read_to_string(target)?;
-    let existing_parsed: Value = serde_json::from_str(existing_raw.as_str())
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))?;
+    let existing_parsed: Value = match serde_json::from_str(existing_raw.as_str()) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            let mut repaired_payload = payload.clone();
+            if let Value::Object(payload_obj) = &mut repaired_payload {
+                payload_obj.insert(
+                    "runtimeMetadataRepair".to_string(),
+                    serde_json::json!({
+                        "reason": "invalid_existing_runtime_metadata",
+                        "error": error.to_string(),
+                        "previousSizeBytes": existing_raw.len()
+                    }),
+                );
+            }
+            let repaired_str = serde_json::to_string_pretty(&repaired_payload)?;
+            return write_json_file_atomic_replace(target, repaired_str.as_str());
+        }
+    };
 
     match (existing_parsed, payload.clone()) {
         (Value::Object(mut existing_obj), Value::Object(incoming_obj)) => {
@@ -1317,6 +1333,44 @@ mod snapshot_entry_tests {
             serde_json::from_str(fs::read_to_string(&target).unwrap().as_str()).unwrap();
         assert_eq!(parsed.get("first").and_then(Value::as_bool), Some(true));
         assert!(parsed.get("second").is_none());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn runtime_metadata_invalid_existing_file_is_repaired() {
+        let dir = std::env::temp_dir().join(format!("hub-snapshot-hooks-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("__runtime.json");
+        fs::write(&target, "{").unwrap();
+
+        let payload = serde_json::json!({
+            "requestId": "req_runtime_repair",
+            "groupRequestId": "grp_runtime_repair",
+            "providerKey": "cc.key1.gpt-5.5"
+        });
+
+        upsert_runtime_metadata_file(&target, &payload)
+            .expect("invalid runtime marker must be repaired from current runtime truth");
+
+        let parsed: Value =
+            serde_json::from_str(fs::read_to_string(&target).unwrap().as_str()).unwrap();
+        assert_eq!(
+            parsed.get("requestId").and_then(Value::as_str),
+            Some("req_runtime_repair")
+        );
+        let repair = parsed
+            .get("runtimeMetadataRepair")
+            .and_then(Value::as_object)
+            .expect("repair diagnostic");
+        assert_eq!(
+            repair.get("reason").and_then(Value::as_str),
+            Some("invalid_existing_runtime_metadata")
+        );
+        assert_eq!(
+            repair.get("previousSizeBytes").and_then(Value::as_u64),
+            Some(1)
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

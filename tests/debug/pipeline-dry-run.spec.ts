@@ -15,6 +15,7 @@ jest.unstable_mockModule('../../src/providers/core/utils/snapshot-writer.js', ()
 
 const {
   PIPELINE_DRY_RUN_METADATA_KEY,
+  PIPELINE_DRY_RUN_SERIALIZED_METADATA_KEY,
   attachPipelineDryRunControl,
   propagatePipelineDryRunControl,
   readPipelineDryRunControl,
@@ -68,12 +69,12 @@ describe('pipeline dry-run control and provider request cut point', () => {
       source: 'local_header',
       requestedAtMs: 1
     });
-    expect(Object.keys(source)).toEqual(['requestId']);
+    expect(Object.keys(source)).toEqual(['requestId', PIPELINE_DRY_RUN_SERIALIZED_METADATA_KEY]);
     expect(JSON.stringify(source)).not.toContain(PIPELINE_DRY_RUN_METADATA_KEY);
     expect(readPipelineDryRunControl(source)?.kind).toBe('provider_request');
 
     const clone = { ...source };
-    expect(readPipelineDryRunControl(clone)).toBeUndefined();
+    expect(readPipelineDryRunControl(clone)?.kind).toBe('provider_request');
     propagatePipelineDryRunControl(source, clone);
     expect(readPipelineDryRunControl(clone)?.kind).toBe('provider_request');
   });

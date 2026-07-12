@@ -10,10 +10,18 @@ import type {
   ProviderSuccessEvent,
 } from "../../../types/llmswitch-local-types.js";
 import {
-  getRouterHotpathJsonBindingSync,
   shouldRecordSnapshotsNative,
   writeSnapshotViaHooksNative,
-} from "./native-exports.js";
+} from "./snapshot-hooks-host.js";
+import {
+  assertSseRuntimeNativeAvailable,
+  buildJsonFromSseWithNative,
+} from './sse-runtime-host.js';
+import {
+  assertProviderRuntimeIngressNativeAvailable,
+  reportProviderErrorToRouterPolicyNative,
+  reportProviderSuccessToRouterPolicyNative,
+} from './provider-runtime-ingress-host.js';
 import {
   captureResponsesRequestContext,
   recordResponsesResponse,
@@ -171,48 +179,12 @@ export async function resetResponsesConversationStateForRestartSimulation(): Pro
   resetResponsesConversationStateForRestartSimulationHost();
 }
 
-function nativeJsonBinding(): Record<string, unknown> {
-  return getRouterHotpathJsonBindingSync() as unknown as Record<string, unknown>;
-}
-
-function requireNativeJsonFunction<T extends (...args: any[]) => unknown>(
-  capability: string,
-): T {
-  const fn = nativeJsonBinding()[capability];
-  if (typeof fn !== "function") {
-    throw new Error(`[llmswitch-bridge] ${capability} not available`);
-  }
-  return fn as T;
-}
-
 async function collectSseBodyText(source: AsyncIterable<string | Buffer>): Promise<string> {
   const chunks: string[] = [];
   for await (const chunk of source) {
     chunks.push(typeof chunk === "string" ? chunk : chunk.toString());
   }
   return chunks.join("");
-}
-
-function buildJsonFromSseWithNative(input: {
-  protocol: string;
-  bodyText: string;
-  requestId?: string;
-  model?: string;
-  config?: AnyRecord;
-}): AnyRecord {
-  const fn = requireNativeJsonFunction<(inputJson: string) => string>("buildJsonFromSseJson");
-  const raw = fn(JSON.stringify({
-    protocol: input.protocol,
-    body_text: input.bodyText,
-    request_id: input.requestId,
-    model: input.model,
-    config: input.config ?? {},
-  }));
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("[llmswitch-bridge] buildJsonFromSseJson returned invalid result");
-  }
-  return parsed as AnyRecord;
 }
 
 export async function buildResponsesJsonFromSseStreamWithNative(input: {
@@ -231,14 +203,6 @@ export async function buildResponsesJsonFromSseStreamWithNative(input: {
   });
 }
 
-function reportProviderRuntimeIngressWithNative<TEvent>(
-  capability: string,
-  event: TEvent,
-): TEvent {
-  const fn = requireNativeJsonFunction<(inputJson: string) => string>(capability);
-  return JSON.parse(fn(JSON.stringify(event))) as TEvent;
-}
-
 export async function preloadCriticalBridgeRuntimeModules(): Promise<{
   loaded: string[];
 }> {
@@ -250,11 +214,10 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
   await resumeLatestResponsesContinuationByScopeHost({ payload: {}, entryKind: "responses" });
   loaded.push("bridge/responses-conversation-store-host");
 
-  requireNativeJsonFunction<(inputJson: string) => string>("buildJsonFromSseJson");
+  assertSseRuntimeNativeAvailable();
   loaded.push("native-json/sse-runtime");
 
-  requireNativeJsonFunction<(inputJson: string) => string>("reportProviderErrorToRouterPolicyJson");
-  requireNativeJsonFunction<(inputJson: string) => string>("reportProviderSuccessToRouterPolicyJson");
+  assertProviderRuntimeIngressNativeAvailable();
   loaded.push("native-json/provider-runtime-ingress");
 
   return { loaded };
@@ -263,11 +226,11 @@ export async function preloadCriticalBridgeRuntimeModules(): Promise<{
 export async function reportProviderErrorToRouterPolicy(
   event: ProviderErrorEvent,
 ): Promise<ProviderErrorEvent> {
-  return reportProviderRuntimeIngressWithNative("reportProviderErrorToRouterPolicyJson", event);
+  return reportProviderErrorToRouterPolicyNative(event);
 }
 
 export async function reportProviderSuccessToRouterPolicy(
   event: ProviderSuccessEvent,
 ): Promise<ProviderSuccessEvent> {
-  return reportProviderRuntimeIngressWithNative("reportProviderSuccessToRouterPolicyJson", event);
+  return reportProviderSuccessToRouterPolicyNative(event);
 }

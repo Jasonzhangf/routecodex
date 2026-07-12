@@ -7,7 +7,7 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
 
   test('writeSnapshotViaHooks forwards payload to native snapshot hooks', async () => {
     const writer = jest.fn();
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/snapshot-hooks-host.js', () => ({
       writeSnapshotViaHooksNative: writer,
       shouldRecordSnapshotsNative: jest.fn(() => true),
       getRouterHotpathJsonBindingSync: jest.fn(() => ({})),
@@ -33,7 +33,7 @@ describe('llmswitch bridge runtime-integrations snapshot hooks', () => {
 
   test('RED: writeSnapshotViaHooks forwards providerKey and groupRequestId so --snap requests do not stay anonymous pending forever', async () => {
     const writer = jest.fn();
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/snapshot-hooks-host.js', () => ({
       writeSnapshotViaHooksNative: writer,
       shouldRecordSnapshotsNative: jest.fn(() => true),
       getRouterHotpathJsonBindingSync: jest.fn(() => ({})),

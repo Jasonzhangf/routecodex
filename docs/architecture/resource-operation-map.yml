@@ -1,0 +1,1720 @@
+# RouteCodex resource operation map
+version: 1
+status: m0
+
+resources:
+  - resource_id: request.normal_payload
+    resource_kind: normal_payload
+    lifecycle: request.mainline
+    identity: [requestId, pipelineId, entryEndpoint, portScope]
+    owner_feature_id: server.responses_request_handler_bridge_surface
+    owner_node: HubReqInbound02Standardized
+    allowed_readers: [HubReqChatProcess03Governed, VrRoute04SelectedTarget, HubReqOutbound05ProviderSemantic]
+    allowed_writers: [ServerReqInbound01ClientRaw, HubReqInbound02Standardized]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, snapshot.debug_sample]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: request.protocol_context
+    resource_kind: protocol_context
+    lifecycle: request.mainline
+    identity: [requestId, entryEndpoint, portScope]
+    owner_feature_id: server.responses_request_handler_bridge_surface
+    owner_node: ServerReqInbound01ClientRaw
+    allowed_readers: [HubReqInbound02Standardized, metadata.runtime_control]
+    allowed_writers: [ServerReqInbound01ClientRaw]
+    forbidden_writers: [provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: request.provider_semantic
+    resource_kind: normal_payload
+    lifecycle: request.mainline
+    identity: [requestId, providerProtocol, providerKey]
+    owner_feature_id: hub.req_outbound_provider_semantic
+    owner_node: HubReqOutbound05ProviderSemantic
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [HubReqOutbound05ProviderSemantic]
+    forbidden_writers: [response.mainline, sse.transport_frame]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: provider.wire_payload
+    resource_kind: provider_wire
+    lifecycle: request.mainline
+    identity: [requestId, providerKey, runtimeKey]
+    owner_feature_id: responses.request_compat_normalization
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [provider_runtime.observation, dryrun.provider_request_probe]
+    allowed_writers: [ProviderReqOutbound06WirePayload]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, snapshot.debug_sample]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: response.provider_raw
+    resource_kind: provider_response
+    lifecycle: response.mainline
+    identity: [requestId, providerKey, providerProtocol]
+    owner_feature_id: hub.response_provider_sse_materialization
+    owner_node: ProviderRespInbound01Raw
+    allowed_readers: [HubRespInbound02Parsed, sse.transport_frame, dryrun.provider_request_probe]
+    allowed_writers: [ProviderRespInbound01Raw]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: response.hub_semantic
+    resource_kind: normal_payload
+    lifecycle: response.mainline
+    identity: [requestId, entryEndpoint, providerProtocol]
+    owner_feature_id: hub.response_responses_chat_projection
+    owner_node: HubRespChatProcess03Governed
+    allowed_readers: [HubRespOutbound04ClientSemantic, continuation.scope_state, servertool.followup_state]
+    allowed_writers: [HubRespInbound02Parsed, HubRespChatProcess03Governed]
+    forbidden_writers: [ServerRespOutbound05ClientFrame, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: response.client_payload
+    resource_kind: normal_payload
+    lifecycle: response.mainline
+    identity: [requestId, entryEndpoint]
+    owner_feature_id: hub.response_responses_client_projection
+    owner_node: HubRespOutbound04ClientSemantic
+    allowed_readers: [ServerRespOutbound05ClientFrame, sse.transport_frame]
+    allowed_writers: [HubRespOutbound04ClientSemantic]
+    forbidden_writers: [continuation.scope_state, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: metadata.runtime_control
+    resource_kind: side_channel
+    lifecycle: metadata.center.mainline
+    identity: [requestId, pipelineId, portScope]
+    owner_feature_id: hub.metadata_center_mainline
+    owner_node: MetaReq04RuntimeControlBound
+    allowed_readers: [HubReqChatProcess03Governed, VrRoute04SelectedTarget, provider_runtime.observation, servertool.followup_state]
+    allowed_writers: [MetaReq04RuntimeControlBound]
+    forbidden_writers: [provider.wire_payload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-metadata-center-write-boundaries]
+
+  - resource_id: metadata.request_truth
+    resource_kind: side_channel
+    lifecycle: metadata.center.mainline
+    identity: [requestId, sessionId, conversationId, entryEndpoint]
+    owner_feature_id: hub.metadata_center_mainline
+    owner_node: MetaReq02TruthMaterialized
+    allowed_readers: [metadata.runtime_control, continuation.scope_state, response.hub_semantic]
+    allowed_writers: [MetaReq02TruthMaterialized]
+    forbidden_writers: [continuation.scope_state, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-metadata-center-write-boundaries]
+
+  - resource_id: metadata.response_observation
+    resource_kind: side_channel
+    lifecycle: metadata.center.mainline
+    identity: [requestId, responseId]
+    owner_feature_id: hub.metadata_center_mainline
+    owner_node: MetaResp06ResponseObserved
+    allowed_readers: [MetaResp08CloseoutReleased]
+    allowed_writers: [MetaResp06ResponseObserved]
+    forbidden_writers: [request.mainline, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: error.chain
+    resource_kind: side_channel
+    lifecycle: error.mainline
+    identity: [requestId, providerKey, errorCode]
+    owner_feature_id: error.pipeline_contract
+    owner_node: ErrorErr01SourceRaised
+    allowed_readers: [ErrorErr02HostCaptured, ErrorErr03RuntimeClassified, ErrorErr04RouterPolicyApplied, ErrorErr05ExecutionDecision, ErrorErr06ClientProjected]
+    allowed_writers: [ErrorErr01SourceRaised, ErrorErr02HostCaptured, ErrorErr03RuntimeClassified, ErrorErr04RouterPolicyApplied, ErrorErr05ExecutionDecision, ErrorErr06ClientProjected]
+    forbidden_writers: [provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:error-pipeline-contract]
+
+  - resource_id: route.selection
+    resource_kind: side_channel
+    lifecycle: request.mainline
+    identity: [requestId, routingGroup, routeName, providerKey]
+    owner_feature_id: hub.route_selection_bridge
+    owner_node: VrRoute04SelectedTarget
+    allowed_readers: [HubReqOutbound05ProviderSemantic, provider_runtime.observation]
+    allowed_writers: [VrRoute04SelectedTarget]
+    forbidden_writers: [provider.wire_payload, response.mainline]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: provider_runtime.observation
+    resource_kind: side_channel
+    lifecycle: error.mainline
+    identity: [providerKey, runtimeKey, providerFamily]
+    owner_feature_id: error.pipeline_contract
+    owner_node: ErrorErr04RouterPolicyApplied
+    allowed_readers: [route.selection, ErrorErr05ExecutionDecision]
+    allowed_writers: [ErrorErr04RouterPolicyApplied]
+    forbidden_writers: [response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: continuation.scope_state
+    resource_kind: side_channel
+    lifecycle: responses.continuation.mainline
+    identity: [entryEndpoint, continuationOwner, portScope, sessionId, conversationId, responseId]
+    owner_feature_id: hub.chat_process_responses_continuation
+    owner_node: ChatProcRespContinuation07CanonicalSaved
+    allowed_readers: [ChatProcReqContinuation02OwnerResolved, ChatProcReqContinuation03CanonicalRestored]
+    allowed_writers: [ChatProcReqContinuation02OwnerResolved, ChatProcRespContinuation07CanonicalSaved]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-history-protocol-contract]
+
+  - resource_id: dryrun.provider_request_probe
+    resource_kind: diagnostic
+    lifecycle: debug.pipeline_dry_run_loop.mainline
+    identity: [requestId, entryEndpoint, providerKey]
+    owner_feature_id: debug.pipeline_dry_run_loop
+    owner_node: DebugDryRun02InternalControlCarrier
+    allowed_readers: [ProviderReqOutbound07TransportRequest, DebugDryRun03CapturedRequestReplay]
+    allowed_writers: [DebugDryRun02InternalControlCarrier]
+    forbidden_writers: [response.hub_semantic, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run test:pipeline-dry-run]
+
+  - resource_id: snapshot.debug_sample
+    resource_kind: diagnostic
+    lifecycle: debug.pipeline_dry_run_loop.mainline
+    identity: [requestId, portScope, phase]
+    owner_feature_id: debug.pipeline_dry_run_loop
+    owner_node: DebugDryRun03CapturedRequestReplay
+    allowed_readers: [dryrun.provider_request_probe]
+    allowed_writers: [DebugDryRun03CapturedRequestReplay, DebugDryRun04CapturedProviderResponse]
+    forbidden_writers: [request.normal_payload, provider.wire_payload, response.hub_semantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: sse.transport_frame
+    resource_kind: transport
+    lifecycle: sse.chat_stream_projection.mainline
+    identity: [requestId, entryEndpoint, streamId]
+    owner_feature_id: sse.chat_stream_projection
+    owner_node: ServerRespOutbound05ClientFrame
+    allowed_readers: [client]
+    allowed_writers: [ServerRespOutbound05ClientFrame]
+    forbidden_writers: [continuation.scope_state, response.hub_semantic, error.chain]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: servertool.followup_state
+    resource_kind: side_channel
+    lifecycle: servertool.hook_skeleton.mainline
+    identity: [requestId, flowId, toolName]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: HubRespChatProcess03Governed
+    allowed_readers: [HubReqChatProcess03Governed, continuation.scope_state]
+    allowed_writers: [HubRespChatProcess03Governed, HubReqChatProcess03Governed]
+    forbidden_writers: [provider.wire_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.engine_selection_plan
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, selectionPhase, primaryAutoHookSet]
+    owner_feature_id: hub.servertool_engine_selection
+    owner_node: ServertoolEngineSelectionPlan
+    allowed_readers: [ServertoolEngineActionPlan, ServertoolExecutionContractPlan]
+    allowed_writers: [EngineSelectionStartPlan, EngineSelectionAfterRunPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, ServerRespOutbound05ClientFrame, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.engine_action_plan
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, actionKind, triggerKind]
+    owner_feature_id: hub.servertool_engine_runtime_action_contract
+    owner_node: ServertoolEngineRuntimeActionPlan
+    allowed_readers: [ServertoolExecutionContractPlan, ServertoolResponseStageRuntimeActionPlan]
+    allowed_writers: [ServertoolEnginePreflightPlan, ServertoolEngineRuntimeActionPlan, ServertoolEnginePrepassActionPlan, ServertoolEngineSkipPlan, ServertoolEntryPreflightPlan, ServertoolResponseStageRuntimeActionPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.auto_hook_execution_plan
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, hookId, attemptIndex]
+    owner_feature_id: hub.servertool_auto_hook_execution
+    owner_node: AutoHookRuntimeAttemptPlan
+    allowed_readers: [ServertoolEngineSelectionPlan, ServertoolExecutionContractPlan]
+    allowed_writers: [AutoHookRuntimeAttemptPlan, AutoHookCallerFinalizationPlan, AutoHookTraceEventPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.execution_contract_plan
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, toolName, executionStep]
+    owner_feature_id: hub.servertool_execution_branch_contract
+    owner_node: ServertoolExecutionContractPlan
+    allowed_readers: [ServertoolExecutionLoopEffectPlan, ServertoolExecutionOutcomeRuntimeActionPlan, servertool.followup_state]
+    allowed_writers: [ServertoolExecutionBranchPlan, ServertoolDispatchErrorPlan, ServertoolHandlerMaterializationPlan, ServertoolExecutionLoopEffectPlan, ServertoolExecutionLoopRuntimeActionPlan, ServertoolExecutionOutcomeRuntimeActionPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.execution_state
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, executedRecordIndex]
+    owner_feature_id: hub.servertool_execution_state_contract
+    owner_node: ServertoolExecutionLoopStateValue
+    allowed_readers: [ServertoolExecutionLoopEffectPlan, ServertoolExecutionOutcomeRuntimeActionPlan]
+    allowed_writers: [ServertoolExecutionLoopStateValue, ServertoolAppendExecutedRecordInput]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.registry_projection
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, toolName, registrySource]
+    owner_feature_id: hub.servertool_registry_contract
+    owner_node: ServertoolRegistryProjectionPlan
+    allowed_readers: [ServertoolEngineSelectionPlan, ServertoolExecutionBranchPlan, ServertoolCliProjection01Planned]
+    allowed_writers: [ServertoolRegistryLookupActionPlan, ServertoolRegistryAutoHookDescriptorPlan, ServertoolRegistryProjectionPlan, ServertoolRegistrySourceProjectionPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.cli_projection_plan
+    resource_kind: normal_payload
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, publicToolAlias, projectionKind]
+    owner_feature_id: hub.servertool_cli_projection
+    owner_node: ServertoolCliProjection01Planned
+    allowed_readers: [ServerRespOutbound05ClientFrame, StoplessCli04ProjectionPlanned]
+    allowed_writers: [ServertoolCliProjection01Planned, StoplessCliProjectionContextPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, metadata.request_truth]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.flow_presentation
+    resource_kind: diagnostic
+    lifecycle: servertool.engine_contract.mainline
+    identity: [flowId, progressStage, toolName]
+    owner_feature_id: hub.servertool_flow_presentation
+    owner_node: ServertoolProgressPresentationDecision
+    allowed_readers: [ServertoolCliProjection01Planned, debug.artifact]
+    allowed_writers: [ServertoolProgressPresentationDecision]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.loop_warning
+    resource_kind: normal_payload
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, repeatCount]
+    owner_feature_id: hub.servertool_loop_warning
+    owner_node: LoopWarningInput
+    allowed_readers: [ServertoolReq04FollowupPayload, HubReqChatProcess03Governed]
+    allowed_writers: [LoopWarningInput]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: servertool.hook_closeout_contract
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [hookName, hookPhase, closeoutGate]
+    owner_feature_id: hub.servertool_rust_only_closeout
+    owner_node: ServertoolHookSkeletonContract
+    allowed_readers: [ServertoolHookSchedulerInput, ServertoolHookEffectPlan]
+    allowed_writers: [ServertoolHookSpec, ServertoolHookProjection, ServertoolHookEffectPlan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: servertool.orchestration_policy
+    resource_kind: side_channel
+    lifecycle: servertool.engine_contract.mainline
+    identity: [requestId, flowId, policyKind]
+    owner_feature_id: hub.servertool_orchestration_policy
+    owner_node: ServertoolOrchestrationPolicyPlan
+    allowed_readers: [ServertoolEngineActionPlan, ServertoolExecutionContractPlan, ErrorErr06ClientProjected]
+    allowed_writers: [ServertoolTimeoutWatcherPlan, ServertoolClientDisconnectWatcherPlan, ServertoolErrorPlan, ServertoolClientInjectTextInput, ServertoolProviderKeyInput]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: config.authoring_surface
+    resource_kind: config_authoring
+    lifecycle: config.user_config_materialization.mainline
+    identity: [configPath, rccUserDir, providerRoot]
+    owner_feature_id: config.user_config_materialization
+    owner_node: ConfigLoad01PublicShell
+    allowed_readers: [ConfigLoad02NativeBridge, ConfigLoad03RustLoader]
+    allowed_writers: [ConfigLoad01PublicShell, ConfigLoad02NativeBridge]
+    forbidden_writers: [VrRoute04SelectedTarget, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-ssot]
+
+  - resource_id: config.validated_manifest
+    resource_kind: config_manifest
+    lifecycle: config.user_config_materialization.mainline
+    identity: [configPath, routingPolicyGroup, providerProfileSet]
+    owner_feature_id: config.user_config_materialization
+    owner_node: ConfigLoad04UserConfigParsed
+    allowed_readers: [ConfigLoad05RuntimeManifestCompiled, ConfigLoad06LoadedConfigReturned]
+    allowed_writers: [ConfigLoad03RustLoader, ConfigLoad04UserConfigParsed]
+    forbidden_writers: [webui.config_edit_intent, runtime.pid_cache, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: config.runtime_projection
+    resource_kind: config_runtime_projection
+    lifecycle: config.user_config_materialization.mainline
+    identity: [routingPolicyGroup, portScope, providerProfileSet]
+    owner_feature_id: config.user_config_materialization
+    owner_node: ConfigLoad05RuntimeManifestCompiled
+    allowed_readers: [HubConfig01PipelineRuntimeArtifact, HubConfig02RuntimePolicyArtifacts, HubConfig03RuntimeRouteTierArtifacts]
+    allowed_writers: [ConfigLoad05RuntimeManifestCompiled, ConfigLoad06LoadedConfigReturned]
+    forbidden_writers: [webui.config_edit_intent, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: config.provider_profile_projection
+    resource_kind: config_runtime_projection
+    lifecycle: config.user_config_materialization.mainline
+    identity: [providerKey, runtimeKey, providerProfileSet]
+    owner_feature_id: config.provider_profile_materialization
+    owner_node: ConfigLoad05RuntimeManifestCompiled
+    allowed_readers: [ConfigLoad06LoadedConfigReturned, HubConfig01PipelineRuntimeArtifact]
+    allowed_writers: [ConfigLoad04UserConfigParsed, ConfigLoad05RuntimeManifestCompiled]
+    forbidden_writers: [webui.config_edit_intent, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: config.routing_policy_projection
+    resource_kind: config_runtime_projection
+    lifecycle: config.user_config_materialization.mainline
+    identity: [routingPolicyGroup, routeName, routeTierSet]
+    owner_feature_id: config.user_config_materialization
+    owner_node: VrConfig01RustBootstrapArtifact
+    allowed_readers: [VrConfig02NativeBootstrap, HubConfig02RuntimePolicyArtifacts, HubConfig03RuntimeRouteTierArtifacts]
+    allowed_writers: [ConfigLoad05RuntimeManifestCompiled, VrConfig01RustBootstrapArtifact]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, vr.diagnostic_decision]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: webui.config_edit_intent
+    resource_kind: config_authoring
+    lifecycle: webui.config_editor_surface.mainline
+    identity: [webuiSession, editorSurface, configSection]
+    owner_feature_id: webui.config_editor_surface
+    owner_node: WebuiConfigEditor01UserIntent
+    allowed_readers: [WebuiConfigEditor02AdminApiRequest]
+    allowed_writers: [WebuiConfigEditor01UserIntent]
+    forbidden_writers: [config.validated_manifest, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run test:webui]
+
+  - resource_id: config.admin_mutation_request
+    resource_kind: config_authoring
+    lifecycle: webui.config_editor_surface.mainline
+    identity: [adminRequestId, configPath, configSection]
+    owner_feature_id: webui.config_editor_surface
+    owner_node: WebuiConfigEditor02AdminApiRequest
+    allowed_readers: [WebuiConfigEditor03SharedConfigMutation]
+    allowed_writers: [WebuiConfigEditor02AdminApiRequest]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, runtime.instance_record]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-ssot]
+
+  - resource_id: config.shared_write_result
+    resource_kind: config_authoring
+    lifecycle: webui.config_editor_surface.mainline
+    identity: [configPath, writerOwner, mutationResult]
+    owner_feature_id: config.user_config_write_surface
+    owner_node: WebuiConfigEditor03SharedConfigMutation
+    allowed_readers: [WebuiConfigEditor02AdminApiRequest, webui.config_edit_intent]
+    allowed_writers: [WebuiConfigEditor03SharedConfigMutation]
+    forbidden_writers: [webui.config_edit_intent, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:config-toml-codec-rust]
+
+  - resource_id: runtime.pid_cache
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.lifecycle.mainline
+    identity: [portScope, pid, rccUserDir]
+    owner_feature_id: runtime.lifecycle.pid_cache
+    owner_node: ServerPidCacheRecord
+    allowed_readers: [ServerStartCommand, ServerStopCommand, ServerRestartCommand]
+    allowed_writers: [ServerStartCommand]
+    forbidden_writers: [request.normal_payload, metadata.request_truth, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:runtime-lifecycle-pid-rebase]
+
+  - resource_id: runtime.stop_intent
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.lifecycle.mainline
+    identity: [portScope, reason, ttl]
+    owner_feature_id: runtime.lifecycle.stop_intent
+    owner_node: StopIntentRecord
+    allowed_readers: [ServerStartCommand, ServerStopCommand]
+    allowed_writers: [ServerStopCommand, ServerStartCommand]
+    forbidden_writers: [request.normal_payload, metadata.request_truth, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:runtime-lifecycle-pid-rebase]
+
+  - resource_id: runtime.instance_record
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.lifecycle.mainline
+    identity: [portScope, ownerScope, instanceStatus]
+    owner_feature_id: runtime.lifecycle.instance_registry
+    owner_node: RuntimeInstanceRecord
+    allowed_readers: [ServerStartCommand, ServerStopCommand, DaemonSupervisorLoop, DaemonRestartLoop]
+    allowed_writers: [ServerStartCommand, ServerStopCommand, DaemonSupervisorLoop, DaemonRestartLoop, StartShutdownHandler]
+    forbidden_writers: [request.normal_payload, metadata.request_truth, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:runtime-lifecycle-pid-rebase]
+
+  - resource_id: runtime.restart_signal
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.lifecycle.mainline
+    identity: [portScope, pid, restartTransport]
+    owner_feature_id: runtime.lifecycle.restart_command
+    owner_node: RestartProcessSignal
+    allowed_readers: [ServerRestartCommand, DaemonRestartLoop]
+    allowed_writers: [ServerRestartCommand, RestartProcessHttpRequest]
+    forbidden_writers: [request.normal_payload, provider_runtime.observation, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:runtime-lifecycle-pid-rebase]
+
+  - resource_id: runtime.admin_restart_request
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.lifecycle.mainline
+    identity: [portScope, adminAuthScope, restartTransport]
+    owner_feature_id: runtime.lifecycle.restart_command
+    owner_node: RestartProcessHttpRequest
+    allowed_readers: [RestartProcessSignal, registerRestartRoutes]
+    allowed_writers: [ServerRestartCommand]
+    forbidden_writers: [request.normal_payload, metadata.request_truth, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:runtime-lifecycle-pid-rebase]
+
+  - resource_id: runtime.provider_binding_resolution
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, providerKey, runtimeKey, routingGroup]
+    owner_feature_id: server.runtime_key_resolution
+    owner_node: ProviderRuntimeResolution
+    allowed_readers: [RequestExecutorAttempt, ProviderResponseConversionHost]
+    allowed_writers: [resolveProviderRuntimeOrThrow]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-fallback-denylist]
+
+  - resource_id: runtime.hub_pipeline_handle
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, routingPolicyGroup, hubPipelineHandle]
+    owner_feature_id: hub.runtime_ingress_bridge
+    owner_node: HubPipelineHandle
+    allowed_readers: [HttpServerRuntimeSetup, RequestExecutorAttempt]
+    allowed_writers: [create_hub_pipeline_engine_json, update_hub_pipeline_virtual_router_config_json, update_hub_pipeline_engine_deps_json, dispose_hub_pipeline_engine_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, metadata.request_truth]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: runtime.http_entry_dispatch
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, routePath, dispatchMode]
+    owner_feature_id: server.http_runtime_entry
+    owner_node: RouteCodexHttpServer
+    allowed_readers: [HttpServerRoutes, HandlerContext]
+    allowed_writers: [RouteCodexHttpServer, PortRegistry]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: runtime.http_lifecycle_context
+    resource_kind: runtime_lifecycle
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, lifecycleAction, handlerContextId]
+    owner_feature_id: server.http_runtime_lifecycle
+    owner_node: HandlerContext
+    allowed_readers: [RouteCodexHttpServer, ServerRequestHandler]
+    allowed_writers: [initializeHttpServer, restartRuntimeFromDisk, startHttpServer, stopHttpServer, buildHttpHandlerContext]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: response.host_conversion_handoff
+    resource_kind: provider_response
+    lifecycle: runtime.host_surface.mainline
+    identity: [requestId, providerProtocol, conversionHost]
+    owner_feature_id: server.provider_response_conversion_host
+    owner_node: ProviderResponseConversionHost
+    allowed_readers: [HubRespInbound02Parsed, HubRespChatProcess03Governed, ServertoolFollowupDispatch]
+    allowed_writers: [convertProviderResponseIfNeeded]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, request.normal_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: response.inspection_signal
+    resource_kind: diagnostic
+    lifecycle: runtime.host_surface.mainline
+    identity: [requestId, inspectionKind, payloadContractSignal]
+    owner_feature_id: server.response_inspection_helpers
+    owner_node: PayloadContractSignal
+    allowed_readers: [RequestExecutorContractCheck, debug.artifact]
+    allowed_writers: [containsEmptyAssistantSanitizedPlaceholder, extractTextFromResponsesOutputItem]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: models.capability_catalog
+    resource_kind: normal_payload
+    lifecycle: runtime.host_surface.mainline
+    identity: [providerKey, modelId, aliasId]
+    owner_feature_id: server.models_capability_contract
+    owner_node: ModelListItem
+    allowed_readers: [client, codex_client]
+    allowed_writers: [buildCodexModelMetadata, buildCodexAdvancedModelMetadata, collectConfiguredModelItems]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:models-capability-contract]
+
+  - resource_id: server.handler_transport_envelope
+    resource_kind: transport
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, entryEndpoint, handlerName]
+    owner_feature_id: server.responses_handler_family
+    owner_node: HandlerContext
+    allowed_readers: [HubReqInbound02Standardized, ServerRespOutbound05ClientFrame]
+    allowed_writers: [handleChatCompletions, handleImageGenerations, handleMessages, handleResponses, handleGetUserConfig, handleListProviderTemplates, handleValidateUserConfig, handleSaveUserConfig]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespChatProcess03Governed, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:server-function-map-boundary]
+
+  - resource_id: cli.command_dispatch_intent
+    resource_kind: config_authoring
+    lifecycle: runtime.host_surface.mainline
+    identity: [commandName, portScope, dispatchTarget]
+    owner_feature_id: cli.command_surface
+    owner_node: CliCommandRegistrar
+    allowed_readers: [ServerStartCommand, ServerStopCommand, ManagerCommandRuntime]
+    allowed_writers: [createStartCommand, createStopCommand, createStatusCommand, createConfigCommand, createCodeCommand, createCodexCommand, createClaudeCommand, createGuardianDaemonCommand, createInitCommand]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-ci]
+
+  - resource_id: hub.chat_session_usage
+    resource_kind: side_channel
+    lifecycle: runtime.host_surface.mainline
+    identity: [portScope, requestId, localDay]
+    owner_feature_id: hub.chat_process_session_usage
+    owner_node: GlobalRequestCounter
+    allowed_readers: [HttpServerRuntimeSetup, MetadataCenterRuntimeControl]
+    allowed_writers: [plan_chat_process_session_usage, plan_chat_process_session_usage_json]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: response.provider_context_projection
+    resource_kind: side_channel
+    lifecycle: runtime.host_surface.mainline
+    identity: [requestId, entryEndpoint, providerProtocol]
+    owner_feature_id: hub.response_provider_context_helpers
+    owner_node: HubRespOutbound04ClientSemantic
+    allowed_readers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    allowed_writers: [resolve_client_protocol_for_response_entry, resolve_display_model_from_context, resolve_client_facing_request_id_from_context, resolve_tool_surface_shadow_enabled]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, request.normal_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:hub-response-provider-context-helpers]
+
+  - resource_id: debug.artifact
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [debugSurface, requestId, artifactKind]
+    owner_feature_id: debug.unified_surface
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [DebugObs01SurfaceRequested, IntErrNum05DebugArtifactProjected]
+    allowed_writers: [DebugObs07ReplayedOrInspected, IntErrNum05DebugArtifactProjected]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:debug-unified-surface]
+
+  - resource_id: debug.internal_error_envelope
+    resource_kind: side_channel
+    lifecycle: internal_error_numbering.mainline
+    identity: [internalCode, ownerFeatureId, node]
+    owner_feature_id: debug.internal_error_numbering
+    owner_node: IntErrNum04EnvelopeBuilt
+    allowed_readers: [IntErrNum05DebugArtifactProjected, IntErrNum07ClientBoundaryPreserved]
+    allowed_writers: [IntErrNum03SubcodeAssigned, IntErrNum04EnvelopeBuilt]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:internal-error-numbering]
+
+  - resource_id: debug.external_error_link
+    resource_kind: side_channel
+    lifecycle: internal_error_numbering.mainline
+    identity: [internalCode, externalErrorKind, requestId]
+    owner_feature_id: debug.internal_error_numbering
+    owner_node: IntErrNum06ExternalLinked
+    allowed_readers: [IntErrNum07ClientBoundaryPreserved, debug.artifact]
+    allowed_writers: [IntErrNum06ExternalLinked]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ErrorErr06ClientProjected]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:internal-error-numbering]
+
+  - resource_id: debug.client_boundary_proof
+    resource_kind: side_channel
+    lifecycle: internal_error_numbering.mainline
+    identity: [internalCode, boundaryNode, requestId]
+    owner_feature_id: debug.internal_error_numbering
+    owner_node: IntErrNum07ClientBoundaryPreserved
+    allowed_readers: [debug.artifact]
+    allowed_writers: [IntErrNum07ClientBoundaryPreserved]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:internal-error-numbering]
+
+  - resource_id: vr.diagnostic_snapshot
+    resource_kind: diagnostic
+    lifecycle: vr.online_diagnostics.mainline
+    identity: [routingGroup, portScope, diagnosticRequestId]
+    owner_feature_id: vr.online_diagnostics
+    owner_node: VrDiag01StatusSnapshot
+    allowed_readers: [VrDiag02DryRunInput, VrDiag03DryRunDecision]
+    allowed_writers: [VrDiag01StatusSnapshot]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-forwarder-runtime]
+
+  - resource_id: vr.diagnostic_decision
+    resource_kind: diagnostic
+    lifecycle: vr.online_diagnostics.mainline
+    identity: [routingGroup, routeName, providerKey]
+    owner_feature_id: vr.online_diagnostics
+    owner_node: VrDiag03DryRunDecision
+    allowed_readers: [ServerRespOutbound05ClientFrame, diagnostic.http_payload]
+    allowed_writers: [VrDiag03DryRunDecision]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+
+  - resource_id: vr.hit_log_record
+    resource_kind: diagnostic
+    lifecycle: vr.hit_log_projection.mainline
+    identity: [requestId, routeName, providerKey]
+    owner_feature_id: vr.route_host_effects
+    owner_node: VrHitLog02NativeProjection
+    allowed_readers: [VrHitLog03HostEmission, VrHitLog04TelemetryProjection]
+    allowed_writers: [VrHitLog01RouteDecision, VrHitLog02NativeProjection]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+
+  - resource_id: vr.telemetry_projection
+    resource_kind: diagnostic
+    lifecycle: vr.hit_log_projection.mainline
+    identity: [requestId, routeName, telemetryConsumer]
+    owner_feature_id: vr.hit_log_projection
+    owner_node: VrHitLog04TelemetryProjection
+    allowed_readers: [stats-center, diagnostic.http_payload]
+    allowed_writers: [VrHitLog04TelemetryProjection]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:llmswitch-rustification-audit]
+
+  - resource_id: diagnostic.http_payload
+    resource_kind: diagnostic
+    lifecycle: vr.online_diagnostics.mainline
+    identity: [portScope, diagnosticEndpoint, requestId]
+    owner_feature_id: vr.online_diagnostics
+    owner_node: ServerRespOutbound05ClientFrame
+    allowed_readers: [client, cli]
+    allowed_writers: [ServerRespOutbound05ClientFrame]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: stopless.schema_gate_state
+    resource_kind: side_channel
+    lifecycle: stopless.session.mainline
+    identity: [requestId, sessionId, flowId, schemaGate]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessResp02SchemaGateEvaluated
+    allowed_readers: [StoplessState03RuntimeSnapshotResolved, StoplessCli04ProjectionPlanned]
+    allowed_writers: [StoplessResp02SchemaGateEvaluated]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, ServerRespOutbound05ClientFrame, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stopless.runtime_snapshot
+    resource_kind: side_channel
+    lifecycle: stopless.session.mainline
+    identity: [sessionId, flowId, repeatCount, maxRepeats]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessState03RuntimeSnapshotResolved
+    allowed_readers: [StoplessCli04ProjectionPlanned, StoplessReq07ContinuationRestored]
+    allowed_writers: [StoplessState03RuntimeSnapshotResolved, StoplessReq07ContinuationRestored]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:stopless-invalid-schema-blackbox]
+
+  - resource_id: stopless.cli_projection
+    resource_kind: normal_payload
+    lifecycle: stopless.session.mainline
+    identity: [flowId, publicToolAlias, repeatCount]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessCli04ProjectionPlanned
+    allowed_readers: [StoplessCli06ClientExecuted, ServerRespOutbound05ClientFrame]
+    allowed_writers: [StoplessCli04ProjectionPlanned]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, metadata.request_truth]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stopless.cli_result
+    resource_kind: normal_payload
+    lifecycle: stopless.session.mainline
+    identity: [flowId, publicToolAlias, clientToolResultId]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessCli06ClientExecuted
+    allowed_readers: [StoplessReq07ContinuationRestored, StoplessReq08GuidanceRewritten]
+    allowed_writers: [StoplessCli06ClientExecuted]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, metadata.request_truth]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stopless.guidance_rewrite
+    resource_kind: normal_payload
+    lifecycle: stopless.session.mainline
+    identity: [flowId, requestId, entryEndpoint]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessReq08GuidanceRewritten
+    allowed_readers: [StoplessReq09SchemaContractInjected, HubReqChatProcess03Governed]
+    allowed_writers: [StoplessReq08GuidanceRewritten]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stopless.schema_contract
+    resource_kind: normal_payload
+    lifecycle: stopless.session.mainline
+    identity: [flowId, entryEndpoint, routeName]
+    owner_feature_id: hub.servertool_stopless_cli_continuation
+    owner_node: StoplessReq09SchemaContractInjected
+    allowed_readers: [VrRoute04SelectedTarget, HubReqOutbound05ProviderSemantic]
+    allowed_writers: [StoplessReq09SchemaContractInjected]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: sse.protocol_stream_projection
+    resource_kind: transport
+    lifecycle: sse.chat_stream_projection.mainline
+    identity: [requestId, providerProtocol, streamId]
+    owner_feature_id: sse.anthropic_gemini_stream_projection
+    owner_node: ServerRespOutbound05ClientFrame
+    allowed_readers: [client, sse.transport_frame]
+    allowed_writers: [ServerRespOutbound05ClientFrame]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: sse.provider_stream_aggregate
+    resource_kind: provider_response
+    lifecycle: sse.chat_stream_projection.mainline
+    identity: [requestId, providerProtocol, streamId]
+    owner_feature_id: sse.anthropic_gemini_stream_projection
+    owner_node: HubRespInbound02Parsed
+    allowed_readers: [HubRespChatProcess03Governed, response.hub_semantic]
+    allowed_writers: [HubRespInbound02Parsed]
+    forbidden_writers: [ServerRespOutbound05ClientFrame, route.selection, provider_runtime.observation]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:sse-architecture-boundary]
+
+  - resource_id: stage_a.servertool_outcome_plan
+    resource_kind: side_channel
+    lifecycle: stage_a.p0_rust_migration.mainline
+    identity: [requestId, flowId, ownerFeatureId]
+    owner_feature_id: servertool.followup_orchestration
+    owner_node: ServertoolOutcome
+    allowed_readers: [servertool.followup_state, HubRespOutbound04ClientSemantic]
+    allowed_writers: [ServertoolOutcome]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stage_a.protocol_canonical
+    resource_kind: normal_payload
+    lifecycle: stage_a.p0_rust_migration.mainline
+    identity: [sourceProtocol, targetProtocol, conversionOwner]
+    owner_feature_id: conversion.shared.anthropic
+    owner_node: OpenAiChatCanonical
+    allowed_readers: [HubReqChatProcess03Governed, HubRespChatProcess03Governed]
+    allowed_writers: [OpenAiChatCanonical]
+    forbidden_writers: [ServerRespOutbound05ClientFrame, route.selection, provider_runtime.observation]
+    may_enter_provider_body: true
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:llmswitch-rustification-audit]
+
+  - resource_id: stage_a.continuation_store_state
+    resource_kind: side_channel
+    lifecycle: stage_a.p0_rust_migration.mainline
+    identity: [entryEndpoint, continuationOwner, conversationScope]
+    owner_feature_id: conversion.responses.store
+    owner_node: ResponsesContinuationStore
+    allowed_readers: [continuation.scope_state, ChatProcReqContinuation03CanonicalRestored]
+    allowed_writers: [ResponsesContinuationStore]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-history-protocol-contract]
+
+  - resource_id: stage_a.req_tool_governance_state
+    resource_kind: normal_payload
+    lifecycle: stage_a.p0_rust_migration.mainline
+    identity: [requestId, entryEndpoint, toolGovernanceOwner]
+    owner_feature_id: hub.req_chatprocess.tool_governance
+    owner_node: HubReqChatProcess03Governed
+    allowed_readers: [HubReqOutbound05ProviderSemantic, stopless.schema_contract]
+    allowed_writers: [HubReqChatProcess03Governed]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.hub_semantic, sse.transport_frame]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: stage_a.resp_tool_governance_state
+    resource_kind: normal_payload
+    lifecycle: stage_a.p0_rust_migration.mainline
+    identity: [requestId, entryEndpoint, toolGovernanceOwner]
+    owner_feature_id: hub.resp_chatprocess.tool_governance
+    owner_node: HubRespChatProcess03Governed
+    allowed_readers: [HubRespOutbound04ClientSemantic, servertool.followup_state]
+    allowed_writers: [HubRespChatProcess03Governed]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, request.normal_payload, sse.transport_frame]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:servertool-rust-only]
+
+  - resource_id: protocol.openai_chat_history_compat
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, compatibilityProfile]
+    owner_feature_id: openai_chat.single_tool_call_history_compat
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [split_parallel_tool_call_assistant_history]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:openai-chat-single-tool-call-history-compat-rust-only]
+
+  - resource_id: protocol.responses_function_tool_schema
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, toolName]
+    owner_feature_id: responses.function_tool_normalization
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [normalize_responses_function_tools]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-function-tool-normalization-rust-only]
+
+  - resource_id: protocol.responses_tool_parameters_schema
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, toolName]
+    owner_feature_id: responses.tool_parameters_normalization
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [normalize_responses_tool_parameters]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-tool-parameters-normalization-rust-only]
+
+  - resource_id: protocol.responses_instruction_projection
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, instructionSource]
+    owner_feature_id: responses.instructions_to_input_normalization
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [apply_responses_instructions_to_input]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-instructions-to-input-rust-only]
+
+  - resource_id: protocol.responses_crs_request_compat
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, compatibilityProfile]
+    owner_feature_id: responses.crs_request_compat
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [apply_responses_crs_request_compat]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-crs-request-compat-rust-only]
+
+  - resource_id: protocol.gemini_canonical
+    resource_kind: normal_payload
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, sourceProtocol, targetProtocol]
+    owner_feature_id: conversion.shared.gemini
+    owner_node: GeminiOpenaiCodecOutput
+    allowed_readers: [HubReqChatProcess03Governed, HubReqOutbound05ProviderSemantic, HubRespInbound02Parsed]
+    allowed_writers: [stage_a_conversion_shared_gemini_owner_boundary]
+    forbidden_writers: [route.selection, provider_runtime.observation, metadata.runtime_control]
+    may_enter_provider_body: true
+    may_enter_client_body: true
+    required_gates: [npm run verify:resource-operation-map, npm run verify:llmswitch-rustification-audit]
+
+  - resource_id: protocol.web_search_governance_plan
+    resource_kind: side_channel
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, webSearchMode]
+    owner_feature_id: hub.web_search_tool_governance
+    owner_node: WebSearchExecutionMode
+    allowed_readers: [HubReqChatProcess03Governed, VrRoute04SelectedTarget, ProviderReqOutbound06WirePayload]
+    allowed_writers: [resolve_web_search_execution_mode]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+mainline_resource_flows:
+  - chain_id: request.mainline
+    step_id: req-00
+    consumes: [request.protocol_context]
+    produces: [request.normal_payload, metadata.request_truth]
+    side_channel_reads: []
+    side_channel_writes: [metadata.request_truth]
+  - chain_id: request.mainline
+    step_id: req-01
+    consumes: [request.protocol_context, request.normal_payload]
+    produces: [metadata.request_truth]
+    side_channel_reads: []
+    side_channel_writes: [metadata.request_truth]
+  - chain_id: request.mainline
+    step_id: req-02
+    consumes: [request.normal_payload, metadata.request_truth]
+    produces: [request.normal_payload]
+    side_channel_reads: [metadata.request_truth]
+    side_channel_writes: []
+  - chain_id: request.mainline
+    step_id: req-03
+    consumes: [request.normal_payload, metadata.runtime_control]
+    produces: [route.selection]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [route.selection]
+  - chain_id: request.mainline
+    step_id: req-04
+    consumes: [request.normal_payload, route.selection]
+    produces: [request.provider_semantic]
+    side_channel_reads: [route.selection]
+    side_channel_writes: []
+  - chain_id: request.mainline
+    step_id: req-05
+    consumes: [request.provider_semantic, route.selection]
+    produces: [provider.wire_payload]
+    side_channel_reads: [route.selection]
+    side_channel_writes: []
+  - chain_id: responses.direct_passthrough.mainline
+    step_id: rdp-01
+    consumes: [request.normal_payload, metadata.runtime_control]
+    produces: [route.selection]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [route.selection]
+  - chain_id: responses.direct_passthrough.mainline
+    step_id: rdp-02
+    consumes: [request.normal_payload, route.selection]
+    produces: [provider.wire_payload]
+    side_channel_reads: [metadata.runtime_control, route.selection]
+    side_channel_writes: []
+  - chain_id: response.mainline
+    step_id: resp-01
+    consumes: [response.provider_raw]
+    produces: [response.hub_semantic]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [metadata.response_observation]
+  - chain_id: response.mainline
+    step_id: resp-02
+    consumes: [response.hub_semantic]
+    produces: [response.hub_semantic]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: response.mainline
+    step_id: resp-03
+    consumes: [response.hub_semantic]
+    produces: [response.client_payload]
+    side_channel_reads: [metadata.request_truth, metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: response.mainline
+    step_id: resp-04
+    consumes: [response.client_payload]
+    produces: [sse.transport_frame]
+    side_channel_reads: [metadata.response_observation]
+    side_channel_writes: []
+  - chain_id: responses.continuation.mainline
+    step_id: rct-01
+    consumes: [request.normal_payload, metadata.request_truth]
+    produces: [continuation.scope_state]
+    side_channel_reads: [metadata.request_truth]
+    side_channel_writes: [continuation.scope_state]
+  - chain_id: responses.continuation.mainline
+    step_id: rct-02
+    consumes: [continuation.scope_state, metadata.request_truth]
+    produces: [continuation.scope_state]
+    side_channel_reads: [continuation.scope_state, metadata.request_truth]
+    side_channel_writes: [continuation.scope_state]
+  - chain_id: responses.continuation.mainline
+    step_id: rct-03
+    consumes: [request.normal_payload, continuation.scope_state]
+    produces: [request.normal_payload, servertool.followup_state]
+    side_channel_reads: [continuation.scope_state]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: responses.continuation.mainline
+    step_id: rct-04
+    consumes: [request.normal_payload, servertool.followup_state]
+    produces: [request.normal_payload]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: []
+  - chain_id: responses.continuation.mainline
+    step_id: rct-05
+    consumes: [request.normal_payload, response.hub_semantic, continuation.scope_state]
+    produces: [response.hub_semantic]
+    side_channel_reads: [continuation.scope_state]
+    side_channel_writes: []
+  - chain_id: responses.continuation.mainline
+    step_id: rct-06
+    consumes: [response.hub_semantic, metadata.request_truth]
+    produces: [continuation.scope_state]
+    side_channel_reads: [metadata.request_truth]
+    side_channel_writes: [continuation.scope_state]
+  - chain_id: responses.continuation.mainline
+    step_id: rct-07
+    consumes: [continuation.scope_state, metadata.response_observation]
+    produces: []
+    side_channel_reads: [continuation.scope_state, metadata.response_observation]
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-resp-01
+    consumes: [response.hub_semantic, metadata.runtime_control]
+    produces: [servertool.followup_state]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-resp-02
+    consumes: [servertool.followup_state, response.hub_semantic]
+    produces: [servertool.followup_state]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-resp-03
+    consumes: [servertool.followup_state]
+    produces: [response.hub_semantic, servertool.followup_state]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-resp-06
+    consumes: [response.hub_semantic, servertool.followup_state]
+    produces: [response.hub_semantic]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-resp-07
+    consumes: [response.hub_semantic, servertool.followup_state]
+    produces: [response.client_payload]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-cli-01
+    consumes: [servertool.followup_state]
+    produces: [servertool.followup_state]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-req-01
+    consumes: [request.normal_payload, servertool.followup_state]
+    produces: [servertool.followup_state]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-req-02
+    consumes: [servertool.followup_state]
+    produces: [request.normal_payload]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-req-03
+    consumes: [request.normal_payload, servertool.followup_state]
+    produces: [request.normal_payload]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-req-04
+    consumes: [request.normal_payload]
+    produces: [request.normal_payload]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: servertool.hook_skeleton.mainline
+    step_id: sth-req-05
+    consumes: [request.normal_payload]
+    produces: [request.normal_payload]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-load-01
+    consumes: [config.authoring_surface]
+    produces: [config.authoring_surface]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-load-02
+    consumes: [config.authoring_surface]
+    produces: [config.authoring_surface]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-load-03
+    consumes: [config.authoring_surface]
+    produces: [config.validated_manifest]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-load-04
+    consumes: [config.validated_manifest]
+    produces: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-load-05
+    consumes: [config.validated_manifest, config.runtime_projection, config.provider_profile_projection]
+    produces: [config.runtime_projection, config.provider_profile_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-runtime-vr-01
+    consumes: [config.runtime_projection, config.routing_policy_projection]
+    produces: [config.routing_policy_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-runtime-vr-02
+    consumes: [config.routing_policy_projection]
+    produces: [config.routing_policy_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-runtime-hub-01
+    consumes: [config.runtime_projection]
+    produces: [config.runtime_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-runtime-hub-02
+    consumes: [config.runtime_projection]
+    produces: [config.provider_profile_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: config.user_config_materialization.mainline
+    step_id: cfg-runtime-hub-03
+    consumes: [config.runtime_projection, config.routing_policy_projection]
+    produces: [config.routing_policy_projection]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: webui.config_editor_surface.mainline
+    step_id: wce-01
+    consumes: [webui.config_edit_intent]
+    produces: [config.admin_mutation_request]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: webui.config_editor_surface.mainline
+    step_id: wce-02
+    consumes: [config.admin_mutation_request]
+    produces: [config.shared_write_result]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: debug.unified_surface.mainline
+    step_id: dbg-01
+    consumes: [debug.artifact]
+    produces: [debug.artifact]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    step_id: ddr-01
+    consumes: [request.protocol_context]
+    produces: [dryrun.provider_request_probe]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    step_id: ddr-02
+    consumes: [provider.wire_payload, dryrun.provider_request_probe]
+    produces: [dryrun.provider_request_probe, snapshot.debug_sample]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    step_id: ddr-03
+    consumes: [snapshot.debug_sample, dryrun.provider_request_probe]
+    produces: [snapshot.debug_sample]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: debug.pipeline_dry_run_loop.mainline
+    step_id: ddr-04
+    consumes: [response.provider_raw, snapshot.debug_sample]
+    produces: [response.client_payload]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-01
+    consumes: [debug.artifact]
+    produces: [debug.internal_error_envelope]
+    side_channel_reads: []
+    side_channel_writes: [debug.internal_error_envelope]
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-02
+    consumes: [debug.internal_error_envelope]
+    produces: [debug.internal_error_envelope]
+    side_channel_reads: [debug.internal_error_envelope]
+    side_channel_writes: [debug.internal_error_envelope]
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-03
+    consumes: [debug.internal_error_envelope]
+    produces: [debug.internal_error_envelope]
+    side_channel_reads: [debug.internal_error_envelope]
+    side_channel_writes: [debug.internal_error_envelope]
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-04
+    consumes: [debug.internal_error_envelope]
+    produces: [debug.artifact]
+    side_channel_reads: [debug.internal_error_envelope]
+    side_channel_writes: []
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-05
+    consumes: [debug.artifact]
+    produces: [debug.external_error_link]
+    side_channel_reads: []
+    side_channel_writes: [debug.external_error_link]
+  - chain_id: internal_error_numbering.mainline
+    step_id: ien-06
+    consumes: [debug.artifact, debug.external_error_link]
+    produces: [debug.client_boundary_proof]
+    side_channel_reads: [debug.external_error_link]
+    side_channel_writes: [debug.client_boundary_proof]
+  - chain_id: error.mainline
+    step_id: err-01
+    consumes: [provider_runtime.observation]
+    produces: [error.chain]
+    side_channel_reads: []
+    side_channel_writes: [error.chain]
+  - chain_id: error.mainline
+    step_id: err-02
+    consumes: [error.chain]
+    produces: [error.chain]
+    side_channel_reads: [error.chain, provider_runtime.observation]
+    side_channel_writes: [error.chain]
+  - chain_id: error.mainline
+    step_id: err-03
+    consumes: [error.chain, provider_runtime.observation]
+    produces: [error.chain, provider_runtime.observation]
+    side_channel_reads: [error.chain, provider_runtime.observation]
+    side_channel_writes: [error.chain, provider_runtime.observation]
+  - chain_id: error.mainline
+    step_id: err-04
+    consumes: [error.chain, provider_runtime.observation]
+    produces: [error.chain]
+    side_channel_reads: [error.chain, provider_runtime.observation]
+    side_channel_writes: [error.chain]
+  - chain_id: error.mainline
+    step_id: err-05
+    consumes: [error.chain]
+    produces: [response.client_payload]
+    side_channel_reads: [error.chain]
+    side_channel_writes: []
+  - chain_id: vr.route_availability.mainline
+    step_id: vra-01
+    consumes: [route.selection, provider_runtime.observation]
+    produces: [route.selection]
+    side_channel_reads: [route.selection, provider_runtime.observation]
+    side_channel_writes: [route.selection]
+  - chain_id: vr.route_availability.mainline
+    step_id: vra-02
+    consumes: [route.selection, provider_runtime.observation]
+    produces: [provider_runtime.observation]
+    side_channel_reads: [route.selection, provider_runtime.observation]
+    side_channel_writes: [provider_runtime.observation]
+  - chain_id: vr.route_availability.mainline
+    step_id: vra-03
+    consumes: [route.selection, provider_runtime.observation]
+    produces: [route.selection]
+    side_channel_reads: [route.selection, provider_runtime.observation]
+    side_channel_writes: [route.selection]
+  - chain_id: vr.route_availability.mainline
+    step_id: vra-04
+    consumes: [route.selection, provider_runtime.observation]
+    produces: [error.chain]
+    side_channel_reads: [route.selection, provider_runtime.observation]
+    side_channel_writes: [error.chain]
+  - chain_id: vr.online_diagnostics.mainline
+    step_id: vrd-01
+    consumes: [route.selection, provider_runtime.observation]
+    produces: [vr.diagnostic_snapshot]
+    side_channel_reads: [route.selection, provider_runtime.observation]
+    side_channel_writes: []
+  - chain_id: vr.online_diagnostics.mainline
+    step_id: vrd-02
+    consumes: [vr.diagnostic_snapshot, route.selection]
+    produces: [vr.diagnostic_decision]
+    side_channel_reads: [route.selection]
+    side_channel_writes: []
+  - chain_id: vr.online_diagnostics.mainline
+    step_id: vrd-03
+    consumes: [vr.diagnostic_decision]
+    produces: [diagnostic.http_payload]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: vr.hit_log_projection.mainline
+    step_id: vrh-01
+    consumes: [route.selection, metadata.runtime_control]
+    produces: [vr.hit_log_record]
+    side_channel_reads: [route.selection, metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: vr.hit_log_projection.mainline
+    step_id: vrh-02
+    consumes: [vr.hit_log_record]
+    produces: [vr.hit_log_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: vr.hit_log_projection.mainline
+    step_id: vrh-03
+    consumes: [vr.hit_log_record, metadata.runtime_control]
+    produces: [vr.telemetry_projection]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-01
+    consumes: []
+    produces: [runtime.pid_cache]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-02
+    consumes: []
+    produces: [runtime.pid_cache]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-03
+    consumes: []
+    produces: [runtime.stop_intent]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-04
+    consumes: [runtime.stop_intent]
+    produces: [runtime.stop_intent]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-05
+    consumes: []
+    produces: [runtime.admin_restart_request]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-06
+    consumes: [runtime.pid_cache]
+    produces: [runtime.restart_signal]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-07
+    consumes: []
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-08
+    consumes: []
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-09
+    consumes: [runtime.restart_signal]
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-10
+    consumes: [runtime.instance_record]
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-11
+    consumes: [runtime.instance_record]
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-12
+    consumes: [runtime.stop_intent, runtime.instance_record]
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: runtime.lifecycle.mainline
+    step_id: rtl-13
+    consumes: [runtime.instance_record]
+    produces: [runtime.instance_record]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: metadata.center.mainline
+    step_id: mtc-01
+    consumes: [request.protocol_context]
+    produces: [metadata.request_truth]
+    side_channel_reads: []
+    side_channel_writes: [metadata.request_truth]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-02
+    consumes: [metadata.request_truth, continuation.scope_state]
+    produces: [continuation.scope_state]
+    side_channel_reads: [metadata.request_truth, continuation.scope_state]
+    side_channel_writes: [continuation.scope_state]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-03
+    consumes: [metadata.request_truth]
+    produces: [metadata.runtime_control]
+    side_channel_reads: [metadata.request_truth]
+    side_channel_writes: [metadata.runtime_control]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-04
+    consumes: [metadata.runtime_control, route.selection]
+    produces: [provider_runtime.observation]
+    side_channel_reads: [metadata.runtime_control, route.selection]
+    side_channel_writes: [provider_runtime.observation]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-05
+    consumes: [response.provider_raw, provider_runtime.observation, metadata.request_truth]
+    produces: [metadata.response_observation]
+    side_channel_reads: [provider_runtime.observation, metadata.request_truth]
+    side_channel_writes: [metadata.response_observation]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-06
+    consumes: [metadata.response_observation, metadata.runtime_control]
+    produces: [metadata.response_observation]
+    side_channel_reads: [metadata.response_observation, metadata.runtime_control]
+    side_channel_writes: [metadata.response_observation]
+  - chain_id: metadata.center.mainline
+    step_id: mtc-07
+    consumes: [metadata.request_truth, metadata.response_observation]
+    produces: []
+    side_channel_reads: [metadata.request_truth, metadata.response_observation]
+    side_channel_writes: []
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: chat-sse-01
+    consumes: [response.client_payload]
+    produces: [sse.transport_frame]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: chat-sse-02
+    consumes: [response.provider_raw]
+    produces: [response.hub_semantic]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: stopless.session.mainline
+    step_id: stl-01
+    consumes: [response.hub_semantic, metadata.runtime_control]
+    produces: [servertool.followup_state]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [servertool.followup_state]
+  - chain_id: stopless.session.mainline
+    step_id: stl-02
+    consumes: [servertool.followup_state, metadata.runtime_control]
+    produces: [stopless.schema_gate_state, stopless.runtime_snapshot]
+    side_channel_reads: [servertool.followup_state, metadata.runtime_control]
+    side_channel_writes: [stopless.schema_gate_state, stopless.runtime_snapshot]
+  - chain_id: stopless.session.mainline
+    step_id: stl-03
+    consumes: [stopless.schema_gate_state, stopless.runtime_snapshot]
+    produces: [stopless.cli_projection]
+    side_channel_reads: [stopless.schema_gate_state, stopless.runtime_snapshot]
+    side_channel_writes: []
+  - chain_id: stopless.session.mainline
+    step_id: stl-04
+    consumes: [stopless.cli_projection]
+    produces: [stopless.cli_result]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: stopless.session.mainline
+    step_id: stl-05
+    consumes: [stopless.cli_result, stopless.runtime_snapshot, continuation.scope_state]
+    produces: [stopless.runtime_snapshot]
+    side_channel_reads: [stopless.runtime_snapshot, continuation.scope_state]
+    side_channel_writes: [stopless.runtime_snapshot]
+  - chain_id: stopless.session.mainline
+    step_id: stl-06
+    consumes: [request.normal_payload, stopless.cli_result, stopless.runtime_snapshot]
+    produces: [stopless.guidance_rewrite]
+    side_channel_reads: [stopless.runtime_snapshot]
+    side_channel_writes: []
+  - chain_id: stopless.session.mainline
+    step_id: stl-07
+    consumes: [stopless.guidance_rewrite]
+    produces: [stopless.schema_contract]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: stopless.session.mainline
+    step_id: stl-08
+    consumes: [stopless.schema_contract, metadata.runtime_control]
+    produces: [route.selection]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: [route.selection]
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: anthropic-sse-01
+    consumes: [response.client_payload]
+    produces: [sse.protocol_stream_projection, sse.transport_frame]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: anthropic-sse-02
+    consumes: [response.provider_raw]
+    produces: [sse.provider_stream_aggregate, response.hub_semantic]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: gemini-sse-01
+    consumes: [response.client_payload]
+    produces: [sse.protocol_stream_projection, sse.transport_frame]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.chat_stream_projection.mainline
+    step_id: gemini-sse-02
+    consumes: [response.provider_raw]
+    produces: [sse.provider_stream_aggregate, response.hub_semantic]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-01
+    consumes: [response.hub_semantic, servertool.followup_state]
+    produces: [stage_a.servertool_outcome_plan]
+    side_channel_reads: [servertool.followup_state]
+    side_channel_writes: [stage_a.servertool_outcome_plan]
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-02
+    consumes: [request.normal_payload]
+    produces: [stage_a.protocol_canonical]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-03
+    consumes: [response.hub_semantic, continuation.scope_state]
+    produces: [stage_a.continuation_store_state]
+    side_channel_reads: [continuation.scope_state]
+    side_channel_writes: [stage_a.continuation_store_state]
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-04
+    consumes: [request.normal_payload, metadata.runtime_control]
+    produces: [stage_a.req_tool_governance_state]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-05
+    consumes: [response.hub_semantic, metadata.runtime_control]
+    produces: [stage_a.resp_tool_governance_state]
+    side_channel_reads: [metadata.runtime_control]
+    side_channel_writes: []
+  - chain_id: stage_a.p0_rust_migration.mainline
+    step_id: stage-a-p0-06
+    consumes: [request.normal_payload]
+    produces: [stage_a.protocol_canonical]
+    side_channel_reads: []
+    side_channel_writes: []

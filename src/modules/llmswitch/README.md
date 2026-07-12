@@ -10,8 +10,8 @@ semantics belong to Rust/native owners under
 
 - `bridge/*.ts`: thin host IO, native binding, routing, snapshot, SSE, and
   continuation store shells.
-- `bridge/native-exports.ts`: package/dist path resolution and explicit
-  llmswitch-core native binding loading.
+- `bridge/native-exports.ts`: private package/dist path resolution and final
+  llmswitch-core native binding loading for owner-specific host modules.
 
 The broad `bridge.ts` and `bridge/index.ts` barrels are retired. Server/runtime
 callers must import the concrete leaf bridge module they own.
@@ -22,8 +22,8 @@ specifiers because Jest maps them to the canonical TypeScript source.
 
 ## Boundary Rules
 
-- Do call Rust/NAPI through `native-exports.ts` or the existing approved host
-  bridge shell for the feature.
+- Do call Rust/NAPI through the existing approved owner-specific host bridge
+  shell for the feature.
 - Do keep host code limited to IO, native binding calls, HTTP/server adapters,
   and explicit diagnostic writing.
 - Do not restore `importCoreDist`, `requireCoreDist`, engine selection,

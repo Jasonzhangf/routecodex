@@ -1,64 +1,13 @@
 import { extractStatusCodeFromError } from './utils.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
-import { getRouterHotpathJsonBindingSync } from '../../../../modules/llmswitch/bridge/native-exports.js';
+import { isRateLimitLikeErrorNative } from '../../../../modules/llmswitch/bridge/error-execution-decision-host.js';
 
 export {
   extractStatusCodeFromError
 };
 
-const RATE_LIMIT_ERROR_CODE_HINTS = [
-  '429',
-  '1302',
-  'rate_limit',
-  'rate-limit',
-  'too_many_requests',
-  'too-many-requests',
-  'too many requests'
-];
-
-const RATE_LIMIT_MESSAGE_HINTS = [
-  'rate limit',
-  'too many requests',
-  'request limit',
-  'rate limited',
-  'quota exceeded',
-  'slow down',
-  '访问量过大',
-  '速率限制',
-  '请求频率',
-  '请求过于频繁',
-  '频率限制'
-];
-
-function coerceErrorCode(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function withRateLimitNative(message: string, ...codes: Array<string | undefined>): boolean | undefined {
-  try {
-    const binding = getRouterHotpathJsonBindingSync();
-    if (typeof binding.isRateLimitLikeErrorJson === 'function') {
-      const filteredCodes = codes.filter((c): c is string => typeof c === 'string');
-      const raw = binding.isRateLimitLikeErrorJson(JSON.stringify({ message, codes: filteredCodes }));
-      return (JSON.parse(raw) as { result: boolean }).result === true;
-    }
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
 export function isRateLimitLikeError(message: string, ...codes: Array<string | undefined>): boolean {
-  const native = withRateLimitNative(message, ...codes);
-  if (native !== undefined) return native;
-  const loweredMessage = String(message || '').toLowerCase();
-  const normalizedCodes = codes
-    .map((code) => coerceErrorCode(code))
-    .filter((code) => code.length > 0);
-  if (normalizedCodes.some((code) => RATE_LIMIT_ERROR_CODE_HINTS.some((hint) => code.includes(hint)))) {
-    return true;
-  }
-  return RATE_LIMIT_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
+  return isRateLimitLikeErrorNative(message, ...codes);
 }
 
 export function isSseDecodeRateLimitError(error: unknown, status: number | undefined): boolean {

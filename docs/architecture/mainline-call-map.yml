@@ -23,6 +23,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "optional explicit config path plus current host env provider/root overrides"
         semantic_output: "native loader input with cwd/home/exec and RouteCodex/RCC env snapshot"
+        resource_flow:
+          consumes: [config.authoring_surface]
+          produces: [config.authoring_surface]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-load-02
         from_node: ConfigLoad02NativeBridge
@@ -34,6 +39,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "JSON native loader input"
         semantic_output: "NAPI call into Rust config loader with fail-fast error projection"
+        resource_flow:
+          consumes: [config.authoring_surface]
+          produces: [config.authoring_surface]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-load-03
         from_node: ConfigLoad03RustLoader
@@ -45,6 +55,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "host env snapshot and optional explicit path"
         semantic_output: "resolved TOML config path and parsed userConfig object"
+        resource_flow:
+          consumes: [config.authoring_surface]
+          produces: [config.validated_manifest]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-load-04
         from_node: ConfigLoad04UserConfigParsed
@@ -56,6 +71,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "normalized v2 userConfig plus materialized or root-loaded providerConfigs"
         semantic_output: "deterministic RouteCodex runtime manifest and selected routingPolicyGroup"
+        resource_flow:
+          consumes: [config.validated_manifest]
+          produces: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-load-05
         from_node: ConfigLoad05RuntimeManifestCompiled
@@ -67,6 +87,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "normalized userConfig and compiled runtime manifest"
         semantic_output: "LoadedRouteCodexConfig with configPath, materialized userConfig, and providerProfiles"
+        resource_flow:
+          consumes: [config.validated_manifest, config.runtime_projection, config.provider_profile_projection]
+          produces: [config.runtime_projection, config.provider_profile_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-runtime-vr-01
         from_node: ConfigLoad05RuntimeManifestCompiled
@@ -78,6 +103,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "materialized userConfig plus primary routingPolicyGroup"
         semantic_output: "Rust RouteCodexRuntimeManifest with virtualRouterBootstrapInput attached as runtime carrier"
+        resource_flow:
+          consumes: [config.runtime_projection, config.routing_policy_projection]
+          produces: [config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-runtime-vr-02
         from_node: VrConfig01RustBootstrapArtifact
@@ -89,6 +119,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "manifest.virtualRouterBootstrapInput only"
         semantic_output: "VirtualRouterArtifacts.config/runtime produced from Rust artifact"
+        resource_flow:
+          consumes: [config.routing_policy_projection]
+          produces: [config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-runtime-hub-01
         from_node: ConfigLoad05RuntimeManifestCompiled
@@ -100,6 +135,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "router bootstrap input carrying non-enumerable Rust RouteCodexRuntimeManifest"
         semantic_output: "manifest.pipelineRuntimeConfig for HubPipelineConfig"
+        resource_flow:
+          consumes: [config.runtime_projection]
+          produces: [config.runtime_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-runtime-hub-02
         from_node: HubConfig01PipelineRuntimeArtifact
@@ -111,6 +151,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "pipelineRuntimeConfig.routingProviderIds"
         semantic_output: "router-port allowedProviders without reading authoring virtualrouter.routingPolicyGroups"
+        resource_flow:
+          consumes: [config.runtime_projection]
+          produces: [config.provider_profile_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: cfg-runtime-hub-03
         from_node: HubConfig01PipelineRuntimeArtifact
@@ -122,6 +167,11 @@ chains:
         owner_feature_id: config.user_config_materialization
         semantic_input: "pipelineRuntimeConfig.routingTiersByRoute"
         semantic_output: "primary-exhausted/default-pool route tiers without reading authoring virtualrouter.routingPolicyGroups"
+        resource_flow:
+          consumes: [config.runtime_projection, config.routing_policy_projection]
+          produces: [config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
 
   - chain_id: webui.config_editor_surface.mainline
@@ -140,6 +190,11 @@ chains:
         owner_feature_id: webui.config_editor_surface
         semantic_input: "provider card, backup/restore, single-file httpserver.ports[] entry, provider picker, or fwd aggregation edit intent"
         semantic_output: "authenticated daemon admin/config HTTP request intent without provider secrets in client state"
+        resource_flow:
+          consumes: [webui.config_edit_intent]
+          produces: [config.admin_mutation_request]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: wce-02
         from_node: WebuiConfigEditor02AdminApiRequest
@@ -151,6 +206,11 @@ chains:
         owner_feature_id: webui.config_editor_surface
         semantic_input: "admin config mutation request for provider/routing/forwarder editor surface"
         semantic_output: "shared writer/codec-owned user/provider config mutation; fwd selection remains vr.provider_forwarder_runtime"
+        resource_flow:
+          consumes: [config.admin_mutation_request]
+          produces: [config.shared_write_result]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Current admin route owner writes routing/user-config mutations through writeUserConfigFile; future dedicated WebUI config editor APIs must keep this shared writer edge."
 
@@ -170,6 +230,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "canonical provider response after Hub response chat-process parsing"
         semantic_output: "response interception event for normal response, abnormal/error response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls` registered internal servertool call candidate, or no-op"
+        resource_flow:
+          consumes: [response.hub_semantic, metadata.runtime_control]
+          produces: [servertool.followup_state]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Anchored by Rust Hub response governance calling the stopless response hook skeleton before continuation save, outbound mapping, or SSE projection."
       - step_id: sth-resp-02
@@ -182,6 +247,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "response interception event plus skeleton-selected schema source: assistant text/fence for `finish_reason=stop`, or registered internal servertool arguments for `finish_reason=tool_calls` such as `reasoningStop.arguments`"
         semantic_output: "single schema validation event covering valid terminal, non-terminal/still-running, empty schema/no_schema, invalid schema, malformed args, already-terminal cases, and client-projection-required cases"
+        resource_flow:
+          consumes: [servertool.followup_state, response.hub_semantic]
+          produces: [servertool.followup_state]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton; internal `reasoningStop`/stop schema judgment happens before outbound projection."
       - step_id: sth-resp-03
@@ -194,6 +264,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "schema validation pass/deny/error event"
         semantic_output: "terminal-stop summary projection when schema passes, or client-visible shell `exec_command(routecodex hook run reasoningStop ...)` projection plan when feedback/client execution is required"
+        resource_flow:
+          consumes: [servertool.followup_state]
+          produces: [response.hub_semantic, servertool.followup_state]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Anchored by Rust stopless runtime planning in the response hook skeleton; business execution remains a client-visible CLI projection rather than server-side tool execution."
       - step_id: sth-resp-06
@@ -206,6 +281,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "post-intercept governed response candidate plus hook events; server-side runtime action bridge retired"
         semantic_output: "final governed response truth with internal tool stripped and client projection handoff selected"
+        resource_flow:
+          consumes: [response.hub_semantic, servertool.followup_state]
+          produces: [response.hub_semantic]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: []
         status: anchored
         note: "Anchored by Rust projection finalization for non-terminal stopless hook results; internal tool semantics are converted to the governed client shell projection before outbound mapping."
       - step_id: sth-resp-07
@@ -218,6 +298,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "final servertool governed response truth"
         semantic_output: "normal Hub response outbound client semantic"
+        resource_flow:
+          consumes: [response.hub_semantic, servertool.followup_state]
+          produces: [response.client_payload]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: []
         status: anchored
         note: "Anchored by Rust response finalize/remap after the stopless hook payload is selected; servertool returns to the normal Hub response outbound chain."
       - step_id: sth-cli-01
@@ -230,6 +315,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "client-visible exec_command projection plan"
         semantic_output: "client executes `routecodex hook run <toolName> --input-json <json>` and returns ordinary tool result"
+        resource_flow:
+          consumes: [servertool.followup_state]
+          produces: [servertool.followup_state]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Anchored by Rust CLI projection builder emitting the client-visible `routecodex hook run reasoningStop ...` command; the hook still does not execute client CLI."
       - step_id: sth-req-01
@@ -242,6 +332,11 @@ chains:
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "next request containing ordinary tool result / CLI stdout"
         semantic_output: "parsed public hook result event, including restoration of shell-executed stop hook results back to model-visible `reasoningStop -> function_call_output`, or no-op when no servertool result exists"
+        resource_flow:
+          consumes: [request.normal_payload, servertool.followup_state]
+          produces: [servertool.followup_state]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Anchored by Rust inbound tool-call normalization converting shell-projected stop hook calls/results back into model-visible `reasoningStop` function-call semantics before request governance."
       - step_id: sth-req-02
@@ -254,6 +349,11 @@ chains:
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "parsed hook result plus schema guidance/feedback"
         semantic_output: "optional model-visible text rewrite or no-op event"
+        resource_flow:
+          consumes: [servertool.followup_state]
+          produces: [request.normal_payload]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: []
         status: anchored
         note: "Anchored by Rust guidance text construction from the parsed stopless CLI result; malformed or non-terminal schema feedback becomes model-visible corrective guidance without replaying raw shell history."
       - step_id: sth-req-03
@@ -266,6 +366,11 @@ chains:
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "request semantic after optional text rewrite"
         semantic_output: "request tool declarations, stop hook contract, and tool constraints injected for servertool-managed turns"
+        resource_flow:
+          consumes: [request.normal_payload, servertool.followup_state]
+          produces: [request.normal_payload]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: []
         status: anchored
         note: "Anchored by Rust req_chatprocess governance injecting the model-facing `reasoningStop` tool and stopless system contract for servertool-managed turns."
       - step_id: sth-req-04
@@ -278,6 +383,11 @@ chains:
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "request semantic with parsed result/rewrite/tool injection events"
         semantic_output: "final request semantic ready for HubReqChatProcess03Governed"
+        resource_flow:
+          consumes: [request.normal_payload]
+          produces: [request.normal_payload]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Anchored by Rust req_chatprocess governance building the processed request before it re-enters the typed HubReqChatProcess03Governed entrypoint."
       - step_id: sth-req-05
@@ -290,6 +400,11 @@ chains:
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "final servertool-governed request semantic"
         semantic_output: "normal Hub request chat-process governed semantic"
+        resource_flow:
+          consumes: [request.normal_payload]
+          produces: [request.normal_payload]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Anchored by the Rust request-side governance boundary re-entering the normal Hub request chain."
 
@@ -305,10 +420,15 @@ chains:
         caller_symbol: prepareResponsesHandlerEntryForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: planResponsesHandlerEntry
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: server.responses_request_handler_bridge_surface
         semantic_input: "raw /v1/responses payload + entry endpoint + path response id"
         semantic_output: "native-planned handler entry mode and normalized payload"
+        resource_flow:
+          consumes: [request.protocol_context]
+          produces: [request.normal_payload, metadata.request_truth]
+          side_channel_reads: []
+          side_channel_writes: [metadata.request_truth]
         status: anchored
       - step_id: req-01
         from_node: ServerReqInbound01ClientRaw
@@ -316,21 +436,31 @@ chains:
         caller_symbol: buildResponsesRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: captureReqInboundResponsesContextSnapshotJson
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.req_inbound_responses_context_capture
         semantic_input: "entry protocol request + current request metadata scope"
         semantic_output: "request-side normalized responses context snapshot"
+        resource_flow:
+          consumes: [request.protocol_context, request.normal_payload]
+          produces: [metadata.request_truth]
+          side_channel_reads: []
+          side_channel_writes: [metadata.request_truth]
         status: anchored
       - step_id: req-02
         from_node: HubReqInbound02Standardized
         to_node: HubReqChatProcess03Governed
         caller_symbol: captureReqInboundResponsesContextSnapshotJson
-        caller_file: src/modules/llmswitch/bridge/native-exports.ts
+        caller_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         callee_symbol: capture_req_inbound_responses_context_snapshot_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
         owner_feature_id: hub.req_inbound_responses_context_capture
         semantic_input: "normalized raw request envelope"
         semantic_output: "Hub req-inbound context capture truth for later governed request build"
+        resource_flow:
+          consumes: [request.normal_payload, metadata.request_truth]
+          produces: [request.normal_payload]
+          side_channel_reads: [metadata.request_truth]
+          side_channel_writes: []
         status: anchored
       - step_id: req-03
         from_node: HubReqChatProcess03Governed
@@ -342,6 +472,11 @@ chains:
         owner_feature_id: hub.route_selection_bridge
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
+        resource_flow:
+          consumes: [request.normal_payload, metadata.runtime_control]
+          produces: [route.selection]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [route.selection]
         status: anchored
         note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics. VR route reads now come through `vr.metadata_center_surface` backed by the request-scoped `MetadataCenter` snapshot; `__rt` and flat metadata mirrors must not participate in route selection."
       - step_id: req-04
@@ -354,6 +489,11 @@ chains:
         owner_feature_id: hub.req_outbound_provider_semantic
         semantic_input: "virtual-router target selection and route decision"
         semantic_output: "provider-semantic outbound payload aligned to selected target"
+        resource_flow:
+          consumes: [request.normal_payload, route.selection]
+          produces: [request.provider_semantic]
+          side_channel_reads: [route.selection]
+          side_channel_writes: []
         status: anchored
         note: "Req-04 is now anchored at the Rust typed entrypoint: `execute(...)` passes `VrRoute04SelectedTarget` directly into `run_hub_req_outbound_05_provider_semantic_entrypoint(...)`, sealing the selected target into provider-neutral outbound semantics before req-05 compat."
       - step_id: req-05
@@ -366,6 +506,11 @@ chains:
         owner_feature_id: responses.request_compat_normalization
         semantic_input: "provider-neutral outbound semantic"
         semantic_output: "provider-compatible wire-ready semantic payload"
+        resource_flow:
+          consumes: [request.provider_semantic, route.selection]
+          produces: [provider.wire_payload]
+          side_channel_reads: [route.selection]
+          side_channel_writes: []
         status: anchored
         note: "Req-05 is anchored inside the Rust HubPipeline engine: `execute(...)` invokes `run_req_outbound_stage3_compat(...)` directly, and the JSON NAPI entrypoint is only test/script evidence. The retired TS wrapper `native-hub-pipeline-req-outbound-semantics.ts` must stay physically deleted. Locked by `verify:responses-request-compat-rust-only` and `build:base`."
 
@@ -385,6 +530,11 @@ chains:
         owner_feature_id: responses.direct_tool_shape_contract
         semantic_input: "current request body object plus request-scoped runtime control metadata"
         semantic_output: "Virtual Router selected target for direct provider dispatch"
+        resource_flow:
+          consumes: [request.normal_payload, metadata.runtime_control]
+          produces: [route.selection]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [route.selection]
         status: anchored
         note: "The server direct path may require that the body is an object, but it must not call Responses provider-wire validators, sanitize function_call_output history, or rebuild from raw metadata before VR selection."
       - step_id: rdp-02
@@ -397,6 +547,11 @@ chains:
         owner_feature_id: responses.direct_tool_shape_contract
         semantic_input: "selected direct target plus the same current request body object"
         semantic_output: "provider direct send payload with direct runtime metadata carrier only"
+        resource_flow:
+          consumes: [request.normal_payload, route.selection]
+          produces: [provider.wire_payload]
+          side_channel_reads: [metadata.runtime_control, route.selection]
+          side_channel_writes: []
         status: anchored
         note: "Provider/runtime owns any provider-specific rejection. Direct passthrough must not force relay or fail-fast because of historical Responses tool-output shape."
 
@@ -416,6 +571,11 @@ chains:
         owner_feature_id: hub.response_provider_sse_materialization
         semantic_input: "provider canonical/raw response payload after entry protocol + VR target have already fixed the response chain"
         semantic_output: "typed Hub resp-inbound parsed payload"
+        resource_flow:
+          consumes: [response.provider_raw]
+          produces: [response.hub_semantic]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [metadata.response_observation]
         status: anchored
       - step_id: resp-02
         from_node: HubRespInbound02Parsed
@@ -427,6 +587,11 @@ chains:
         owner_feature_id: hub.response_responses_chat_projection
         semantic_input: "typed Hub resp-inbound payload + governed response payload"
         semantic_output: "typed Hub resp-chatprocess governed payload"
+        resource_flow:
+          consumes: [response.hub_semantic]
+          produces: [response.hub_semantic]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
         note: "Chat Process owns response interception, schema/tool normalization, and canonical continuation save preconditions. Bridge/outbound mapping begins only after this node completes."
       - step_id: resp-03
@@ -435,10 +600,15 @@ chains:
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
         caller_file: src/server/handlers/handler-response-utils.ts
         callee_symbol: projectResponsesClientPayloadForClientNative
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-client-projection-host.ts
         owner_feature_id: hub.response_responses_client_projection
         semantic_input: "post-governed Hub response truth + entry endpoint + request context"
         semantic_output: "client-visible responses payload after native projection"
+        resource_flow:
+          consumes: [response.hub_semantic]
+          produces: [response.client_payload]
+          side_channel_reads: [metadata.request_truth, metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
         note: "Projection only. This edge must not own schema interception, stopless tool injection, or continuation restore/save."
       - step_id: resp-04
@@ -451,6 +621,11 @@ chains:
         owner_feature_id: server.responses_response_handler_bridge_surface
         semantic_input: "client semantic body/probe"
         semantic_output: "http json/sse frame"
+        resource_flow:
+          consumes: [response.client_payload]
+          produces: [sse.transport_frame]
+          side_channel_reads: [metadata.response_observation]
+          side_channel_writes: []
         status: anchored
         note: "Transport-only boundary: SSE/JSON frame writers must not perform stopless schema judgment, continuation save/restore, tool list injection, hook restore, or semantic repair. Any such fix belongs to Hub response governance, continuation owner, or request hook owner before this edge."
 
@@ -466,10 +641,15 @@ chains:
         caller_symbol: prepareResponsesHandlerEntryForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: planResponsesContinuationRequestAction
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
         semantic_output: "Rust-owned continuation action plan resolves direct vs relay owner, legal submit/materialize action, client error, or no-op"
+        resource_flow:
+          consumes: [request.normal_payload, metadata.request_truth]
+          produces: [continuation.scope_state]
+          side_channel_reads: [metadata.request_truth]
+          side_channel_writes: [continuation.scope_state]
         status: anchored
         note: "Request-visible evidence is the only legal starting point. `prepareResponsesHandlerEntryForHttp` performs host IO lookup, then delegates continuation owner/action semantics to Rust `planResponsesContinuationRequestAction`; session/scope-only hits remain forbidden. Non-responses protocols skip this block."
       - step_id: rct-02
@@ -478,10 +658,15 @@ chains:
         caller_symbol: buildResponsesRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: planResponsesRequestContext
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "legal continuation candidate plus request metadata scope"
         semantic_output: "canonical direct ownership metadata or relay materialized request truth"
+        resource_flow:
+          consumes: [continuation.scope_state, metadata.request_truth]
+          produces: [continuation.scope_state]
+          side_channel_reads: [continuation.scope_state, metadata.request_truth]
+          side_channel_writes: [continuation.scope_state]
         status: anchored
         note: "Anchored by Rust request-context restore planner. TS `buildResponsesRequestContextForHttp` now passes payload/resumeMeta to native and only performs HTTP/session IO plus the follow-on native capture call for the planned canonical request payload."
       - step_id: rct-03
@@ -490,22 +675,32 @@ chains:
         caller_symbol: buildCapturedRelayResumeRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: captureReqInboundResponsesContextSnapshotJson
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "canonical restored current-turn request truth including payload/input/tools and request-scoped continuation metadata"
         semantic_output: "request truth after current-turn client exec_command result has been restored back to model-visible reasoningStop semantics/guidance"
+        resource_flow:
+          consumes: [request.normal_payload, continuation.scope_state]
+          produces: [request.normal_payload, servertool.followup_state]
+          side_channel_reads: [continuation.scope_state]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Relay materialization now anchors request-side restore before hook restore. Tests must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
       - step_id: rct-04
         from_node: ChatProcReqContinuation04HookRestored
         to_node: ChatProcReqContinuation05Governed
         caller_symbol: captureReqInboundResponsesContextSnapshotJson
-        caller_file: src/modules/llmswitch/bridge/native-exports.ts
+        caller_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         callee_symbol: capture_req_inbound_responses_context_snapshot_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "restored current-turn request semantic"
         semantic_output: "normal governed Hub request path resumes"
+        resource_flow:
+          consumes: [request.normal_payload, servertool.followup_state]
+          produces: [request.normal_payload]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: []
         status: anchored
       - step_id: rct-05
         from_node: ChatProcReqContinuation05Governed
@@ -513,10 +708,15 @@ chains:
         caller_symbol: prepareResponsesJsonClientDispatchPlanForHttp
         caller_file: src/server/handlers/handler-response-utils.ts
         callee_symbol: planResponsesJsonClientDispatchNative
-        callee_file: src/modules/llmswitch/bridge/native-exports.ts
+        callee_file: src/modules/llmswitch/bridge/responses-client-projection-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "governed request yields response-side truth plus finish_reason stop schema or reasoningStop tool-call schema"
         semantic_output: "finalized response-side governed truth after schema judgment and client-visible stopless projection, before persistence"
+        resource_flow:
+          consumes: [request.normal_payload, response.hub_semantic, continuation.scope_state]
+          produces: [response.hub_semantic]
+          side_channel_reads: [continuation.scope_state]
+          side_channel_writes: []
         status: anchored
         note: "JSON client dispatch action is now Rust-owned: TS executes only `direct_passthrough` or `project_client_payload` from `planResponsesJsonClientDispatchNative`; response projection itself remains native-owned through `projectResponsesClientPayloadForClientNative`. Tests assert schema source, schema judgment, client-visible exec_command projection fields, and that SSE remains transport-only."
       - step_id: rct-06
@@ -529,6 +729,11 @@ chains:
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "finalized client-visible response truth after response governance/projection, including response.id, required_action, projected tool calls, and merged tool definitions"
         semantic_output: "canonical continuation truth saved for the next legal restore/materialize"
+        resource_flow:
+          consumes: [response.hub_semantic, metadata.request_truth]
+          produces: [continuation.scope_state]
+          side_channel_reads: [metadata.request_truth]
+          side_channel_writes: [continuation.scope_state]
         status: anchored
         note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; SSE/handler closeout must not revive save logic."
       - step_id: rct-07
@@ -541,6 +746,11 @@ chains:
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "saved canonical continuation truth plus request-scoped metadata families"
         semantic_output: "closeout release of legal minimum retained state"
+        resource_flow:
+          consumes: [continuation.scope_state, metadata.response_observation]
+          produces: []
+          side_channel_reads: [continuation.scope_state, metadata.response_observation]
+          side_channel_writes: []
         status: anchored
 
   - chain_id: debug.unified_surface.mainline
@@ -559,6 +769,11 @@ chains:
         owner_feature_id: debug.unified_surface
         semantic_input: "debug surface request entering the unified debug owner shell"
         semantic_output: "debug toolkit with diag/snapshot/logger/harness replay surfaces unified under src/debug"
+        resource_flow:
+          consumes: [debug.artifact]
+          produces: [debug.artifact]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "The unified debug entry builds the canonical toolkit facade and routes all migrated debug sub-surfaces through the single debug owner module."
 
@@ -578,6 +793,11 @@ chains:
         owner_feature_id: debug.pipeline_dry_run_loop
         semantic_input: "loopback HTTP request with x-routecodex-dry-run provider-request header"
         semantic_output: "non-enumerable internal dry-run control carrier or explicit local-only rejection"
+        resource_flow:
+          consumes: [request.protocol_context]
+          produces: [dryrun.provider_request_probe]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: ddr-02
         from_node: DebugDryRun02InternalControlCarrier
@@ -589,6 +809,11 @@ chains:
         owner_feature_id: debug.pipeline_dry_run_loop
         semantic_input: "final PreparedHttpRequest after provider wire body/header/url construction and provider-request snapshot write"
         semantic_output: "diagnostic provider-request JSON response; upstream HTTP transport not called"
+        resource_flow:
+          consumes: [provider.wire_payload, dryrun.provider_request_probe]
+          produces: [dryrun.provider_request_probe, snapshot.debug_sample]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
       - step_id: ddr-03
         from_node: DebugDryRun02InternalControlCarrier
@@ -600,6 +825,11 @@ chains:
         owner_feature_id: debug.pipeline_dry_run_loop
         semantic_input: "codex-samples client-request/http-request snapshot plus --dry-run provider-request"
         semantic_output: "same live API entrypoint request with local dry-run header and saved dry-run.provider-request.json"
+        resource_flow:
+          consumes: [snapshot.debug_sample, dryrun.provider_request_probe]
+          produces: [snapshot.debug_sample]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: ddr-04
         from_node: DebugDryRun04CapturedProviderResponse
@@ -611,6 +841,11 @@ chains:
         owner_feature_id: debug.pipeline_dry_run_loop
         semantic_input: "codex-samples provider-response*.json with inferred or explicit entry endpoint/provider protocol"
         semantic_output: "existing provider response converter output saved as response-dry-run.json"
+        resource_flow:
+          consumes: [response.provider_raw, snapshot.debug_sample]
+          produces: [response.client_payload]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
 
   - chain_id: internal_error_numbering.mainline
@@ -629,6 +864,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "RouteCodex-owned internal failure origin plus requested internal debug code"
         semantic_output: "registry-owned module block for the internal debug code"
+        resource_flow:
+          consumes: [debug.artifact]
+          produces: [debug.internal_error_envelope]
+          side_channel_reads: []
+          side_channel_writes: [debug.internal_error_envelope]
         status: anchored
       - step_id: ien-02
         from_node: IntErrNum02ModuleBlockResolved
@@ -640,6 +880,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "module block plus internal debug code"
         semantic_output: "validated registry entry with lane, node, owner feature, and subcode semantics"
+        resource_flow:
+          consumes: [debug.internal_error_envelope]
+          produces: [debug.internal_error_envelope]
+          side_channel_reads: [debug.internal_error_envelope]
+          side_channel_writes: [debug.internal_error_envelope]
         status: anchored
       - step_id: ien-03
         from_node: IntErrNum03SubcodeAssigned
@@ -651,6 +896,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "validated registry entry plus internal failure context"
         semantic_output: "InternalDebugErrorEnvelope side-channel object"
+        resource_flow:
+          consumes: [debug.internal_error_envelope]
+          produces: [debug.internal_error_envelope]
+          side_channel_reads: [debug.internal_error_envelope]
+          side_channel_writes: [debug.internal_error_envelope]
         status: anchored
       - step_id: ien-04
         from_node: IntErrNum04EnvelopeBuilt
@@ -662,6 +912,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "InternalDebugErrorEnvelope"
         semantic_output: "debug artifact projection carrying internalError side-channel"
+        resource_flow:
+          consumes: [debug.internal_error_envelope]
+          produces: [debug.artifact]
+          side_channel_reads: [debug.internal_error_envelope]
+          side_channel_writes: []
         status: anchored
       - step_id: ien-05
         from_node: IntErrNum05DebugArtifactProjected
@@ -673,6 +928,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "optional provider/upstream/client/transport external error relation"
         semantic_output: "ExternalErrorLink correlation without converting external identity into internal code"
+        resource_flow:
+          consumes: [debug.artifact]
+          produces: [debug.external_error_link]
+          side_channel_reads: []
+          side_channel_writes: [debug.external_error_link]
         status: anchored
       - step_id: ien-06
         from_node: IntErrNum06ExternalLinked
@@ -684,6 +944,11 @@ chains:
         owner_feature_id: debug.internal_error_numbering
         semantic_input: "internal debug artifact projection and optional external link"
         semantic_output: "proof boundary that default client/provider payloads must not carry InternalDebugErrorEnvelope"
+        resource_flow:
+          consumes: [debug.artifact, debug.external_error_link]
+          produces: [debug.client_boundary_proof]
+          side_channel_reads: [debug.external_error_link]
+          side_channel_writes: [debug.client_boundary_proof]
         status: anchored
 
   - chain_id: error.mainline
@@ -702,6 +967,11 @@ chains:
         owner_feature_id: error.pipeline_contract
         semantic_input: "provider/local thrown error + stage scope"
         semantic_output: "host-captured provider error event"
+        resource_flow:
+          consumes: [provider_runtime.observation]
+          produces: [error.chain]
+          side_channel_reads: []
+          side_channel_writes: [error.chain]
         status: anchored
       - step_id: err-02
         from_node: ErrorErr02HostCaptured
@@ -713,6 +983,11 @@ chains:
         owner_feature_id: error.provider_failure_policy
         semantic_input: "host-captured provider error event"
         semantic_output: "classified provider/server failure with availability-vs-session boundary"
+        resource_flow:
+          consumes: [error.chain]
+          produces: [error.chain]
+          side_channel_reads: [error.chain, provider_runtime.observation]
+          side_channel_writes: [error.chain]
         status: anchored
       - step_id: err-03
         from_node: ErrorErr03RuntimeClassified
@@ -724,6 +999,11 @@ chains:
         owner_feature_id: error.pipeline_contract
         semantic_input: "classified provider/server failure"
         semantic_output: "router-policy-applied error event with runtime scope and availability policy input"
+        resource_flow:
+          consumes: [error.chain, provider_runtime.observation]
+          produces: [error.chain, provider_runtime.observation]
+          side_channel_reads: [error.chain, provider_runtime.observation]
+          side_channel_writes: [error.chain, provider_runtime.observation]
         status: anchored
       - step_id: err-04
         from_node: ErrorErr04RouterPolicyApplied
@@ -735,6 +1015,11 @@ chains:
         owner_feature_id: error.execution_decision_consumer
         semantic_input: "router-policy-applied error event + retry/error snapshot"
         semantic_output: "executor-visible provider failover/default-pool/client-projection decision; session_storm may not intercept provider availability truth"
+        resource_flow:
+          consumes: [error.chain, provider_runtime.observation]
+          produces: [error.chain]
+          side_channel_reads: [error.chain, provider_runtime.observation]
+          side_channel_writes: [error.chain]
         status: anchored
       - step_id: err-05
         from_node: ErrorErr05ExecutionDecision
@@ -746,6 +1031,11 @@ chains:
         owner_feature_id: error.client_projection
         semantic_input: "execution decision result"
         semantic_output: "client-visible http error projection"
+        resource_flow:
+          consumes: [error.chain]
+          produces: [response.client_payload]
+          side_channel_reads: [error.chain]
+          side_channel_writes: []
         status: anchored
 
   - chain_id: vr.route_availability.mainline
@@ -764,6 +1054,11 @@ chains:
         owner_feature_id: vr.provider_forwarder_runtime
         semantic_input: "ordinary route-pool targets plus request-scoped excluded keys, health/quota state, protocol/multimodal constraints"
         semantic_output: "route-local filtered pool plus forwarder empty-vs-real-target availability result"
+        resource_flow:
+          consumes: [route.selection, provider_runtime.observation]
+          produces: [route.selection]
+          side_channel_reads: [route.selection, provider_runtime.observation]
+          side_channel_writes: [route.selection]
         status: anchored
       - step_id: vra-02
         from_node: VrAvail02PoolFiltered
@@ -775,6 +1070,11 @@ chains:
         owner_feature_id: vr.route_availability_floor
         semantic_input: "filtered ordinary route pool, unavailable-route-pool details, candidate provider count, and recoverable cooldown hints"
         semantic_output: "explicit route-availability floor truth: route exhausted vs default-pool still available"
+        resource_flow:
+          consumes: [route.selection, provider_runtime.observation]
+          produces: [provider_runtime.observation]
+          side_channel_reads: [route.selection, provider_runtime.observation]
+          side_channel_writes: [provider_runtime.observation]
         status: anchored
       - step_id: vra-03
         from_node: VrAvail03DefaultFloorEvaluated
@@ -786,6 +1086,11 @@ chains:
         owner_feature_id: virtual_router.primary_exhausted_to_default_pool
         semantic_input: "primary exhausted route name, exhausted targets, route-scoped tiers, and known targets"
         semantic_output: "Rust-owned declarative default-pool plan only; no host-synthesized fallback chain"
+        resource_flow:
+          consumes: [route.selection, provider_runtime.observation]
+          produces: [route.selection]
+          side_channel_reads: [route.selection, provider_runtime.observation]
+          side_channel_writes: [route.selection]
         status: anchored
       - step_id: vra-04
         from_node: VrAvail04PrimaryExhaustedPlanned
@@ -797,6 +1102,11 @@ chains:
         owner_feature_id: vr.route_availability_floor
         semantic_input: "route name, route/default tiers, current route pool, provider key, and current request excluded-provider set"
         semantic_output: "Rust-owned ErrorErr05 availability decision: remaining route candidates, defaultPoolAvailable, routePoolAuthoritative, verifiedLastProvider, and mayProject"
+        resource_flow:
+          consumes: [route.selection, provider_runtime.observation]
+          produces: [error.chain]
+          side_channel_reads: [route.selection, provider_runtime.observation]
+          side_channel_writes: [error.chain]
         status: anchored
         note: "TS is a consumer only on this edge. It invokes the Rust native decision contract and must not infer global no-provider from forwarder empty or ordinary route exhaustion while a default-pool last provider remains."
 
@@ -816,6 +1126,11 @@ chains:
         owner_feature_id: vr.online_diagnostics
         semantic_input: "current Rust VR routing, health, forwarder, and request metadata snapshot"
         semantic_output: "read-only diagnostic input and route-state snapshot without host-side recomputation"
+        resource_flow:
+          consumes: [route.selection, provider_runtime.observation]
+          produces: [vr.diagnostic_snapshot]
+          side_channel_reads: [route.selection, provider_runtime.observation]
+          side_channel_writes: []
         status: anchored
       - step_id: vrd-02
         from_node: VrDiag02DryRunInput
@@ -827,6 +1142,11 @@ chains:
         owner_feature_id: vr.online_diagnostics
         semantic_input: "diagnostic request sample plus metadataCenterSnapshot"
         semantic_output: "selected route/provider or structured provider-unavailable explanation from Rust VR truth"
+        resource_flow:
+          consumes: [vr.diagnostic_snapshot, route.selection]
+          produces: [vr.diagnostic_decision]
+          side_channel_reads: [route.selection]
+          side_channel_writes: []
         status: anchored
       - step_id: vrd-03
         from_node: VrDiag03DryRunDecision
@@ -838,6 +1158,11 @@ chains:
         owner_feature_id: vr.online_diagnostics
         semantic_input: "Rust-produced diagnostic JSON"
         semantic_output: "HTTP/CLI projected diagnostic JSON; no TS route/health/default-floor recomputation"
+        resource_flow:
+          consumes: [vr.diagnostic_decision]
+          produces: [diagnostic.http_payload]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
 
   - chain_id: vr.hit_log_projection.mainline
@@ -856,6 +1181,11 @@ chains:
         owner_feature_id: vr.route_host_effects
         semantic_input: "Rust VR target/decision plus Rust-planned host effect context"
         semantic_output: "native host-effects finalization emits marker parse logs and returns optional formatted hit-log line without TS request-id/session/label decisions"
+        resource_flow:
+          consumes: [route.selection, metadata.runtime_control]
+          produces: [vr.hit_log_record]
+          side_channel_reads: [route.selection, metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
       - step_id: vrh-02
         from_node: VrHitLog02NativeProjection
@@ -867,6 +1197,11 @@ chains:
         owner_feature_id: vr.route_host_effects
         semantic_input: "VirtualRouterHitRecord plus omit config"
         semantic_output: "Rust-owned diagnostic log line; TS host only writes the returned string to console"
+        resource_flow:
+          consumes: [vr.hit_log_record]
+          produces: [vr.hit_log_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: vrh-03
         from_node: VrHitLog02NativeProjection
@@ -878,6 +1213,11 @@ chains:
         owner_feature_id: vr.hit_log_projection
         semantic_input: "VirtualRouterHitRecord plus request/entry metadata"
         semantic_output: "Rust-owned telemetry event projection for stats-center consumers"
+        resource_flow:
+          consumes: [vr.hit_log_record, metadata.runtime_control]
+          produces: [vr.telemetry_projection]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
         note: "Hit-log projection is diagnostics only; it must not reselect routes, mutate provider payload, or implement retry/reroute policy."
 
@@ -897,6 +1237,11 @@ chains:
         owner_feature_id: runtime.lifecycle.pid_cache
         semantic_input: "server port + pid number"
         semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        resource_flow:
+          consumes: []
+          produces: [runtime.pid_cache]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-02
         from_node: ServerStartCommand
@@ -908,6 +1253,11 @@ chains:
         owner_feature_id: runtime.lifecycle.pid_cache
         semantic_input: "server port + pid number"
         semantic_output: "pid.cache JSON written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        resource_flow:
+          consumes: []
+          produces: [runtime.pid_cache]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-03
         from_node: ServerStopCommand
@@ -919,6 +1269,11 @@ chains:
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port + stop reason + timestamp"
         semantic_output: "stop-intent.json written under <rccUserDir>/state/runtime-lifecycle/ports/<port>/"
+        resource_flow:
+          consumes: []
+          produces: [runtime.stop_intent]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-04
         from_node: ServerStartCommand
@@ -930,6 +1285,11 @@ chains:
         owner_feature_id: runtime.lifecycle.stop_intent
         semantic_input: "port context"
         semantic_output: "stop-intent record if fresh TTL-valid intent exists, otherwise null"
+        resource_flow:
+          consumes: [runtime.stop_intent]
+          produces: [runtime.stop_intent]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-05
         from_node: ServerRestartCommand
@@ -941,6 +1301,11 @@ chains:
         owner_feature_id: runtime.lifecycle.restart_command
         semantic_input: "target host/port plus configured restart API key when HTTP restart transport is selected"
         semantic_output: "POST /daemon/restart-process asks the existing RouteCodex process to SIGUSR2 itself; no detached start --restart takeover"
+        resource_flow:
+          consumes: []
+          produces: [runtime.admin_restart_request]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-06
         from_node: ServerRestartCommand
@@ -952,6 +1317,11 @@ chains:
         owner_feature_id: runtime.lifecycle.restart_command
         semantic_input: "target pid hints from listener discovery plus SIGUSR2"
         semantic_output: "existing RouteCodex child receives SIGUSR2; managed start parent restarts the child inside the original session"
+        resource_flow:
+          consumes: [runtime.pid_cache]
+          produces: [runtime.restart_signal]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-07
         from_node: ServerStartCommand
@@ -963,6 +1333,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope + status=declared"
         semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (direct server spawn)"
+        resource_flow:
+          consumes: []
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-08
         from_node: DaemonSupervisorLoop
@@ -974,6 +1349,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
         semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (daemon supervisor first spawn)"
+        resource_flow:
+          consumes: []
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-09
         from_node: DaemonRestartLoop
@@ -985,6 +1365,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + host + command + configPath + ownerScope=cli.start.daemon + status=declared"
         semantic_output: "instance.json under <rccUserDir>/state/runtime-lifecycle/ports/<port>/ (managed restart child)"
+        resource_flow:
+          consumes: [runtime.restart_signal]
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-10
         from_node: ServerStartCommand
@@ -996,6 +1381,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=healthy"
         semantic_output: "instance.json status promoted to healthy after restart probe passes"
+        resource_flow:
+          consumes: [runtime.instance_record]
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-11
         from_node: StartShutdownHandler
@@ -1007,6 +1397,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=shutdown-intent"
         semantic_output: "instance.json status promoted to shutdown-intent before HTTP shutdown request"
+        resource_flow:
+          consumes: [runtime.instance_record]
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-12
         from_node: ServerStopCommand
@@ -1018,6 +1413,11 @@ chains:
         owner_feature_id: runtime.lifecycle.instance_registry
         semantic_input: "port + status=shutdown-intent + notes.source=cli.stop"
         semantic_output: "instance.json status promoted to shutdown-intent on stop request"
+        resource_flow:
+          consumes: [runtime.stop_intent, runtime.instance_record]
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: rtl-13
         from_node: ServerStartCommand
@@ -1029,6 +1429,11 @@ chains:
         owner_feature_id: runtime.lifecycle.start_command
         semantic_input: "explicit --restart start request plus resolved port group and listener/health observations"
         semantic_output: "existing runtime is refused before stop-intent or /shutdown; stopped target may proceed to start"
+        resource_flow:
+          consumes: [runtime.instance_record]
+          produces: [runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
 
   - chain_id: stopless.session.mainline
@@ -1047,6 +1452,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "HubRespChatProcess03Governed stop response + requestId + MetadataCenter snapshot carrying requestTruth/session scope and runtime_control.stopless"
         semantic_output: "stop schema gate decision and stopless loop state candidate"
+        resource_flow:
+          consumes: [response.hub_semantic, metadata.runtime_control]
+          produces: [servertool.followup_state]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [servertool.followup_state]
         status: anchored
         note: "Response-side Chat Process exit stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
       - step_id: stl-02
@@ -1059,6 +1469,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "engine execution plus current request-truth session id and MetadataCenter runtime_control.stopless control fields"
         semantic_output: "Rust-built stopless execution control plus orchestration plan; no TS session/context composition, no adapterContext carrier, and no persisted/tmux/conversation fallback"
+        resource_flow:
+          consumes: [servertool.followup_state, metadata.runtime_control]
+          produces: [stopless.schema_gate_state, stopless.runtime_snapshot]
+          side_channel_reads: [servertool.followup_state, metadata.runtime_control]
+          side_channel_writes: [stopless.schema_gate_state, stopless.runtime_snapshot]
         status: anchored
       - step_id: stl-03
         from_node: StoplessState03RuntimeSnapshotResolved
@@ -1070,6 +1485,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "concise stopless command payload: flowId/repeatCount/maxRepeats/triggerHint plus optional schemaFeedback{reasonCode,missingFields}"
         semantic_output: "client-visible exec_command using public alias reasoningStop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
+        resource_flow:
+          consumes: [stopless.schema_gate_state, stopless.runtime_snapshot]
+          produces: [stopless.cli_projection]
+          side_channel_reads: [stopless.schema_gate_state, stopless.runtime_snapshot]
+          side_channel_writes: []
         status: anchored
       - step_id: stl-04
         from_node: StoplessCli04ProjectionPlanned
@@ -1081,6 +1501,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "exec_command shell string with status-only input and repeat flags"
         semantic_output: "servertool CLI stdout JSON containing continuationPrompt, schemaGuidance, structured schemaFeedback, repeatCount, and maxRepeats"
+        resource_flow:
+          consumes: [stopless.cli_projection]
+          produces: [stopless.cli_result]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Canonical continuation save belongs before client delivery, after Round-1 response normalization."
       - step_id: stl-05
@@ -1093,6 +1518,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "next request MetadataCenter runtime_control.stopless control signal"
         semantic_output: "stopless runtime snapshot restored into request turn without file persistence, payload/context copying, or adapterContext carrier"
+        resource_flow:
+          consumes: [stopless.cli_result, stopless.runtime_snapshot, continuation.scope_state]
+          produces: [stopless.runtime_snapshot]
+          side_channel_reads: [stopless.runtime_snapshot, continuation.scope_state]
+          side_channel_writes: [stopless.runtime_snapshot]
         status: anchored
         note: "Round-2 starts only after `/v1/responses` continuation restore has completed. Non-responses protocols skip continuation restore and enter the same request-side stopless hook boundary directly from standard request truth."
       - step_id: stl-06
@@ -1105,6 +1535,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
         semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn, with legacy shell-projected `reasoningStop` / `reasoning_stop` history physically removed instead of replayed"
+        resource_flow:
+          consumes: [request.normal_payload, stopless.cli_result, stopless.runtime_snapshot]
+          produces: [stopless.guidance_rewrite]
+          side_channel_reads: [stopless.runtime_snapshot]
+          side_channel_writes: []
         status: anchored
       - step_id: stl-07
         from_node: StoplessReq08GuidanceRewritten
@@ -1116,6 +1551,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "next-turn request after stopless guidance rewrite"
         semantic_output: "stopless schema contract physically rebound to request mainline (`messages` for chat, `instructions` for responses)"
+        resource_flow:
+          consumes: [stopless.guidance_rewrite]
+          produces: [stopless.schema_contract]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
       - step_id: stl-08
         from_node: StoplessReq09SchemaContractInjected
@@ -1127,6 +1567,11 @@ chains:
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "stopless followup metadata/current-turn signal plus rebound schema contract"
         semantic_output: "thinking route; historical tools route hint must not dominate stopless turn"
+        resource_flow:
+          consumes: [stopless.schema_contract, metadata.runtime_control]
+          produces: [route.selection]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [route.selection]
         status: anchored
         note: "Round-3 guard: after 3 consecutive no_schema rounds, do not rewrite another finish_reason=stop into CLI projection."
 
@@ -1146,6 +1591,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "client request metadata seed plus request body metadata"
         semantic_output: "request truth candidates (`requestId/sessionId/conversationId/entryEndpoint/clientRequestId`) captured into one request-scoped carrier"
+        resource_flow:
+          consumes: [request.protocol_context]
+          produces: [metadata.request_truth]
+          side_channel_reads: []
+          side_channel_writes: [metadata.request_truth]
         status: anchored
         note: "Current implementation writes `request_truth.sessionId/conversationId` in `buildRequestMetadata`; `buildHandlerPipelineMetadata` is no longer the request-truth owner. Later stages must not rewrite these fields from continuation or attachment scope."
       - step_id: mtc-02
@@ -1158,6 +1608,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request truth plus responses pipeline continuation control inputs"
         semantic_output: "responses continuation control attached without redefining request truth and without mirroring request/context payload into MetadataCenter"
+        resource_flow:
+          consumes: [metadata.request_truth, continuation.scope_state]
+          produces: [continuation.scope_state]
+          side_channel_reads: [metadata.request_truth, continuation.scope_state]
+          side_channel_writes: [continuation.scope_state]
         status: anchored
         note: "Pipeline metadata write may attach `responsesResume` and other continuation control only; request truth remains write-once and MetadataCenter must not carry `responsesRequestContext` or any request/context payload mirror. continuation fields must not be promoted back into request identity."
       - step_id: mtc-03
@@ -1170,6 +1625,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "request metadata carrier plus pipeline result metadata"
         semantic_output: "runtime-control binding node for request-route (`routeHint/routeName/routeId/providerProtocol/retryProviderKey/preselectedRoute`), followup (`serverToolFollowup/serverToolFollowupSource/stopless`), and stop-message (`stopMessageEnabled/stopMessageExcludeDirect`) written into one request-scoped metadata-center family"
+        resource_flow:
+          consumes: [metadata.request_truth]
+          produces: [metadata.runtime_control]
+          side_channel_reads: [metadata.request_truth]
+          side_channel_writes: [metadata.runtime_control]
         status: anchored
         note: "Current owner now writes request-route control, including `providerProtocol`, through the request-executor request-route owner onto the shared MetadataCenter. `preselectedRoute` still has router-direct relay/release handling, but `providerProtocol` is no longer only top-level transport."
       - step_id: mtc-04
@@ -1182,6 +1642,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "selected target plus runtime metadata for current attempt"
         semantic_output: "selected target is written into `provider_observation` slots (`target/providerKey/assignedModelId/modelId/clientModelId/compatibilityProfile`) without reviving flat request metadata fields"
+        resource_flow:
+          consumes: [metadata.runtime_control, route.selection]
+          produces: [provider_runtime.observation]
+          side_channel_reads: [metadata.runtime_control, route.selection]
+          side_channel_writes: [provider_runtime.observation]
         status: anchored
         note: "Current owner now writes provider observation through `MetadataCenter.writeProviderObservation(...)` inside `resolveRequestExecutorPipelineAttempt`; flat `mergedMetadata.target` / `mergedMetadata.compatibilityProfile` revival is physically removed."
       - step_id: mtc-05
@@ -1194,6 +1659,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "provider response plus provider observation plus request-scoped metadata carrier"
         semantic_output: "response closeout derives `finishReason` and uses MetadataCenter-backed request truth for lifecycle persistence without reopening request truth"
+        resource_flow:
+          consumes: [response.provider_raw, provider_runtime.observation, metadata.request_truth]
+          produces: [metadata.response_observation]
+          side_channel_reads: [provider_runtime.observation, metadata.request_truth]
+          side_channel_writes: [metadata.response_observation]
         status: anchored
         note: "The response closeout owner now reads request truth directly from the bound MetadataCenter inside core Chat Process closeout; handler/bridge closeout no longer participates in persistence."
       - step_id: mtc-06
@@ -1206,6 +1676,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "response conversion metadata plus bound request-scoped MetadataCenter"
         semantic_output: "bridge invocation metadata is bound to the same MetadataCenter without copying request/context payload or projecting servertool truth in TS"
+        resource_flow:
+          consumes: [metadata.response_observation, metadata.runtime_control]
+          produces: [metadata.response_observation]
+          side_channel_reads: [metadata.response_observation, metadata.runtime_control]
+          side_channel_writes: [metadata.response_observation]
         status: anchored
         note: "The provider response converter no longer builds a servertool adapter context and no longer reads entryOriginRequest; semantic stopless/servertool state must already be Rust Chat Process output or MetadataCenter runtime_control."
       - step_id: mtc-07
@@ -1218,6 +1693,11 @@ chains:
         owner_feature_id: hub.metadata_center_mainline
         semantic_input: "response observation plus final client/servertool outcome reaching handler closeout"
         semantic_output: "metadata center request-truth and continuation-context slots marked released for the current request closeout"
+        resource_flow:
+          consumes: [metadata.request_truth, metadata.response_observation]
+          produces: []
+          side_channel_reads: [metadata.request_truth, metadata.response_observation]
+          side_channel_writes: []
         status: anchored
         note: "The closeout helper is invoked by JSON response completion, SSE finish/close cleanup, and SSE bridge-error early-close paths. Closeout may mark release only; it must not repair or backfill prior families."
 
@@ -1237,18 +1717,28 @@ chains:
         owner_feature_id: sse.chat_stream_projection
         semantic_input: "validated ChatCompletionResponse plus request-scoped ChatJsonToSseContext"
         semantic_output: "ordered ChatSseEvent stream for role/content/reasoning/tool-call/finish/done frames"
+        resource_flow:
+          consumes: [response.client_payload]
+          produces: [sse.transport_frame]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames through direct NAPI; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `openai-chat` to the chat SSE event owner for ordering, usage, and fail-fast validation. The adjacent encode edge may project frames only. It must not synthesize fallback error frames for malformed response semantics; encode failures surface through the stream error path."
       - step_id: chat-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
         caller_symbol: buildJsonFromSseWithNative
-        caller_file: src/modules/llmswitch/bridge/runtime-integrations.ts
+        caller_file: src/modules/llmswitch/bridge/sse-runtime-host.ts
         callee_symbol: build_json_from_sse_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.chat_stream_projection
         semantic_input: "OpenAI Chat provider SSE body text or ChatSseEvent stream plus request-scoped model/request id"
         semantic_output: "final ChatCompletionResponse with aggregated content/reasoning/tool/function deltas and strict terminal [DONE] validation"
+        resource_flow:
+          consumes: [response.provider_raw]
+          produces: [response.hub_semantic]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildJsonFromSseWithNative` only marshals raw SSE body text through direct NAPI; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `openai-chat` to the chat SSE event owner for parse/materialize, usage normalization, tool/function argument aggregation, and incomplete stream fail-fast."
       - step_id: anthropic-sse-01
@@ -1261,18 +1751,28 @@ chains:
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Anthropic message response plus request-scoped AnthropicJsonToSseOptions"
         semantic_output: "ordered AnthropicSseEvent stream for message/content/reasoning/tool/stop frames"
+        resource_flow:
+          consumes: [response.client_payload]
+          produces: [sse.protocol_stream_projection, sse.transport_frame]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames through direct NAPI; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `anthropic-messages` to the Anthropic SSE event owner for JSON->SSE event ordering, reasoning projection, chunking, and fail-fast validation."
       - step_id: anthropic-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
         caller_symbol: buildJsonFromSseWithNative
-        caller_file: src/modules/llmswitch/bridge/runtime-integrations.ts
+        caller_file: src/modules/llmswitch/bridge/sse-runtime-host.ts
         callee_symbol: build_json_from_sse_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "Anthropic provider SSE body text plus request-scoped model/request id and reasoning options"
         semantic_output: "final AnthropicMessageResponse with aggregated text/reasoning/tool blocks, usage, stop reason, and strict message_stop validation"
+        resource_flow:
+          consumes: [response.provider_raw]
+          produces: [sse.provider_stream_aggregate, response.hub_semantic]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildJsonFromSseWithNative` only marshals raw SSE body text through direct NAPI; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `anthropic-messages` to the Anthropic SSE event owner for parse/materialize, reasoning projection, tool input materialization, and incomplete stream fail-fast."
       - step_id: gemini-sse-01
@@ -1285,18 +1785,28 @@ chains:
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "validated Gemini response plus request-scoped GeminiJsonToSseOptions"
         semantic_output: "ordered GeminiSseEvent stream for part and done frames"
+        resource_flow:
+          consumes: [response.client_payload]
+          produces: [sse.protocol_stream_projection, sse.transport_frame]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildSseFramesFromJsonWithNative` only marshals JSON and frames through direct NAPI; Rust `sse_runtime_dispatch::build_sse_frames_from_json_json` dispatches `gemini-chat` to the Gemini SSE event owner for JSON->SSE event ordering, reasoning projection, and fail-fast validation."
       - step_id: gemini-sse-02
         from_node: ProviderRespInbound01Raw
         to_node: HubRespInbound02Parsed
         caller_symbol: buildJsonFromSseWithNative
-        caller_file: src/modules/llmswitch/bridge/runtime-integrations.ts
+        caller_file: src/modules/llmswitch/bridge/sse-runtime-host.ts
         callee_symbol: build_json_from_sse_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs
         owner_feature_id: sse.anthropic_gemini_stream_projection
         semantic_input: "Gemini provider SSE body text plus request-scoped model/request id and reasoning options"
         semantic_output: "final GeminiResponse with aggregated text/reasoning parts, candidate done metadata, prompt feedback, usage metadata, model version, and strict done validation"
+        resource_flow:
+          consumes: [response.provider_raw]
+          produces: [sse.provider_stream_aggregate, response.hub_semantic]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Host bridge `buildJsonFromSseWithNative` only marshals raw SSE body text through direct NAPI; Rust `sse_runtime_dispatch::build_json_from_sse_json` dispatches `gemini-chat` to the Gemini SSE event owner for parse/materialize, data/done validation, reasoning projection, and incomplete stream fail-fast."
 
@@ -1316,6 +1826,11 @@ chains:
         owner_feature_id: servertool.followup_orchestration
         semantic_input: "post-Chat-Process governed response and servertool runtime context"
         semantic_output: "servertool outcome/followup plan before client projection"
+        resource_flow:
+          consumes: [response.hub_semantic, servertool.followup_state]
+          produces: [stage_a.servertool_outcome_plan]
+          side_channel_reads: [servertool.followup_state]
+          side_channel_writes: [stage_a.servertool_outcome_plan]
         status: anchored
         note: "TS servertool shells may execute IO from native plans, but followup/orchestration semantics must remain Rust-owned."
       - step_id: stage-a-p0-02
@@ -1328,6 +1843,11 @@ chains:
         owner_feature_id: conversion.shared.anthropic
         semantic_input: "Anthropic messages payload with tools, content blocks, tool_use, tool_result, and thinking blocks"
         semantic_output: "canonical OpenAI chat request/response semantics with normalized tool schema and message history"
+        resource_flow:
+          consumes: [request.normal_payload]
+          produces: [stage_a.protocol_canonical]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "TS anthropic shared utility files are forbidden from owning protocol conversion semantics."
       - step_id: stage-a-p0-03
@@ -1340,6 +1860,11 @@ chains:
         owner_feature_id: conversion.responses.store
         semantic_input: "Responses request/response continuation truth and scope data"
         semantic_output: "persisted/restored continuation payload isolated by entry protocol, continuation owner, and conversation/session scope"
+        resource_flow:
+          consumes: [response.hub_semantic, continuation.scope_state]
+          produces: [stage_a.continuation_store_state]
+          side_channel_reads: [continuation.scope_state]
+          side_channel_writes: [stage_a.continuation_store_state]
         status: anchored
         note: "resp_outbound, SSE, handler, and adapter layers are forbidden from reconstructing continuation history."
       - step_id: stage-a-p0-04
@@ -1352,6 +1877,11 @@ chains:
         owner_feature_id: hub.req_chatprocess.tool_governance
         semantic_input: "standardized request payload before Chat Process request governance"
         semantic_output: "request payload after request-side tool governance, tool injection, and sanitization"
+        resource_flow:
+          consumes: [request.normal_payload, metadata.runtime_control]
+          produces: [stage_a.req_tool_governance_state]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
         note: "native-chat-process-governance-semantics.ts is a host wrapper only and must not own request payload semantics."
       - step_id: stage-a-p0-05
@@ -1364,6 +1894,11 @@ chains:
         owner_feature_id: hub.resp_chatprocess.tool_governance
         semantic_input: "parsed provider response before response-side Chat Process governance"
         semantic_output: "response payload after text tool harvest, apply_patch reversal, and internal tool stripping"
+        resource_flow:
+          consumes: [response.hub_semantic, metadata.runtime_control]
+          produces: [stage_a.resp_tool_governance_state]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: []
         status: anchored
         note: "response outbound projection must not own tool harvest or patch reversal semantics."
       - step_id: stage-a-p0-06
@@ -1376,6 +1911,11 @@ chains:
         owner_feature_id: conversion.shared.responses_openai
         semantic_input: "OpenAI Responses request payload and explicit request context"
         semantic_output: "OpenAI chat request plus Responses response projection without TS hidden ctxMap state"
+        resource_flow:
+          consumes: [request.normal_payload]
+          produces: [stage_a.protocol_canonical]
+          side_channel_reads: []
+          side_channel_writes: []
         status: anchored
         note: "Retired Responses codec TS shell is forbidden from owning codec state or protocol conversion semantics."
 
@@ -1383,7 +1923,7 @@ shared_multi_reference_functions:
   - function_id: native.responses_context_capture
     binding_status: confirmed
     symbol: captureReqInboundResponsesContextSnapshotJson
-    file: src/modules/llmswitch/bridge/native-exports.ts
+    file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
     owner_feature_id: hub.req_inbound_responses_context_capture
     reused_by_chains:
       - request.mainline
@@ -1391,7 +1931,7 @@ shared_multi_reference_functions:
   - function_id: native.responses_client_projection
     binding_status: confirmed
     symbol: projectResponsesClientPayloadForClientNative
-    file: src/modules/llmswitch/bridge/native-exports.ts
+    file: src/modules/llmswitch/bridge/responses-client-projection-host.ts
     owner_feature_id: hub.response_responses_client_projection
     reused_by_chains:
       - response.mainline

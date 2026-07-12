@@ -5,12 +5,75 @@
 # - bind feature to canonical types/builders/tests
 version: 1
 owners:
+  - feature_id: architecture.resource_ownership_model
+    status: active
+    summary: "resource ownership taxonomy, operation map, and resource-flow gate for request/response/resource convergence"
+    owner_kind: architecture_contract
+    owner_scope: "M0 architecture resource ownership registry; runtime refactors must bind to this map before changing resource writers"
+    owner_module: scripts/architecture/verify-resource-operation-map.mjs
+    canonical_types:
+      - ResourceOperationMap
+      - ResourceTaxonomy
+      - ResourceFlow
+    canonical_builders:
+      - readYaml
+      - assertSameList
+    allowed_paths:
+      - docs/architecture/resource-taxonomy.md
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/resource-global-coverage-report.json
+      - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/audit-resource-global-coverage.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/goals/resource-ownership-refactor-plan.md
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    required_tests:
+      - scripts/architecture/verify-resource-operation-map.mjs
+      - scripts/architecture/audit-resource-global-coverage.mjs
+    required_gates:
+      - npm run audit:resource-global-coverage
+      - npm run verify:resource-operation-map
+      - npm run verify:resource-owner-uniqueness
+      - npm run verify:resource-mainline-bindings
+      - npm run verify:resource-forbidden-writes
+      - npm run verify:resource-side-channel-isolation
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    resource_bindings:
+      writes:
+        - dryrun.provider_request_probe@DebugDryRun02InternalControlCarrier
+      reads:
+        - request.normal_payload@HubReqInbound02Standardized
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+    notes:
+      - "This feature owns the map/gate shell only; it must not become a runtime global manager."
+      - "Resource identity is global per lifecycle, but writes stay stage-bound and feature-owned."
+
   - feature_id: hub.servertool_followup
     status: active
     summary: "servertool followup orchestration and governed response truth"
     owner_kind: rust_ssot
     owner_scope: "servertool followup orchestration and governed response truth"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - servertool.followup_state@HubRespChatProcess03Governed
+        - stage_a.servertool_outcome_plan@ServertoolOutcome
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - metadata.runtime_control@HubRespChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - HubRespChatProcess03Governed
       - HubRespOutbound04ClientSemantic
@@ -42,6 +105,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool primary auto-hook first pass and rerun selection planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_selection_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_selection_plan@ServertoolEngineSelectionPlan
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+        - servertool.auto_hook_execution_plan@AutoHookRuntimeAttemptPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - EngineSelectionStartInput
       - EngineSelectionStartPlan
@@ -80,6 +152,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution migrates to client-visible exec_command CLI projection with status-only CLI input"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - servertool.cli_projection_plan@ServertoolCliProjection01Planned
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - metadata.request_truth@MetaReq02TruthMaterialized
     canonical_types:
       - ServertoolCliProjection01Planned
     canonical_builders:
@@ -119,6 +200,22 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Chat Process-owned stopless lifecycle: response-side stop/reasoningStop schema judgment plus CLI/terminal normalization, request-side CLI result restore/guidance rewrite/schema-contract reinjection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+    resource_bindings:
+      writes:
+        - servertool.followup_state@HubRespChatProcess03Governed
+        - stopless.schema_gate_state@StoplessResp02SchemaGateEvaluated
+        - stopless.runtime_snapshot@StoplessState03RuntimeSnapshotResolved
+        - stopless.cli_projection@StoplessCli04ProjectionPlanned
+        - stopless.cli_result@StoplessCli06ClientExecuted
+        - stopless.guidance_rewrite@StoplessReq08GuidanceRewritten
+        - stopless.schema_contract@StoplessReq09SchemaContractInjected
+      reads:
+        - metadata.runtime_control@HubRespChatProcess03Governed
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - continuation.scope_state@StoplessReq07ContinuationRestored
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - StoplessExecutionPlanInput
       - StoplessExecutionPlan
@@ -204,6 +301,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool auto-hook runtime attempt, trace, and caller finalization planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/auto_hook_runtime_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.auto_hook_execution_plan@AutoHookRuntimeAttemptPlan
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - AutoHookRuntimeAttemptInput
       - AutoHookRuntimeAttemptPlan
@@ -239,6 +344,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool engine preflight early-return planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_preflight_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolEnginePreflightPlan
+      reads:
+        - servertool.engine_selection_plan@ServertoolEngineSelectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolEnginePreflightInput
       - ServertoolEnginePreflightAction
@@ -269,6 +382,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool engine runtime action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_runtime_action_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolEngineRuntimeActionPlan
+      reads:
+        - servertool.engine_selection_plan@ServertoolEngineSelectionPlan
+        - servertool.auto_hook_execution_plan@AutoHookRuntimeAttemptPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolEngineRuntimeActionInput
       - ServertoolEngineRuntimeAction
@@ -302,6 +424,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool engine prepass action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_prepass_action_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolEnginePrepassActionPlan
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolEnginePrepassActionInput
       - ServertoolEnginePrepassAction
@@ -333,6 +463,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool engine skip planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/engine_skip_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolEngineSkipPlan
+      reads:
+        - servertool.engine_selection_plan@ServertoolEngineSelectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolEngineSkipInput
       - ServertoolEngineSkipAction
@@ -362,6 +500,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution branch and CLI projection target planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_branch_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolExecutionBranchPlan
+      reads:
+        - servertool.engine_action_plan@ServertoolEngineRuntimeActionPlan
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolExecutableToolCall
       - ServertoolExecutionBranchPlanInput
@@ -394,6 +541,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution dispatch error and followup contract planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_dispatch_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolDispatchErrorPlan
+      reads:
+        - servertool.execution_state@ServertoolExecutionLoopStateValue
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolDispatchSpecMismatchErrorInput
       - ServertoolInvalidMixedClientToolsOutcomeErrorInput
@@ -426,6 +581,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool handler materialization planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_handler_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolHandlerMaterializationPlan
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+        - servertool.engine_action_plan@ServertoolEngineRuntimeActionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolHandlerMaterializationInput
       - ServertoolHandlerMaterializationPlan
@@ -456,6 +620,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution loop effect planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_effect_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolExecutionLoopEffectPlan
+      reads:
+        - servertool.execution_state@ServertoolExecutionLoopStateValue
+        - servertool.execution_contract_plan@ServertoolExecutionBranchPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolExecutionLoopEffectInput
       - ServertoolExecutionLoopEffectPlan
@@ -485,6 +658,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution loop runtime action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_loop_runtime_action_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolExecutionLoopRuntimeActionPlan
+      reads:
+        - servertool.execution_state@ServertoolExecutionLoopStateValue
+        - servertool.execution_contract_plan@ServertoolExecutionLoopEffectPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolExecutionLoopRuntimeActionInput
       - ServertoolExecutionLoopRuntimeActionPlan
@@ -514,6 +696,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution outcome runtime action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_outcome_runtime_action_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_contract_plan@ServertoolExecutionOutcomeRuntimeActionPlan
+      reads:
+        - servertool.execution_state@ServertoolExecutionLoopStateValue
+        - servertool.execution_contract_plan@ServertoolExecutionLoopRuntimeActionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolExecutionOutcomeRuntimeActionInput
       - ServertoolExecutionOutcomeRuntimeActionPlan
@@ -543,6 +734,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool execution loop state creation and append planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/execution_state_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.execution_state@ServertoolExecutionLoopStateValue
+      reads:
+        - servertool.execution_contract_plan@ServertoolExecutionBranchPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolExecutionSummary
       - ServertoolExecutedToolCall
@@ -576,6 +775,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool registry lookup, auto-hook descriptor, and projection planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/registry_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      reads:
+        - servertool.engine_selection_plan@ServertoolEngineSelectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolRegistryLookupActionInput
       - ServertoolRegistryAutoHookDescriptorInput
@@ -614,6 +821,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool response-stage runtime action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/response_stage_runtime_action_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolResponseStageRuntimeActionPlan
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - servertool.execution_contract_plan@ServertoolExecutionOutcomeRuntimeActionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolResponseStageRuntimeActionInput
       - ServertoolResponseStageRuntimeAction
@@ -645,6 +861,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool entry preflight action planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/server_side_tool_entry_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.engine_action_plan@ServertoolEntryPreflightPlan
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolEntryPreflightInput
       - ServertoolEntryPreflightAction
@@ -677,6 +901,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "stopless CLI projection context planning"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/stopless_cli_projection_context_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.cli_projection_plan@StoplessCliProjectionContextPlan
+      reads:
+        - stopless.runtime_snapshot@StoplessState03RuntimeSnapshotResolved
+        - stopless.schema_gate_state@StoplessResp02SchemaGateEvaluated
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - metadata.request_truth@MetaReq02TruthMaterialized
     canonical_types:
       - StoplessCliProjectionRuntimeSnapshotInput
       - StoplessCliProjectionContextInput
@@ -707,6 +940,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust owner for servertool progress log tool-name and highlight presentation policy"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_skeleton_config.rs
+    resource_bindings:
+      writes:
+        - servertool.flow_presentation@ServertoolProgressPresentationDecision
+      reads:
+        - servertool.registry_projection@ServertoolRegistryProjectionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - ServertoolProgressPresentationInput
       - ServertoolProgressPresentationDecision
@@ -743,6 +984,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "stop-message loop warning text/count injection and seed payload bridge"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/followup-core/src
+    resource_bindings:
+      writes:
+        - servertool.loop_warning@LoopWarningInput
+      reads:
+        - servertool.followup_state@HubReqChatProcess03Governed
+        - stopless.runtime_snapshot@StoplessState03RuntimeSnapshotResolved
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - LoopWarningInput
       - ServertoolReq04FollowupPayload
@@ -777,6 +1027,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool rust-only closeout gate and Rust hook skeleton contract anchors (validate, scheduler, phase contract)"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/hook_skeleton_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.hook_closeout_contract@ServertoolHookSkeletonContract
+      reads:
+        - servertool.execution_contract_plan@ServertoolExecutionContractPlan
+        - servertool.cli_projection_plan@ServertoolCliProjection01Planned
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ServertoolHookSpec
       - ServertoolHookSchedulerInput
@@ -830,6 +1089,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "servertool timeout, client-inject, followup error, and adapter provider-key policy"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/orchestration_policy_contract.rs
+    resource_bindings:
+      writes:
+        - servertool.orchestration_policy@ServertoolOrchestrationPolicyPlan
+      reads:
+        - servertool.execution_contract_plan@ServertoolExecutionContractPlan
+        - servertool.engine_action_plan@ServertoolEngineRuntimeActionPlan
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServertoolTimeoutPolicyInput
       - ServertoolTimeoutWatcherPlan
@@ -885,6 +1153,15 @@ owners:
     owner_kind: provider_runtime
     owner_scope: "provider/server error cataloging, runtime classification, router policy application, availability/cooldown truth"
     owner_module: src/providers/core/runtime
+    resource_bindings:
+      writes:
+        - error.chain@ErrorErr03RuntimeClassified
+      reads:
+        - error.chain@ErrorErr02HostCaptured
+        - provider_runtime.observation@ErrorErr03RuntimeClassified
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - ErrorErr03RuntimeClassified
       - ErrorErr04RouterPolicyApplied
@@ -921,6 +1198,15 @@ owners:
     owner_kind: transitional
     owner_scope: "provider binding/runtime key lookup for server runtime handles; provider selection is consumed as route truth, unresolved runtime keys fail fast"
     owner_module: src/server/runtime/http-server/executor/provider-runtime-resolver.ts
+    resource_bindings:
+      writes:
+        - runtime.provider_binding_resolution@ProviderRuntimeResolution
+      reads:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ProviderRuntimeManager
       - ProviderHandle
@@ -1041,6 +1327,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "HubReqChatProcess03Governed -> VrRoute04SelectedTarget typed bridge and request-path route-control handoff"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
+    resource_bindings:
+      writes:
+        - route.selection@VrRoute04SelectedTarget
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+        - metadata.runtime_control@VrRoute04SelectedTarget
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.hub_semantic@HubRespInbound02Parsed
     canonical_types:
       - HubReqChatProcess03Governed
       - VrRoute04SelectedTarget
@@ -1078,6 +1373,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "VrRoute04SelectedTarget -> HubReqOutbound05ProviderSemantic typed bridge and provider-neutral outbound semantic handoff"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+    resource_bindings:
+      writes:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+      reads:
+        - route.selection@VrRoute04SelectedTarget
+        - request.normal_payload@HubReqChatProcess03Governed
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - VrRoute04SelectedTarget
       - HubReqOutbound05ProviderSemantic
@@ -1151,6 +1454,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Virtual Router read-only metadata-center-backed route scope surface for route hint, session scope, and stop-message routing reads"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs
+    resource_bindings:
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      observes:
+        - route.selection@VrRoute04SelectedTarget
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - MetaRoute03RouteCarrier
     canonical_builders:
@@ -1223,6 +1535,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust owner for Virtual Router hit-log diagnostic projection; host/runtime TS may only call required NAPI exports and emit returned strings"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
+    resource_bindings:
+      writes:
+        - vr.telemetry_projection@VrHitLog04TelemetryProjection
+      observes:
+        - vr.hit_log_record@VrHitLog02NativeProjection
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - VirtualRouterHitRecord
       - StopMessageRuntimeSummary
@@ -1274,6 +1596,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust owner for Virtual Router route host-effects planning and finalization"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs
+    resource_bindings:
+      observes:
+        - route.selection@VrRoute04SelectedTarget
+      writes:
+        - vr.hit_log_record@VrHitLog02NativeProjection
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - VirtualRouterRouteHostEffectsPlan
     canonical_builders:
@@ -1370,6 +1702,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - route.selection@VrAvail04PrimaryExhaustedPlanned
+      reads:
+        - route.selection@VrAvail03DefaultFloorEvaluated
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - PrimaryExhaustedPlanInput
       - PrimaryExhaustedToDefaultPoolPlan
@@ -1416,6 +1757,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "route selection must not silently collapse to empty after quota health and filters; default pool always keeps one last ordered choice"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+    resource_bindings:
+      writes:
+        - provider_runtime.observation@VrAvail03DefaultFloorEvaluated
+        - error.chain@ErrorErr05ExecutionDecision
+      reads:
+        - route.selection@VrAvail02PoolFiltered
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - VrRoute04SelectedTarget
     canonical_builders:
@@ -1425,7 +1776,6 @@ owners:
       - resolve_error_err05_route_availability_decision
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
-      - src/modules/llmswitch/bridge/native-exports.ts
       - src/modules/llmswitch/bridge/route-availability-host.ts
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
       - docs
@@ -1459,6 +1809,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+    resource_bindings:
+      writes:
+        - route.selection@VrAvail02PoolFiltered
+      reads:
+        - route.selection@VrAvail01RouteCandidates
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - ForwarderRegistry
       - ForwarderEntry
@@ -1496,6 +1855,19 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust owner for Virtual Router online route/tier/forwarder/default-pool status plus dry-run decision and provider-unavailable explanation"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs
+    resource_bindings:
+      writes:
+        - vr.diagnostic_snapshot@VrDiag01StatusSnapshot
+        - vr.diagnostic_decision@VrDiag03DryRunDecision
+        - diagnostic.http_payload@ServerRespOutbound05ClientFrame
+      observes:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      projects:
+        - diagnostic.http_payload@ServerRespOutbound05ClientFrame
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - VrDiag01StatusSnapshot
       - VrDiag02DryRunInput
@@ -1540,6 +1912,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "internal metadata carrier isolation from normal request, provider wire, and client response payloads"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - metadata.response_observation@MetaResp06ResponseObserved
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
     canonical_types:
       - HubReqInbound02Standardized
       - HubRespInbound02Parsed
@@ -1609,6 +1990,17 @@ owners:
     owner_kind: transitional
     owner_scope: "single request-scoped metadata truth/provenance registry core plus response closeout release; surrounding TS shells may read/write through this owner but must not create a second center or rewrite another family's truth"
     owner_module: src/server/runtime/http-server/metadata-center/metadata-center.ts
+    resource_bindings:
+      writes:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.response_observation@MetaResp06ResponseObserved
+      reads:
+        - request.protocol_context@MetaReq01InboundSeeded
+        - provider_runtime.observation@MetaReq05ProviderObservationProjected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - MetaReq01InboundSeeded
       - MetaReq02TruthMaterialized
@@ -1668,6 +2060,16 @@ owners:
     owner_kind: rust_migration
     owner_scope: "all request-scoped metadata control reads/writes must enter through one API before Rust-only closeout"
     owner_module: src/server/runtime/http-server/metadata-center
+    resource_bindings:
+      writes:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - metadata.response_observation@MetaResp06ResponseObserved
+      reads:
+        - request.protocol_context@ServerReqInbound01ClientRaw
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - MetadataCenterFamily
       - MetadataCenterRuntimeControl
@@ -1712,6 +2114,15 @@ owners:
     owner_kind: transitional
     owner_scope: "request-entry metadata capture and request-local carrier seeding before Hub execution"
     owner_module: src/server/runtime/http-server/executor-metadata.ts
+    resource_bindings:
+      writes:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      reads:
+        - request.protocol_context@ServerReqInbound01ClientRaw
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - MetaReq01InboundSeeded
       - MetaReq02TruthMaterialized
@@ -1720,6 +2131,7 @@ owners:
       - buildRequestMetadata
       - decorateMetadataForAttempt
     allowed_paths:
+      - src/modules/llmswitch/bridge/executor-metadata-host.ts
       - src/server/runtime/http-server/executor-metadata.ts
       - tests/server/http-server/executor-metadata.spec.ts
       - docs
@@ -1745,6 +2157,16 @@ owners:
     owner_kind: transitional
     owner_scope: "request-executor attempt state plus metadata-center merge after Hub pipeline execution"
     owner_module: src/server/runtime/http-server/executor/request-executor-attempt-state.ts
+    resource_bindings:
+      writes:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      reads:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - route.selection@VrRoute04SelectedTarget
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - MetaReq04RuntimeControlBound
       - MetaReq05ProviderObservationProjected
@@ -1779,6 +2201,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Hub Pipeline native handle registry, engine lifecycle, Virtual Router runtime ingress, and deps wiring"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_engine/registry.rs
+    resource_bindings:
+      writes:
+        - runtime.hub_pipeline_handle@HubPipelineHandle
+      reads:
+        - config.runtime_projection@HubConfig01PipelineRuntimeArtifact
+        - config.routing_policy_projection@VrConfig01RustBootstrapArtifact
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - HubPipelineHandle
     canonical_builders:
@@ -1900,6 +2331,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Anthropic provider message to OpenAI chat/Responses client semantic projection, including hidden reasoning and Responses retention carriers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks
+    resource_bindings:
+      writes:
+        - response.hub_semantic@HubRespInbound02Parsed
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - ProviderRespInbound01Raw
       - HubRespInbound02Parsed
@@ -1939,6 +2380,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "OpenAI Responses provider payload to OpenAI Chat client semantic projection, including bridge response actions and Responses retention carriers"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_response_utils.rs
+    resource_bindings:
+      writes:
+        - response.hub_semantic@HubRespChatProcess03Governed
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ProviderRespInbound01Raw
       - HubRespInbound02Parsed
@@ -1983,6 +2433,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "File-scoped Rust response effect normalization and legacy post-servertool action retirement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    resource_bindings:
+      writes:
+        - response.hub_semantic@HubRespChatProcess03Governed
+      reads:
+        - servertool.followup_state@HubRespChatProcess03Governed
+        - stage_a.servertool_outcome_plan@ServertoolOutcome
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - HubRespChatProcess03Governed
       - HubRespOutbound04ClientSemantic
@@ -2017,6 +2476,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "OpenAI Responses client-visible payload projection for JSON body and SSE frames after Chat Process normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
+    resource_bindings:
+      writes:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      forbidden:
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - HubRespOutbound04ClientSemantic
       - ServerRespOutbound05ClientFrame
@@ -2027,7 +2495,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/client_tool_args.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/napi_bindings.rs
-      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/modules/llmswitch/bridge/responses-client-projection-host.ts
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/server/handlers/handler-response-utils.ts
     forbidden_paths:
@@ -2059,6 +2527,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Provider response SSE marker/bodyText materialization before Rust Hub response pipeline entry"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    resource_bindings:
+      writes:
+        - response.provider_raw@ProviderRespInbound01Raw
+        - response.hub_semantic@HubRespInbound02Parsed
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
     canonical_types:
       - ProviderRespInbound01Raw
       - HubRespInbound02Parsed
@@ -2094,6 +2571,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Provider response context helper resolution for client protocol, followup, display model, and client-facing request id"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics_blocks/context_helpers.rs
+    resource_bindings:
+      writes:
+        - response.provider_context_projection@HubRespOutbound04ClientSemantic
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - HubRespOutbound04ClientSemantic
     canonical_builders:
@@ -2125,6 +2611,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+    resource_bindings:
+      writes:
+        - request.normal_payload@HubReqInbound02Standardized
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      reads:
+        - request.protocol_context@ServerReqInbound01ClientRaw
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - HubReqInbound02Standardized
       - ResponsesContextCaptureInput
@@ -2137,7 +2633,7 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_output_snapshot.rs
-      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
       - docs/architecture
       - tests/sharedmodule/helpers/req-inbound-direct-native.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
@@ -2163,6 +2659,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+    resource_bindings:
+      writes:
+        - request.normal_payload@HubReqChatProcess03Governed
+      reads:
+        - request.normal_payload@HubReqInbound02Standardized
+        - servertool.followup_state@ServertoolReqHook01ResultParsed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - HubReqChatProcess03Governed
       - ToolGovernanceInput
@@ -2206,6 +2711,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped Rust plan_chat_process_session_usage owns global counter tick, local-midnight reset, and `req_{total}_{daily}` requestId generation"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/chat_process_session_usage.rs
+    resource_bindings:
+      writes:
+        - hub.chat_session_usage@GlobalRequestCounter
+      reads:
+        - runtime.hub_pipeline_handle@HubPipelineHandle
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - GlobalRequestCounter
       - ChatProcessSessionUsageInput
@@ -2385,6 +2899,17 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy"
     owner_module: src/debug
+    resource_bindings:
+      writes:
+        - debug.artifact@DebugObs07ReplayedOrInspected
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      observes:
+        - debug.internal_error_envelope@IntErrNum04EnvelopeBuilt
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - DebugSurface
       - DebugSession
@@ -2439,6 +2964,17 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "debug-only dry-run control/result carrier plus sample replay commands; runtime code may only consume the internal carrier to stop before provider HTTP transport or reuse the existing provider-response converter"
     owner_module: src/debug/pipeline-dry-run.ts
+    resource_bindings:
+      writes:
+        - dryrun.provider_request_probe@DebugDryRun02InternalControlCarrier
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      reads:
+        - provider.wire_payload@ProviderReqOutbound07TransportRequest
+        - response.provider_raw@DebugDryRun04CapturedProviderResponse
+      projects:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      forbidden:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
     canonical_types:
       - PipelineDryRunControl
       - ProviderRequestDryRunResponse
@@ -2485,6 +3021,17 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped"
     owner_module: src/debug/internal-error
+    resource_bindings:
+      writes:
+        - debug.internal_error_envelope@IntErrNum04EnvelopeBuilt
+        - debug.external_error_link@IntErrNum06ExternalLinked
+        - debug.client_boundary_proof@IntErrNum07ClientBoundaryPreserved
+      projects:
+        - debug.artifact@IntErrNum05DebugArtifactProjected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - error.chain@ErrorErr06ClientProjected
     canonical_types:
       - InternalDebugErrorCode
       - InternalErrorCodeRegistryEntry
@@ -2546,6 +3093,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      reads:
+        - request.normal_payload@ServerReqInbound01ClientRaw
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - response.hub_semantic@HubRespInbound02Parsed
+        - continuation.scope_state@ChatProcReqContinuation02OwnerResolved
     canonical_types:
       - VrRoute04SelectedTarget
       - ProviderReqOutbound06WirePayload
@@ -2589,6 +3146,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Responses request compat normalization for c4m/crs profiles must be owned by Rust req_outbound stage3 compat only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
+    resource_bindings:
+      writes:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - route.selection@VrRoute04SelectedTarget
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2622,6 +3188,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "OpenAI chat historical single-tool-call history compat must be owned by Rust req_outbound stage3 compat only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
+    resource_bindings:
+      writes:
+        - protocol.openai_chat_history_compat@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2652,6 +3227,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "chat-style function tools must normalize to Responses wire top-level name and parameters only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    resource_bindings:
+      writes:
+        - protocol.responses_function_tool_schema@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2670,6 +3254,7 @@ owners:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     required_gates:
       - npm run verify:responses-function-tool-normalization-rust-only
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "chat-style `tools[].function` to Responses wire `tools[].name` normalization is shared Rust truth for c4m/crs and must not reappear in provider/server TS."
@@ -2680,6 +3265,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Responses function tool parameters must normalize to JSON object schema only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    resource_bindings:
+      writes:
+        - protocol.responses_tool_parameters_schema@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2697,6 +3291,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     required_gates:
       - npm run verify:responses-tool-parameters-normalization-rust-only
+      - npm run verify:resource-operation-map
     migration_target: rust
     notes:
       - "String/invalid tool parameter payloads must normalize into Responses wire object schema in Rust only; provider/server TS must not repair them."
@@ -2707,6 +3302,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Responses instructions must normalize into leading system input_text only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
+    resource_bindings:
+      writes:
+        - protocol.responses_instruction_projection@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2734,6 +3338,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "responses:crs request compat must strip temperature only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
+    resource_bindings:
+      writes:
+        - protocol.responses_crs_request_compat@ProviderReqOutbound06WirePayload
+      reads:
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
@@ -2980,6 +3593,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "TS captures host env and calls native; Rust owns config path resolution, TOML user/provider file IO, v2 source validation, primary routingPolicyGroup resolution, deterministic RouteCodex runtime manifest, manifest-to-userConfig materialization, and provider profile projection for the runtime loader"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+    resource_bindings:
+      writes:
+        - config.validated_manifest@ConfigLoad04UserConfigParsed
+        - config.runtime_projection@ConfigLoad05RuntimeManifestCompiled
+        - config.routing_policy_projection@VrConfig01RustBootstrapArtifact
+      reads:
+        - config.authoring_surface@ConfigLoad01PublicShell
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - LoadedRouteCodexConfig
       - MaterializedRouteCodexConfig
@@ -3035,6 +3659,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns provider profile protocol/auth/transport/compatibility/metadata projection from materialized config; TS provider-profile-loader keeps public type shell and extractApiKeyEntries helper only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+    resource_bindings:
+      writes:
+        - config.provider_profile_projection@ConfigLoad05RuntimeManifestCompiled
+      reads:
+        - config.validated_manifest@ConfigLoad04UserConfigParsed
+        - config.runtime_projection@ConfigLoad05RuntimeManifestCompiled
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - ProviderProfile
       - ProviderProfileCollection
@@ -3071,6 +3704,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns forwarder profile id/protocol/model/strategy/stickyKey/targets/weights projection and validation; TS provider-profile-loader keeps buildForwarderProfiles as a native shell only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
+    resource_bindings:
+      writes:
+        - config.provider_profile_projection@ConfigLoad05RuntimeManifestCompiled
+      reads:
+        - config.validated_manifest@ConfigLoad04UserConfigParsed
+        - config.routing_policy_projection@VrConfig01RustBootstrapArtifact
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - ProviderForwarderProfile
       - ProviderForwarderCollection
@@ -3110,6 +3752,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns TOML-only user config write, serialization, atomic file replace, and scalar patch read/write; TS user writer only exposes async entrypoints and return types"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+    resource_bindings:
+      writes:
+        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
+      reads:
+        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - PersistedUserConfigFile
     canonical_builders:
@@ -3146,6 +3796,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust owns provider v2 async TOML-only write, serialization, and atomic file replace; TS provider writer keeps only return types and the sync fsImpl-injected init/test boundary"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
+    resource_bindings:
+      writes:
+        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
+      reads:
+        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - PersistedProviderConfigFile
     canonical_builders:
@@ -3180,6 +3838,16 @@ owners:
     owner_kind: ts_ui_surface
     owner_scope: "WebUI may render and submit config editor intent only; provider/config writes stay in shared writers and fwd selection stays Rust-owned"
     owner_module: webui/src/App.tsx
+    resource_bindings:
+      writes:
+        - webui.config_edit_intent@WebuiConfigEditor01UserIntent
+        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
+      observes:
+        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - MainTab
       - ProviderPage
@@ -3349,6 +4017,13 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "server pid cache writer/reader helpers under runtime-lifecycle subdir"
     owner_module: src/utils/server-runtime-pid.ts
+    resource_bindings:
+      writes:
+        - runtime.pid_cache@ServerPidCacheRecord
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
     canonical_types:
       - ServerPidCacheRecord
     canonical_builders:
@@ -3377,6 +4052,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "stop intent writer/consumer/reaper under runtime-lifecycle subdir"
     owner_module: src/utils/server-runtime-stop-intent.ts
+    resource_bindings:
+      writes:
+        - runtime.stop_intent@StopIntentRecord
+      reads:
+        - runtime.stop_intent@StopIntentRecord
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
     canonical_types:
       - StopIntentRecord
     canonical_builders:
@@ -3404,6 +4088,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "instance declaration writer/reader/state-update"
     owner_module: src/utils/runtime-instance-registry.ts
+    resource_bindings:
+      writes:
+        - runtime.instance_record@RuntimeInstanceRecord
+      reads:
+        - runtime.restart_signal@RestartProcessSignal
+        - runtime.stop_intent@StopIntentRecord
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - RuntimeInstance
       - InstanceLifecycleStatus
@@ -3436,6 +4130,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "routecodex/rcc restart command target resolution, restart transport selection, SIGUSR2 or daemon restart-process request, and restart readiness wait"
     owner_module: src/cli/commands/restart.ts
+    resource_bindings:
+      writes:
+        - runtime.admin_restart_request@RestartProcessHttpRequest
+        - runtime.restart_signal@RestartProcessSignal
+      reads:
+        - runtime.pid_cache@ServerPidCacheRecord
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - RestartCommandOptions
       - RestartCommandContext
@@ -3474,6 +4178,17 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "routecodex/rcc start command config loading, port-group launch, daemon supervisor launch, and explicit start --restart guard"
     owner_module: src/cli/commands/start.ts
+    resource_bindings:
+      writes:
+        - runtime.pid_cache@ServerPidCacheRecord
+        - runtime.instance_record@RuntimeInstanceRecord
+      reads:
+        - runtime.stop_intent@StopIntentRecord
+        - runtime.instance_record@RuntimeInstanceRecord
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - StartCommandOptions
       - StartCommandContext
@@ -3505,6 +4220,15 @@ owners:
     owner_kind: ts_entry_shell
     owner_scope: "RouteCodexHttpServer index shell owns port registry, per-port direct/relay dispatch, and runtime manager wiring"
     owner_module: src/server/runtime/http-server/index.ts
+    resource_bindings:
+      writes:
+        - runtime.http_entry_dispatch@RouteCodexHttpServer
+      reads:
+        - runtime.hub_pipeline_handle@HubPipelineHandle
+        - runtime.provider_binding_resolution@ProviderRuntimeResolution
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - RouteCodexHttpServer
       - PortRegistry
@@ -3538,6 +4262,15 @@ owners:
     owner_kind: ts_entry_shell
     owner_scope: "HTTP server lifecycle helpers own initialization, reload, closeout, and handler-context assembly around the index shell"
     owner_module: src/server/runtime/http-server/http-server-lifecycle.ts
+    resource_bindings:
+      writes:
+        - runtime.http_lifecycle_context@HandlerContext
+      reads:
+        - runtime.instance_record@RuntimeInstanceRecord
+        - runtime.hub_pipeline_handle@HubPipelineHandle
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - ServerStatusV2
       - HandlerContext
@@ -3570,6 +4303,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "provider response host converter executes stream/body capture, Rust handoff, and servertool followup/client-inject glue without rebuilding response semantics in TS"
     owner_module: src/server/runtime/http-server/executor/provider-response-converter.ts
+    resource_bindings:
+      writes:
+        - response.host_conversion_handoff@ProviderResponseConversionHost
+        - response.provider_raw@ProviderRespInbound01Raw
+      reads:
+        - runtime.provider_binding_resolution@ProviderRuntimeResolution
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - PipelineExecutionResult
     canonical_builders:
@@ -3602,6 +4345,15 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "request-executor response inspection helpers for placeholder detection, text extraction, and tool-call inspection"
     owner_module: src/server/runtime/http-server/executor/request-executor-response-inspect.ts
+    resource_bindings:
+      writes:
+        - response.inspection_signal@PayloadContractSignal
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - PayloadContractSignal
     canonical_builders:
@@ -3629,6 +4381,15 @@ owners:
     owner_kind: server_projection
     owner_scope: "`/v1/models` Codex-facing capability metadata for bare and provider-prefixed model aliases"
     owner_module: src/server/runtime/http-server/routes.ts
+    resource_bindings:
+      writes:
+        - models.capability_catalog@ModelListItem
+      reads:
+        - config.provider_profile_projection@ConfigLoad05RuntimeManifestCompiled
+        - config.runtime_projection@ConfigLoad05RuntimeManifestCompiled
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - ModelListItem
     canonical_builders:
@@ -3659,6 +4420,16 @@ owners:
     owner_kind: server_projection
     owner_scope: "handlers/chat/config-admin/images/messages/responses are HTTP transport adapters only; protocol semantics belong to Hub Pipeline"
     owner_module: src/server/handlers
+    resource_bindings:
+      writes:
+        - server.handler_transport_envelope@HandlerContext
+        - request.protocol_context@ServerReqInbound01ClientRaw
+      reads:
+        - runtime.http_lifecycle_context@HandlerContext
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - HandlerContext
       - PipelineExecutionInput
@@ -3694,6 +4465,15 @@ owners:
     owner_kind: ts_bridge
     owner_scope: "/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner"
     owner_module: src/modules/llmswitch/bridge/responses-request-bridge.ts
+    resource_bindings:
+      writes:
+        - request.protocol_context@ServerReqInbound01ClientRaw
+        - request.normal_payload@HubReqInbound02Standardized
+      reads:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - PrepareResponsesHandlerEntryForHttpArgs
       - PrepareResponsesHandlerEntryForHttpResult
@@ -3720,7 +4500,7 @@ owners:
       - shouldProjectResponsesResumeClientErrorForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
-      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - src/server/handlers/responses-handler.ts
       - docs/architecture
@@ -3777,6 +4557,20 @@ owners:
     owner_kind: rust_hub_pipeline
     owner_scope: "file-scoped Responses continuation request restore at Chat Process entry and response save at Chat Process end"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    resource_bindings:
+      writes:
+        - request.normal_payload@ChatProcReqContinuation03CanonicalRestored
+        - servertool.followup_state@ChatProcReqContinuation04HookRestored
+        - response.hub_semantic@ChatProcRespContinuation06ResponseGoverned
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+      reads:
+        - request.normal_payload@ChatProcReqContinuation01EntryEvidence
+        - response.hub_semantic@ChatProcRespContinuation06ResponseGoverned
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - continuation.scope_state@ChatProcReqContinuation02OwnerResolved
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ChatProcReqContinuation01EntryEvidence
       - ChatProcReqContinuation02OwnerResolved
@@ -3840,6 +4634,15 @@ owners:
     owner_kind: ts_transport
     owner_scope: "/v1/responses SSE path writes frames, manages stream transport, and calls Rust/NAPI projection wrappers without owning schema/tool/metadata/terminal business semantics"
     owner_module: src/server/handlers/handler-response-sse.ts
+    resource_bindings:
+      writes:
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
+      reads:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - sse.protocol_stream_projection@ServerRespOutbound05ClientFrame
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
     canonical_types:
       - ServerRespOutbound05ClientFrame
     canonical_builders:
@@ -3848,7 +4651,6 @@ owners:
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
       - src/modules/llmswitch/bridge/sse-projection-host.ts
-      - src/modules/llmswitch/bridge/native-exports.ts
       - docs/architecture
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
       - scripts/architecture/verify-server-function-map-boundary.mjs
@@ -3870,7 +4672,7 @@ owners:
     migration_target: rust
     notes:
       - "SSE is transport-only. No schema strip, stopless interception, metadata inspection, required_action detection, terminal repair, tool projection, or semantic normalization may live here."
-      - "Responses SSE closeout may consume Rust native transport closeout evidence through `native-exports.ts`; TS handler must not locally parse or infer terminal/repair semantics."
+      - "Responses SSE closeout may consume Rust native transport closeout evidence through `sse-projection-host.ts`; TS handler must not locally parse or infer terminal/repair semantics."
       - "All request/response business semantics must complete in Chat Process before RespOutbound."
       - "locked business module: the SSE surface is an independent transport-only module and may pass opaque SSE/body handoff state and request ids only."
       - "Server handler SSE transport code must stay physically isolated in `handler-response-sse.ts`; shared non-protocol helpers live in `handler-response-common.ts`; `handler-response-utils.ts` is dispatcher + JSON path only."
@@ -3889,6 +4691,15 @@ owners:
     owner_kind: handler_io_plus_rust_ssot
     owner_scope: "file-scoped /v1/responses response dispatch is handler-local HTTP IO plus Rust/NAPI response projection; continuation save truth lives in core Chat Process closeout"
     owner_module: src/server/handlers/handler-response-utils.ts
+    resource_bindings:
+      writes:
+        - response.client_payload@ServerRespOutbound05ClientFrame
+      reads:
+        - response.hub_semantic@HubRespOutbound04ClientSemantic
+        - metadata.response_observation@MetaResp06ResponseObserved
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
     canonical_types:
       - ServerRespOutbound05ClientFrame
     canonical_builders:
@@ -3896,7 +4707,7 @@ owners:
       - normalizeResponsesJsonBodyForHttp
       - prepareResponsesJsonClientDispatchPlanForHttp
     allowed_paths:
-      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/responses-client-projection-host.ts
       - src/server/handlers/handler-response-sse.ts
       - src/server/handlers/handler-response-utils.ts
       - docs/architecture
@@ -3929,6 +4740,15 @@ owners:
     owner_kind: ts_entry_shell
     owner_scope: "CLI command surface is entry shell: arg parse + dispatch to http-server / manager / command runtime; no business semantics"
     owner_module: src/cli/commands
+    resource_bindings:
+      writes:
+        - cli.command_dispatch_intent@CliCommandRegistrar
+      reads:
+        - runtime.pid_cache@ServerPidCacheRecord
+        - runtime.instance_record@RuntimeInstanceRecord
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
     canonical_types:
       - CliCommandRegistrar
     canonical_builders:
@@ -4008,6 +4828,7 @@ owners:
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge/runtime-integrations.ts
+      - src/modules/llmswitch/bridge/sse-runtime-host.ts
       - scripts/helpers/sse-direct-native.mjs
       - tests/sharedmodule/helpers/sse-direct-native.ts
       - docs/goals/sse-runtime-rust-only-closeout-plan.md
@@ -4173,6 +4994,17 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "OpenAI Chat JSON->SSE event sequence projection for chat chunks, usage, reasoning, and tool-call deltas; TS remains stream IO shell only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_sse_event_payload.rs
+    resource_bindings:
+      writes:
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
+      reads:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - response.provider_raw@ProviderRespInbound01Raw
+      projects:
+        - response.hub_semantic@HubRespInbound02Parsed
+      forbidden:
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+        - error.chain@ErrorErr06ClientProjected
     canonical_types:
       - ChatCompletionResponse
       - ChatSseEvent
@@ -4209,6 +5041,20 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Anthropic Messages and Gemini Chat protocol-specific SSE projection owners; Anthropic JSON->SSE sequence, Anthropic SSE->JSON decode, Gemini JSON->SSE sequence, and Gemini SSE->JSON decode are Rust-owned and TS remains stream IO shell only"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+    resource_bindings:
+      writes:
+        - sse.protocol_stream_projection@ServerRespOutbound05ClientFrame
+        - sse.provider_stream_aggregate@HubRespInbound02Parsed
+      reads:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - response.provider_raw@ProviderRespInbound01Raw
+      projects:
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
+        - response.hub_semantic@HubRespInbound02Parsed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - AnthropicSseEvent
       - GeminiSseEvent
@@ -4251,6 +5097,16 @@ owners:
     owner_kind: provider_runtime
     owner_scope: "ErrorErr01-06 provider/runtime error chain contract and architecture gate"
     owner_module: src/providers/core/utils/provider-error-reporter.ts
+    resource_bindings:
+      writes:
+        - error.chain@ErrorErr01SourceRaised
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      reads:
+        - provider_runtime.observation@ErrorErr01SourceRaised
+      projects:
+        - response.client_payload@ErrorErr06ClientProjected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - ErrorErr01SourceRaised
       - ErrorErr02HostCaptured
@@ -4266,6 +5122,7 @@ owners:
       - src/providers/core/runtime/provider-failure-policy-impl.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_runtime_ingress.rs
+      - src/modules/llmswitch/bridge/provider-runtime-ingress-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/utils/http-error-mapper.ts
       - src/server/runtime/http-server/provider-direct-pipeline.ts
@@ -4295,6 +5152,16 @@ owners:
     owner_kind: ts_runtime_owner
     owner_scope: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
     owner_module: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
+    resource_bindings:
+      writes:
+        - error.chain@ErrorErr05ExecutionDecision
+      reads:
+        - error.chain@ErrorErr04RouterPolicyApplied
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - RequestExecutorErrorErr04RouterPolicyEnvelope
       - ErrorErr05ExecutionDecision
@@ -4302,6 +5169,7 @@ owners:
     canonical_builders:
       - resolveProviderRetryExecutionPlan
     allowed_paths:
+      - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure.ts
@@ -4336,6 +5204,14 @@ owners:
     owner_kind: server_projection
     owner_scope: "ErrorErr06 client-visible HTTP/SSE error projection"
     owner_module: src/server/utils/http-error-mapper.ts
+    resource_bindings:
+      writes:
+        - response.client_payload@ErrorErr06ClientProjected
+      reads:
+        - error.chain@ErrorErr05ExecutionDecision
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
     canonical_types:
       - ErrorErr05ExecutionDecision
       - ErrorErr06ClientProjected
@@ -4414,6 +5290,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "Rust web_search_mode owns direct/native search qualification; adjacent Rust allowed paths consume that decision for tool injection, VR filtering, and webSearch engine normalization."
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/web_search_mode.rs
+    resource_bindings:
+      writes:
+        - protocol.web_search_governance_plan@WebSearchExecutionMode
+      reads:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - request.normal_payload@HubReqChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - WebSearchExecutionMode
       - WebSearchEngineOutput
@@ -4467,6 +5352,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for servertool server-side tool followup lifecycle"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
+    resource_bindings:
+      writes:
+        - stage_a.servertool_outcome_plan@ServertoolOutcome
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - servertool.followup_state@HubRespChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ServerToolOrchestrationState
     canonical_builders:
@@ -4497,6 +5392,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for conversion type anthropic messages"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
+    resource_bindings:
+      writes:
+        - stage_a.protocol_canonical@OpenAiChatCanonical
+      reads:
+        - request.normal_payload@AnthropicChatInbound
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - ConvertedOpenAiChat
       - CanonicalAnthropicMessage
@@ -4532,6 +5435,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for conversion type Gemini"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/gemini_openai_codec.rs
+    resource_bindings:
+      writes:
+        - protocol.gemini_canonical@GeminiOpenaiCodecOutput
+      reads:
+        - stage_a.protocol_canonical@OpenAiChatCanonical
+        - request.normal_payload@HubReqInbound02Standardized
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - GeminiOpenaiCodecInput
       - GeminiOpenaiCodecOutput
@@ -4560,6 +5472,14 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for Responses/OpenAI chat codec request context and response projection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
+    resource_bindings:
+      writes:
+        - stage_a.protocol_canonical@OpenAiChatCanonical
+      reads:
+        - request.normal_payload@ResponsesRequestInbound
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
     canonical_types:
       - ResponsesOpenAiRequestOptions
       - ResponsesOpenAiContext
@@ -4592,6 +5512,16 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for responses conversation store"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+    resource_bindings:
+      writes:
+        - stage_a.continuation_store_state@ResponsesContinuationStore
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - sse.transport_frame@ServerRespOutbound05ClientFrame
     canonical_types:
       - ResponsesConversationEntry
       - ContinuationLookupResult
@@ -4624,6 +5554,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for request side text tool governance and sanitization"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance.rs
+    resource_bindings:
+      writes:
+        - stage_a.req_tool_governance_state@HubReqChatProcess03Governed
+      reads:
+        - request.normal_payload@HubReqInbound02Standardized
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.hub_semantic@HubRespInbound02Parsed
     canonical_types:
       - ToolGovernanceInput
       - ToolGovernanceOutput
@@ -4652,6 +5591,15 @@ owners:
     owner_kind: rust_ssot
     owner_scope: "file-scoped rust owner for response side governed tool result harvest and reversals"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
+    resource_bindings:
+      writes:
+        - stage_a.resp_tool_governance_state@HubRespChatProcess03Governed
+      reads:
+        - response.hub_semantic@HubRespInbound02Parsed
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - request.normal_payload@HubReqInbound02Standardized
     canonical_types:
       - RespToolGovernanceInput
       - RespToolGovernanceOutput

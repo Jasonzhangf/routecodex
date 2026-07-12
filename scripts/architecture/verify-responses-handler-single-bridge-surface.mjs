@@ -85,7 +85,7 @@ const checks = [
   },
   {
     file: 'src/server/handlers/handler-response-utils.ts',
-    allowedImport: '../../modules/llmswitch/bridge/native-exports.js',
+    allowedImport: '../../modules/llmswitch/bridge/responses-client-projection-host.js',
     requiredImports: [
       './handler-response-sse.js',
       './handler-response-common.js',

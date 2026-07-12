@@ -82,6 +82,37 @@ function readString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+function inferProviderProtocolFromResponsePayload(doc: Record<string, unknown>): string | undefined {
+  const bodyRecord = asRecord(doc.body);
+  const dataRecord = asRecord(doc.data);
+  const candidates = [
+    asRecord(bodyRecord?.payload),
+    asRecord(dataRecord?.payload),
+    asRecord(bodyRecord?.body),
+    asRecord(dataRecord?.body),
+    asRecord(bodyRecord?.data),
+    asRecord(dataRecord?.data),
+    bodyRecord,
+    dataRecord,
+    doc
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (candidate.object === 'response') {
+      return 'openai-responses';
+    }
+    if (Array.isArray(candidate.choices)) {
+      return 'openai-chat';
+    }
+    if (candidate.type === 'message' && Array.isArray(candidate.content)) {
+      return 'anthropic-messages';
+    }
+  }
+  return undefined;
+}
+
 function inferEntryEndpoint(samplePath: string, doc: Record<string, unknown>, options: Options): string {
   const meta = asRecord(doc.meta);
   const explicit = readString(options.entryEndpoint, meta?.entryEndpoint, doc.entryEndpoint, doc.endpoint);
@@ -99,6 +130,10 @@ function inferProviderProtocol(samplePath: string, entryEndpoint: string, doc: R
   const explicit = readString(options.providerProtocol, meta?.providerProtocol, doc.providerProtocol);
   if (explicit) {
     return explicit;
+  }
+  const payloadProtocol = inferProviderProtocolFromResponsePayload(doc);
+  if (payloadProtocol) {
+    return payloadProtocol;
   }
   const normalizedPath = samplePath.replace(/\\/g, '/').toLowerCase();
   if (entryEndpoint.includes('/messages') || normalizedPath.includes('anthropic')) return 'anthropic-messages';

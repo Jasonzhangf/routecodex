@@ -6,12 +6,14 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
   });
 
   it('throws native HubPipeline Error payload directly instead of wrapping it as invalid JSON', async () => {
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-native-host.js', () => ({
+      buildRequestStageRuntimeControlWritePlanNative: jest.fn(),
       getRouterHotpathJsonBindingSync: () => ({
         hubPipelineExecuteJson: jest.fn(() => (
           'Error: hub_pipeline_missing_provider_protocol: HubPipeline requires metadata center runtime_control.providerProtocol'
         )),
       }),
+      resolveEntryProtocolFromEndpointNative: jest.fn(),
     }));
 
     const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.js');
@@ -25,7 +27,8 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
   });
 
   it('throws native virtual-router Error payload directly instead of wrapping it as invalid JSON', async () => {
-    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+    jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-native-host.js', () => ({
+      buildRequestStageRuntimeControlWritePlanNative: jest.fn(),
       getRouterHotpathJsonBindingSync: () => ({
         resolveRccUserDirJson: jest.fn(() => 'null'),
         planVirtualRouterRouteHostEffectsJson: jest.fn(() => '{}'),
@@ -35,6 +38,7 @@ describe('llmswitch bridge routing-integrations native error projection', () => 
           'Error: hub_pipeline_virtual_router_route failed: PROVIDER_NOT_AVAILABLE'
         )),
       }),
+      resolveEntryProtocolFromEndpointNative: jest.fn(),
     }));
 
     const routing = await import('../../../../src/modules/llmswitch/bridge/routing-integrations.js');

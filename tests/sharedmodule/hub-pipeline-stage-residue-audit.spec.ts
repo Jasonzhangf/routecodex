@@ -715,6 +715,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(findings).toEqual([]);
   });
 
+  it('provider response executor helper shells must use the provider response native host', () => {
+    const repoRoot = process.cwd();
+    const sharedSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.ts'),
+      'utf8',
+    );
+    const validationSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/provider-response-tool-validation-blocks.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-response-converter-host.ts'),
+      'utf8',
+    );
+
+    expect(sharedSource).toContain('../../../../modules/llmswitch/bridge/provider-response-converter-host.js');
+    expect(validationSource).toContain('../../../../modules/llmswitch/bridge/provider-response-converter-host.js');
+    expect(sharedSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(validationSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('asFlatRecordJson');
+    expect(hostSource).toContain('validateCanonicalClientToolCallJson');
+  });
+
   it('provider response helper shell must stay deleted after host bridge direct native wiring', () => {
     const repoRoot = process.cwd();
     const retiredHelperPath = path.join(
@@ -860,6 +884,10 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/providers/core/runtime/http-request-executor.ts'),
       'utf8',
     );
+    const responsesProviderSource = fs.readFileSync(
+      path.join(repoRoot, 'src/providers/core/runtime/responses-provider.ts'),
+      'utf8',
+    );
     const hostSource = fs.readFileSync(
       path.join(repoRoot, 'src/modules/llmswitch/bridge/provider-outbound-sanitize-host.ts'),
       'utf8',
@@ -867,8 +895,11 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(executorSource).toContain('../../../modules/llmswitch/bridge/provider-outbound-sanitize-host.js');
     expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
+    expect(responsesProviderSource).toContain('../../../modules/llmswitch/bridge/provider-outbound-sanitize-host.js');
+    expect(responsesProviderSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
     expect(hostSource).toContain("from './native-exports.js'");
     expect(hostSource).toContain('sanitizeProviderOutboundPayload');
+    expect(hostSource).toContain('normalizeResponsesDirectCurrentRequestPayload');
   });
 
   it('request executor route availability must use its narrow native host', () => {
@@ -888,6 +919,233 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('evaluateSingletonRoutePoolExhaustionNative');
     expect(hostSource).toContain('planPrimaryExhaustedToDefaultPoolNative');
     expect(hostSource).toContain('resolveErrorErr05RouteAvailabilityDecisionNative');
+  });
+
+  it('request executor retry execution decision must use its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const executorSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/error-execution-decision-host.ts'),
+      'utf8',
+    );
+
+    expect(executorSource).toContain('../../../../modules/llmswitch/bridge/error-execution-decision-host.js');
+    expect(executorSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain("from './route-availability-host.js'");
+    expect(hostSource).toContain('resolveProviderRetryExecutionPolicyNative');
+    expect(hostSource).toContain('resolveErrorErr05RouteAvailabilityDecisionNative');
+  });
+
+  it('request retry helper rate-limit matching must use the error decision host', () => {
+    const repoRoot = process.cwd();
+    const retrySource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/request-retry-helpers.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/error-execution-decision-host.ts'),
+      'utf8',
+    );
+
+    expect(retrySource).toContain('../../../../modules/llmswitch/bridge/error-execution-decision-host.js');
+    expect(retrySource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(retrySource).not.toContain('RATE_LIMIT_ERROR_CODE_HINTS');
+    expect(retrySource).not.toContain('RATE_LIMIT_MESSAGE_HINTS');
+    expect(hostSource).toContain('isRateLimitLikeErrorJson');
+  });
+
+  it('request executor pipeline attempt route-pool helpers must use their narrow host', () => {
+    const repoRoot = process.cwd();
+    const attemptSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor/request-executor-pipeline-attempt.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/request-executor-pipeline-attempt-host.ts'),
+      'utf8',
+    );
+
+    expect(attemptSource).toContain('../../../../modules/llmswitch/bridge/request-executor-pipeline-attempt-host.js');
+    expect(attemptSource).not.toContain('../../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('normalizeExplicitRoutePoolNative');
+    expect(hostSource).toContain('mergeObservedRoutePoolChainNative');
+  });
+
+  it('request executor pipeline native helpers must stay behind routing integrations host', () => {
+    const repoRoot = process.cwd();
+    const executorSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor-pipeline.ts'),
+      'utf8',
+    );
+    const routingSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/routing-integrations.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/routing-native-host.ts'),
+      'utf8',
+    );
+
+    expect(executorSource).toContain('../../../modules/llmswitch/bridge/routing-integrations.js');
+    expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
+    expect(routingSource).toContain("from './routing-native-host.js'");
+    expect(routingSource).not.toContain("from './native-exports.js'");
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('buildRequestStageRuntimeControlWritePlanNative');
+    expect(hostSource).toContain('resolveEntryProtocolFromEndpointNative');
+  });
+
+  it('executor metadata native helpers must use the executor metadata host', () => {
+    const repoRoot = process.cwd();
+    const executorSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/runtime/http-server/executor-metadata.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/executor-metadata-host.ts'),
+      'utf8',
+    );
+
+    expect(executorSource).toContain('../../../modules/llmswitch/bridge/executor-metadata-host.js');
+    expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('extractSessionIdentifiersFromMetadataNative');
+    expect(hostSource).toContain('extractServertoolCliResultRouteHintFromRequestNative');
+  });
+
+  it('server response handler Responses client projection uses its narrow native host', () => {
+    const repoRoot = process.cwd();
+    const handlerSource = fs.readFileSync(
+      path.join(repoRoot, 'src/server/handlers/handler-response-utils.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-client-projection-host.ts'),
+      'utf8',
+    );
+
+    expect(handlerSource).toContain('../../modules/llmswitch/bridge/responses-client-projection-host.js');
+    expect(handlerSource).not.toContain('../../modules/llmswitch/bridge/native-exports.js');
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('buildResponsesPayloadFromChatNative');
+    expect(hostSource).toContain('planResponsesJsonClientDispatchNative');
+    expect(hostSource).toContain('projectResponsesClientPayloadForClientNative');
+  });
+
+  it('server response handler tests mock narrow native hosts instead of broad native exports', () => {
+    const repoRoot = process.cwd();
+    const testPaths = [
+      'tests/server/handlers/handler-response-utils.force-sse-json-responses.spec.ts',
+      'tests/server/handlers/handler-response-utils.prestart-client-close-guard.spec.ts',
+      'tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts',
+      'tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts',
+      'tests/server/handlers/handler-response-utils.sse-usage-log.spec.ts',
+      'tests/server/handlers/sse-projection-timeout.blackbox.spec.ts',
+    ];
+
+    for (const relativePath of testPaths) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      expect(source).not.toContain('src/modules/llmswitch/bridge/native-exports');
+      expect(source).toContain('src/modules/llmswitch/bridge/responses-client-projection-host.js');
+      expect(source).toContain('src/modules/llmswitch/bridge/sse-projection-host.js');
+    }
+  });
+
+  it('provider and manager runtime tests mock owner native hosts instead of broad native exports', () => {
+    const repoRoot = process.cwd();
+    const testCases = [
+      {
+        path: 'tests/providers/runtime/responses-provider.direct-passthrough.spec.ts',
+        hosts: [
+          'src/modules/llmswitch/bridge/provider-outbound-sanitize-host.js',
+          'src/modules/llmswitch/bridge/responses-to-chat-host.js',
+        ],
+      },
+      {
+        path: 'tests/manager/routing/native-routing-state-store.spec.ts',
+        hosts: [
+          'src/modules/llmswitch/bridge/routing-state-store-host.js',
+        ],
+      },
+    ];
+
+    for (const testCase of testCases) {
+      const source = fs.readFileSync(path.join(repoRoot, testCase.path), 'utf8');
+      expect(source).not.toContain('src/modules/llmswitch/bridge/native-exports');
+      for (const host of testCase.hosts) {
+        expect(source).toContain(host);
+      }
+    }
+  });
+
+  it('responses request bridge uses request-handler host instead of broad native exports', () => {
+    const repoRoot = process.cwd();
+    const bridgeSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-request-bridge.ts'),
+      'utf8',
+    );
+    const hostSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/responses-request-handler-host.ts'),
+      'utf8',
+    );
+    const testPaths = [
+      'tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts',
+      'tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts',
+      'tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts',
+    ];
+
+    expect(bridgeSource).toContain("from './responses-request-handler-host.js'");
+    expect(bridgeSource).not.toContain("from './native-exports.js'");
+    expect(hostSource).toContain("from './native-exports.js'");
+    expect(hostSource).toContain('planResponsesHandlerEntry');
+    expect(hostSource).toContain('captureReqInboundResponsesContextSnapshotJson');
+    for (const relativePath of testPaths) {
+      const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+      expect(source).not.toContain('src/modules/llmswitch/bridge/native-exports');
+      expect(source).toContain('src/modules/llmswitch/bridge/responses-request-handler-host.js');
+    }
+  });
+
+  it('runtime integrations use owner native hosts instead of broad native exports', () => {
+    const repoRoot = process.cwd();
+    const runtimeSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/runtime-integrations.ts'),
+      'utf8',
+    );
+    const snapshotTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/modules/llmswitch/bridge/runtime-integrations.snapshot.spec.ts'),
+      'utf8',
+    );
+
+    expect(runtimeSource).not.toContain('from "./native-exports.js"');
+    expect(runtimeSource).not.toContain("from './native-exports.js'");
+    expect(runtimeSource).toContain("from \"./snapshot-hooks-host.js\"");
+    expect(runtimeSource).toContain("from './sse-runtime-host.js'");
+    expect(runtimeSource).toContain("from './provider-runtime-ingress-host.js'");
+    expect(snapshotTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(snapshotTestSource).toContain('src/modules/llmswitch/bridge/snapshot-hooks-host.js');
+  });
+
+  it('routing integrations use routing native host instead of broad native exports', () => {
+    const repoRoot = process.cwd();
+    const routingSource = fs.readFileSync(
+      path.join(repoRoot, 'src/modules/llmswitch/bridge/routing-integrations.ts'),
+      'utf8',
+    );
+    const routingTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/modules/llmswitch/bridge/routing-integrations.native-error.spec.ts'),
+      'utf8',
+    );
+
+    expect(routingSource).not.toContain("from './native-exports.js'");
+    expect(routingSource).toContain("from './routing-native-host.js'");
+    expect(routingTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(routingTestSource).toContain('src/modules/llmswitch/bridge/routing-native-host.js');
   });
 
   it('SSE event payload wrapper shells must stay deleted after direct Rust NAPI tests', () => {

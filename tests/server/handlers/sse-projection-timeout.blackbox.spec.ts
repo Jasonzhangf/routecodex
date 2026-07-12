@@ -49,7 +49,23 @@ function createLocalNativeExportsMock(overrides: BridgeOverrides = {}): BridgeOv
 
 function mockBridgeModules(overrides: BridgeOverrides = {}): void {
   const nativeExports = createLocalNativeExportsMock(overrides);
-  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => nativeExports);
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/session-log-color-host.js', () => ({
+    getSessionLogColorBinding: jest.fn(() => ({
+      resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
+    })),
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-client-projection-host.js', () => ({
+    buildResponsesPayloadFromChatNative: nativeExports.buildResponsesPayloadFromChatNative,
+    planResponsesJsonClientDispatchNative: nativeExports.planResponsesJsonClientDispatchNative,
+    projectResponsesClientPayloadForClientNative: nativeExports.projectResponsesClientPayloadForClientNative,
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/error-projection-host.js', () => ({
+    projectSseErrorEventPayloadNative: nativeExports.projectSseErrorEventPayloadNative,
+  }));
+  jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/sse-projection-host.js', () => ({
+    projectResponsesSseFrameForClientNative: nativeExports.projectResponsesSseFrameForClientNative,
+    updateResponsesSseTransportTerminalStateNative: nativeExports.updateResponsesSseTransportTerminalStateNative,
+  }));
 }
 
 function parseSseEvents(text: string): Array<{ event?: string; data?: unknown }> {

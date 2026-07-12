@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 let nativeBinding: Record<string, unknown> = {};
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/routing-state-store-host.js', () => ({
   getRouterHotpathJsonBindingSync: () => nativeBinding,
 }));
 

@@ -23,7 +23,7 @@ import {
   buildResponsesPayloadFromChatNative,
   planResponsesJsonClientDispatchNative,
   projectResponsesClientPayloadForClientNative,
-} from '../../modules/llmswitch/bridge/native-exports.js';
+} from '../../modules/llmswitch/bridge/responses-client-projection-host.js';
 import { readRuntimeRequestTruthIdentifiers } from '../runtime/http-server/metadata-center/request-truth-readers.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
