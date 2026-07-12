@@ -2663,7 +2663,7 @@ fn test_validate_apply_patch_arguments_repairs_arg_key_invalid_json_artifact() {
 }
 
 #[test]
-fn test_validate_apply_patch_arguments_syncs_patch_and_input_after_arg_key_artifact_repair() {
+fn test_validate_apply_patch_arguments_keeps_single_patch_carrier_after_arg_key_artifact_repair() {
     let patch_text =
         "*** Begin Patch\n*** Delete File: .apply_patch_escape_test.txt\n*** End Patch";
     let injected =
@@ -2685,12 +2685,8 @@ fn test_validate_apply_patch_arguments_syncs_patch_and_input_after_arg_key_artif
         .get("patch")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let input = normalized_value
-        .get("input")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     assert_eq!(patch, patch_text);
-    assert_eq!(input, patch_text);
+    assert!(normalized_value.get("input").is_none());
     assert!(!patch.contains("</arg_key><arg_value>"));
 }
 

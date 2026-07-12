@@ -50,8 +50,7 @@ fn read_apply_patch_source_from_args(args: &Map<String, Value>) -> Option<String
 
 fn build_canonical_apply_patch_args(patch: String) -> Map<String, Value> {
     let mut out = Map::new();
-    out.insert("patch".to_string(), Value::String(patch.clone()));
-    out.insert("input".to_string(), Value::String(patch));
+    out.insert("patch".to_string(), Value::String(patch));
     out
 }
 

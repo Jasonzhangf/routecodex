@@ -360,8 +360,8 @@ async function main() {
       if (normalizedPatchText.includes('</arg_key><arg_value>')) {
         throw new Error('[verify-apply-patch] arg_key_artifacts: patch still contains arg_key artifacts');
       }
-      if (parsed?.patch !== parsed?.input) {
-        throw new Error('[verify-apply-patch] arg_key_artifacts: patch/input mismatch after normalization');
+      if (parsed?.patch !== patchText || Object.prototype.hasOwnProperty.call(parsed, 'input')) {
+        throw new Error('[verify-apply-patch] arg_key_artifacts: normalized output must keep patch as the single carrier');
       }
     }
 
