@@ -32,10 +32,7 @@ jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-r
 }));
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => ({
-  executeHubPipelineNative: executeHubPipelineNativeMock
-}));
-
-jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
+  executeHubPipelineNative: executeHubPipelineNativeMock,
   buildRequestStageRuntimeControlWritePlanNative: buildRequestStageRuntimeControlWritePlanNativeMock,
   resolveEntryProtocolFromEndpointNative: resolveEntryProtocolFromEndpointNativeMock
 }));

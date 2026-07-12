@@ -1003,6 +1003,10 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/routing-native-host.ts'),
       'utf8',
     );
+    const stageRecorderTestSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts'),
+      'utf8',
+    );
 
     expect(executorSource).toContain('../../../modules/llmswitch/bridge/routing-integrations.js');
     expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
@@ -1011,6 +1015,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain("from './native-exports.js'");
     expect(hostSource).toContain('buildRequestStageRuntimeControlWritePlanNative');
     expect(hostSource).toContain('resolveEntryProtocolFromEndpointNative');
+    expect(stageRecorderTestSource).toContain('src/modules/llmswitch/bridge/routing-integrations.js');
+    expect(stageRecorderTestSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
   });
 
   it('executor metadata native helpers must use the executor metadata host', () => {
