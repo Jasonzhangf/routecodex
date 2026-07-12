@@ -19,5 +19,5 @@ export function planDirectRouteResponseErrorNative(status: number | undefined): 
     'planDirectRouteResponseErrorJson',
     callNativeJsonCapability(getBinding, 'planDirectRouteResponseErrorJson', [{ status }], options),
     options,
-  ) as DirectRouteResponseErrorPlan;
+  ) as unknown as DirectRouteResponseErrorPlan;
 }
