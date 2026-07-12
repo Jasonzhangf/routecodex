@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 import {
+  buildResponsesPipelineMetadataForHttpFake,
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
 } from './responses-request-handler-host-fake.js';
@@ -120,6 +121,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  buildResponsesPipelineMetadataForHttpNative: jest.fn(buildResponsesPipelineMetadataForHttpFake),
   finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {

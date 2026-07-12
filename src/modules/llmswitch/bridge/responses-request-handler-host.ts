@@ -7,6 +7,7 @@
 
 export {
   buildResponsesConversationPortScopeForHttpNative,
+  buildResponsesPipelineMetadataForHttpNative,
   buildResponsesResumeClientErrorForHttpNative,
   buildResponsesResumeControlForContinuationContextForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,

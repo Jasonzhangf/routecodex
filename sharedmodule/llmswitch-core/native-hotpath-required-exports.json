@@ -222,6 +222,7 @@
   "shouldManageResponsesConversationForHttpJson",
   "buildResponsesConversationPortScopeForHttpJson",
   "buildResponsesResumeControlForContinuationContextForHttpJson",
+  "buildResponsesPipelineMetadataForHttpJson",
   "buildResponsesScopeContinuationExpiredErrorForHttpJson",
   "buildResponsesResumeClientErrorForHttpJson",
   "shouldProjectResponsesResumeClientErrorForHttpJson",

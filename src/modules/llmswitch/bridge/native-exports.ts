@@ -306,6 +306,7 @@ type NativeRouterHotpathJsonBinding = {
   shouldManageResponsesConversationForHttpJson?: (entryEndpoint: string) => boolean;
   buildResponsesConversationPortScopeForHttpJson?: (portContextJson: string) => string;
   buildResponsesResumeControlForContinuationContextForHttpJson?: (resumeMetaJson: string) => string;
+  buildResponsesPipelineMetadataForHttpJson?: (inputJson: string) => string;
   buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
   buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
   shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
@@ -1190,6 +1191,62 @@ export function buildResponsesResumeControlForContinuationContextForHttpNative(
     'buildResponsesResumeControlForContinuationContextForHttpJson',
     parsed
   );
+}
+
+// feature_id: hub.responses_request_pipeline_metadata_plan
+// canonical_builder: build_responses_pipeline_metadata_for_http_json
+export function buildResponsesPipelineMetadataForHttpNative(args: {
+  streamPlan: Record<string, unknown>;
+  clientRequestId?: string;
+  clientHeaders?: Record<string, unknown>;
+  clientAbort?: boolean;
+  resumeMeta?: Record<string, unknown>;
+}): {
+  metadata: AnyRecord;
+  metadataCenterWrites: Array<{
+    family: string;
+    key: string;
+    value: unknown;
+    reason?: string;
+  }>;
+} {
+  const fn = getRouterHotpathJsonBindingSync().buildResponsesPipelineMetadataForHttpJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] buildResponsesPipelineMetadataForHttpJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify({
+    streamPlan: args.streamPlan,
+    ...(typeof args.clientRequestId === 'string' ? { clientRequestId: args.clientRequestId } : {}),
+    ...(args.clientHeaders ? { clientHeaders: args.clientHeaders } : {}),
+    clientAbort: args.clientAbort === true,
+    ...(args.resumeMeta ? { resumeMeta: args.resumeMeta } : {}),
+  }))) as unknown;
+  const record = assertNativeObject('buildResponsesPipelineMetadataForHttpJson', parsed);
+  const metadata = assertNativeObject(
+    'buildResponsesPipelineMetadataForHttpJson.metadata',
+    record.metadata
+  );
+  if (!Array.isArray(record.metadataCenterWrites)) {
+    throw new Error('[llmswitch-bridge] buildResponsesPipelineMetadataForHttpJson.metadataCenterWrites returned invalid payload');
+  }
+  return {
+    metadata,
+    metadataCenterWrites: record.metadataCenterWrites.map((entry, index) => {
+      const write = assertNativeObject(
+        `buildResponsesPipelineMetadataForHttpJson.metadataCenterWrites[${index}]`,
+        entry
+      );
+      if (typeof write.family !== 'string' || typeof write.key !== 'string') {
+        throw new Error('[llmswitch-bridge] buildResponsesPipelineMetadataForHttpJson returned malformed metadata write');
+      }
+      return {
+        family: write.family,
+        key: write.key,
+        value: write.value,
+        ...(typeof write.reason === 'string' ? { reason: write.reason } : {}),
+      };
+    }),
+  };
 }
 
 export function buildResponsesScopeContinuationExpiredErrorForHttpNative(): {

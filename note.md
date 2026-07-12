@@ -1,3 +1,11 @@
+# 2026-07-12 23:32 CST: responses pipeline metadata plan moved to Rust
+- Scope: `hub.responses_request_pipeline_metadata_plan` as a Hub Pipeline TS orchestration closeout slice for `/v1/responses` request-side metadata/control assembly.
+- Change: Rust `shared_responses_conversation_utils.rs::build_responses_pipeline_metadata_for_http_json` now plans `runtime_control.streamIntent`, `runtime_control.providerProtocol`, `runtime_control.clientAbort`, `continuation_context.responsesResume`, and direct-only `runtime_control.retryProviderKey`; TS bridge only calls native, attaches `MetadataCenter`, preserves non-serializable `clientConnectionState`, and applies returned writes.
+- Negative lock: relay resume metadata uses the existing sanitized resume-control builder and does not leak `providerKey`, `routeHint`, session identity, or payload mirrors into request metadata.
+- Map/gate: added function-map owner and verification-map entry; package scripts `test:responses-pipeline-metadata-plan-cargo` and `test:responses-pipeline-metadata-plan-bridge` keep required gates queryable by `verify:architecture-owner-queryability`.
+- Validation PASS: `npm run test:responses-pipeline-metadata-plan-cargo`; `npm run test:responses-pipeline-metadata-plan-bridge`; `npm run verify:function-map-compile-gate`; `npm run verify:hub-pipeline-native-reference-gate`; `npm run verify:llmswitch-rustification-audit`; `npm run build:native-hotpath`; `npm run verify:architecture-mainline-call-map`; `npm run verify:architecture-thin-wrapper-only`; `npm run verify:architecture-review-surface-light`; `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`; `git diff --check`.
+- Boundary: no provider config, global install, restart, or live replay in this source/architecture slice.
+
 # 2026-07-12 23:27 CST: provider-response timing breakdown projection moved to Rust
 - Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`, timing projection sub-slice only.
 - Change: `convertProviderResponseIfNeeded` no longer contains local TS `attachTimingBreakdown`; it calls `buildProviderResponseTimingBreakdownWithNative`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.

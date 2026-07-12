@@ -1,3 +1,14 @@
+# 2026-07-12: function-map required gates must be package scripts
+
+- For new function-map / verification-map features, `required_gates` and verification `smoke` entries must use queryable `npm run <script>` commands. Raw `cargo test ...` or long `npm run jest:run -- ...` entries fail `verify:architecture-owner-queryability`; add package scripts first, then bind maps to those scripts.
+- Evidence: `hub.responses_request_pipeline_metadata_plan` was fixed by adding `test:responses-pipeline-metadata-plan-cargo` and `test:responses-pipeline-metadata-plan-bridge`, after which `npm run verify:function-map-compile-gate` passed.
+
+# 2026-07-12: Responses request pipeline metadata plan is Rust-owned
+
+- `/v1/responses` request-side pipeline metadata/control assembly is owned by `shared_responses_conversation_utils.rs::build_responses_pipeline_metadata_for_http_json`: `runtime_control.streamIntent`, `runtime_control.providerProtocol`, `runtime_control.clientAbort`, `continuation_context.responsesResume`, and direct-only `runtime_control.retryProviderKey`.
+- TS bridge may only call the native planner, attach `MetadataCenter`, preserve non-serializable `clientConnectionState`, and apply returned writes; it must not locally decide provider protocol, stream intent, resume control, abort state, or direct continuation provider pin.
+- Evidence: Rust focused tests, bridge metadata-center Jest, `verify:function-map-compile-gate`, `verify:hub-pipeline-native-reference-gate`, `verify:llmswitch-rustification-audit`, `build:native-hotpath`, and `build:base` passed on 2026-07-12.
+
 # 2026-07-12: 5555 route pool excludes spark/asxs and prefers cc/free GPT
 
 - Live 5555 routing policy group is `gateway_priority_5555`; active 5555 route pools must not reference `gpt-5.3-codex-spark` or asxs targets.

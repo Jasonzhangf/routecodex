@@ -86,6 +86,68 @@ export function buildResponsesResumeControlForContinuationContextForHttpFake(
   return out;
 }
 
+export function buildResponsesPipelineMetadataForHttpFake(args: {
+  streamPlan?: AnyRecord;
+  clientRequestId?: string;
+  clientHeaders?: AnyRecord;
+  clientAbort?: boolean;
+  resumeMeta?: AnyRecord;
+  responsesResume?: AnyRecord;
+}): AnyRecord {
+  const streamPlan = args.streamPlan ?? {};
+  const responsesResume = args.responsesResume ?? (args.resumeMeta
+    ? buildResponsesResumeControlForContinuationContextForHttpFake(args.resumeMeta)
+    : undefined);
+  const runtimeControlWrites = [
+    {
+      family: 'runtime_control',
+      key: 'streamIntent',
+      value: streamPlan.inboundStream === true || streamPlan.outboundStream === true ? 'stream' : 'non_stream',
+      reason: 'responses handler stream intent',
+    },
+    {
+      family: 'runtime_control',
+      key: 'providerProtocol',
+      value: 'openai-responses',
+      reason: 'responses handler provider protocol',
+    },
+    {
+      family: 'runtime_control',
+      key: 'clientAbort',
+      value: args.clientAbort === true,
+      reason: 'responses handler client abort state',
+    },
+  ];
+  if (
+    responsesResume?.continuationOwner === 'direct'
+    && typeof responsesResume.providerKey === 'string'
+    && responsesResume.providerKey.trim()
+  ) {
+    runtimeControlWrites.push({
+      family: 'runtime_control',
+      key: 'retryProviderKey',
+      value: responsesResume.providerKey.trim(),
+      reason: 'direct responses continuation provider pin',
+    });
+  }
+  return {
+    metadata: {
+      clientRequestId: args.clientRequestId,
+      clientStream: streamPlan.acceptsSse === true ? true : undefined,
+      clientHeaders: args.clientHeaders,
+      ...(responsesResume ? { responsesResume } : {}),
+    },
+    metadataCenterWrites: [
+      ...runtimeControlWrites,
+      ...(responsesResume ? [{
+        family: 'continuation_context',
+        key: 'responsesResume',
+        value: responsesResume,
+      }] : []),
+    ],
+  };
+}
+
 export function finalizeResponsesHandlerPayloadForHttpFake(args: {
   payload?: AnyRecord;
   isSubmitToolOutputs?: boolean;

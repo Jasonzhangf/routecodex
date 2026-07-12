@@ -2638,14 +2638,43 @@ verification:
       - npm run build:base
     notes:
       - "Server handlers are HTTP transport adapters only; protocol semantics must stay out of server TS."
+  - feature_id: hub.responses_request_pipeline_metadata_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
+      - src/modules/llmswitch/bridge/native-exports.ts
+      - src/modules/llmswitch/bridge/responses-request-handler-host.ts
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+    contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
+    integration:
+      - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
+    smoke:
+      - npm run test:responses-pipeline-metadata-plan-cargo
+      - npm run test:responses-pipeline-metadata-plan-bridge
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - npm run build:base
+    notes:
+      - "Positive proof: Rust emits `runtime_control.streamIntent`, `runtime_control.providerProtocol`, `runtime_control.clientAbort`, `continuation_context.responsesResume`, and direct-only `runtime_control.retryProviderKey` writes."
+      - "Negative proof: relay resume metadata does not leak provider pin, route hint, session identity, or payload mirrors into request metadata."
+      - "TS bridge may only attach MetadataCenter, carry non-serializable Node clientConnectionState, and apply returned writes."
   - feature_id: server.responses_request_handler_bridge_surface
     change_risk: high
     unit:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/modules/llmswitch/bridge/responses-request-handler-host.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - src/server/handlers/responses-handler.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
+      - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
@@ -2668,7 +2697,7 @@ verification:
       - "relay-owned request-context normalization is covered by `responses-request-bridge.request-context-normalization.spec.ts`: native req_inbound snapshot must replace raw duplicate tool history, must collapse repeated identical tool-call batches to the latest output per call_id, and orphan tool_result must fail without falling back to raw input."
       - "request-context capture gating, result metadata attach, and tool-call response seeding are covered by the same request-bridge gate and submit_tool_outputs handler regressions."
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
-      - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, `responsesRequestContext`, stream carrier) is covered by the same request-bridge gate plus accept-header/submit_tool_outputs handler regressions."
+      - "request-side protocol-scoped pipeline metadata assembly (`providerProtocol`, `responsesResume`, stream carrier, client abort, and direct continuation provider pin) is Rust-owned by `hub.responses_request_pipeline_metadata_plan`; this bridge gate proves the TS surface only applies returned MetadataCenter writes."
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
       - "Validation must prove `runtime_control.providerProtocol` is written into the bound MetadataCenter on the request-executor request-route path; top-level protocol-shell transport may remain transitional, but it is no longer the only owner evidence."
       - "Validation must prove request bridge / req_inbound do not restore or mutate continuation history; they may only capture explicit request evidence and pass opaque MetadataCenter/store inputs to Chat Process owners."

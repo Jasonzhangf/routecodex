@@ -67,6 +67,8 @@
     "verify:responses-conversation-shared-helpers": "node scripts/architecture/verify-responses-conversation-shared-helpers.mjs",
     "test:responses-conversation-shared-helpers-red-fixtures": "node scripts/tests/responses-conversation-shared-helpers-red-fixtures.mjs",
     "test:responses-conversation-shared-helpers-cargo": "cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi shared_responses_conversation_utils --lib -- --nocapture",
+    "test:responses-pipeline-metadata-plan-cargo": "cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi responses_pipeline_metadata_for_http --lib -- --nocapture",
+    "test:responses-pipeline-metadata-plan-bridge": "npm run jest:run -- --runTestsByPath tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts --runInBand",
     "verify:servertool-core-shared-helpers": "node scripts/architecture/verify-servertool-core-shared-helpers.mjs",
     "test:servertool-core-shared-helpers-red-fixtures": "node scripts/tests/servertool-core-shared-helpers-red-fixtures.mjs",
     "test:servertool-core-shared-helpers-cargo": "cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi contextual_json_helpers_preserve_error_context --lib -- --nocapture && cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi servertool_core_blocks --lib -- --nocapture",

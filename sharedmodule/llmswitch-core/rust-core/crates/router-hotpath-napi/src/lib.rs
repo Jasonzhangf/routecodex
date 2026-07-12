@@ -3627,6 +3627,7 @@ pub use responses_reasoning_registry::{
     register_responses_passthrough_json, register_responses_payload_snapshot_json,
 };
 pub use shared_responses_conversation_utils::{
+    build_responses_pipeline_metadata_for_http_json,
     materialize_provider_owned_submit_context_json, plan_responses_captured_entry_json,
     plan_responses_continuation_request_action_json, plan_responses_conversation_preflight_json,
     plan_responses_handler_entry_json, plan_responses_record_continuation_flag_json,
@@ -3778,17 +3779,13 @@ pub fn should_allow_direct_responses_prebuilt_sse_passthrough_json(
 #[napi]
 pub fn build_choices_array_bridge_debug_details_json(input_json: String) -> NapiResult<String> {
     let raw: serde_json::Value = parse_napi_json(&input_json)?;
-    stringify_napi_json(&payload_extraction::build_choices_array_bridge_debug_details(
-        &raw,
-    ))
+    stringify_napi_json(&payload_extraction::build_choices_array_bridge_debug_details(&raw))
 }
 
 #[napi]
 pub fn build_provider_response_timing_breakdown_json(input_json: String) -> NapiResult<String> {
     let raw: serde_json::Value = parse_napi_json(&input_json)?;
-    stringify_napi_json(&payload_extraction::build_provider_response_timing_breakdown(
-        &raw,
-    ))
+    stringify_napi_json(&payload_extraction::build_provider_response_timing_breakdown(&raw))
 }
 
 // ---------------------------------------------------------------------------

@@ -4113,6 +4113,21 @@ impl ResponsesConversationStoreState {
                 serde_json::json!(responses_store_now_ms()),
             );
         }
+        let release_plan = plan_responses_release_request_payload(&entry);
+        if let Some(row) = entry.as_object_mut() {
+            if let Some(plan_obj) = release_plan.as_object() {
+                for key in [
+                    "releasedInputPrefix",
+                    "basePayload",
+                    "releasedPendingToolCallIds",
+                    "input",
+                ] {
+                    if let Some(value) = plan_obj.get(key).cloned() {
+                        row.insert(key.to_string(), value);
+                    }
+                }
+            }
+        }
         let actual_request_id = responses_store_read_entry_request_id(&entry)
             .unwrap_or_else(|| entry_request_id.clone());
         self.request_map
@@ -5748,15 +5763,12 @@ fn first_trimmed_field(input: &Map<String, Value>, keys: &[&str]) -> Option<Stri
         .find_map(|key| read_trimmed_string(input.get(*key)))
 }
 
-#[napi_derive::napi(js_name = "buildResponsesResumeControlForContinuationContextForHttpJson")]
-pub fn build_responses_resume_control_for_continuation_context_for_http_json(
-    resume_meta_json: String,
-) -> NapiResult<String> {
-    let resume_meta: Value = serde_json::from_str(&resume_meta_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+fn build_responses_resume_control_for_continuation_context_for_http_value(
+    resume_meta: &Value,
+) -> Result<Value, String> {
     let input = resume_meta
         .as_object()
-        .ok_or_else(|| napi::Error::from_reason("resumeMeta must be object"))?;
+        .ok_or_else(|| "resumeMeta must be object".to_string())?;
     let mut output = serde_json::Map::new();
 
     for key in [
@@ -5818,8 +5830,146 @@ pub fn build_responses_resume_control_for_continuation_context_for_http_json(
         }
     }
 
-    serde_json::to_string(&Value::Object(output))
-        .map_err(|e| napi::Error::from_reason(e.to_string()))
+    Ok(Value::Object(output))
+}
+
+#[napi_derive::napi(js_name = "buildResponsesResumeControlForContinuationContextForHttpJson")]
+pub fn build_responses_resume_control_for_continuation_context_for_http_json(
+    resume_meta_json: String,
+) -> NapiResult<String> {
+    let resume_meta: Value = serde_json::from_str(&resume_meta_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output =
+        build_responses_resume_control_for_continuation_context_for_http_value(&resume_meta)
+            .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn responses_pipeline_metadata_write(
+    family: &str,
+    key: &str,
+    value: Value,
+    reason: Option<&str>,
+) -> Value {
+    let mut output = serde_json::Map::new();
+    output.insert("family".to_string(), Value::String(family.to_string()));
+    output.insert("key".to_string(), Value::String(key.to_string()));
+    output.insert("value".to_string(), value);
+    if let Some(reason) = reason {
+        output.insert("reason".to_string(), Value::String(reason.to_string()));
+    }
+    Value::Object(output)
+}
+
+// feature_id: hub.responses_request_pipeline_metadata_plan
+fn build_responses_pipeline_metadata_for_http(input: &Value) -> Result<Value, String> {
+    let obj = input
+        .as_object()
+        .ok_or_else(|| "responses pipeline metadata input must be object".to_string())?;
+    let stream_plan = obj
+        .get("streamPlan")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "responses pipeline metadata input missing streamPlan".to_string())?;
+    let responses_resume = match obj.get("resumeMeta") {
+        Some(Value::Null) | None => None,
+        Some(value) => {
+            Some(build_responses_resume_control_for_continuation_context_for_http_value(value)?)
+        }
+    };
+    let inbound_stream = stream_plan
+        .get("inboundStream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let outbound_stream = stream_plan
+        .get("outboundStream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let accepts_sse = stream_plan
+        .get("acceptsSse")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let mut metadata = serde_json::Map::new();
+    if let Some(client_request_id) = read_trimmed_string(obj.get("clientRequestId")) {
+        metadata.insert(
+            "clientRequestId".to_string(),
+            Value::String(client_request_id),
+        );
+    }
+    if accepts_sse {
+        metadata.insert("clientStream".to_string(), Value::Bool(true));
+    }
+    if let Some(headers) = obj.get("clientHeaders").and_then(Value::as_object) {
+        metadata.insert("clientHeaders".to_string(), Value::Object(headers.clone()));
+    }
+    if let Some(resume) = responses_resume.clone() {
+        metadata.insert("responsesResume".to_string(), resume);
+    }
+
+    let mut writes = vec![
+        responses_pipeline_metadata_write(
+            "runtime_control",
+            "streamIntent",
+            Value::String(if inbound_stream || outbound_stream {
+                "stream".to_string()
+            } else {
+                "non_stream".to_string()
+            }),
+            Some("responses handler stream intent"),
+        ),
+        responses_pipeline_metadata_write(
+            "runtime_control",
+            "providerProtocol",
+            Value::String("openai-responses".to_string()),
+            Some("responses handler provider protocol"),
+        ),
+        responses_pipeline_metadata_write(
+            "runtime_control",
+            "clientAbort",
+            Value::Bool(
+                obj.get("clientAbort")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            ),
+            Some("responses handler client abort state"),
+        ),
+    ];
+
+    if let Some(resume) = responses_resume {
+        writes.push(responses_pipeline_metadata_write(
+            "continuation_context",
+            "responsesResume",
+            resume.clone(),
+            None,
+        ));
+        if matches!(
+            resume.get("continuationOwner").and_then(Value::as_str),
+            Some("direct")
+        ) {
+            if let Some(provider_key) = read_trimmed_string(resume.get("providerKey")) {
+                writes.push(responses_pipeline_metadata_write(
+                    "runtime_control",
+                    "retryProviderKey",
+                    Value::String(provider_key),
+                    Some("direct responses continuation provider pin"),
+                ));
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "metadata": Value::Object(metadata),
+        "metadataCenterWrites": writes,
+    }))
+}
+
+#[napi_derive::napi(js_name = "buildResponsesPipelineMetadataForHttpJson")]
+pub fn build_responses_pipeline_metadata_for_http_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output =
+        build_responses_pipeline_metadata_for_http(&input).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi_derive::napi(js_name = "buildResponsesScopeContinuationExpiredErrorForHttpJson")]
@@ -6317,7 +6467,7 @@ pub fn publish_responses_record_plan_json(
 mod tests {
     use super::{
         build_responses_conversation_port_scope_for_http_json,
-        build_responses_conversation_scope_plan,
+        build_responses_conversation_scope_plan, build_responses_pipeline_metadata_for_http_json,
         build_responses_resume_control_for_continuation_context_for_http_json,
         build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
         execute_responses_conversation_store_operation,
@@ -9844,6 +9994,104 @@ mod tests {
                 {"callId": "call_2", "outputText": "text output"}
             ])
         );
+    }
+
+    #[test]
+    fn responses_pipeline_metadata_for_http_plans_relay_control_writes() {
+        let output: Value = serde_json::from_str(
+            &build_responses_pipeline_metadata_for_http_json(
+                json!({
+                    "streamPlan": {
+                        "inboundStream": true,
+                        "outboundStream": true,
+                        "acceptsSse": true
+                    },
+                    "clientRequestId": " client-req-1 ",
+                    "clientHeaders": {"x-test": "1"},
+                    "clientAbort": false,
+                    "resumeMeta": {
+                        "responseId": " resp_1 ",
+                        "continuationOwner": "relay",
+                        "providerKey": "provider.must_not_leak"
+                    }
+                })
+                .to_string(),
+            )
+            .expect("pipeline metadata"),
+        )
+        .expect("pipeline metadata json");
+
+        assert_eq!(output["metadata"]["clientRequestId"], json!("client-req-1"));
+        assert_eq!(output["metadata"]["clientStream"], json!(true));
+        assert_eq!(
+            output["metadata"]["responsesResume"]["responseId"],
+            json!("resp_1")
+        );
+        assert!(output["metadata"]["responsesResume"]
+            .get("providerKey")
+            .is_none());
+        assert!(output["metadata"]["clientConnectionState"].is_null());
+        let writes = output["metadataCenterWrites"].as_array().unwrap();
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("runtime_control")
+                && write["key"] == json!("streamIntent")
+                && write["value"] == json!("stream")
+        }));
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("runtime_control")
+                && write["key"] == json!("providerProtocol")
+                && write["value"] == json!("openai-responses")
+        }));
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("continuation_context")
+                && write["key"] == json!("responsesResume")
+                && write["value"]["continuationOwner"] == json!("relay")
+        }));
+        assert!(!writes
+            .iter()
+            .any(|write| write["key"] == json!("retryProviderKey")));
+    }
+
+    #[test]
+    fn responses_pipeline_metadata_for_http_plans_direct_provider_pin() {
+        let output: Value = serde_json::from_str(
+            &build_responses_pipeline_metadata_for_http_json(
+                json!({
+                    "streamPlan": {
+                        "inboundStream": false,
+                        "outboundStream": false,
+                        "acceptsSse": false
+                    },
+                    "clientAbort": true,
+                    "resumeMeta": {
+                        "responseId": "resp_direct",
+                        "continuationOwner": "direct",
+                        "providerKey": " provider.key1.gpt-5.5 "
+                    }
+                })
+                .to_string(),
+            )
+            .expect("pipeline metadata"),
+        )
+        .expect("pipeline metadata json");
+
+        assert!(output["metadata"].get("clientStream").is_none());
+        let writes = output["metadataCenterWrites"].as_array().unwrap();
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("runtime_control")
+                && write["key"] == json!("streamIntent")
+                && write["value"] == json!("non_stream")
+        }));
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("runtime_control")
+                && write["key"] == json!("clientAbort")
+                && write["value"] == json!(true)
+        }));
+        assert!(writes.iter().any(|write| {
+            write["family"] == json!("runtime_control")
+                && write["key"] == json!("retryProviderKey")
+                && write["value"] == json!("provider.key1.gpt-5.5")
+        }));
     }
 
     #[test]

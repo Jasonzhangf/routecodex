@@ -21,7 +21,7 @@ import {
 import {
   captureReqInboundResponsesContextSnapshotJson,
   buildResponsesConversationPortScopeForHttpNative,
-  buildResponsesResumeControlForContinuationContextForHttpNative,
+  buildResponsesPipelineMetadataForHttpNative,
   buildResponsesResumeClientErrorForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
@@ -141,65 +141,32 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   resumeMeta?: Record<string, unknown>;
   requestContext: ResponsesRequestContextForHttp;
 }): Record<string, unknown> {
-  const responsesResume = args.resumeMeta
-    ? buildResponsesResumeControlForContinuationContextForHttpNative(args.resumeMeta)
-    : undefined;
+  const plan = buildResponsesPipelineMetadataForHttpNative({
+    streamPlan: args.streamPlan,
+    ...(typeof args.clientRequestId === 'string' ? { clientRequestId: args.clientRequestId } : {}),
+    ...(args.clientHeaders ? { clientHeaders: args.clientHeaders } : {}),
+    clientAbort: readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
+    ...(args.resumeMeta ? { resumeMeta: args.resumeMeta } : {}),
+  });
   const metadata: Record<string, unknown> = {
-    clientRequestId: args.clientRequestId,
-    clientStream: args.streamPlan.acceptsSse || undefined,
-    clientHeaders: args.clientHeaders,
+    ...plan.metadata,
     clientConnectionState: args.clientConnectionState,
-    ...(responsesResume ? { responsesResume } : {}),
   };
   MetadataCenter.attach(metadata);
-  writeMetadataCenterSlot({
-    target: metadata,
-    family: 'runtime_control',
-    key: 'streamIntent',
-    value: args.streamPlan.inboundStream || args.streamPlan.outboundStream ? 'stream' : 'non_stream',
-    writer: RESPONSES_PIPELINE_METADATA_WRITER,
-    reason: 'responses handler stream intent'
-  });
-  writeMetadataCenterSlot({
-    target: metadata,
-    family: 'runtime_control',
-    key: 'providerProtocol',
-    value: 'openai-responses',
-    writer: RESPONSES_PIPELINE_METADATA_WRITER,
-    reason: 'responses handler provider protocol'
-  });
-  writeMetadataCenterSlot({
-    target: metadata,
-    family: 'runtime_control',
-    key: 'clientAbort',
-    value: readClientAbortSignalForHttp(args.clientConnectionState)?.aborted === true,
-    writer: RESPONSES_PIPELINE_METADATA_WRITER,
-    reason: 'responses handler client abort state'
-  });
-  if (args.resumeMeta) {
-    if (responsesResume) {
-      writeMetadataCenterSlot({
-        target: metadata,
-        family: 'continuation_context',
-        key: 'responsesResume',
-        value: responsesResume,
-        writer: RESPONSES_PIPELINE_CONTINUATION_WRITER
-      });
+  for (const write of plan.metadataCenterWrites) {
+    if (write.family !== 'runtime_control' && write.family !== 'continuation_context') {
+      throw new Error(`Unsupported responses pipeline metadata write family: ${String(write.family)}`);
     }
-    if (
-      responsesResume?.continuationOwner === 'direct'
-      && typeof responsesResume.providerKey === 'string'
-      && responsesResume.providerKey.trim()
-    ) {
-      writeMetadataCenterSlot({
-        target: metadata,
-        family: 'runtime_control',
-        key: 'retryProviderKey',
-        value: responsesResume.providerKey.trim(),
-        writer: RESPONSES_PIPELINE_METADATA_WRITER,
-        reason: 'direct responses continuation provider pin'
-      });
-    }
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: write.family,
+      key: write.key,
+      value: write.value,
+      writer: write.family === 'continuation_context'
+        ? RESPONSES_PIPELINE_CONTINUATION_WRITER
+        : RESPONSES_PIPELINE_METADATA_WRITER,
+      ...(typeof write.reason === 'string' ? { reason: write.reason } : {})
+    });
   }
   return metadata;
 }

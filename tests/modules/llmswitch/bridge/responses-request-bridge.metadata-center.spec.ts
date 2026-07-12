@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 import {
+  buildResponsesPipelineMetadataForHttpFake,
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
 } from './responses-request-handler-host-fake.js';
@@ -86,6 +87,7 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  buildResponsesPipelineMetadataForHttpNative: jest.fn(buildResponsesPipelineMetadataForHttpFake),
   finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
     payload?: Record<string, unknown>;
@@ -131,6 +133,7 @@ let finalizeResponsesPipelineResultForHttp: any;
 let MetadataCenter: any;
 let readRuntimeControlProjection: any;
 let runtimeIntegrations: any;
+let responsesRequestHandlerHost: any;
 
 beforeAll(async () => {
   ({
@@ -140,6 +143,9 @@ beforeAll(async () => {
     finalizeResponsesPipelineResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
   runtimeIntegrations = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
+  responsesRequestHandlerHost = await import(
+    '../../../../src/modules/llmswitch/bridge/responses-request-handler-host.js'
+  );
   ({ MetadataCenter } = await import(
     '../../../../src/server/runtime/http-server/metadata-center/metadata-center.ts'
   ));
@@ -219,6 +225,18 @@ describe('responses-request-bridge metadata center projection', () => {
       resumeMeta
     });
 
+    expect(responsesRequestHandlerHost.buildResponsesPipelineMetadataForHttpNative).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: 'client-req-1',
+        clientAbort: false,
+        resumeMeta,
+        streamPlan: expect.objectContaining({
+          inboundStream: true,
+          outboundStream: true,
+          acceptsSse: true
+        })
+      })
+    );
     const center = MetadataCenter.read(metadata);
     expect(center?.readContinuationContext()).toMatchObject({
       responsesResume: resumeMeta
