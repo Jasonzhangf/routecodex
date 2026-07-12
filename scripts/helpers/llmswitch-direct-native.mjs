@@ -47,8 +47,8 @@ function parseNativeRecord(raw, capability) {
   return parsed;
 }
 
-function executeResponsesStoreOperation(operation, payload = {}) {
-  const parsed = parseNativeRecord(
+export function executeResponsesStoreOperationEnvelope(operation, payload = {}) {
+  return parseNativeRecord(
     nativeFn('executeResponsesConversationStoreOperationJson')(
       JSON.stringify({
         operation,
@@ -58,6 +58,10 @@ function executeResponsesStoreOperation(operation, payload = {}) {
     ),
     'executeResponsesConversationStoreOperationJson',
   );
+}
+
+function executeResponsesStoreOperation(operation, payload = {}) {
+  const parsed = executeResponsesStoreOperationEnvelope(operation, payload);
   if (parsed.ok === false) {
     const error = parsed.error && typeof parsed.error === 'object' ? parsed.error : {};
     throw new Error(String(error.message ?? `${operation} responses store operation failed`));

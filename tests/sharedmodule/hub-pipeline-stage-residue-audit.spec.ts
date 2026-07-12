@@ -1074,6 +1074,8 @@ describe('hub pipeline stage residue audit', () => {
       'tests/server/handlers/handler-response-utils.request-context-resolution.spec.ts',
       'tests/server/handlers/handler-response-utils.responses-keepalive-protocol.spec.ts',
       'tests/server/handlers/handler-response-utils.sse-usage-log.spec.ts',
+      'tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts',
+      'tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts',
       'tests/server/handlers/sse-projection-timeout.blackbox.spec.ts',
     ];
 
@@ -1083,6 +1085,30 @@ describe('hub pipeline stage residue audit', () => {
       expect(source).toContain('src/modules/llmswitch/bridge/responses-client-projection-host.js');
       expect(source).toContain('src/modules/llmswitch/bridge/sse-projection-host.js');
     }
+  });
+
+  it('responses submit_tool_outputs handler tests mock continuation owner hosts, not broad native exports', () => {
+    const repoRoot = process.cwd();
+    const responsesProviderSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts'),
+      'utf8',
+    );
+    const sseErrorSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/server/handlers/responses-handler.submit-tool-outputs.sse-error.spec.ts'),
+      'utf8',
+    );
+
+    expect(responsesProviderSource).toContain('src/modules/llmswitch/bridge/responses-request-handler-host.js');
+    expect(responsesProviderSource).toContain('src/modules/llmswitch/bridge/executor-metadata-host.js');
+    expect(responsesProviderSource).toContain('src/modules/llmswitch/bridge/config-integrations.js');
+    expect(responsesProviderSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(responsesProviderSource).not.toContain('createNativeExportsMock');
+
+    expect(sseErrorSource).toContain('src/modules/llmswitch/bridge/responses-request-bridge.js');
+    expect(sseErrorSource).toContain('src/modules/llmswitch/bridge/executor-metadata-host.js');
+    expect(sseErrorSource).toContain('src/modules/llmswitch/bridge/config-integrations.js');
+    expect(sseErrorSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
+    expect(sseErrorSource).not.toContain('createNativeExportsMock');
   });
 
   it('provider and manager runtime tests mock owner native hosts instead of broad native exports', () => {

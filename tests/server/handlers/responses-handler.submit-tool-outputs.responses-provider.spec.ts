@@ -26,17 +26,7 @@ const planResponsesRequestBodyForHttpMock = (payload: Record<string, unknown>) =
   };
 };
 
-const createNativeExportsMock = () => ({
-  getRouterHotpathJsonBindingSync: jest.fn(() => ({
-    resolveRccPathJson: jest.fn((inputJson: string) => {
-      const input = JSON.parse(inputJson || '{}') as { segments?: unknown[] };
-      const parts = Array.isArray(input.segments) ? input.segments.map(String) : [];
-      return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
-    }),
-    resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
-    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
-  })),
-  normalizeAssistantTextToToolCallsJson: jest.fn(async (input: unknown) => input),
+const createResponsesRequestHandlerHostMock = () => ({
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
     input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
     toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
@@ -113,9 +103,6 @@ const createNativeExportsMock = () => ({
     }
     return { action: 'none' };
   }),
-  sanitizeProviderOutboundPayload: jest.fn(async (input: unknown) => input),
-  evaluateSingletonRoutePoolExhaustionNative: jest.fn(() => ({ exhausted: false })),
-  planPrimaryExhaustedToDefaultPoolNative: jest.fn(() => ({ status: 'unmatched', defaultPoolTargets: [] })),
   planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
   shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
     entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
@@ -184,15 +171,19 @@ const createNativeExportsMock = () => ({
       },
     };
   }),
-  convertResponsesRequestToChatNative: jest.fn((input: unknown) => input),
-  normalizeResponsesDirectCurrentRequestPayload: jest.fn((input: unknown) => input),
   extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
     sessionId: metadata?.sessionId ?? metadata?.session_id,
     conversationId: metadata?.conversationId ?? metadata?.conversation_id,
   })),
+});
+
+const createResponsesClientProjectionHostMock = () => ({
   buildResponsesPayloadFromChatNative: jest.fn((input: unknown) => input),
-  projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
   planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
+  projectResponsesClientPayloadForClientNative: jest.fn((args: { payload?: unknown }) => args.payload ?? {}),
+});
+
+const createSseProjectionHostMock = () => ({
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string; state?: unknown }) => ({
     emit: true,
     frame: args.frame ?? '',
@@ -202,52 +193,64 @@ const createNativeExportsMock = () => ({
     state: input.state ?? {},
     observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
   })),
+});
+
+const createErrorProjectionHostMock = () => ({
   projectSseErrorEventPayloadNative: jest.fn((args: unknown) => args),
-  classifyProviderFailure: jest.fn(() => ({ classification: 'unknown' })),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
-  shouldRecordSnapshotsNative: jest.fn(() => false),
-  writeSnapshotViaHooksNative: jest.fn(() => undefined),
-  classifyEmptyResponseSignalNative: jest.fn(() => ({ isEmpty: false, empty: false, reason: undefined })),
-  detectToolExecutionFailuresNative: jest.fn(() => []),
-  classifyRuntimeErrorSignalNative: jest.fn(() => null),
-  shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
-  shouldLogRuntimeErrorSignalToConsoleNative: jest.fn(() => false),
-  shouldWriteClientToolErrorsampleNative: jest.fn(() => true),
-  resetSnapshotRecorderErrorsampleStateNative: jest.fn(() => undefined),
-  appendSnapshotStageTraceNative: jest.fn(({ trace }: { trace?: unknown[] }) => trace ?? []),
-  summarizeSnapshotStageTraceNative: jest.fn((trace: unknown[]) => trace),
-  shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
-  shouldInspectToolFailuresNative: jest.fn(() => false),
-  resolveRequestTailSummaryNative: jest.fn(() => null),
-  summarizeClientToolObservationNative: jest.fn(() => ({
-    topLevelKeys: [],
-    failureCount: 0,
-    toolMessageCount: 0,
-    failures: [],
-    toolMessages: [],
+});
+
+const createSessionLogColorHostMock = () => ({
+  getSessionLogColorBinding: jest.fn(() => ({
+    resolveSessionColorStr: jest.fn(() => JSON.stringify('')),
+    resolveSessionLogColorKeyJson: jest.fn(() => JSON.stringify('')),
   })),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn((input: {
-    request?: Record<string, unknown>;
-  }) => {
-    const request = input.request ?? {};
-    const toolOutputs = Array.isArray(request.tool_outputs) ? request.tool_outputs : [];
-    const first = toolOutputs[0];
-    if (!first || typeof first !== 'object' || Array.isArray(first)) {
-      return undefined;
-    }
-    const output = (first as Record<string, unknown>).output;
-    if (typeof output !== 'string' || !output.trim()) {
-      return undefined;
-    }
-    try {
-      const parsed = JSON.parse(output) as Record<string, unknown>;
-      return typeof parsed.routeHint === 'string' ? parsed.routeHint : undefined;
-    } catch {
-      return undefined;
-    }
+});
+
+const createConfigIntegrationsHostMock = () => ({
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (input: unknown) => input ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((input: unknown) => input ?? null),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  compileRouteCodexRuntimeManifest: jest.fn(async (input: unknown) => input ?? {}),
+  compileRouteCodexRuntimeManifestSync: jest.fn((input: unknown) => input ?? {}),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((input: unknown) => input ?? {}),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: unknown) => input ?? {}),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  planAuthFileResolutionNativeSync: jest.fn(() => ({ candidates: [] })),
+  planProviderConfigRootNativeSync: jest.fn(() => ({ rootDir: '/tmp/routecodex-test/provider' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({ candidates: [] })),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveAuthFileKeyNativeSync: jest.fn(() => undefined),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  resolveRccPathNativeSync: jest.fn((segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
   }),
-  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/routecodex-test/codex-samples'),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/routecodex-test'),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn(() => ({ providerId: 'mock' })),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn(() => ''),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn(() => ''),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn(() => undefined),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn(() => undefined),
+});
+
+const createExecutorMetadataHostMock = () => ({
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
+  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
+    sessionId: metadata?.sessionId ?? metadata?.session_id,
+    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
+  })),
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
@@ -272,7 +275,34 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
   writeSnapshotViaHooks: jest.fn(async () => undefined),
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', createNativeExportsMock);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-request-handler-host.js',
+  createResponsesRequestHandlerHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-client-projection-host.js',
+  createResponsesClientProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/sse-projection-host.js',
+  createSseProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/error-projection-host.js',
+  createErrorProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/session-log-color-host.js',
+  createSessionLogColorHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/config-integrations.js',
+  createConfigIntegrationsHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/executor-metadata-host.js',
+  createExecutorMetadataHostMock,
+);
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),

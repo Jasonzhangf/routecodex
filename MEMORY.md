@@ -847,6 +847,11 @@
 - TS `responses-conversation-store.ts` may build requested scope keys, read `scopeIndex`, project minimal candidates, and execute restore/materialize IO; it must not re-own allow-continuation filtering, direct-vs-relay exclusion, dedupe, mixed-owner ambiguity, no-match, or multi-match ambiguity.
 - Verified evidence: Rust `scope_match` test, sharedmodule TypeScript check, native hotpath build, focused responses store/residue Jest, `verify:responses-history-protocol-contract` 59/59, `verify:llmswitch-rustification-audit`, function-map gate, mainline binding/call-map gates, and touched-file `git diff --check` passed.
 
+# 2026-07-12: Responses store script regressions use isolated direct-native state
+
+- Script-level Responses store regressions must call `scripts/helpers/llmswitch-direct-native.mjs` and set an isolated temp `ROUTECODEX_RESPONSES_CONVERSATION_STORE`; they must not manually load broad native candidates or read live `~/.rcc/state/responses-conversation-store.json`.
+- Verified trigger: `responses-store-orphan-tool-result.mjs` reading the live store path made `build:base` appear stuck after Rust responses-history tests. Moving it to the direct-native helper with a temp store made `node sharedmodule/llmswitch-core/tests/responses-store-orphan-tool-result.mjs`, `npm run verify:responses-history-protocol-contract`, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` exit 0.
+
 # 2026-07-05: Responses submit resume entry selection is Rust-owned
 
 - `resumeConversation()` entry selection for Responses submit_tool_outputs now uses Rust `planResponsesConversationResumeEntryMatchJson`.

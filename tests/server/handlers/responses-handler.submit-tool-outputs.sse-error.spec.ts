@@ -2,10 +2,6 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import {
-  buildResponsesResumeControlForContinuationContextForHttpFake,
-  finalizeResponsesHandlerPayloadForHttpFake,
-} from '../../providers/helpers/llmswitch-native-exports-fake.js';
 
 const mockResumeResponsesConversation = jest.fn();
 const mockCaptureResponsesRequestContextForRequest = jest.fn();
@@ -14,18 +10,6 @@ const mockFinalizeResponsesConversationRequestRetention = jest.fn(async () => un
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn(async () => null);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
-
-const planResponsesRequestBodyForHttpMock = (payload: Record<string, unknown>) => {
-  const pipelineBody = { ...(payload ?? {}) };
-  const metadata = pipelineBody.metadata;
-  delete pipelineBody.metadata;
-  return {
-    ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-      ? { requestBodyMetadata: metadata as Record<string, unknown> }
-      : {}),
-    pipelineBody,
-  };
-};
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   buildResponsesJsonFromSseStreamWithNative: jest.fn(async () => ({})),
@@ -47,135 +31,25 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/runtime-integrat
   writeSnapshotViaHooks: jest.fn(async () => undefined),
 }));
 
-const createNativeExportsMock = () => ({
+const createResponsesClientProjectionHostMock = () => ({
   buildResponsesPayloadFromChatNative: jest.fn((payload: unknown) => payload),
-  captureReqInboundResponsesContextSnapshotJson: jest.fn((args: { rawRequest?: Record<string, unknown> }) => ({
-    input: Array.isArray(args.rawRequest?.input) ? args.rawRequest.input : [],
-    toolsRaw: Array.isArray(args.rawRequest?.tools) ? args.rawRequest.tools : [],
-  })),
-  classifyEmptyResponseSignalNative: jest.fn(() => ({ errorType: '', matchedText: '', responseSummary: {} })),
-  classifyProviderFailure: jest.fn(() => 'unknown'),
-  convertResponsesRequestToChatNative: jest.fn((payload: unknown) => payload),
-  deriveFinishReasonNative: jest.fn(() => undefined),
-  detectToolExecutionFailuresNative: jest.fn(() => []),
-  classifyRuntimeErrorSignalNative: jest.fn(() => null),
-  shouldLogClientToolErrorToConsoleNative: jest.fn(() => false),
-  shouldLogRuntimeErrorSignalToConsoleNative: jest.fn(() => false),
-  shouldWriteClientToolErrorsampleNative: jest.fn(() => true),
-  resetSnapshotRecorderErrorsampleStateNative: jest.fn(() => undefined),
-  appendSnapshotStageTraceNative: jest.fn(({ trace }: { trace?: unknown[] }) => trace ?? []),
-  summarizeSnapshotStageTraceNative: jest.fn((trace: unknown[]) => trace),
-  shouldInspectRuntimeErrorFastNative: jest.fn(() => false),
-  shouldInspectToolFailuresNative: jest.fn(() => false),
-  resolveRequestTailSummaryNative: jest.fn(() => null),
-  summarizeClientToolObservationNative: jest.fn(() => ({
-    topLevelKeys: [],
-    failureCount: 0,
-    toolMessageCount: 0,
-    failures: [],
-    toolMessages: [],
-  })),
-  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
-    sessionId: metadata?.sessionId ?? metadata?.session_id,
-    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
-  })),
-  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
-  getRouterHotpathJsonBindingSync: jest.fn(() => ({
-    resolveRccPathJson: jest.fn((inputJson: string) => {
-      const input = JSON.parse(inputJson || '{}') as { segments?: unknown[] };
-      const parts = Array.isArray(input.segments) ? input.segments.map(String) : [];
-      return JSON.stringify(['/tmp/routecodex-test', ...parts].join('/'));
-    }),
-  })),
-  isToolCallContinuationResponseNative: jest.fn(() => false),
-  materializeProviderOwnedSubmitContext: jest.fn((payload: Record<string, unknown>) => payload),
-  normalizeAssistantTextToToolCallsJson: jest.fn((payload: unknown) => payload),
-  normalizeResponsesDirectCurrentRequestPayload: jest.fn((payload: unknown) => payload),
-  planResponsesContinuationRequestAction: jest.fn(() => ({ action: 'none' })),
-  planResponsesHandlerEntry: jest.fn(async (payload: Record<string, unknown>, _entryEndpoint: string, responseIdFromPath?: string) => ({
-    mode: 'submit_tool_outputs',
-    payload: {
-      ...payload,
-      ...(responseIdFromPath ? { response_id: responseIdFromPath } : {}),
-    },
-    responseId: responseIdFromPath,
-  })),
   planResponsesJsonClientDispatchNative: jest.fn(() => ({ action: 'direct_passthrough' })),
-  planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
-  shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
-    entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs'
-  ),
-  buildResponsesScopeContinuationExpiredErrorForHttpNative: jest.fn(() => ({
-    error: {
-      message: 'Responses continuation expired or not found for local scope materialization',
-      type: 'invalid_request_error',
-      code: 'responses_continuation_expired',
-    },
-  })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  } = {}) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message: typeof args.message === 'string' && args.message.trim()
-          ? args.message
-          : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code: typeof args.code === 'string' && args.code.trim()
-          ? args.code
-          : 'responses_resume_failed',
-        origin: typeof args.origin === 'string' && args.origin.trim()
-          ? args.origin
-          : 'client',
-      },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
-    typeof origin === 'string' && origin.trim() === 'client'
-  ),
-  buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
-    buildResponsesResumeControlForContinuationContextForHttpFake
-  ),
-  finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
-  buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
-  planResponsesHandlerStreamForHttpNative: jest.fn((args: {
-    payload?: Record<string, unknown>;
-    forceStream?: boolean;
-    acceptsSse: boolean;
-    requestTimeoutMs?: number;
-  }) => {
-    const payload = args.payload ?? {};
-    const hasExplicitStream = typeof payload.stream === 'boolean';
-    const originalStream = payload.stream === true;
-    const outboundStream = typeof args.forceStream === 'boolean'
-      ? args.forceStream
-      : (hasExplicitStream ? originalStream : args.acceptsSse);
-    return {
-      originalStream,
-      outboundStream,
-      inboundStream: outboundStream,
-      acceptsSse: args.acceptsSse,
-      requestStartMeta: {
-        inboundStream: outboundStream,
-        outboundStream,
-        clientAcceptsSse: args.acceptsSse,
-        originalStream,
-        type: payload.type,
-        timeoutMs: args.requestTimeoutMs,
-      },
-    };
-  }),
-  planResponsesRequestContext: jest.fn(() => ({ shouldCapture: false, context: {} })),
   projectResponsesClientPayloadForClientNative: jest.fn((payload: unknown) => payload),
+});
+
+const createSseProjectionHostMock = () => ({
   projectResponsesSseFrameForClientNative: jest.fn((args: { frame?: string; state?: unknown }) => ({
     emit: true,
     frame: args.frame ?? '',
     state: args.state,
   })),
+  updateResponsesSseTransportTerminalStateNative: jest.fn((input: { state?: Record<string, unknown>; chunk?: unknown }) => ({
+    state: input.state ?? {},
+    observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
+  })),
+});
+
+const createErrorProjectionHostMock = () => ({
   projectSseErrorEventPayloadNative: jest.fn((args: { requestId?: string; status?: number; message?: string; code?: string }) => ({
     type: 'error',
     request_id: args.requestId,
@@ -183,17 +57,79 @@ const createNativeExportsMock = () => ({
     message: args.message ?? 'sse error',
     code: args.code ?? 'ERR_SSE_ERROR',
   })),
-  resolveProviderResponseRequestSemanticsNative: jest.fn((_processed: unknown, standardized: unknown) => standardized ?? {}),
-  sanitizeProviderOutboundPayload: jest.fn((payload: unknown) => payload),
-  shouldRecordSnapshotsNative: jest.fn(() => false),
-  updateResponsesSseTransportTerminalStateNative: jest.fn((input: { state?: Record<string, unknown>; chunk?: unknown }) => ({
-    state: input.state ?? {},
-    observedTerminal: String(input.chunk ?? '').includes('response.completed') || String(input.chunk ?? '').includes('response.done'),
-  })),
-  writeSnapshotViaHooksNative: jest.fn(() => undefined),
 });
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/native-exports.js', createNativeExportsMock);
+const createConfigIntegrationsHostMock = () => ({
+  buildRouteCodexForwarderProfilesSync: jest.fn(() => ({})),
+  buildRouteCodexProviderProfilesSync: jest.fn(() => ({})),
+  coerceRouteCodexProviderConfigV2: jest.fn(async (input: unknown) => input ?? null),
+  coerceRouteCodexProviderConfigV2Sync: jest.fn((input: unknown) => input ?? null),
+  collectRouteCodexV2ConfigSourceErrorsSync: jest.fn(() => []),
+  compileRouteCodexRuntimeManifest: jest.fn(async (input: unknown) => input ?? {}),
+  compileRouteCodexRuntimeManifestSync: jest.fn((input: unknown) => input ?? {}),
+  decodeRouteCodexProviderConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  decodeRouteCodexUserConfigTextSync: jest.fn(() => ({ format: 'toml', raw: '', parsed: {} })),
+  detectRouteCodexProviderConfigFormatSync: jest.fn(() => 'toml'),
+  detectRouteCodexUserConfigFormatSync: jest.fn(() => 'toml'),
+  extractRouteCodexMaterializedProviderConfigsSync: jest.fn(() => null),
+  loadRouteCodexConfigNativeSync: jest.fn(() => ({ configPath: '', userConfig: {}, providerProfiles: {} })),
+  loadRouteCodexProviderConfigsV2FromRootSync: jest.fn(() => ({})),
+  materializeRouteCodexUserConfigFromManifestSync: jest.fn((input: unknown) => input ?? {}),
+  normalizeRouteCodexV2RuntimeSourceSync: jest.fn((input: unknown) => input ?? {}),
+  parseRouteCodexTomlRecordSync: jest.fn(() => ({})),
+  planAuthFileResolutionNativeSync: jest.fn(() => ({ candidates: [] })),
+  planProviderConfigRootNativeSync: jest.fn(() => ({ rootDir: '/tmp/routecodex-test/provider' })),
+  planRouteCodexConfigLoaderPathsNativeSync: jest.fn(() => ({ candidates: [] })),
+  planRouteCodexProviderConfigV2FilesSync: jest.fn(() => []),
+  resolveAuthFileKeyNativeSync: jest.fn(() => undefined),
+  resolvePrimaryRouteCodexRoutingPolicyGroupSync: jest.fn(() => undefined),
+  resolveRccPathNativeSync: jest.fn((segments?: unknown) => {
+    const parts = Array.isArray(segments) ? segments.map(String) : [];
+    return ['/tmp/routecodex-test', ...parts].join('/');
+  }),
+  resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/routecodex-test/codex-samples'),
+  resolveRccUserDirNativeSync: jest.fn(() => '/tmp/routecodex-test'),
+  resolveRouteCodexConfigPathNativeSync: jest.fn(() => '/tmp/routecodex-test/config.toml'),
+  resolveRouteCodexProviderConfigV2IdentitySync: jest.fn(() => ({ providerId: 'mock' })),
+  serializeRouteCodexTomlRecordSync: jest.fn(() => ''),
+  updateRouteCodexTomlStringScalarInTableSync: jest.fn(() => ''),
+  updateRouteCodexUserConfigStringScalarNativeSync: jest.fn(() => ''),
+  writeRouteCodexProviderConfigFileNativeSync: jest.fn(() => undefined),
+  writeRouteCodexUserConfigFileNativeSync: jest.fn(() => undefined),
+});
+
+const createExecutorMetadataHostMock = () => ({
+  extractServertoolCliResultRouteHintFromRequestNative: jest.fn(() => undefined),
+  extractSessionIdentifiersFromMetadataNative: jest.fn((metadata?: Record<string, unknown>) => ({
+    sessionId: metadata?.sessionId ?? metadata?.session_id,
+    conversationId: metadata?.conversationId ?? metadata?.conversation_id,
+  })),
+});
+
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/responses-client-projection-host.js',
+  createResponsesClientProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/sse-projection-host.js',
+  createSseProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/error-projection-host.js',
+  createErrorProjectionHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/config-integrations.js',
+  createConfigIntegrationsHostMock,
+);
+jest.unstable_mockModule(
+  '../../../src/modules/llmswitch/bridge/executor-metadata-host.js',
+  createExecutorMetadataHostMock,
+);
+
+jest.unstable_mockModule('../../../src/debug/diag/index.js', () => ({
+  writeDebugErrorDiagArtifact: jest.fn(async () => '/tmp/routecodex-test/debug-error.json'),
+}));
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
@@ -311,6 +247,8 @@ async function withServer<T>(app: express.Express, run: (baseUrl: string) => Pro
     const address = server.address() as AddressInfo;
     return await run(`http://127.0.0.1:${address.port}`);
   } finally {
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 }
