@@ -77,7 +77,7 @@ describe('HttpRequestExecutor provider wire sanitize', () => {
         function: expect.objectContaining({
           name: 'apply_patch',
           parameters: expect.objectContaining({
-            required: ['filePath', 'patch'],
+            required: ['patch'],
           }),
         }),
       }),

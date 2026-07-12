@@ -43,6 +43,14 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-export
   }),
 }), { virtual: true });
 
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/provider-outbound-sanitize-host.js', () => ({
+  sanitizeProviderOutboundPayload: async (input: {
+    protocol?: string;
+    compatibilityProfile?: string;
+    payload: Record<string, unknown>;
+  }) => sanitizeProviderOutboundPayloadWithNative(input),
+}), { virtual: true });
+
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   reportProviderErrorToRouterPolicy: async () => {},
   reportProviderSuccessToRouterPolicy: async () => {},
