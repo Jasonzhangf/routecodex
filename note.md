@@ -29704,3 +29704,9 @@ Pure Rust NAPI candidates:
 - TS only executes returned MetadataCenter writes when the request-local pipeline carrier exists. The dead cloned request metadata carrier and TS-owned keys/reasons were physically removed.
 - Red: before native rebuild, the focused router-direct suite failed on missing `planDirectRouteModelObservationEffectsJson`; green: router-direct 36/36 and Rust model-hooks 4/4.
 - Required residue/function/resource/mainline/native-reference/rustification/native/base-build gates passed; generated build-info was restored.
+# 2026-07-13: direct model observation release/live verification
+
+- Release snapshot install passed and restarted managed 5520; explicit `routecodex restart --port 5555` also passed.
+- Version truth aligned at `0.90.3932`: global `routecodex`, global `rcc`, `~/.rcc/install/current/package.json`, and 5555 `/health.version`; health reports ready/pipelineReady.
+- Same-entry `/v1/responses` provider-request dry-run on 5555 returned HTTP 200 `routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`, provider snapshot written, and final provider body preserved `model=gpt-5.5`.
+- The first immediate post-restart curl returned 502 without body capture; the repeated same request succeeded and canonical new sample `req_1783887672816_a79cd601` records client response status 200. Historical July 4/7 startup errors in the log predate this install and are not new runtime failures.

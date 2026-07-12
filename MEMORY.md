@@ -2655,3 +2655,7 @@
 - The existence, family, keys, values, and reasons for router-direct model observation writes are Rust truth. TS only applies the returned effects to an available request-local MetadataCenter carrier.
 - A valid effect requires both original client alias and assigned provider wire model; a missing half emits zero writes. Never recreate the pair or reason strings in TS.
 - The prior cloned request payload carrier was dead: it was written but neither returned nor consumed. It is physically removed rather than retained as a second metadata path.
+# 2026-07-13: direct model observation slice installed/live baseline
+
+- Commit `2a2e5cf` is installed at version `0.90.3932`; global CLIs, install/current, and managed 5555 health versions match.
+- Live 5555 Responses provider-request dry-run proves the installed path stops before provider send and emits the final provider request with the expected canonical model. Latest canonical client response sample is HTTP 200.
