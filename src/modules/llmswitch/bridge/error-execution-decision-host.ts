@@ -44,6 +44,10 @@ export type ErrorErr02HostCapturedInput = {
   detailUpstreamCode?: string;
   detailUpstreamMessage?: string;
   responseErrorMessage?: string;
+  responseErrorCode?: string;
+  responseErrorType?: string;
+  responseErrorParam?: string;
+  providerStatusCode?: number;
 };
 
 export type ErrorErr03RuntimeClassifiedDecision = {

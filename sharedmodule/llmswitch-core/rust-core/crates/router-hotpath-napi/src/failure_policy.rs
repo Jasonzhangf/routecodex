@@ -177,6 +177,14 @@ pub struct ErrorErr02HostCapturedInput {
     pub detail_upstream_message: Option<String>,
     #[serde(default)]
     pub response_error_message: Option<String>,
+    #[serde(default)]
+    pub response_error_code: Option<String>,
+    #[serde(default)]
+    pub response_error_type: Option<String>,
+    #[serde(default)]
+    pub response_error_param: Option<String>,
+    #[serde(default)]
+    pub provider_status_code: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -271,6 +279,9 @@ pub fn classify_error_err02_host_captured(
 ) -> ErrorErr03RuntimeClassifiedDecision {
     let error_code = normalize_code(input.error_code.as_deref());
     let upstream_code = normalize_code(input.upstream_code.as_deref());
+    let nested_code = normalize_code(input.response_error_code.as_deref());
+    let nested_type = normalize_code(input.response_error_type.as_deref());
+    let protocol_upstream_code = normalize_code(input.detail_upstream_code.as_deref());
     if input.stage.as_deref() == Some("provider.followup") {
         return ErrorErr03RuntimeClassifiedDecision {
             classification: None,
@@ -299,8 +310,35 @@ pub fn classify_error_err02_host_captured(
         .trim()
         .to_ascii_lowercase();
     let code_matches = |expected: &str| {
-        error_code.as_deref() == Some(expected) || upstream_code.as_deref() == Some(expected)
+        error_code.as_deref() == Some(expected)
+            || upstream_code.as_deref() == Some(expected)
+            || nested_code.as_deref() == Some(expected)
     };
+    let protocol_code_matches = |expected: &str| {
+        code_matches(expected) || protocol_upstream_code.as_deref() == Some(expected)
+    };
+    let malformed_response = code_matches("MALFORMED_RESPONSE");
+    let has_2013_signal = input.provider_status_code == Some(2013)
+        || [
+            error_code.as_deref(),
+            upstream_code.as_deref(),
+            nested_code.as_deref(),
+            protocol_upstream_code.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|code| code == "2013" || code.contains("_2013"));
+    let protocol_reason = input
+        .detail_reason
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let nested_message = input
+        .response_error_message
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let prompt_too_long = code_matches("CONTEXT_LENGTH_EXCEEDED")
         || [
             "prompt is too long",
@@ -331,13 +369,41 @@ pub fn classify_error_err02_host_captured(
         || code_matches("514")
         || (input.status_code == Some(520)
             && (code_matches("PROVIDER_STATUS_1000") || reason.contains("unknown error, 520")))
+        || (has_2013_signal
+            && (protocol_reason == "context_length_exceeded"
+                || reason.contains("context_length_exceeded")
+                || nested_message.contains("context_length_exceeded")))
+        || (input.status_code == Some(429) && has_2013_signal)
+        || (has_2013_signal
+            && [
+                "当前请求量较高",
+                "请稍后重试",
+                "traffic saturation",
+                "rate limited",
+                "too many requests",
+                "token plan",
+            ]
+            .iter()
+            .any(|hint| reason.contains(hint)))
+        || (malformed_response
+            && (protocol_code_matches("PROVIDER_STATUS_2056")
+                || reason.contains("usage limit exceeded")))
+        || (malformed_response
+            && (protocol_code_matches("SERVER_ERROR")
+                || nested_type.as_deref() == Some("SERVER_ERROR")))
+        || (malformed_response && has_2013_signal)
+        || (input.status_code == Some(200)
+            && malformed_response
+            && (reason.contains("instead of sse")
+                || nested_message.contains("instead of sse")
+                || protocol_reason.contains("instead of sse")))
     {
         Some(FailureClassification::Recoverable)
     } else if code_matches("MALFORMED_REQUEST")
         || code_matches("CLIENT_TOOL_ARGS_INVALID")
         || local_response_contract
         || matches!(input.status_code, Some(401 | 402 | 403 | 404))
-        || (code_matches("MALFORMED_RESPONSE")
+        || (malformed_response
             && !reason.contains("context_length_exceeded")
             && !reason.contains("instead of sse")
             && !reason.contains("usage limit exceeded"))

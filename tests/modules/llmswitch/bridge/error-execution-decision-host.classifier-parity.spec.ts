@@ -62,6 +62,43 @@ const cases = [
     name: 'GLM 514 business error',
     input: { stage: 'provider.send', statusCode: 200, errorCode: '514', reason: 'glm business error (514)' },
   },
+  {
+    name: 'provider business 2013 saturation',
+    input: {
+      stage: 'provider.send', statusCode: 200, errorCode: 'MALFORMED_RESPONSE',
+      detailUpstreamCode: 'PROVIDER_STATUS_2013', providerStatusCode: 2013,
+      reason: 'Token Plan 当前请求量较高，请稍后重试',
+    },
+  },
+  {
+    name: 'provider business 2013 context length',
+    input: {
+      stage: 'provider.send', statusCode: 200, errorCode: 'MALFORMED_RESPONSE',
+      detailUpstreamCode: 'PROVIDER_STATUS_2013', providerStatusCode: 2013,
+      detailReason: 'context_length_exceeded', reason: 'context_length_exceeded',
+    },
+  },
+  {
+    name: 'provider business 2056 rotation overload',
+    input: {
+      stage: 'provider.send', statusCode: 200, errorCode: 'MALFORMED_RESPONSE',
+      detailUpstreamCode: 'PROVIDER_STATUS_2056', reason: 'usage limit exceeded',
+    },
+  },
+  {
+    name: 'nested server error',
+    input: {
+      stage: 'provider.send', statusCode: 500, errorCode: 'MALFORMED_RESPONSE',
+      responseErrorType: 'server_error', responseErrorCode: 'server_error', reason: 'server error',
+    },
+  },
+  {
+    name: 'HTTP 200 JSON instead of SSE',
+    input: {
+      stage: 'provider.send', statusCode: 200, errorCode: 'MALFORMED_RESPONSE',
+      responseErrorMessage: 'returned JSON instead of SSE', reason: 'returned JSON instead of SSE',
+    },
+  },
 ] as const;
 
 describe('ErrorErr02 Rust classifier parity', () => {
@@ -78,6 +115,17 @@ describe('ErrorErr02 Rust classifier parity', () => {
           reason: 'detailReason' in entry.input ? entry.input.detailReason : undefined,
           upstreamCode: 'detailUpstreamCode' in entry.input ? entry.input.detailUpstreamCode : undefined,
           upstreamMessage: 'detailUpstreamMessage' in entry.input ? entry.input.detailUpstreamMessage : undefined,
+          providerStatusCode: 'providerStatusCode' in entry.input ? entry.input.providerStatusCode : undefined,
+        },
+        response: {
+          data: {
+            error: {
+              code: 'responseErrorCode' in entry.input ? entry.input.responseErrorCode : undefined,
+              type: 'responseErrorType' in entry.input ? entry.input.responseErrorType : undefined,
+              param: 'responseErrorParam' in entry.input ? entry.input.responseErrorParam : undefined,
+              message: 'responseErrorMessage' in entry.input ? entry.input.responseErrorMessage : undefined,
+            },
+          },
         },
       };
       const legacy = resolveProviderFailureClassification({
