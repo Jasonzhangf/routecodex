@@ -91,6 +91,13 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "provider outbound payload guard rejects internal carrier key prefixes without allowing them as normal payload."
+      - path: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        category: local_runtime_marker
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "local-only provider-request dry-run carrier; forbidden from provider/client payload by dry-run black-box fixtures and function-map owner."
   - carrier_id: response_metadata
     description: "response.metadata runtime residues still present before full response projection cleanup."
     files:
@@ -108,3 +115,10 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "server contract help names response.metadata event."
+      - path: src/debug/pipeline-dry-run.ts
+        owner_feature_id: debug.pipeline_dry_run_loop
+        category: payload_side_channel
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "dry-run response metadata is copied only into PipelineExecutionResult metadata; not provider wire or client body truth."

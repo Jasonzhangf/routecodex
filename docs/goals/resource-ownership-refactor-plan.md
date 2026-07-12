@@ -720,3 +720,58 @@ Next runtime refactor admission rule:
 3. Confirm `function-map`, `resource-operation-map`, `mainline-call-map`, and `verification-map` still identify the same owner, resources, adjacent edge, allowed paths, forbidden paths, and gates.
 4. Change only the unique owner surface required for the failing sample.
 5. Green closeout must include `npm run test:pipeline-dry-run`, request dry-run black-box replay, response dry-run black-box replay when response handling is touched, `verify:resource-source-bindings`, `verify:function-map-compile-gate`, and `verify:architecture-review-surface-light`.
+
+## M1 Repeatable Black-Box Dry-Run Fixture Gate
+
+This M1 layer upgrades the manually proven dry-run evidence above into a repeatable gate. It is still a pre-runtime-refactor closure: no provider, Hub Pipeline, Virtual Router, restart/install, config, live runtime, routing, retry, health, continuation, or normal request/response behavior may change in this layer.
+
+Collaboration claim:
+
+- Run ID: `20260712T083558Z-Macstudio-76083-07bf`
+- Semantic claim: `feature_id:debug.pipeline_dry_run_loop`
+- Evidence file: `.agent-collab/runs/20260712T083558Z-Macstudio-76083-07bf/evidence.jsonl`
+- Sample matrix: `docs/architecture/dry-run-sample-matrix.yml`
+- Repeatable gate: `npm run test:pipeline-dry-run-blackbox-fixtures`
+
+M1 sample matrix:
+
+- Request positive artifact: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/runs/sample_1783839364169/agent-collab-dryrun-slice/dry-run.provider-request.json`
+- Request source sample: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/client-request.json`
+- Response source sample: `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/provider-response.json`
+- Response positive artifact is generated into a temporary directory by `scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs` through `npm run dry-run:codex-response`.
+- Non-local dry-run header rejection remains locked by `tests/debug/pipeline-dry-run.spec.ts`.
+
+M1 positive expectations:
+
+- Request dry-run artifact must contain `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `dryRun=true`, `evidence.stoppedBeforeProviderSend=true`, `evidence.providerRequestSnapshotWritten=true`, `providerRequest.method=POST`, and `providerRequest.body`.
+- Response dry-run artifact must contain `ok=true`, `converted.status=200`, `converted.body.object=chat.completion`, and `converted.body.choices`.
+
+M1 red/negative fixtures:
+
+- Request artifact missing `routecodex.pipeline_dry_run` fails closed.
+- Request artifact missing `stoppedBeforeProviderSend=true` fails closed.
+- Request artifact missing `providerRequest.body` fails closed.
+- Response artifact missing `ok=true` fails closed.
+- Response artifact missing `converted.status` fails closed.
+- Response artifact missing `converted.body` fails closed.
+- Provider-response samples with serialized `sseStream` but no replayable `bodyText/raw/text` fail closed with re-capture guidance.
+
+M1 gate wiring:
+
+- `package.json` exposes `test:pipeline-dry-run-blackbox-fixtures`.
+- `verify:architecture-ci-longtail` runs `test:pipeline-dry-run-blackbox-fixtures`.
+- `verify:function-map-build-wiring` fails if the black-box gate is removed from longtail.
+- `function-map.yml` and `verification-map.yml` bind the gate to `debug.pipeline_dry_run_loop`.
+
+Runtime fix admission after M1:
+
+1. A request-construction bug must first produce or validate the final upstream `providerRequest` through request dry-run.
+2. A response-handling bug must first produce the black-box `convertProviderResponseIfNeeded` result through response dry-run.
+3. Serialized live `sseStream` snapshots without `bodyText/raw/text` are not offline replay evidence and must be re-captured with stream snapshots enabled.
+4. No failing dry-run sample or red fixture means no runtime refactor admission for this slice.
+5. Runtime changes remain forbidden until owner, resource, mainline edge, allowed/forbidden paths, and required gates are queryable from the maps.
+
+M2 entry condition:
+
+- M1 gate, map wiring, `.agent-collab` evidence, and sample matrix are green.
+- The next runtime task names a concrete failing request or response sample and proves it is red before changing the unique owner.

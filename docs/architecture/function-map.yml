@@ -3168,8 +3168,10 @@ owners:
       - src/providers/core/runtime/http-request-executor.ts
       - scripts/replay-codex-sample.mjs
       - scripts/dry-run-codex-response.ts
+      - scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
       - package.json
       - tests/debug/pipeline-dry-run.spec.ts
+      - docs/architecture/dry-run-sample-matrix.yml
       - docs
       - .agents/skills/rcc-dev-skills
     forbidden_paths:
@@ -3182,8 +3184,10 @@ owners:
       - tests/debug/pipeline-dry-run.spec.ts
       - scripts/replay-codex-sample.mjs
       - scripts/dry-run-codex-response.ts
+      - scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
     required_gates:
       - npm run test:pipeline-dry-run
+      - npm run test:pipeline-dry-run-blackbox-fixtures
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     migration_target: rust

@@ -1849,7 +1849,8 @@ fn build_standard_tool_call_sse_frames_from_required_action_payload(
         let mut terminal_response = Value::Object(response);
         if let Some(terminal_response_obj) = terminal_response.as_object_mut() {
             terminal_response_obj.remove("required_action");
-            terminal_response_obj.insert("status".to_string(), Value::String("completed".to_string()));
+            terminal_response_obj
+                .insert("status".to_string(), Value::String("completed".to_string()));
             terminal_response_obj.insert("output".to_string(), Value::Array(terminal_output));
         }
         frames.push(format!(

@@ -17,6 +17,7 @@ const requiredResourceSourceBindingScript = 'verify:resource-source-bindings';
 const requiredResourceSourceBindingRedScript = 'test:resource-source-bindings-red-fixtures';
 const requiredAgentCollabProtocolScript = 'verify:agent-collab-protocol';
 const requiredAgentCollabProtocolRedScript = 'test:agent-collab-protocol-red-fixtures';
+const requiredPipelineDryRunBlackboxScript = 'test:pipeline-dry-run-blackbox-fixtures';
 const compileGate = scripts[requiredScript] || '';
 const requiredGateParts = [
   'verify:architecture-feature-id-anchors',
@@ -146,6 +147,12 @@ if (!architectureCiLongtail.includes(`npm run ${requiredResourceSourceBindingRed
 if (!architectureCiLongtail.includes(`npm run ${requiredAgentCollabProtocolRedScript}`)) {
   failures.push(`${requiredLongtailScript} must run ${requiredAgentCollabProtocolRedScript}`);
 }
+if (!scripts[requiredPipelineDryRunBlackboxScript]) {
+  failures.push(`package.json missing scripts.${requiredPipelineDryRunBlackboxScript}`);
+}
+if (!architectureCiLongtail.includes(`npm run ${requiredPipelineDryRunBlackboxScript}`)) {
+  failures.push(`${requiredLongtailScript} must run ${requiredPipelineDryRunBlackboxScript}`);
+}
 
 if (failures.length > 0) {
   console.error('[verify:function-map-build-wiring] failed');
@@ -159,4 +166,4 @@ console.log('- build requires build:base and verify:architecture-ci');
 console.log('- build:dev and build:dev:full use build:base');
 console.log('- build/pack scripts do not mutate global installs; release install verification uses a temp prefix');
 console.log('- verify:architecture-ci requires verify:architecture-review-surface, verify:function-map-build-wiring, and verify:architecture-ci-longtail');
-console.log('- architecture review/light and CI longtail require resource source-binding and agent-collab green/red gates');
+console.log('- architecture review/light and CI longtail require resource source-binding, agent-collab, and dry-run blackbox gates');

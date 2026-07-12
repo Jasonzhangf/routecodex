@@ -1765,13 +1765,16 @@ verification:
       - scripts/dry-run-codex-response.ts
     contract:
       - tests/debug/pipeline-dry-run.spec.ts
+      - scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs
     integration:
       - "node scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base http://127.0.0.1:<port>"
       - "npm run dry-run:codex-response -- --sample <provider-response.json>"
+      - npm run test:pipeline-dry-run-blackbox-fixtures
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
+      - npm run test:pipeline-dry-run-blackbox-fixtures
     build:
       - npm run build:base
     notes:

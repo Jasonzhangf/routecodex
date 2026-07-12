@@ -2490,6 +2490,15 @@
 - Live negative proof for final build: global `rcc start --restart --port 5520` exits `1` with `start_takeover_refused`, leaves listener `node:11617` running, and preserves the existing stop-intent mtime `1783818045`.
 - Installed dist scan has zero takeover-adoption residue for `start --restart`, `cli.start.restart_takeover`, and retired install/runtime adoption helper names.
 
+# 2026-07-12: `debug.pipeline_dry_run_loop` has repeatable M1 blackbox fixture gate
+
+- `debug.pipeline_dry_run_loop` M1 is now a repeatable verification framework, not just manual evidence. The gate is `npm run test:pipeline-dry-run-blackbox-fixtures`, implemented by `scripts/tests/pipeline-dry-run-blackbox-fixtures.mjs`.
+- The M1 sample matrix lives at `docs/architecture/dry-run-sample-matrix.yml` and records the request artifact, response sample, expected positive fields, negative fixtures, required failure substrings, required gates, and runtime fix admission rule.
+- Required runtime admission rule: request-construction bugs must first validate the final upstream `providerRequest` through request dry-run; response-handling bugs must first validate `convertProviderResponseIfNeeded` through response dry-run. Serialized live `sseStream` snapshots without `bodyText/raw/text` are not offline replay evidence and must be re-captured.
+- Gate wiring is locked: `verify:architecture-ci-longtail` runs `test:pipeline-dry-run-blackbox-fixtures`, and `verify:function-map-build-wiring` fails if the gate is removed. `function-map.yml` and `verification-map.yml` bind this gate to `feature_id:debug.pipeline_dry_run_loop`.
+- Verified evidence: live request dry-run on existing healthy port `5520` produced `routecodex.pipeline_dry_run` with `stoppedBeforeProviderSend=true`, `providerRequestSnapshotWritten=true`, and providerRequest body present; response dry-run produced `ok=true`, `converted.status=200`, and `converted.body.object=chat.completion`.
+- The slice remains pre-runtime-refactor: no provider, Hub Pipeline, Virtual Router, restart/install, config, live runtime, or normal request/response behavior changed.
+
 # 2026-07-12: runtime.lifecycle closeout final install advanced to 0.90.3932
 
 - Supersedes the earlier same-day `0.90.3931` final evidence because the final `build:base` advanced package/build truth to `0.90.3932`, then `npm run install:release` installed and restarted the live runtime.

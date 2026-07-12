@@ -49,6 +49,7 @@ const TS_OWNER_WHITELIST = new Set([
   'server.runtime_key_resolution', // TS runtime-handle binding shell; policy/selection remains VR/ErrorErr truth
   'hub.metadata_center_dualwrite_api', // transitional dual-write API shell during Rust migration
   'debug.unified_surface', // debug authoring/diag surface is TS governance shell pending Rust migration
+  'debug.pipeline_dry_run_loop', // local-only dry-run diagnostic loop; runtime semantics are gated by black-box fixtures
   'debug.internal_error_numbering', // debug-only internal error registry surface, not runtime/provider payload truth
   'manager.health_runtime', // TS provider-error diagnostics bridge only; cooldown persistence is forbidden
 ]);
