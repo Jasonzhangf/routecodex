@@ -214,6 +214,11 @@ function buildRouterRouteLogSessionContext(
     ?? readPlainRecord(bodyRecord.clientMetadata)
     ?? readPlainRecord(bodyMetadata.client_metadata)
     ?? readPlainRecord(bodyMetadata.clientMetadata);
+  const routeSafeMetadata = buildRouterDirectRouteMetadata({
+    metadata: readPlainRecord(input.metadata),
+    requestId: input.requestId,
+    entryEndpoint: input.entryEndpoint,
+  });
   return buildInboundLogSessionContext({
     entryEndpoint: input.entryEndpoint,
     requestId: input.requestId,
@@ -222,7 +227,7 @@ function buildRouterRouteLogSessionContext(
       ...bodyMetadata,
       ...(clientMetadata ? { client_metadata: clientMetadata } : {}),
     },
-    metadata: readPlainRecord(input.metadata),
+    metadata: routeSafeMetadata,
     portContext: {
       localPort: portConfig.port,
       matchedPort: portConfig.port,

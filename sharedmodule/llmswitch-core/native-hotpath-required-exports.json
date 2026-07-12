@@ -586,5 +586,7 @@
   "consumeResponsesPayloadSnapshotByAliasesJson",
   "registerResponsesPassthroughJson",
   "consumeResponsesPassthroughJson",
-  "consumeResponsesPassthroughByAliasesJson"
+  "consumeResponsesPassthroughByAliasesJson",
+  "buildRouterDirectRouteMetadataJson",
+  "buildDirectProviderRuntimeMetadataJson"
 ]

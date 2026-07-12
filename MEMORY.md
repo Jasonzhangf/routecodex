@@ -2623,3 +2623,8 @@
 
 - Pending Responses conversation request entries are in-memory-only until a response id exists; a separate direct-native binding/store instance reloads persisted entries and cannot prove host in-memory pending state.
 - Tests that assert state produced by `responses-conversation-store-host.ts` capture/record operations must use host-owned debug wrappers (`hasResponsesConversation*InStore`) or host metrics. Reserve direct-native store helpers for pure Rust/NAPI output evidence, not host store instance identity checks.
+# 2026-07-13: direct runtime metadata projection Rust owner
+
+- Direct route/provider metadata field selection and control projection are Rust-owned by `direct_runtime_metadata_projection.rs`; TS only performs cycle-aware JSON transport and NAPI invocation.
+- A cyclic request graph must be reduced by the Rust route-safe projection before any downstream JSON-only observer such as log-session identifier extraction. Sanitizing only the final VR call is too late because earlier observers can fail first.
+- Verified baseline after closeout: direct route-level suite moved from 21 passed / 12 failed to 22 passed / 11 failed; the cyclic image case is green while the remaining SSE/modelId/retry failures are independent owners.

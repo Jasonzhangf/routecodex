@@ -29665,3 +29665,8 @@ Pure Rust NAPI candidates:
 - Root cause: default-floor protection only activated when `floor_candidates.len()==1`; forwarder expansion produced three real candidates, so the default pool never retained its required last ordered provider.
 - Rust fix: when a configured non-default primary route falls through, the default floor now probes only the first ordered floor candidate while ignoring request exclusions; direct/default-only retries still exhaust multi-provider forwarders after all real providers are excluded. Singleton default-floor behavior remains protected.
 - Evidence: target red→green; singleton positive, priority/round-robin exhaustion negatives, and default-only diagnostics negative pass; selection module 44/44; full Rust 2337 pass/1 ignored; required route-floor gate and four Jest suites 26/26; function-map/native-reference/rustification/native-build/build-base gates pass.
+# 2026-07-13: direct runtime metadata projection moved to Rust
+
+- `feature_id:hub.direct_runtime_metadata_projection` now owns route-safe metadata, MetadataCenter snapshot, provider transport controls, Responses direct marker, and pipeline dry-run projection in Rust; `direct-runtime-metadata.ts` is a two-call thin shell.
+- The cyclic-image route-level red was not inside the projector: `buildRouterRouteLogSessionContext` serialized live cyclic metadata first. It now feeds log-session extraction from the same Rust-produced route-safe carrier.
+- Evidence: Rust focused 2/2, metadata Jest 3/3, cyclic route-level 1/1, residue red fixtures/gate, function/resource maps, native build, required architecture gates, and `build:base` passed. Full direct suite improved from 21/12 to 22/11; remaining failures are separate SSE/modelId/retry owners.

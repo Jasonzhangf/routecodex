@@ -56,6 +56,8 @@
     "test:hub-pipeline-native-reference-gate-red-fixtures": "node scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs",
     "verify:hub-bridge-native-json-invoker-singleton": "node scripts/architecture/verify-hub-bridge-native-json-invoker-singleton.mjs",
     "test:hub-bridge-native-json-invoker-singleton-red-fixtures": "node scripts/tests/hub-bridge-native-json-invoker-singleton-red-fixtures.mjs",
+    "verify:direct-runtime-metadata-rust-only": "node scripts/architecture/verify-direct-runtime-metadata-rust-only.mjs",
+    "test:direct-runtime-metadata-rust-only-red-fixtures": "node scripts/tests/direct-runtime-metadata-rust-only-red-fixtures.mjs",
     "verify:provider-response-host-split": "node scripts/architecture/verify-provider-response-host-split.mjs",
     "test:provider-response-host-split-red-fixtures": "node scripts/tests/provider-response-host-split-red-fixtures.mjs",
     "test:provider-response-shared-pure-blocks-cargo": "cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi provider_response_shared_pure_blocks --lib -- --nocapture",

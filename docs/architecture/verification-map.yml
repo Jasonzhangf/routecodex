@@ -3166,3 +3166,26 @@ verification:
       - npm run build:base
     notes:
       - "Provider-mode single-binding rethrow exemption is removed; port config must reject it."
+
+  - feature_id: hub.direct_runtime_metadata_projection
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+      - src/modules/llmswitch/bridge/direct-runtime-metadata-host.ts
+      - src/server/runtime/http-server/direct-runtime-metadata.ts
+    contract:
+      - tests/server/runtime/http-server/direct-runtime-metadata.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi direct_runtime_metadata_projection -- --nocapture
+    integration:
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts --runInBand --silent -t 'router same-protocol direct sends route-safe metadata for cyclic image requests before VR'
+    smoke:
+      - npm run test:direct-runtime-metadata-rust-only-red-fixtures
+      - npm run verify:direct-runtime-metadata-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive tests lock route-safe and provider transport projections; negative tests lock payload mirrors, cyclic references, TS key lists, TS control projection, and host semantic revival out of runtime."

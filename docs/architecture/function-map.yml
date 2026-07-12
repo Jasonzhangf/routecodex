@@ -6506,3 +6506,51 @@ owners:
     notes:
       - "Reverse patching and internal tool stripping must be in Rust per ARCH-HUB-3."
       - "MiMo Web provider text-tool harvest must use the narrow `mimoweb-tool-harvest-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
+
+  - feature_id: hub.direct_runtime_metadata_projection
+    status: active
+    summary: "project direct-route and direct-provider runtime control carriers through one Rust owner before VR/provider consumption"
+    owner_kind: rust_ssot
+    owner_scope: "Rust owns route-safe metadata, MetadataCenter snapshot, provider transport controls, Responses direct marker, and pipeline dry-run control projection; TS only serializes the cyclic host graph and invokes NAPI"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+    resource_bindings:
+      reads:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - continuation.scope_state@MetaReq03ContinuationAttached
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - DirectRuntimeMetadataProjection
+    canonical_builders:
+      - build_router_direct_route_metadata_json
+      - build_direct_provider_runtime_metadata_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+      - src/modules/llmswitch/bridge/direct-runtime-metadata-host.ts
+      - src/server/runtime/http-server/direct-runtime-metadata.ts
+      - src/server/runtime/http-server/index.ts
+      - tests/server/runtime/http-server/direct-runtime-metadata.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+      - scripts/architecture/verify-direct-runtime-metadata-rust-only.mjs
+      - scripts/tests/direct-runtime-metadata-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+      - src/providers/core/runtime
+    required_tests:
+      - tests/server/runtime/http-server/direct-runtime-metadata.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+    required_gates:
+      - npm run test:direct-runtime-metadata-rust-only-red-fixtures
+      - npm run verify:direct-runtime-metadata-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "Cycle removal is host JSON transport mechanics only; all field selection and control semantics remain in Rust."
+      - "Router log-session extraction consumes the Rust-projected route-safe carrier before native identifier extraction, so cyclic request mirrors never enter the JSON boundary."
