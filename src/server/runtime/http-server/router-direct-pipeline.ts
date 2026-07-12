@@ -46,6 +46,7 @@ import {
   rewriteDirectRouteSseFrameNative,
 } from '../../../modules/llmswitch/bridge/direct-route-model-hooks-host.js';
 import { planDirectRouteResponseErrorNative } from '../../../modules/llmswitch/bridge/direct-route-response-error-host.js';
+import { planDirectRouteEligibilityNative } from '../../../modules/llmswitch/bridge/direct-route-eligibility-host.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -155,28 +156,31 @@ export async function executeRouterDirectPipeline(
 ): Promise<RouterDirectOutcome> {
   const { portConfig, target, requestInfo, resolveProviderByRuntimeKey } = input;
 
-  if (portConfig.mode !== 'router') {
-    return { used: false, reason: 'not a router-mode port' };
-  }
-
-  const sameProtocolBehavior = portConfig.sameProtocolBehavior ?? 'direct';
-  if (sameProtocolBehavior !== 'direct') {
-    return { used: false, reason: `sameProtocolBehavior is '${sameProtocolBehavior}', not 'direct'` };
+  const preflightPlan = planDirectRouteEligibilityNative({
+    mode: portConfig.mode,
+    sameProtocolBehavior: portConfig.sameProtocolBehavior,
+  });
+  if (preflightPlan.action === 'skip') {
+    return { used: false, reason: preflightPlan.reason as string };
   }
 
   const runtimeKey = target.runtimeKey ?? target.providerKey;
   const providerHandle = resolveProviderByRuntimeKey(runtimeKey);
-  if (!providerHandle) {
-    return { used: false, reason: `provider not found for runtimeKey: ${runtimeKey}` };
-  }
-
   const inboundProtocol = resolveInboundProtocolFromEntryPath(requestInfo.path);
-  const providerProtocol = providerHandle.providerProtocol;
-  if (inboundProtocol !== providerProtocol) {
-    return {
-      used: false,
-      reason: `protocol mismatch: inbound=${inboundProtocol}, provider=${providerProtocol}`,
-    };
+  const providerProtocol = providerHandle?.providerProtocol;
+  const executionPlan = planDirectRouteEligibilityNative({
+    mode: portConfig.mode,
+    sameProtocolBehavior: portConfig.sameProtocolBehavior,
+    runtimeKey,
+    providerFound: Boolean(providerHandle),
+    inboundProtocol,
+    providerProtocol,
+  });
+  if (executionPlan.action === 'skip') {
+    return { used: false, reason: executionPlan.reason as string };
+  }
+  if (!providerHandle || !providerProtocol || executionPlan.action !== 'execute_direct') {
+    throw new Error(`invalid router-direct eligibility plan action: ${executionPlan.action}`);
   }
 
   const auditContext: RouterDirectAuditContext = {
@@ -411,13 +415,17 @@ const OBSERVABLE_FIELDS = ['model', 'reasoning', 'thinking', 'max_tokens'] as co
 // ---------------------------------------------------------------------------
 
 export function isRouterDirectEligible(portConfig: PortConfig): boolean {
-  if (portConfig.mode !== 'router') return false;
-  return (portConfig.sameProtocolBehavior ?? 'direct') === 'direct';
+  return planDirectRouteEligibilityNative({
+    mode: portConfig.mode,
+    sameProtocolBehavior: portConfig.sameProtocolBehavior,
+  }).eligible;
 }
 
 export function resolveRouterSameProtocolBehavior(portConfig: PortConfig): 'direct' | 'relay' {
-  if (portConfig.mode !== 'router') return 'relay';
-  return portConfig.sameProtocolBehavior ?? 'direct';
+  return planDirectRouteEligibilityNative({
+    mode: portConfig.mode,
+    sameProtocolBehavior: portConfig.sameProtocolBehavior,
+  }).effectiveBehavior as 'direct' | 'relay';
 }
 
 /**

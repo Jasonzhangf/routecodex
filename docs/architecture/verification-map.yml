@@ -3234,3 +3234,26 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive tests lock 401/402/403/429/5xx returned responses into ErrorErr callback; negative tests lock 200/400/404/499 out of recoverable classification and prevent TS status/error synthesis revival."
+
+  - feature_id: hub.router_direct_eligibility_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_eligibility.rs
+      - src/modules/llmswitch/bridge/direct-route-eligibility-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+    contract:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi direct_route_eligibility --lib -- --nocapture
+    integration:
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts --runInBand --silent
+    smoke:
+      - npm run test:direct-route-eligibility-rust-only-red-fixtures
+      - npm run verify:direct-route-eligibility-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks cover router default/explicit direct and matching protocols; negative locks cover provider mode, relay, missing provider, mismatch, impossible plan action, and TS decision revival."

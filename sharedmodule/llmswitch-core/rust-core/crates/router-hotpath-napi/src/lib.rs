@@ -28,6 +28,7 @@ mod direct_decision;
 mod direct_runtime_metadata_projection;
 mod direct_route_model_hooks;
 mod direct_route_response_error;
+mod direct_route_eligibility;
 mod failure_policy;
 mod followup_mainline_blocks;
 mod gemini_openai_codec;

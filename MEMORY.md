@@ -2637,3 +2637,7 @@
 
 - router-direct may receive a resolved provider response object whose HTTP status is itself a provider failure. The decision that 401/402/403/429/5xx must enter ErrorErr is Rust-owned; TS may only materialize the planned JS Error and execute the existing error callback/rethrow effects.
 - Ordinary 400/404/499 returned responses are negative locks for this specific recoverable-status owner. Do not restore a TS status list, HTTP code synthesis, retry/reroute policy, or client projection in router-direct.
+# 2026-07-13: router-direct eligibility is a Rust action plan
+
+- Port mode, effective `sameProtocolBehavior`, provider availability, and inbound/provider protocol compatibility are one eligibility decision owner. Rust emits `skip`, `resolve_provider`, or `execute_direct`; TS performs provider lookup/protocol extraction/IO only.
+- A two-stage Rust plan prevents unnecessary provider lookup for an already-skipped port without moving branching truth back into TS. Impossible native actions must fail-fast; they are not an invitation for a TS default/fallback branch.

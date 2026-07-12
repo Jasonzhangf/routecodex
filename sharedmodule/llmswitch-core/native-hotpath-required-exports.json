@@ -593,5 +593,6 @@
   "rewriteDirectRouteResponseModelJson",
   "rewriteDirectRouteSseFrameJson",
   "projectDirectRouteSseHeadersJson",
-  "planDirectRouteResponseErrorJson"
+  "planDirectRouteResponseErrorJson",
+  "planDirectRouteEligibilityJson"
 ]

@@ -29682,3 +29682,8 @@ Pure Rust NAPI candidates:
 - `hub.router_direct_response_error_projection` now owns returned-response recoverable status classification and the ErrorErr-compatible HTTP descriptor in Rust. TS only constructs a JS `Error`, attaches the opaque provider response, invokes `onProviderError`, and rethrows.
 - Positive contract: 401/402/403/429 and 5xx enter the unified provider error chain. Negative contract: absent/200/400/404/499 do not become recoverable under this owner.
 - Evidence: pre-native-build focused 403 contract was red on the missing native capability; Rust positive/negative 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.
+# 2026-07-13: router-direct eligibility/protocol planner moved to Rust
+
+- `hub.router_direct_eligibility_plan` now owns port mode, effective same-protocol behavior, provider availability, and protocol-match actions in Rust. It emits `skip`, `resolve_provider`, or `execute_direct`; TS resolves entry protocol/provider handle and executes only the planned branch.
+- Positive: router default/explicit direct plus matching protocol executes. Negative: provider mode, relay, missing provider, and protocol mismatch skip with Rust-owned reasons; impossible native actions fail-fast.
+- Evidence: missing native export produced focused red; Rust 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.
