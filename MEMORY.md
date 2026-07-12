@@ -1,3 +1,8 @@
+# 2026-07-12: Hub/runtime rustification rounds require live install/restart
+
+- For Hub Pipeline / runtime rustification work, each implementation round must compile/build, install the target globally/release-side, restart the managed port with `routecodex restart --port <port>`, verify `routecodex --version` / `~/.rcc/install/current/package.json` / `/health.version`, inspect target server logs and samples for errors, and fix any new failures before reporting the round complete.
+- Unit tests, Rust tests, `build:native-hotpath`, `build:base`, and architecture gates remain necessary preflight gates, but they are not completion evidence without the global install/restart/log check.
+
 # 2026-07-12: function-map required gates must be package scripts
 
 - For new function-map / verification-map features, `required_gates` and verification `smoke` entries must use queryable `npm run <script>` commands. Raw `cargo test ...` or long `npm run jest:run -- ...` entries fail `verify:architecture-owner-queryability`; add package scripts first, then bind maps to those scripts.
@@ -2613,3 +2618,8 @@
 - `hub.config_native_json_invoker_convergence` closes the config bridge portion of the TS native JSON invoker singleton: `config-integrations.ts` uses `native-json-invoker.ts` for native function lookup, JSON argument encoding, JSON result parsing, and fail-fast missing-function behavior.
 - Config-specific shape validators stay in `config-integrations.ts`; config semantics and provider/runtime config files remain Rust/native owner territory and were not changed.
 - `verify:hub-bridge-native-json-invoker-singleton` now blocks local `JSON.parse` / `JSON.stringify` / `const binding` / `const fn` native JSON call mechanics from returning to `config-integrations.ts`; the red fixture case is `config-local-json-mechanics`.
+
+# 2026-07-12: Responses store host-state probes must use the host store binding
+
+- Pending Responses conversation request entries are in-memory-only until a response id exists; a separate direct-native binding/store instance reloads persisted entries and cannot prove host in-memory pending state.
+- Tests that assert state produced by `responses-conversation-store-host.ts` capture/record operations must use host-owned debug wrappers (`hasResponsesConversation*InStore`) or host metrics. Reserve direct-native store helpers for pure Rust/NAPI output evidence, not host store instance identity checks.

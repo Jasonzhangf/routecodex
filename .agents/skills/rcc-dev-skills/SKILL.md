@@ -79,6 +79,7 @@ description: RouteCodex 调试与架构路由入口
 ## 全局安装 / release 验证硬规则
 
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
+- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <port>` -> `/health.version` 三点一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
 - 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` / `/health.version` 确认版本，再用 `routecodex restart --port <port>` 重启验证。
 - Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
 - 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
@@ -177,6 +178,7 @@ description: RouteCodex 调试与架构路由入口
 - Dry-run 黑盒门禁：请求构造问题先用 request dry-run 固化 final `providerRequest`，响应处理问题先用 response dry-run 固化 `convertProviderResponseIfNeeded` 黑盒输出；serialized live `sseStream` 没有 `bodyText/raw/text` 不是离线 replay 证据，必须重新 capture。`test:pipeline-dry-run-blackbox-fixtures` 是 dry-run runtime refactor 前置门禁，不是事后补测。
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 - Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
+- Responses conversation store 状态断言若验证 host capture/record 后的 pending entries，必须走 `responses-conversation-store-host.ts` 的同一 host store binding；pending request 未有 response id 前不会持久化，direct-native 单独 binding 只适合纯 Rust 输出证据。
 - Monitored handler/executor 白盒测试也不能 import `tests/providers/helpers/llmswitch-native-exports-fake.ts`；需要 handler 专属行为时放到 owner-specific fake（如 `responses-handler-host-fakes.ts`）。
 - Responses request-bridge host wiring 测试使用 `tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts` 这类 owner-specific fake；禁止回到 `llmswitch-native-exports-fake` / broad `native-exports.ts` mock。
 - Host split 后 gate/source-map 必须跟随真实 helper owner：例如 provider-response converter 拆出 `provider-response-native-calls.ts` / `provider-response-effects.ts` / `provider-response-metadata-effects.ts` 后，gate 检查这些 helper 的 shared invoker / fail-fast / MetadataCenter 证据，禁止为了旧 gate 把 helper 逻辑搬回主 host。

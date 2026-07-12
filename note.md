@@ -1,3 +1,7 @@
+# 2026-07-12 23:45 CST: Hub TS orchestration removal goal contract update
+- Jason clarified the execution requirement: every Hub/runtime rustification round must compile/build, global/release install, managed restart, health/version check, log/sample error inspection, then fix discovered errors before reporting round completion.
+- Updated project MEMORY and rcc-dev-skills; appended the current complete TS orchestration removal execution contract to `docs/goals/hubpipeline-full-rust-closeout-plan.md`.
+
 # 2026-07-12 23:32 CST: responses pipeline metadata plan moved to Rust
 - Scope: `hub.responses_request_pipeline_metadata_plan` as a Hub Pipeline TS orchestration closeout slice for `/v1/responses` request-side metadata/control assembly.
 - Change: Rust `shared_responses_conversation_utils.rs::build_responses_pipeline_metadata_for_http_json` now plans `runtime_control.streamIntent`, `runtime_control.providerProtocol`, `runtime_control.clientAbort`, `continuation_context.responsesResume`, and direct-only `runtime_control.retryProviderKey`; TS bridge only calls native, attaches `MetadataCenter`, preserves non-serializable `clientConnectionState`, and applies returned writes.
@@ -29591,3 +29595,54 @@ Pure Rust NAPI candidates:
 - Gate update: `verify:hub-bridge-native-json-invoker-singleton` now rejects local `JSON.parse` / `JSON.stringify` / `const binding` / `const fn` native JSON mechanics in `config-integrations.ts`; the red fixture includes `config-local-json-mechanics`.
 - Verification PASS: `test:hub-bridge-native-json-invoker-singleton-red-fixtures`; `verify:hub-bridge-native-json-invoker-singleton`; `npx tsc --noEmit --pretty false --skipLibCheck`.
 - Evidence recorded under `.agent-collab/runs/20260712T150537Z-Macstudio.local-2166-yv39yh/evidence.jsonl`. Broader architecture/build gates remain to be run before claiming the full Hub Pipeline shared-library goal complete.
+
+# 2026-07-12: Responses store debug probe alignment
+
+- Scope: `feature_id:hub.chat_process_responses_continuation_store_debug_probe_alignment`; no continuation semantics, provider/runtime behavior, payload shape, fallback, install, restart, or live runtime changed.
+- Root cause: pending request entries are intentionally in-memory-only until a response id exists, so direct-native debug probes using a separate NAPI binding/store instance reload the persistence file and falsely report pending entries missing.
+- Change: `responses-conversation-store-host.ts` now exposes host-owned debug probe wrappers for request/response/scope checks, and `responses-continuation-store.spec.ts` uses the same host store binding as capture/record operations. Rust debug stats/has probes still reload persistence before observing persisted state.
+- Verification PASS: focused pending prune Jest, full `responses-continuation-store.spec.ts` 40/40, `build:native-hotpath`, `verify:responses-history-protocol-contract`, hub/VR shared-helper gates, function-map/mainline/thin-wrapper/rustification gates, `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`, and `git diff --check`.
+- Boundary: direct-native helpers remain valid for pure Rust/NAPI output evidence; store state tests that assert host operations must observe through the host store wrapper.
+
+# 2026-07-12: Hub Pipeline shared-library completion audit continuation
+
+- Scope: audit-only continuation under `.agent-collab` claim `gate_id:hub_pipeline_shared_simplification_completion_audit`; no runtime/source behavior changed by this audit.
+- Current-state required gates PASS: `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-thin-wrapper-only`, `verify:llmswitch-rustification-audit`, `verify:architecture-review-surface-light`, `build:native-hotpath`, `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`, and `git diff --check`.
+- Build note: `build:base` regenerated `src/build-info.ts` timestamp; audit restored it to baseline `2026-07-12T07:34:50.349Z`.
+- Completion remains unproven: `.agent-collab` still has running claims for `resource_id:response.host_conversion_handoff` and `feature_id:error.execution_decision_consumer` / `feature_id:error.provider_failure_policy`. The error claim evidence currently shows native bridge / ErrorErr02 / ErrorErr05 owner work is still in progress, so the full Hub Pipeline shared-library simplification goal must stay active.
+- Evidence recorded in `.agent-collab/runs/20260712T160344Z-Macstudio.local-85490-goal-audit/evidence.jsonl`.
+
+# 2026-07-12: Hub Pipeline shared-library completion audit after error claim progress
+
+- Scope: audit-only continuation; no active runtime claim takeover and no runtime/source behavior change by this audit.
+- Refreshed `.agent-collab` and saw active running claims still present: `resource_id:response.host_conversion_handoff`, `feature_id:error.execution_decision_consumer`, `feature_id:error.provider_failure_policy`, `resource_id:continuation.scope_state@ChatProcRespContinuation07CanonicalSaved`, and `feature_id:conversion.shared.responses_openai.provider_runtime_tests`.
+- Error claim progress observed: ErrorErr02 native classifier / owner-specific host parity advanced, but heartbeat still says full ErrorErr05 execution decision planner remains pending.
+- Current-state required gates PASS again: `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-thin-wrapper-only`, `verify:llmswitch-rustification-audit`, `verify:architecture-review-surface-light`, `build:native-hotpath`, `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`, and `git diff --check`.
+- Build note: `build:base` regenerated `src/build-info.ts` timestamp; audit restored it to baseline `2026-07-12T07:34:50.349Z`.
+- Completion remains unproven; this is current-state evidence only, not live/global closeout.
+
+# 2026-07-12: Completion audit blocked by active error claim map drift
+
+- Scope: audit-only continuation; no takeover of `feature_id:error.execution_decision_consumer` / `feature_id:error.provider_failure_policy`.
+- Current-state gates before failure: `verify:function-map-compile-gate`, standalone `verify:architecture-mainline-call-map`, `verify:architecture-thin-wrapper-only`, `verify:llmswitch-rustification-audit`, and `git diff --check` passed.
+- Then `verify:architecture-review-surface-light` failed because its nested `verify:architecture-mainline-call-map` no longer finds `classifyProviderFailure` in `src/providers/core/runtime/provider-failure-policy-impl.ts` for `error.mainline` edge `err-02`.
+- The failing file is owned by the running error execution/provider failure claims. Audit did not edit active claim files or update maps on their behalf.
+- `build:native-hotpath` / `build:base` were not rerun after this failure because required architecture review is red. Full Hub Pipeline shared-library simplification remains incomplete.
+
+# 2026-07-12: Hub Pipeline shared-library goal continuation still red on active error claim
+
+- Scope: audit-only continuation under run `20260712T162838Z-Macstudio.local-64569-goal-continue`; no source/runtime behavior changed and no active implementation claim was taken over.
+- Required prechecks refreshed: objective file, `.agent-collab` protocol, active claims/heartbeats/evidence, handoff/merge-queue, rcc-dev skill, foundation/runtime/memory routing docs, node-contract method, MemoryPalace search, function/mainline/verification maps, wiki/source symbol anchors.
+- Current active/conflicting claims still include `feature_id:error.execution_decision_consumer`, `feature_id:error.provider_failure_policy`, `resource_id:response.host_conversion_handoff`, `resource_id:continuation.scope_state@ChatProcRespContinuation07CanonicalSaved`, and `feature_id:conversion.shared.responses_openai.provider_runtime_tests`.
+- Current evidence: `verify:function-map-compile-gate` passed; `verify:architecture-thin-wrapper-only` passed; `verify:llmswitch-rustification-audit` passed; `git diff --check` passed.
+- Blocking evidence: `verify:architecture-mainline-call-map` now fails directly because `error.mainline` edge `err-02` still binds caller/callee symbol `classifyProviderFailure`, while current `src/providers/core/runtime/provider-failure-policy-impl.ts` exposes `resolveProviderFailureClassification` and calls `classifyErrorErr02HostCapturedNative`. `verify:architecture-review-surface-light` fails on the same nested gate.
+- Audit did not update `docs/architecture/mainline-call-map.yml` or error provider files because those paths are inside active error claim ownership. `build:native-hotpath` / `build:base` were not rerun after review-light was red.
+- Wrote handoff request `.agent-collab/handoff/20260712T164200Z-error-mainline-err02-map-drift.json` for the active error claim owners with failing gate evidence and requested map/symbol anchor update.
+
+# 2026-07-12: Hub Pipeline shared-library goal blocked audit threshold reached
+
+- Scope: audit-only continuation under run `20260712T163434Z-Macstudio.local-2589-goal-audit2`; no source/runtime behavior changed and no active implementation claim was taken over.
+- Active error claims remain running: `feature_id:error.execution_decision_consumer` heartbeat now says ErrorErr05 parity/planner switch remains in progress; `feature_id:error.provider_failure_policy` is still running. Evidence shows Rust ErrorErr05 planner committed, but no completion/handoff and no map update for the audit blocker.
+- Current gates: `verify:function-map-compile-gate` passed; `verify:architecture-thin-wrapper-only` passed; `verify:llmswitch-rustification-audit` passed; `git diff --check` passed.
+- Blocking gate remains identical: `verify:architecture-mainline-call-map` and nested `verify:architecture-review-surface-light` still fail because `error.mainline` edge `err-02` binds `classifyProviderFailure`, while current source has `resolveProviderFailureClassification` / `classifyErrorErr02HostCapturedNative`.
+- This is the third consecutive goal-audit turn seeing the same active error claim map drift blocker. The Hub Pipeline shared-library goal cannot be completed or verified until the active owner claim updates/hands off the error mainline map and architecture review turns green.

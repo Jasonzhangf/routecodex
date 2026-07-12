@@ -417,3 +417,130 @@ curl -sS http://127.0.0.1:<managed-port>/health
 - 同入口 live replay 覆盖 success、failure、non-terminal、already-terminal，并证明 internal metadata/debug/control 不进入 provider payload 或 client body。
 - `git status --short` 最终干净，所有可验证 slice 已分组提交。
 - `MEMORY.md` 与相关 lessons 记录最终已验证事实、剩余风险为零或明确列出未闭合项；若仍有未闭合项，不得称为完整 Rust 化。
+
+## 11. 2026-07-12 Complete TS Orchestration Removal Contract
+
+本节是当前 `/goal` 的执行真源。目标不是继续把 TS 编排拆成更多 native helper，而是把 Hub Pipeline 运行时语义收成 Rust-owned controller / Rust-owned plan / Rust-owned effect contract。TS 只能保留 Node 无法避免的边界：HTTP/SSE transport、stream object handoff、NAPI JSON call、process lifecycle IO、文件/网络 side effect executor。
+
+### 11.1 主目标
+
+完整去除 Hub Pipeline TS 编排：
+
+- 请求链：`req_inbound -> req_chatprocess -> VR -> req_outbound` 的语义调度、metadata/control 写入、tool/history/continuation 判定必须由 Rust 拥有。
+- 响应链：`resp_inbound -> resp_chatprocess -> resp_outbound` 的响应解析、tool harvest、servertool followup、client projection、effect plan 必须由 Rust 拥有。
+- 错误链：provider/runtime/direct/executor error 必须单向进入 Rust/ErrorErr owner；TS 不得本地决定 retry/reroute/backoff/client projection。
+- Runtime side effects：TS 可以执行 Rust plan 指定的 HTTP/FS/SSE/stream/process IO，但不能解释 plan 语义或补第二套成功路径。
+
+### 11.2 收口对象
+
+优先收以下 TS 编排面：
+
+1. `src/modules/llmswitch/bridge/responses-request-bridge.ts`
+   - request body prepare、runtime prepare、request context capture、tool-call seed、conversation cleanup、resume projection。
+   - 目标：每块变为 Rust plan + TS side-effect executor。
+2. `src/server/runtime/http-server/executor/provider-response-converter.ts` 及其 split hosts
+   - SSE wrapper error remap、MetadataCenter sync、stage recorder、usage/finish reason、stream/body capture、provider context/error mapping。
+   - 目标：语义投影/判定进 Rust；TS 只保留 stream 引用保护和 IO。
+3. request/response executor host glue
+   - provider invocation 前后的 Hub Pipeline handle、ErrorErr decision consumption、dry-run/snapshot side effects。
+   - 目标：TS 不再组合多个 native helper 做业务判断。
+4. servertool / stopless / continuation bridge residue
+   - 目标：`resp_chatprocess save -> immutable interval -> req_chatprocess restore` 之间无 TS 语义恢复、history 修补、required_action 推断或 tool 状态补偿。
+
+### 11.3 每轮固定执行顺序
+
+每一轮只收一个 owner-specific slice，并强制执行：
+
+1. 读规则与定位 owner
+   - `AGENTS.md`
+   - `.agents/skills/rcc-dev-skills/SKILL.md`
+   - `docs/agent-routing/05-foundation-contract.md`
+   - `docs/agent-routing/10-runtime-ssot-routing.md`
+   - `docs/architecture/function-map.yml`
+   - `docs/architecture/mainline-call-map.yml`
+   - `docs/architecture/verification-map.yml`
+   - 对应 wiki/manifest/source anchor
+2. 建 slice claim
+   - `.agent-collab` claim 使用 `feature_id` / `resource_id` / `mainline_node_id` / `gate_id`。
+   - 不接管无关 dirty worktree，不 checkout/reset。
+3. 红测先行
+   - 白盒：Rust owner input/output、正向和反向。
+   - 模块黑盒：TS bridge 只调用 Rust plan，不本地判定。
+   - 架构红测：旧 TS helper / broad native mock / fallback / duplicate owner 复活必红。
+4. Rust 实现
+   - 新语义只写 Rust owner。
+   - TS 只做 NAPI JSON wrapper、stream reference preservation、IO side-effect application。
+   - 旧 TS 语义物理删除。
+5. 本地 gate
+   - 目标 slice required tests。
+   - Rust focused tests。
+   - `npm run verify:function-map-compile-gate`
+   - `npm run verify:hub-pipeline-native-reference-gate`
+   - `npm run verify:llmswitch-rustification-audit`
+   - `npm run build:native-hotpath`
+   - `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`
+   - `git diff --check`
+6. 全局安装与受管重启
+   - `npm run pack:rcc`
+   - `npm run verify:rcc-release-install`
+   - 执行当前项目标准 global/release install 命令，使用全局 `routecodex` / `rcc` 入口验证。
+   - `routecodex restart --port <managed-port>`
+   - 禁止 repo-local `node dist/cli.js start`、临时 shim、手工 start 作为完成证据。
+7. 版本与健康三点一致
+   - `routecodex --version`
+   - `rcc --version`
+   - `~/.rcc/install/current/package.json`
+   - `curl -sS http://127.0.0.1:<managed-port>/health`
+   - `/health.version` 必须等于 installed package version，且 `ready=true`、`pipelineReady=true`。
+8. 查错并修复
+   - 检查 `~/.rcc/logs/server-<port>.log` 最新段。
+   - 检查 `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/` 最新样本。
+   - 若有 `InvalidData`、SSE terminal 缺失、provider payload metadata 泄漏、silent failure、restart/session 断链、ErrorErr bypass、health mismatch，回唯一 owner 修复并重跑本轮。
+9. live replay
+   - 至少重放同入口真实样本或旧失败样本。
+   - 覆盖 success、failure、non-terminal/still-running、already-terminal 中和本 slice 相关的正反路径。
+10. 提交与记录
+   - 精确 stage 本 slice。
+   - commit 前确认无关 dirty 未混入。
+   - `note.md` / `MEMORY.md` / skill lessons 只记录已验证事实。
+
+### 11.4 验证矩阵
+
+每轮最小矩阵：
+
+```bash
+npm run verify:function-map-compile-gate
+npm run verify:hub-pipeline-native-reference-gate
+npm run verify:llmswitch-rustification-audit
+npm run build:native-hotpath
+ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+npm run pack:rcc
+npm run verify:rcc-release-install
+routecodex restart --port <managed-port>
+curl -sS http://127.0.0.1:<managed-port>/health
+```
+
+最终矩阵额外包含：
+
+```bash
+npm run verify:architecture-mainline-binding-pending-gate
+npm run verify:architecture-mainline-call-map
+npm run verify:architecture-mainline-manifest-sync
+npm run verify:architecture-mainline-mermaid-sync
+npm run verify:architecture-wiki-sync
+npm run verify:architecture-wiki-html-sync
+npm run verify:servertool-rust-only
+npm run verify:responses-history-protocol-contract
+cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi --lib -- --nocapture
+```
+
+### 11.5 完成定义
+
+只有同时满足以下条件，才能宣称“完整 TS 编排去除”：
+
+- Hub Pipeline runtime 主链无 TS 语义编排；TS 只剩 NAPI/JSON/stream/IO/lifecycle glue。
+- 所有保留 TS surface 都能在 function map / mainline call map / verification map 反查 owner 和允许理由。
+- 架构 gate 能拦住旧 TS 编排、fallback、重复 owner、metadata payload 泄漏、broad native mock/import 回流。
+- 全局安装版本、`rcc`/`routecodex` CLI、`~/.rcc/install/current`、目标端口 `/health.version` 严格一致。
+- managed restart 后无新增 server log 错误；旧失败样本或同入口真实样本 replay 通过。
+- 每个 slice 已分组提交；最终工作区只剩明确无关 dirty 或干净。
