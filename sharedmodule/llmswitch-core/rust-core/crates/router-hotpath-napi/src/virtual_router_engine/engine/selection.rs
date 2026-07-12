@@ -525,6 +525,8 @@ impl VirtualRouterEngineCore {
         let server_tool_required = metadata_requires_servertool(metadata);
         let forwarder_sticky_session_id = read_forwarder_sticky_session_id(metadata);
 
+        // feature_id: vr.route_retry_pin_surface
+        // Consumes the retry pin built by parse_retry_provider_key_target and projects forced truth.
         if let Some(target) = &routing_state.forced_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
                 let available = self.apply_standard_filters(
@@ -540,8 +542,9 @@ impl VirtualRouterEngineCore {
                         requested_route.to_string(),
                         resolved.keys.clone(),
                         resolved.keys.clone(),
-                        Some("forced".to_string()),
-                    ));
+                        None,
+                    )
+                    .with_reasoning_tag(Some("forced".to_string())));
                 }
             }
         }

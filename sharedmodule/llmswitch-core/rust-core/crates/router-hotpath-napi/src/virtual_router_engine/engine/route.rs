@@ -644,8 +644,11 @@ impl VirtualRouterEngineCore {
         }
         let provider_protocol = read_target_outbound_profile(&target_obj);
         let route_changed = selection.route_used != requested_route;
-        let reasoning =
-            append_reasoning_tag(&classification.reasoning, selection.reasoning_tag.clone());
+        let reasoning = if selection.reasoning_tag.as_deref() == Some("forced") {
+            "forced".to_string()
+        } else {
+            append_reasoning_tag(&classification.reasoning, selection.reasoning_tag.clone())
+        };
         let decision = json!({
             "routeName": selection.route_used,
             "providerKey": selection.provider_key,
@@ -1046,6 +1049,40 @@ mod tests {
             Some("anthropic.key1.claude-sonnet")
         );
         assert_eq!(decision["reasoning"].as_str(), Some("forced"));
+    }
+
+    #[test]
+    fn malformed_retry_provider_key_does_not_force_normal_selection() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "model": "gpt-4o",
+            "input": [
+                { "role": "user", "content": [{ "type": "input_text", "text": "plain request" }] }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/responses",
+                "requestId": "test-malformed-retry-provider-key",
+                "runtimeControl": {
+                    "retryProviderKey": "anthropic"
+                }
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("normal route should remain available");
+
+        let reasoning = result["decision"]["reasoning"]
+            .as_str()
+            .unwrap_or_default();
+        assert_ne!(reasoning, "forced");
+        assert!(!reasoning.split('|').any(|part| part == "forced"));
     }
 
     #[test]

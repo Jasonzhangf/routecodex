@@ -798,6 +798,7 @@ verification:
     change_risk: medium
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
     contract:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
@@ -810,7 +811,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "VR retry-provider-pin reading and forced-target selection must stay queryable as a dedicated file-scoped surface."
+      - "VR retry-provider-pin parsing, forced-target selection, and forced reasoning projection must stay queryable as one adjacent Rust owner surface."
 
   - feature_id: vr.hit_log_projection
     change_risk: medium

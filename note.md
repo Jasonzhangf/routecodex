@@ -29652,3 +29652,10 @@ Pure Rust NAPI candidates:
 - Change: commit `a87733e8b` restores canonical output to `{patch}` only; the arg-key repair regression and verifier now explicitly reject an emitted `input` alias while still accepting legacy input aliases at ingress.
 - Evidence: focused response governance 216 passed/1 ignored; apply_patch freeform/regression gates passed with 41 samples and zero mismatches; chat-process contract 5/5; required architecture/native/build gates passed; release install and managed 5555 restart passed at version 0.90.3932; live `/v1/responses` returned `requires_action` with function arguments containing `patch` and no `input`.
 - Full Rust suite improved from 2323 pass/13 fail to 2333 pass/3 fail. Remaining failures belong to shared-json deletion gate and two VR owner slices.
+# 2026-07-13: VR retry provider pin forced reasoning slice
+
+- Red: `retry_provider_key_without_model_forces_provider_alias` selected the pinned provider but projected classifier reasoning (`thinking:user-input`) instead of forced truth.
+- Root cause: `select_provider` passed `"forced"` into `SelectionResult::new`'s `pool_id` slot, leaving `reasoning_tag=None`; the route projector therefore retained classification reasoning.
+- Rust fix: forced selection now sets `reasoning_tag=forced`, and route projection treats forced truth as authoritative rather than appending classification; malformed retry keys remain normal selection and never gain a forced tag.
+- Maps: `vr.route_retry_pin_surface` now binds the adjacent `route.rs` parse/projection and `selection.rs` forced-target consumer; generic route selection stays under `vr.route_selection`.
+- Evidence: positive/negative focused Rust tests pass, route module 12/12 passes, required VR Jest 7/7 passes, resource/VR/native-reference/rustification/function-map/native-build/build-base gates pass.

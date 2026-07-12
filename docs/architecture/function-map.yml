@@ -1669,9 +1669,9 @@ owners:
 
   - feature_id: vr.route_retry_pin_surface
     status: active
-    summary: "Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface"
+    summary: "Virtual Router retry-provider-pin parsing and forced-target selection stay queryable as one Rust owner surface"
     owner_kind: rust_ssot
-    owner_scope: "Virtual Router file-scoped route surface for retry-provider-pin parsing and forced-target selection input"
+    owner_scope: "Virtual Router adjacent route/select surface for retry-provider-pin parsing, forced-target filtering, and forced reasoning projection"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
     resource_bindings:
       writes:
@@ -1690,6 +1690,7 @@ owners:
       - parse_retry_provider_key_target
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
@@ -1707,7 +1708,7 @@ owners:
       - npm run verify:resource-operation-map
     migration_target: rust
     notes:
-      - "This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership."
+      - "This adjacent owner surface keeps retry pin parsing and its forced SelectionResult projection queryable; generic non-retry route selection remains under vr.route_selection."
 
   - feature_id: vr.hit_log_projection
     status: active

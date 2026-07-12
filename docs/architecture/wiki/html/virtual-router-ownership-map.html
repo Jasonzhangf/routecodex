@@ -139,7 +139,7 @@
         <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
         <tr><td><code>vr.shared_function_library_helpers</code></td><td>Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners</td><td><code>rust_helper</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run test:vr-shared-function-library-helpers-red-fixtures</code>&lt;br/&gt;<code>npm run verify:vr-shared-function-library-helpers</code>&lt;br/&gt;<code>npm run test:vr-shared-function-library-helpers-cargo</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
         <tr><td><code>vr.metadata_center_surface</code></td><td>Virtual Router read-only metadata-center-backed route surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-owner-queryability</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
-        <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
+        <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin parsing and forced-target selection stay queryable as one Rust owner surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
         <tr><td><code>vr.hit_log_projection</code></td><td>Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs</code></td><td><code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
         <tr><td><code>vr.route_host_effects</code></td><td>Virtual Router route host effects plan/finalize stay Rust-owned before TS host emission</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/virtual_router_host_effects.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code></td></tr>
         <tr><td><code>virtual_router.primary_exhausted_to_default_pool</code></td><td>primary tier exhausted to default-pool plan stays Rust-owned and host consumes plan only</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
@@ -308,8 +308,8 @@
           <li>Route selection still outputs <code>VrRoute04SelectedTarget</code> through <code>hub.route_selection_bridge</code>; this owner only covers the read-only metadata surface used by VR decisions.</li>
         </ul>
         <h2>vr.route_retry_pin_surface</h2>
-        <p>Summary: Virtual Router retry-provider-pin and forced-target read stay queryable as one Rust file-scoped surface</p>
-        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code> Owner scope: Virtual Router file-scoped route surface for retry-provider-pin parsing and forced-target selection input</p>
+        <p>Summary: Virtual Router retry-provider-pin parsing and forced-target selection stay queryable as one Rust owner surface</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code> Owner scope: Virtual Router adjacent route/select surface for retry-provider-pin parsing, forced-target filtering, and forced reasoning projection</p>
         <p>Canonical types:</p>
         <ul>
           <li><code>InstructionTarget</code></li>
@@ -322,6 +322,7 @@
         <p>Allowed paths:</p>
         <ul>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs</code></li>
           <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs</code></li>
           <li><code>tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts</code></li>
           <li><code>tests/servertool/virtual-router-servertool-routing.spec.ts</code></li>
@@ -346,7 +347,7 @@
         </ul>
         <p>Notes:</p>
         <ul>
-          <li>This file-scoped owner keeps VR retry-provider-pin reading queryable without collapsing it into generic route-selection ownership.</li>
+          <li>This adjacent owner surface keeps retry pin parsing and its forced SelectionResult projection queryable; generic non-retry route selection remains under vr.route_selection.</li>
         </ul>
         <h2>vr.hit_log_projection</h2>
         <p>Summary: Virtual Router hit-log record, formatting, color-key, reason, and telemetry projection stay Rust-owned</p>
