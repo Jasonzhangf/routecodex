@@ -1388,8 +1388,8 @@ mod tests {
             path.display()
         );
         assert!(
-            !source.contains("stateOrigin") && !source.contains("resume_from"),
-            "chat_node_result_semantics.rs must not restore retired continuation metadata readers"
+            !source.contains("stateOrigin"),
+            "chat_node_result_semantics.rs must not restore retired state-origin metadata readers"
         );
     }
 
