@@ -1029,12 +1029,22 @@ describe('hub pipeline stage residue audit', () => {
       path.join(repoRoot, 'src/modules/llmswitch/bridge/executor-metadata-host.ts'),
       'utf8',
     );
+    const metadataCenterContractSource = fs.readFileSync(
+      path.join(repoRoot, 'tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts'),
+      'utf8',
+    );
 
     expect(executorSource).toContain('../../../modules/llmswitch/bridge/executor-metadata-host.js');
     expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
     expect(hostSource).toContain("from './native-exports.js'");
     expect(hostSource).toContain('extractSessionIdentifiersFromMetadataNative');
     expect(hostSource).toContain('extractServertoolCliResultRouteHintFromRequestNative');
+    expect(metadataCenterContractSource).toContain('src/modules/llmswitch/bridge/executor-metadata-host.js');
+    expect(metadataCenterContractSource).toContain('src/modules/llmswitch/bridge/request-executor-pipeline-attempt-host.js');
+    expect(metadataCenterContractSource).toContain('src/modules/llmswitch/bridge/route-availability-host.js');
+    expect(metadataCenterContractSource).toContain('src/modules/llmswitch/bridge/provider-response-converter-host.js');
+    expect(metadataCenterContractSource).not.toContain('src/modules/llmswitch/bridge/native-exports.js');
+    expect(metadataCenterContractSource).not.toContain('src/modules/llmswitch/bridge/native-exports');
   });
 
   it('server response handler Responses client projection uses its narrow native host', () => {

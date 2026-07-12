@@ -19,6 +19,7 @@ const mockRuntimeIntegrationsModule = {
 };
 
 const mockRoutingIntegrationsModule = {
+  buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({})),
   createHubPipelineNative: jest.fn(() => 'mock_hub_pipeline_handle'),
   executeHubPipelineNative: jest.fn(async () => ({ metadata: {} })),
   updateHubPipelineVirtualRouterConfigNative: jest.fn(),
@@ -34,10 +35,11 @@ const mockRoutingIntegrationsModule = {
   }),
   resolveRccSnapshotsDirNativeSync: jest.fn(() => '/tmp/routecodex-test/codex-samples'),
   resolveRccUserDirNativeSync: jest.fn(() => '/tmp/routecodex-test'),
+  resolveEntryProtocolFromEndpointNative: jest.fn(() => 'openai-responses'),
   disposeHubPipelineNative: jest.fn(),
 };
 
-const mockNativeExportsModule = () => ({
+const createNativeHostFunctionMocks = () => ({
   buildRequestStageRuntimeControlWritePlanNative: jest.fn(() => ({})),
   classifyEmptyResponseSignalNative: jest.fn(() => null),
   detectRetryableEmptyAssistantResponseNative: jest.fn(() => null),
@@ -164,12 +166,180 @@ const mockNativeExportsModule = () => ({
   writeSnapshotViaHooksNative: jest.fn(() => undefined)
 });
 
+const mockNativeBridgeFunctions = createNativeHostFunctionMocks();
+
+const asRecordOrUndefined = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+
+const mockExecutorMetadataHostModule = () => ({
+  extractServertoolCliResultRouteHintFromRequestNative:
+    mockNativeBridgeFunctions.extractServertoolCliResultRouteHintFromRequestNative,
+  extractSessionIdentifiersFromMetadataNative:
+    mockNativeBridgeFunctions.extractSessionIdentifiersFromMetadataNative,
+});
+
+const mockRequestExecutorPipelineAttemptHostModule = () => ({
+  mergeObservedRoutePoolChainNative: mockNativeBridgeFunctions.mergeObservedRoutePoolChainNative,
+  normalizeExplicitRoutePoolNative: mockNativeBridgeFunctions.normalizeExplicitRoutePoolNative,
+});
+
+const mockRouteAvailabilityHostModule = () => ({
+  evaluateSingletonRoutePoolExhaustionNative:
+    mockNativeBridgeFunctions.evaluateSingletonRoutePoolExhaustionNative,
+  planPrimaryExhaustedToDefaultPoolNative:
+    mockNativeBridgeFunctions.planPrimaryExhaustedToDefaultPoolNative,
+  resolveErrorErr05RouteAvailabilityDecisionNative:
+    mockNativeBridgeFunctions.resolveErrorErr05RouteAvailabilityDecisionNative,
+});
+
+const mockErrorExecutionDecisionHostModule = () => ({
+  isRateLimitLikeErrorNative: jest.fn(() => false),
+  resolveErrorErr05RouteAvailabilityDecisionNative:
+    mockNativeBridgeFunctions.resolveErrorErr05RouteAvailabilityDecisionNative,
+  resolveProviderRetryExecutionPolicyNative:
+    mockNativeBridgeFunctions.resolveProviderRetryExecutionPolicyNative,
+});
+
+const mockProviderResponseConverterHostModule = () => ({
+  asFlatRecord: jest.fn(asRecordOrUndefined),
+  containsBroadKillCommand: jest.fn(() => false),
+  convertProviderResponse: jest.fn(async (args: { response?: unknown; body?: unknown }) => args.response ?? args.body ?? {}),
+  detectRetryableEmptyAssistantResponseNative:
+    mockNativeBridgeFunctions.detectRetryableEmptyAssistantResponseNative,
+  detectToolExecutionFailuresNative:
+    mockNativeBridgeFunctions.detectToolExecutionFailuresNative,
+  extractBridgeProviderResponsePayload: jest.fn(asRecordOrUndefined),
+  extractContentTextForStoplessScan: jest.fn(() => ''),
+  extractFirstBalancedJsonObject: jest.fn(() => undefined),
+  extractLatestUserTextForStoplessScan: jest.fn(() => ''),
+  findNestedErrorMarker: jest.fn(() => ''),
+  findNestedRawString: jest.fn(() => ''),
+  hasInvalidShellWrapperShape: jest.fn(() => false),
+  hasRequestedToolsInSemanticsNative: mockNativeBridgeFunctions.hasRequestedToolsInSemanticsNative,
+  hasStoplessDirectiveInRequestPayload: jest.fn(() => false),
+  isContextLengthExceededError: jest.fn(() => false),
+  isGenericBridgeResponseContractError: jest.fn(() => false),
+  isProviderNativeResumeContinuationNative:
+    mockNativeBridgeFunctions.isProviderNativeResumeContinuationNative,
+  isRequiredToolCallTurnNative: mockNativeBridgeFunctions.isRequiredToolCallTurnNative,
+  isRetryableNetworkSseWrapperError: jest.fn(() => false),
+  isToolCallContinuationResponseNative:
+    mockNativeBridgeFunctions.isToolCallContinuationResponseNative,
+  isToolResultFollowupTurnNative:
+    mockNativeBridgeFunctions.isToolResultFollowupTurnNative,
+  resolveProviderResponseRequestSemanticsNative:
+    mockNativeBridgeFunctions.resolveProviderResponseRequestSemanticsNative,
+  tryParseJsonLikeString: jest.fn((raw: string) => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  }),
+  validateCanonicalClientToolCall: jest.fn(() => ({ ok: true })),
+});
+
+const mockSnapshotHooksHostModule = () => ({
+  appendSnapshotStageTraceNative: mockNativeBridgeFunctions.appendSnapshotStageTraceNative,
+  classifyEmptyResponseSignalNative: mockNativeBridgeFunctions.classifyEmptyResponseSignalNative,
+  classifyRuntimeErrorSignalNative: mockNativeBridgeFunctions.classifyRuntimeErrorSignalNative,
+  detectToolExecutionFailuresNative: mockNativeBridgeFunctions.detectToolExecutionFailuresNative,
+  getSnapshotHooksNativeBindingSync: jest.fn(() => ({})),
+  resetSnapshotRecorderErrorsampleStateNative:
+    mockNativeBridgeFunctions.resetSnapshotRecorderErrorsampleStateNative,
+  resolveRequestTailSummaryNative: mockNativeBridgeFunctions.resolveRequestTailSummaryNative,
+  shouldInspectRuntimeErrorFastNative:
+    mockNativeBridgeFunctions.shouldInspectRuntimeErrorFastNative,
+  shouldInspectToolFailuresNative: jest.fn(() => false),
+  shouldLogClientToolErrorToConsoleNative:
+    mockNativeBridgeFunctions.shouldLogClientToolErrorToConsoleNative,
+  shouldLogRuntimeErrorSignalToConsoleNative:
+    mockNativeBridgeFunctions.shouldLogRuntimeErrorSignalToConsoleNative,
+  shouldRecordSnapshotsNative: mockNativeBridgeFunctions.shouldRecordSnapshotsNative,
+  shouldWriteClientToolErrorsampleNative:
+    mockNativeBridgeFunctions.shouldWriteClientToolErrorsampleNative,
+  summarizeClientToolObservationNative:
+    mockNativeBridgeFunctions.summarizeClientToolObservationNative,
+  summarizeSnapshotStageTraceNative:
+    mockNativeBridgeFunctions.summarizeSnapshotStageTraceNative,
+  writeSnapshotViaHooksNative: mockNativeBridgeFunctions.writeSnapshotViaHooksNative,
+});
+
+const mockSessionLogColorHostModule = () => ({
+  getSessionLogColorBinding: jest.fn(() => ({
+    resolveSessionColorStr: jest.fn(() => JSON.stringify('\u001b[36m')),
+    resolveSessionLogColorKeyJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson) as Record<string, unknown>;
+      return JSON.stringify(String(input.requestId ?? input.sessionId ?? input.conversationId ?? 'test-session'));
+    }),
+  })),
+});
+
+const mockTrafficGovernorHostModule = () => ({
+  getRouterHotpathJsonBindingSync: jest.fn(() => ({
+    trafficGovernorAcquireJson: jest.fn((inputJson: string) => {
+      const input = JSON.parse(inputJson) as Record<string, unknown>;
+      return JSON.stringify({
+        permit: {
+          runtimeKey: input.runtimeKey,
+          providerKey: input.providerKey,
+          requestId: input.requestId,
+          leaseId: 'test-lease',
+          stateKey: 'test-state',
+          scopeKey: input.scopeKey,
+          maxInFlight: input.maxInFlight ?? 1,
+          pid: process.pid,
+          serverId: 'test-server',
+          startedAt: 1,
+          expiresAt: 2,
+        },
+        policy: {
+          maxInFlight: input.maxInFlight ?? 1,
+          acquireTimeoutMs: input.acquireTimeoutMs ?? 0,
+          staleLeaseMs: input.staleLeaseMs ?? 0,
+          requestsPerMinute: input.requestsPerMinute ?? 0,
+          rpmTimeoutMs: input.rpmTimeoutMs ?? 0,
+          rpmWindowMs: 60_000,
+        },
+        waitedMs: 0,
+        activeInFlight: 1,
+        rpmInWindow: 1,
+      });
+    }),
+    trafficGovernorIsAtCapacityJson: jest.fn(() => false),
+    trafficGovernorObserveOutcomeJson: jest.fn(() => undefined),
+    trafficGovernorReleaseJson: jest.fn(() => JSON.stringify({ released: true, activeInFlight: 0 })),
+  })),
+});
+
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations', () => mockRuntimeIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations.js', () => mockRoutingIntegrationsModule);
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/routing-integrations', () => mockRoutingIntegrationsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', mockNativeExportsModule);
-jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports', mockNativeExportsModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/error-execution-decision-host.js', mockErrorExecutionDecisionHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/error-execution-decision-host', mockErrorExecutionDecisionHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/executor-metadata-host.js', mockExecutorMetadataHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/executor-metadata-host', mockExecutorMetadataHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/finish-reason-host.js', () => ({
+  deriveFinishReasonNative: mockNativeBridgeFunctions.deriveFinishReasonNative,
+}));
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/finish-reason-host', () => ({
+  deriveFinishReasonNative: mockNativeBridgeFunctions.deriveFinishReasonNative,
+}));
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', mockProviderResponseConverterHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/provider-response-converter-host', mockProviderResponseConverterHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/request-executor-pipeline-attempt-host.js', mockRequestExecutorPipelineAttemptHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/request-executor-pipeline-attempt-host', mockRequestExecutorPipelineAttemptHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/route-availability-host.js', mockRouteAvailabilityHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/route-availability-host', mockRouteAvailabilityHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/session-log-color-host.js', mockSessionLogColorHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/session-log-color-host', mockSessionLogColorHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/snapshot-hooks-host.js', mockSnapshotHooksHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/snapshot-hooks-host', mockSnapshotHooksHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/traffic-governor-host.js', mockTrafficGovernorHostModule);
+jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/traffic-governor-host', mockTrafficGovernorHostModule);
 
 const ROOT = process.cwd();
 const REQUEST_EXECUTOR_PATH = path.join(ROOT, 'src/server/runtime/http-server/request-executor.ts');
