@@ -45,6 +45,7 @@ import {
   rewriteDirectRouteResponseModelNative,
   rewriteDirectRouteSseFrameNative,
 } from '../../../modules/llmswitch/bridge/direct-route-model-hooks-host.js';
+import { planDirectRouteResponseErrorNative } from '../../../modules/llmswitch/bridge/direct-route-response-error-host.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -122,24 +123,19 @@ export interface RouterDirectSkipped {
 
 export type RouterDirectOutcome = RouterDirectResult | RouterDirectSkipped;
 
-function isRouterDirectRecoverableResponseStatus(status: number | undefined): status is number {
-  if (typeof status !== 'number' || !Number.isFinite(status)) {
-    return false;
-  }
-  return status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
-}
-
-function buildRouterDirectResponseError(response: unknown, status: number): Error {
-  const message = `router-direct provider returned recoverable HTTP ${status}`;
-  const error = new Error(message) as Error & {
+function buildRouterDirectResponseErrorFromNativePlan(
+  response: unknown,
+  plan: ReturnType<typeof planDirectRouteResponseErrorNative>,
+): Error {
+  const error = new Error(plan.message) as Error & {
     status: number;
     statusCode: number;
     code: string;
     response: unknown;
   };
-  error.status = status;
-  error.statusCode = status;
-  error.code = `HTTP_${status}`;
+  error.status = plan.status as number;
+  error.statusCode = plan.statusCode as number;
+  error.code = plan.code as string;
   error.response = response;
   return error;
 }
@@ -277,9 +273,9 @@ export async function executeRouterDirectPipeline(
     await input.onProviderError?.(error, auditContext);
     throw error;
   }
-  const responseStatus = extractResponseStatus(response);
-  if (isRouterDirectRecoverableResponseStatus(responseStatus)) {
-    const responseError = buildRouterDirectResponseError(response, responseStatus);
+  const responseErrorPlan = planDirectRouteResponseErrorNative(extractResponseStatus(response));
+  if (responseErrorPlan.shouldRaise) {
+    const responseError = buildRouterDirectResponseErrorFromNativePlan(response, responseErrorPlan);
     await input.onProviderError?.(responseError, auditContext);
     throw responseError;
   }

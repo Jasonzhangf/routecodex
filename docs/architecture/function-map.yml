@@ -6602,3 +6602,46 @@ owners:
     notes:
       - "Provider wire uses configured canonical modelId; client response restores the original alias."
       - "Rust payloadChanged is the only decision used by TS to preserve direct passthrough object identity."
+
+  - feature_id: hub.router_direct_response_error_projection
+    status: active
+    summary: "router-direct returned HTTP response classification and ErrorErr-compatible descriptor planning are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust decides whether returned 401/402/403/429/5xx responses enter the provider error chain and emits the error descriptor; TS only constructs the JS Error and invokes the existing ErrorErr callback"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_error.rs
+    resource_bindings:
+      reads:
+        - response.provider_raw@ProviderRespInbound01Raw
+      writes:
+        - error.chain@ErrorErr01SourceRaised
+      forbidden:
+        - response.client_payload@ServerRespOutbound05ClientFrame
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+    canonical_types:
+      - DirectRouteResponseErrorPlan
+    canonical_builders:
+      - plan_direct_route_response_error_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_error.rs
+      - src/modules/llmswitch/bridge/direct-route-response-error-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-direct-route-response-error-rust-only.mjs
+      - scripts/tests/direct-route-response-error-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run test:direct-route-response-error-rust-only-red-fixtures
+      - npm run verify:direct-route-response-error-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "Returned auth/quota/5xx statuses enter the existing onProviderError ErrorErr chain; ordinary 400/404/499 remain non-recoverable response truth under this owner."
+      - "TS must not retain status lists, HTTP code synthesis, retry/reroute policy, or client error projection."

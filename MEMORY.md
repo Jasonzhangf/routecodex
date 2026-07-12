@@ -2633,3 +2633,7 @@
 - Same-protocol direct must send the configured canonical provider `modelId` on the wire and restore the original inbound alias only on the client response surface. Alias-to-wire and wire-to-client are separate directions, not competing expectations.
 - Direct model/thinking planning and bounded response model projection are Rust-owned. TS may preserve stream/object references and execute NAPI/stream IO, but must not infer whether a payload changed or recursively rewrite arbitrary diagnostic `model` fields.
 - Native JSON planners that may leave a payload unchanged must return an explicit `payloadChanged`; the TS host uses that Rust decision to preserve identity. SSE frame projection must preserve the original frame whitespace and malformed/terminal data verbatim.
+# 2026-07-13: returned direct HTTP status classification is Rust ErrorErr input truth
+
+- router-direct may receive a resolved provider response object whose HTTP status is itself a provider failure. The decision that 401/402/403/429/5xx must enter ErrorErr is Rust-owned; TS may only materialize the planned JS Error and execute the existing error callback/rethrow effects.
+- Ordinary 400/404/499 returned responses are negative locks for this specific recoverable-status owner. Do not restore a TS status list, HTTP code synthesis, retry/reroute policy, or client projection in router-direct.

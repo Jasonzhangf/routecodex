@@ -29677,3 +29677,8 @@ Pure Rust NAPI candidates:
 - Rust explicitly returns `payloadChanged`; TS uses only that flag to preserve direct passthrough object identity and does not rederive model/thinking semantics.
 - SSE frame input is never trimmed before projection; malformed data, whitespace, and `[DONE]` remain transport-equivalent.
 - Evidence: Rust 3/3, router-direct 35/35, canonical route-level 1/1, residue/red, function/resource/mainline, native-reference and rustification gates passed; native hotpath and base build passed. Full 33-case direct suite is not closeout evidence because the pre-existing suite contains long 900s timeout/error-owner cases; the bounded focused contract is green.
+# 2026-07-13: router-direct returned response error projection moved to Rust
+
+- `hub.router_direct_response_error_projection` now owns returned-response recoverable status classification and the ErrorErr-compatible HTTP descriptor in Rust. TS only constructs a JS `Error`, attaches the opaque provider response, invokes `onProviderError`, and rethrows.
+- Positive contract: 401/402/403/429 and 5xx enter the unified provider error chain. Negative contract: absent/200/400/404/499 do not become recoverable under this owner.
+- Evidence: pre-native-build focused 403 contract was red on the missing native capability; Rust positive/negative 2/2, router-direct Jest 36/36, residue/red, function/resource/mainline/native-reference/rustification, native build, base build, and diff check passed.

@@ -948,6 +948,28 @@ describe('router-direct-pipeline', () => {
       expect(onProviderError).toHaveBeenCalledTimes(1);
     });
 
+    it('does not classify an ordinary HTTP 400 response object as a recoverable provider failure', async () => {
+      const handle = createMockProviderHandle('openai-responses');
+      handle.instance.processIncomingDirect = jest.fn(async () => ({
+        status: 400,
+        body: { error: { message: 'request rejected' } },
+      }));
+      const onProviderError = jest.fn(async () => {});
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.5' },
+        requestPayload: { model: 'gpt-5.5', input: 'ping' },
+        target: { providerKey: 'openai.gpt-5.5', providerType: 'openai', runtimeKey: handle.runtimeKey },
+        routingDecision: { routeName: 'default' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+        onProviderError,
+      });
+      expect(result.used).toBe(true);
+      expect(result.response).toMatchObject({ status: 400 });
+      expect(onProviderError).not.toHaveBeenCalled();
+    });
+
     it('restores client model on direct response body after request-side model override', async () => {
       const handle = {
         ...createMockProviderHandle('openai-responses'),
