@@ -3777,9 +3777,18 @@ pub fn should_allow_direct_responses_prebuilt_sse_passthrough_json(
 
 #[napi]
 pub fn build_choices_array_bridge_debug_details_json(input_json: String) -> NapiResult<String> {
-    let raw: serde_json::Value = serde_json::from_str(&input_json)
-        .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
-    Ok(payload_extraction::build_choices_array_bridge_debug_details(&raw).to_string())
+    let raw: serde_json::Value = parse_napi_json(&input_json)?;
+    stringify_napi_json(&payload_extraction::build_choices_array_bridge_debug_details(
+        &raw,
+    ))
+}
+
+#[napi]
+pub fn build_provider_response_timing_breakdown_json(input_json: String) -> NapiResult<String> {
+    let raw: serde_json::Value = parse_napi_json(&input_json)?;
+    stringify_napi_json(&payload_extraction::build_provider_response_timing_breakdown(
+        &raw,
+    ))
 }
 
 // ---------------------------------------------------------------------------

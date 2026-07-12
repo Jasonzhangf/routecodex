@@ -36,6 +36,8 @@ const nativeInvokerConsumerFiles = new Set([
 ]);
 
 const forbiddenHelperDefinitions = [
+  /\bfunction\s+loadNativeConfigBinding\s*\(/u,
+  /\bfunction\s+parseNativeConfigJsonResult\s*\(/u,
   /\bfunction\s+requireNativeBindingFunction\s*\(/u,
   /\bfunction\s+callNativeJsonObject\s*\(/u,
   /\bfunction\s+parseNativeJsonResult\s*\(/u,
@@ -46,6 +48,14 @@ const forbiddenHelperDefinitions = [
   /\bfunction\s+parseNativeRecord\s*\(/u,
   /\bfunction\s+requireProviderResponseNativeJsonFunction\s*\(/u,
   /\bconst\s+(?:requireNativeBindingFunction|callNativeJsonObject|parseNativeJsonResult|parseHubPipelineNativeJsonResult|callSnapshotNativeJson|stringifySnapshotNativeArg|stringifyNativePayload|parseNativeRecord|requireProviderResponseNativeJsonFunction)\b/u,
+];
+
+const configLocalJsonMechanics = [
+  /\bJSON\.parse\s*\(/u,
+  /\bJSON\.stringify\s*\(/u,
+  /\bconst\s+binding\s*=/u,
+  /\bconst\s+fn\s*=/u,
+  /\btypeof\s+fn\s*!==\s*['"]function['"]/u,
 ];
 
 function readText(filePath) {
@@ -159,6 +169,13 @@ function verifyHubBridgeNativeJsonInvokerSingleton() {
     for (const pattern of forbiddenHelperDefinitions) {
       if (pattern.test(source)) {
         failures.push(`${relPath}: duplicate native JSON invoker helper must use ${ownerFile}`);
+      }
+    }
+    if (relPath === 'src/modules/llmswitch/bridge/config-integrations.ts') {
+      for (const pattern of configLocalJsonMechanics) {
+        if (pattern.test(source)) {
+          failures.push(`${relPath}: config native JSON call mechanics must use ${ownerFile}`);
+        }
       }
     }
     if (nativeInvokerConsumerFiles.has(relPath) && !source.includes("from './native-json-invoker.js'")) {

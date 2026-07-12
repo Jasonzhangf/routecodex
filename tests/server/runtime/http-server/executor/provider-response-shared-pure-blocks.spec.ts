@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildChoicesArrayBridgeDebugDetailsWithNative } from '../../../../../src/modules/llmswitch/bridge/provider-response-native-calls.js';
+import {
+  buildChoicesArrayBridgeDebugDetailsWithNative,
+  buildProviderResponseTimingBreakdownWithNative,
+} from '../../../../../src/modules/llmswitch/bridge/provider-response-native-calls.js';
 import { shouldAllowDirectResponsesPrebuiltSsePassthrough } from '../../../../../src/server/runtime/http-server/executor/provider-response-shared-pure-blocks.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,6 +60,62 @@ describe('provider-response shared pure blocks', () => {
       bridgePayloadKeys: ['data'],
       bridgePayloadHasChoices: false,
       bridgePayloadHasDataChoices: true
+    });
+  });
+
+  it('RED: keeps provider-response timing breakdown projection Rust-owned', () => {
+    const source = fs.readFileSync(converterSourcePath, 'utf8');
+
+    expect(source).toContain('buildProviderResponseTimingBreakdownWithNative');
+    expect(source).not.toContain('function attachTimingBreakdown');
+    expect(source).not.toContain('clientInjectWaitMsRaw');
+    expect(source).not.toContain('hubResponseExcludedMs: response.timingBreakdown?.hubResponseExcludedMs ?? clientInjectWaitMs');
+
+    expect(buildProviderResponseTimingBreakdownWithNative({
+      body: { object: 'chat.completion' },
+      usageLogInfo: { clientInjectWaitMs: 12.9 },
+      timingBreakdown: { upstreamMs: 50 }
+    })).toEqual({
+      body: { object: 'chat.completion' },
+      usageLogInfo: { clientInjectWaitMs: 12.9 },
+      timingBreakdown: {
+        upstreamMs: 50,
+        clientInjectWaitMs: 12,
+        hubResponseExcludedMs: 12
+      }
+    });
+
+    expect(buildProviderResponseTimingBreakdownWithNative({
+      body: { object: 'chat.completion' },
+      usageLogInfo: { clientInjectWaitMs: -1 },
+      timingBreakdown: { upstreamMs: 50 }
+    })).toEqual({
+      body: { object: 'chat.completion' },
+      usageLogInfo: { clientInjectWaitMs: -1 },
+      timingBreakdown: {
+        upstreamMs: 50,
+        clientInjectWaitMs: 0,
+        hubResponseExcludedMs: 0
+      }
+    });
+
+    const withoutClientInject = {
+      body: { object: 'chat.completion' },
+      usageLogInfo: {},
+      timingBreakdown: { upstreamMs: 50 }
+    };
+    expect(buildProviderResponseTimingBreakdownWithNative(withoutClientInject)).toEqual(withoutClientInject);
+
+    const sseStream = { marker: 'non-json stream identity' };
+    const projected = buildProviderResponseTimingBreakdownWithNative({
+      body: { object: 'chat.completion' },
+      sseStream,
+      usageLogInfo: { clientInjectWaitMs: 9.7 }
+    });
+    expect(projected.sseStream).toBe(sseStream);
+    expect(projected.timingBreakdown).toEqual({
+      clientInjectWaitMs: 9,
+      hubResponseExcludedMs: 9
     });
   });
 

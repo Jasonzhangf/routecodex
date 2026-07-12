@@ -1,3 +1,25 @@
+# 2026-07-12: 5555 route pool excludes spark/asxs and prefers cc/free GPT
+
+- Live 5555 routing policy group is `gateway_priority_5555`; active 5555 route pools must not reference `gpt-5.3-codex-spark` or asxs targets.
+- `coding` / `thinking` / `longcontext` primary pools are weighted `fwd.glm.glm-5.2` + `fwd.free.gpt-5.5`; thinking levels are `low` / `high` / `medium`.
+- 5555 `tools` / `search` / `web_search` / `multimodal` should prefer `fwd.free.gpt-5.5` before paid/minimax fallback; paid GPT fallback is `fwd.paid.gpt-5.5` (`55ai` / `1token`) and not asxs.
+- `routecodex port dry-run 5555 ... --metadata-json '{"metadataCenterSnapshot":{}}'` is the fastest black-box check: a normal `gpt-5.5` request selected `cc.key1.gpt-5.5`; route status for 5555 pools had no asxs/spark. Global diagnostics may still list unrelated asxs forwarders or old spark health keys; judge the route-specific `gateway_priority_5555:*` pools and dry-run decision, not global health text.
+
+# 2026-07-12: Provider-response timing breakdown projection is Rust-owned
+
+- `convertProviderResponseIfNeeded` must not locally compute provider-response `timingBreakdown.clientInjectWaitMs` or default `hubResponseExcludedMs` in TS. It calls `buildProviderResponseTimingBreakdownWithNative(...)`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_provider_response_timing_breakdown`; NAPI entry: `buildProviderResponseTimingBreakdownJson`.
+- Required lock: Rust unit covers positive projection, negative clamp to zero, and no-op without `usageLogInfo.clientInjectWaitMs`; Jest source scan rejects reintroduced local TS `attachTimingBreakdown`, `clientInjectWaitMsRaw`, and local `hubResponseExcludedMs` projection.
+- Native JSON boundary rule: TS wrapper must not send live `sseStream` objects through native JSON serialization; it strips `sseStream` before the native call and reattaches the exact original reference afterward.
+- This closes only timing projection. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage recorder, usage extraction / finish reason, stream/body capture, and provider context/error mapping; those remain separate owner slices.
+
+# 2026-07-12: Provider-response timing breakdown projection is Rust-owned
+
+- `convertProviderResponseIfNeeded` must not locally rebuild `timingBreakdown.clientInjectWaitMs` or default `hubResponseExcludedMs` in TS. It calls `buildProviderResponseTimingBreakdownWithNative(...)`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_provider_response_timing_breakdown`.
+- Required lock: Rust unit and Jest source scan must reject local TS `function attachTimingBreakdown`, `clientInjectWaitMsRaw`, and `hubResponseExcludedMs: response.timingBreakdown?.hubResponseExcludedMs ?? clientInjectWaitMs`; tests must also prove `sseStream` identity remains TS host IO and does not enter the native JSON payload.
+- This closes only a timing projection sub-slice. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage recorder, and stream/body capture; those remain separate owner slices.
+
 # 2026-07-12: Provider-response choices-array bridge debug details are Rust-owned
 
 - `convertProviderResponseIfNeeded` must not locally rebuild `choices array` bridge debug details in TS. It calls `buildChoicesArrayBridgeDebugDetailsWithNative(...)` and spreads that Rust-owned projection into error log details.
@@ -2563,8 +2585,20 @@
 - `hub.servertool_core_shared_helpers` owns only Rust JSON parse/stringify bridge mechanics in `shared_json_utils.rs` (`parse_json_with_context`, `stringify_json_with_context`); `servertool_core_blocks.rs` consumes those helpers broadly while servertool-core remains the semantic owner for engine/stopless/hook/orchestration/CLI/timeout/policy contracts.
 - Required evidence for this slice: `test:servertool-core-shared-helpers-red-fixtures`, `verify:servertool-core-shared-helpers`, `test:servertool-core-shared-helpers-cargo`, servertool rust-only/function-map/mainline/thin-wrapper/rustification gates, native hotpath build, build:base, and wiki sync if generated ownership pages change.
 
+# 2026-07-12: hub_pipeline_lib engine shared JSON/trim helper boundary
+
+- `hub.pipeline_engine_shared_helpers` owns only Rust JSON parse error-context and trimmed-string mechanics through `shared_json_utils.rs` (`parse_json_with_context`, `read_trimmed_string`); `hub_pipeline_lib/engine.rs` consumes those helpers while remaining the owning facade for route selection, req/resp stage orchestration, stopless hook skeleton, context snapshot transfer, and effect plan assembly.
+- `execute_hub_pipeline_json` must keep its public `serde_json::from_str(&input_json)?` behavior; do not replace that entry parse with contextual helper unless the public error-code contract is deliberately redesigned.
+- Required evidence for this slice: `test:hub-pipeline-engine-shared-helpers-red-fixtures`, `verify:hub-pipeline-engine-shared-helpers`, `test:hub-pipeline-engine-shared-helpers-cargo`, servertool rust-only/function-map/mainline/thin-wrapper/rustification gates, native hotpath build, and `git diff --check`.
+
 # 2026-07-12: VR shared helper first-slice boundary
 
 - `vr.shared_function_library_helpers` owns only exact duplicate Rust VR pure helper mechanics for string/list normalization and reuse of existing tool constants. Its canonical builders are `trim_nonempty_str`, `push_unique_trimmed`, `normalize_unique_trimmed_strings`, and `normalize_trimmed_string_values` under `virtual_router_engine/routing/utils.rs`.
 - Bool/number/provider-key/forwarder/default-floor helpers remain out of this first slice; do not merge them until caller-specific semantics are locked by dedicated red tests and route availability / forwarder gates.
 - Required evidence for this slice: `test:vr-shared-function-library-helpers-red-fixtures`, `verify:vr-shared-function-library-helpers`, `test:vr-shared-function-library-helpers-cargo`, VR no-TS runtime, function-map compile, mainline call map, llmswitch rustification audit, wiki sync, `build:base`, and `git diff --check`.
+
+# 2026-07-12: Config bridge native JSON invoker boundary
+
+- `hub.config_native_json_invoker_convergence` closes the config bridge portion of the TS native JSON invoker singleton: `config-integrations.ts` uses `native-json-invoker.ts` for native function lookup, JSON argument encoding, JSON result parsing, and fail-fast missing-function behavior.
+- Config-specific shape validators stay in `config-integrations.ts`; config semantics and provider/runtime config files remain Rust/native owner territory and were not changed.
+- `verify:hub-bridge-native-json-invoker-singleton` now blocks local `JSON.parse` / `JSON.stringify` / `const binding` / `const fn` native JSON call mechanics from returning to `config-integrations.ts`; the red fixture case is `config-local-json-mechanics`.

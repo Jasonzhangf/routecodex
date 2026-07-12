@@ -42,6 +42,7 @@ use crate::req_process_stage2_route_select::RouteSelectionApplyInput;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput as RespToolGovernanceInput;
 use crate::resp_process_stage2_finalize::FinalizeInput;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
+use crate::shared_json_utils::{parse_json_with_context, read_trimmed_string};
 use crate::stopless_auto_handler_bridge::{
     build_stopless_auto_cli_projection_from_engine_json, run_stopless_auto_handler_runtime_json,
 };
@@ -62,28 +63,12 @@ fn read_entry_provider_protocol(
     metadata_center_snapshot
         .get("runtimeControl")
         .and_then(|v| v.as_object())
-        .and_then(|rt| rt.get("providerProtocol"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            normalized_metadata
-                .get("providerProtocol")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
+        .and_then(|rt| read_trimmed_string(rt.get("providerProtocol")))
+        .or_else(|| read_trimmed_string(normalized_metadata.get("providerProtocol")))
 }
 
 fn resolve_request_entry_protocol(entry_endpoint: &str, metadata: &Value) -> String {
-    metadata
-        .get("clientProtocol")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    read_trimmed_string(metadata.get("clientProtocol"))
         .unwrap_or_else(|| resolve_hub_client_protocol(entry_endpoint))
 }
 
@@ -1145,7 +1130,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
         is_stop_message_response_runtime_enabled(metadata, metadata_center_snapshot);
     let stop_gateway = inspect_stop_gateway_signal(&chatprocess_payload.to_string())
         .ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|raw| parse_json_with_context::<Value>(&raw, "inspect stop gateway signal").ok())
         .unwrap_or(Value::Null);
     let stop_gateway_eligible = stop_gateway
         .get("eligible")
@@ -1231,10 +1216,14 @@ fn run_servertool_resp_stopless_hook_skeleton(
         run_stopless_auto_handler_runtime_json(runtime_input.to_string()).map_err(|error| {
             HubPipelineError::new("hub_pipeline_stopless_resp_hook_failed", error.reason)
         })?;
-    let runtime_output: Value = serde_json::from_str(&raw_runtime).map_err(|error| {
+    let runtime_output: Value = parse_json_with_context(
+        &raw_runtime,
+        "Rust stopless response hook runtime returned invalid JSON",
+    )
+    .map_err(|message| {
         HubPipelineError::new(
             "hub_pipeline_stopless_resp_hook_invalid_output",
-            format!("Rust stopless response hook runtime returned invalid JSON: {error}"),
+            message,
         )
     })?;
     let action = runtime_output
@@ -1302,15 +1291,16 @@ fn run_servertool_resp_stopless_hook_skeleton(
                         error.reason,
                     )
                 })?;
-                let projection_output: Value =
-                    serde_json::from_str(&raw_projection).map_err(|error| {
-                        HubPipelineError::new(
-                            "hub_pipeline_stopless_resp_hook_projection_invalid_output",
-                            format!(
-                                "Rust stopless response hook projection returned invalid JSON: {error}"
-                            ),
-                        )
-                    })?;
+                let projection_output: Value = parse_json_with_context(
+                    &raw_projection,
+                    "Rust stopless response hook projection returned invalid JSON",
+                )
+                .map_err(|message| {
+                    HubPipelineError::new(
+                        "hub_pipeline_stopless_resp_hook_projection_invalid_output",
+                        message,
+                    )
+                })?;
                 projection_output
                     .get("chatResponse")
                     .cloned()
@@ -1455,12 +1445,7 @@ fn is_stop_message_response_runtime_enabled(
 }
 
 fn read_trimmed_metadata_string(metadata: &Value, key: &str) -> Option<String> {
-    metadata
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    read_trimmed_string(metadata.get(key))
 }
 
 fn read_metadata_value(metadata: &Value, key: &str) -> Option<Value> {
@@ -1477,10 +1462,7 @@ fn read_trimmed_metadata_string_with_target_fallback(
     metadata: &Value,
     key: &str,
 ) -> Option<String> {
-    read_metadata_value(metadata, key)
-        .and_then(|value| value.as_str().map(str::to_string))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    read_trimmed_string(read_metadata_value(metadata, key).as_ref())
 }
 
 fn build_response_record_effect_payload(
@@ -1488,7 +1470,8 @@ fn build_response_record_effect_payload(
     payload: &Value,
     request_id: &str,
 ) -> Value {
-    if metadata.get("clientProtocol").and_then(Value::as_str) != Some("openai-responses") {
+    if read_trimmed_string(metadata.get("clientProtocol")).as_deref() != Some("openai-responses")
+    {
         return Value::Null;
     }
     serde_json::json!({
@@ -1507,12 +1490,10 @@ fn resolve_context_snapshot(metadata: &Value) -> Option<Value> {
     let metadata_obj = metadata.as_object()?;
     let key = metadata_obj
         .get("contextMetadataKey")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("responsesContext");
+        .and_then(|value| read_trimmed_string(Some(value)))
+        .unwrap_or_else(|| "responsesContext".to_string());
     metadata_obj
-        .get(key)
+        .get(&key)
         .or_else(|| metadata_obj.get("responsesContext"))
         .or_else(|| metadata_obj.get("contextSnapshot"))
         .filter(|value| value.is_object())
@@ -1664,14 +1645,8 @@ fn build_adapter_context(
     provider_protocol: &str,
     request_id: &str,
 ) -> AdapterContext {
-    let session_id = metadata
-        .get("sessionId")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let conversation_id = metadata
-        .get("conversationId")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let session_id = read_trimmed_string(metadata.get("sessionId"));
+    let conversation_id = read_trimmed_string(metadata.get("conversationId"));
     AdapterContext {
         compatibility_profile: read_trimmed_metadata_string_with_target_fallback(
             metadata,

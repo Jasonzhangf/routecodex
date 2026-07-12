@@ -1,3 +1,19 @@
+# 2026-07-12 23:27 CST: provider-response timing breakdown projection moved to Rust
+- Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`, timing projection sub-slice only.
+- Change: `convertProviderResponseIfNeeded` no longer contains local TS `attachTimingBreakdown`; it calls `buildProviderResponseTimingBreakdownWithNative`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.
+- Boundary fix: the TS native wrapper strips non-JSON `sseStream` before calling Rust and reattaches the original reference afterward; Jest locks `sseStream` identity preservation.
+- Positive/negative lock: Rust unit covers `clientInjectWaitMs` projection, negative clamp to zero, and no-op without `clientInjectWaitMs`; Jest source scan rejects reintroduced `attachTimingBreakdown`, `clientInjectWaitMsRaw`, and local `hubResponseExcludedMs` projection.
+- Validation PASS: `npm run test:provider-response-shared-pure-blocks-cargo` passed 35 tests; `npm run build:native-hotpath`; focused Jest provider-response shared pure blocks + bridge seed passed 10 tests; provider-response/native helper gates passed; function-map/mainline/resource/architecture-light/longtail passed; `npx tsc --noEmit --pretty false --skipLibCheck`; `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`; `npm run pack:rcc`; `npm run verify:rcc-release-install`; `git diff --check`.
+- Dry-run evidence: request dry-run artifact `/Users/fanzhang/.rcc/codex-samples/openai-chat/ports/5520/req_1783782555457_b30d64a4/runs/sample_1783867857976/provider-response-timing-rust-20260712/dry-run.provider-request.json` had `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `dryRun=true`, `stoppedBeforeProviderSend=true`, method `POST`, endpoint `/responses`, body keys `input/model/stream`; response dry-run `.agent-collab/runs/20260712T140246Z-Macstudio.local-8471-provider-response-runtime-closeout/response-dry-run-timing-breakdown/response-dry-run.json` had `ok=true`, entry `/v1/chat/completions`, protocol `openai-responses`, status `200`, object `chat.completion`, `choices=1`.
+- Boundary: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, usage extraction / finish reason, stream/body capture, and provider context/error mapping remain TS host glue and need separate red/dry-run samples before migration.
+
+# 2026-07-12 22:59 UTC: provider-response timing breakdown projection moved to Rust
+- Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`, timing projection sub-slice only.
+- Change: `convertProviderResponseIfNeeded` no longer contains local TS `attachTimingBreakdown`; it calls `buildProviderResponseTimingBreakdownWithNative`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.
+- Positive/negative lock: Rust unit and Jest source scan cover `usageLogInfo.clientInjectWaitMs` positive projection, negative no-op when absent, floor/non-negative normalization, `hubResponseExcludedMs` defaulting, and `sseStream` identity preservation outside native JSON payload.
+- Validation: `verify:rust-napi-json-wrapper-helper`; `test:provider-response-shared-pure-blocks-cargo` passed 35 tests; focused Jest `provider-response-shared-pure-blocks` + `provider-response-converter.bridge-seed` passed 10 tests; provider-response/shared helper gates, dry-run blackbox fixture, architecture review/longtail, native build, exact `build:base`, and `git diff --check` passed.
+- Boundary: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, and stream/body capture remain TS host glue and need separate red/dry-run samples before migration.
+
 # 2026-07-12 23:02 CST: provider-response choices-array bridge debug details moved to Rust
 - Slice: `resource_id:response.host_conversion_handoff` / `feature_id:server.provider_response_conversion_host`, diagnostic projection sub-slice only.
 - Change: `convertProviderResponseIfNeeded` no longer contains local TS `buildChoicesArrayBridgeDebugDetails`; it calls `buildChoicesArrayBridgeDebugDetailsWithNative`, backed by Rust/NAPI `buildChoicesArrayBridgeDebugDetailsJson`.
@@ -29432,6 +29448,14 @@ Pure Rust NAPI candidates:
 - Verification PASS: focused Jest 3 suites / 240 tests; exact `git grep` found zero `native-exports` hits in the two migrated tests; `llmswitch-rustification-audit`; strict `llmswitch-ts-shell-reference-audit`; function-map compile; architecture mainline call map; resource source/operation gates; VR no-TS runtime; minimal TS surface; `git diff --check`; `build:base`.
 - Boundary: this is host bridge test/reference contraction only. White-box host wiring tests should mock owner-specific hosts; pure native output evidence tests should move to direct-native helpers.
 
+# 2026-07-12: 5555 removed spark/asxs from active route pools
+
+- Scope: live `~/.rcc/config.toml` routing fix for port 5555 only; no repo runtime code change.
+- Root cause: `gateway_priority_5555:tools` still had a high-priority `fwd.paid.gpt-5.3-codex-spark` tier, and 5555 fallback/default/tool/search routes still referenced asxs directly or through paid mini/GPT-5.4 forwarders.
+- Change: removed `fwd.paid.gpt-5.3-codex-spark`; removed spark tier from 5555 tools; removed 5555 route references to `fwd.asxs.gpt-5.5`, `fwd.paid.gpt-5.4-mini`, and `fwd.gpt.gpt-5.4`; made 5555 tools/search/web_search/multimodal prefer `fwd.free.gpt-5.5` before paid/minimax fallback.
+- Verification: static 5555 config scan found no `asxs` / `gpt-5.3` / `spark` route references; `routecodex restart --port 5555` succeeded; `/health` ready at `0.90.3932`; VR status showed 5555 route pools without asxs/spark; `routecodex port dry-run 5555 ... --metadata-json '{"metadataCenterSnapshot":{}}'` selected `cc.key1.gpt-5.5` with candidates `orangeai`, `cc`, `55ai`, `1token`, and `minimax`.
+- Note: global status still lists asxs forwarders and old spark health keys because those are global/provider health surfaces, not 5555 active route pools.
+
 # 2026-07-12: Responses submit_tool_outputs host/direct-native contraction
 
 - Scope: continue Hub Pipeline / VR external native bridge convergence for `hub.chat_process_responses_continuation`; no runtime behavior change and no live restart/install.
@@ -29533,6 +29557,16 @@ Pure Rust NAPI candidates:
 - Build generated `src/build-info.ts` timestamp was precisely restored to `2026-07-12T07:34:50.349Z`. Evidence recorded under `.agent-collab/runs/20260712T140307Z-Macstudio.local-10032-servertool-core-shared/evidence.jsonl`; claim marked `validated`.
 - Remaining active goal: Rust large-file shared-helper audit/splitting remains open for `hub_pipeline_lib/engine.rs`; any further servertool core split must remain exact-mechanics or owner-preserving only.
 
+# 2026-07-12: Hub Pipeline engine shared-helper slice validated
+
+- Scope: Hub Pipeline shared-library simplification slice for `feature_id:hub.pipeline_engine_shared_helpers`; no intended runtime behavior change, no public `execute_hub_pipeline_json` error-code behavior change, no route/stopless/continuation/context/effect semantic owner move, and no TS semantic expansion.
+- Change: `hub_pipeline_lib/engine.rs` now reuses `shared_json_utils::{parse_json_with_context, read_trimmed_string}` for exact JSON parse error-context and trimmed-string mechanics. Lifecycle semantics stayed in the engine facade.
+- Gate/map update: added `verify:hub-pipeline-engine-shared-helpers`, `test:hub-pipeline-engine-shared-helpers-red-fixtures`, and `test:hub-pipeline-engine-shared-helpers-cargo`; wired red/verify gates into `verify:architecture-ci-longtail`; represented owner and required gates in function-map / verification-map and shared-library simplification plan.
+- Validation cleanup: `src/build-info.ts` generated timestamp was restored to baseline `2026-07-12T07:34:50.349Z`; package version stayed `0.90.3932`; no package-lock diff.
+- Verification PASS: red fixtures; `verify:hub-pipeline-engine-shared-helpers`; focused Rust `hub_pipeline_lib` cargo tests 64 passed; `verify:servertool-rust-only`; `verify:function-map-compile-gate`; `verify:architecture-mainline-call-map`; `verify:architecture-thin-wrapper-only`; `verify:llmswitch-rustification-audit`; `verify:architecture-review-surface-light`; `build:native-hotpath`; prior `ROUTECODEX_SKIP_AUTO_BUMP=1 build:base`; `git diff --check`.
+- Evidence recorded under `.agent-collab/runs/20260712T141724Z-Macstudio.local-50102-hub-engine-shared/evidence.jsonl`; claim marked `validated`.
+- MemPalace status: initial search failed with `Internal error: Error finding id`; `mempalace mine . --wing routecodex` later passed (`37` files processed, `2630` drawers filed), but post-mine search for the new phrase still failed with the same internal error. Current turn used direct source/project memory files as evidence and did not claim MemPalace search closeout.
+
 # 2026-07-12: VR shared function library first slice validated
 
 - Scope: `feature_id:vr.shared_function_library_helpers`; first safe Rust VR shared-helper slice only. No route selection, forwarder/default-floor, provider availability, provider/client payload, TS runtime, install, restart, or live runtime behavior changed.
@@ -29541,3 +29575,11 @@ Pure Rust NAPI candidates:
 - Verification PASS: VR verifier; VR red fixtures; focused cargo tests for shared utils, route availability, coding tool detection, and web tool detection; function-map compile; architecture mainline call map; VR no-TS runtime; llmswitch rustification audit; wiki markdown/html sync; `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`; `git diff --check`.
 - Evidence recorded under `.agent-collab/runs/20260712T-vr-shared-function-library-helpers/evidence.jsonl`; build left no `src/build-info.ts` or lockfile diff.
 - MemPalace status: `mempalace mine . --wing routecodex` passed and filed 67 drawers; no-wing searches for VR shared-helper phrases returned the plan/wiki, but `mempalace search ... --wing routecodex` still fails with `Internal error: Error finding id`.
+
+# 2026-07-12: Config bridge native JSON invoker sub-slice
+
+- Scope: `feature_id:hub.config_native_json_invoker_convergence`; no config semantics, provider config files, VR selection, install, restart, release, live runtime, provider/client payload, or Rust owner behavior changed.
+- Change: `src/modules/llmswitch/bridge/config-integrations.ts` now routes JSON-returning config native calls through `native-json-invoker.ts` helpers for function lookup, JSON argument encode, JSON result parse, and fail-fast missing-function behavior. Config-specific output shape validation stays local.
+- Gate update: `verify:hub-bridge-native-json-invoker-singleton` now rejects local `JSON.parse` / `JSON.stringify` / `const binding` / `const fn` native JSON mechanics in `config-integrations.ts`; the red fixture includes `config-local-json-mechanics`.
+- Verification PASS: `test:hub-bridge-native-json-invoker-singleton-red-fixtures`; `verify:hub-bridge-native-json-invoker-singleton`; `npx tsc --noEmit --pretty false --skipLibCheck`.
+- Evidence recorded under `.agent-collab/runs/20260712T150537Z-Macstudio.local-2166-yv39yh/evidence.jsonl`. Broader architecture/build gates remain to be run before claiming the full Hub Pipeline shared-library goal complete.

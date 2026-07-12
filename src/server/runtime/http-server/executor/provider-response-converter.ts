@@ -5,6 +5,7 @@ import { asRecord } from '../provider-utils.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   buildChoicesArrayBridgeDebugDetailsWithNative,
+  buildProviderResponseTimingBreakdownWithNative,
 } from '../../../../modules/llmswitch/bridge/provider-response-converter-host.js';
 import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
@@ -117,25 +118,6 @@ function buildBridgeInvocationMetadata(args: {
     delete bridgeMetadata.metadataCenterSnapshot;
   }
   return bridgeMetadata;
-}
-
-function attachTimingBreakdown(response: PipelineExecutionResult): PipelineExecutionResult {
-  const clientInjectWaitMsRaw = response.usageLogInfo?.clientInjectWaitMs;
-  const clientInjectWaitMs =
-    typeof clientInjectWaitMsRaw === 'number' && Number.isFinite(clientInjectWaitMsRaw)
-      ? Math.max(0, Math.floor(clientInjectWaitMsRaw))
-      : undefined;
-  if (clientInjectWaitMs === undefined) {
-    return response;
-  }
-  return {
-    ...response,
-    timingBreakdown: {
-      ...(response.timingBreakdown ?? {}),
-      clientInjectWaitMs,
-      hubResponseExcludedMs: response.timingBreakdown?.hubResponseExcludedMs ?? clientInjectWaitMs
-    }
-  };
 }
 
 function logProviderResponseConverterNonBlockingError(
@@ -508,7 +490,7 @@ export async function convertProviderResponseIfNeeded(
         hasUsage: Boolean(usage),
         finishReason
       });
-      return attachTimingBreakdown({
+      return buildProviderResponseTimingBreakdownWithNative({
         ...options.response,
         body: converted.body,
         sseStream: converted.sseStream,
@@ -520,7 +502,7 @@ export async function convertProviderResponseIfNeeded(
       });
     }
     void deriveFinishReason(converted.body ?? body);
-    return attachTimingBreakdown({
+    return buildProviderResponseTimingBreakdownWithNative({
       ...options.response,
       body: converted.body ?? body
     });

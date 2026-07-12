@@ -67,6 +67,20 @@
   - `verify:hub-bridge-native-json-invoker-singleton`
   - `test:hub-bridge-native-json-invoker-singleton-red-fixtures`
 
+### 2026-07-12 Update: Config Bridge Native JSON Mechanics
+
+Closed sub-slice:
+- `src/modules/llmswitch/bridge/config-integrations.ts` no longer carries local native binding lookup, local native JSON stringify/parse, or per-call `const binding` / `const fn` mechanics for JSON-returning config native exports.
+- Shared owner: `src/modules/llmswitch/bridge/native-json-invoker.ts`.
+- TS config bridge shell keeps config-specific output shape validation and raw-string TOML helpers, but native function lookup, JSON argument encoding, JSON result parsing, and missing function fail-fast now go through the shared invoker helpers.
+
+Gate update:
+- `verify:hub-bridge-native-json-invoker-singleton` now rejects local `JSON.parse` / `JSON.stringify` / `const binding` / `const fn` mechanics in `config-integrations.ts`.
+- `test:hub-bridge-native-json-invoker-singleton-red-fixtures` includes a negative fixture proving config-local JSON mechanics fail the gate.
+
+Boundary:
+- No config semantics, provider config files, Virtual Router selection, provider/runtime behavior, install, restart, or live runtime behavior belongs to this sub-slice.
+
 ## Slice B: Rust Shared Helper Closeout
 
 ### Slice B1: Rust NAPI JSON Wrapper Helper
@@ -139,6 +153,23 @@
 - root stage 文件只保留 orchestrator、public/NAPI entry、error propagation。
 - public function 名称和 JSON contract 不变。
 - 旧位置重复代码物理删除。
+
+### Slice C2: Hub Pipeline Engine Shared Helper Audit
+
+目标：收口 `hub_pipeline_lib/engine.rs` 中可证明等价的本地 JSON parse / trimmed-string 机械 helper，保持 engine 作为 Hub Pipeline 编排 facade，不移动 route selection、stopless hook skeleton、Responses continuation、context snapshot、effect plan 等生命周期语义。
+
+已锁 gate：
+- `scripts/architecture/verify-hub-pipeline-engine-shared-helpers.mjs`
+- `scripts/tests/hub-pipeline-engine-shared-helpers-red-fixtures.mjs`
+- package scripts:
+  - `verify:hub-pipeline-engine-shared-helpers`
+  - `test:hub-pipeline-engine-shared-helpers-red-fixtures`
+  - `test:hub-pipeline-engine-shared-helpers-cargo`
+
+边界：
+- 只复用 `shared_json_utils.rs` 的 `parse_json_with_context` / `read_trimmed_string` 机械层。
+- `execute_hub_pipeline_json` 的 public serde error-code behavior 保持原样。
+- 不抽 stopless runtime-control 判定、VR session-dir override、preselected route、context snapshot transfer、provider metadata carrier movement、adapter context semantic assembly。
 
 ## 风险与规避
 

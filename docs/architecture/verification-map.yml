@@ -1565,6 +1565,34 @@ verification:
       - "This gate proves servertool_core_blocks reuses shared contextual JSON parse/stringify bridge mechanics without changing servertool contracts."
       - "Focused Rust tests must prove servertool_core_blocks behavior and contextual helper error labeling stay unchanged after helper reuse."
 
+  - feature_id: hub.pipeline_engine_shared_helpers
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - scripts/architecture/verify-hub-pipeline-engine-shared-helpers.mjs
+    contract:
+      - scripts/tests/hub-pipeline-engine-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-hub-pipeline-engine-shared-helpers.mjs
+      - npm run test:hub-pipeline-engine-shared-helpers-cargo
+    integration:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    smoke:
+      - npm run test:hub-pipeline-engine-shared-helpers-red-fixtures
+      - npm run verify:hub-pipeline-engine-shared-helpers
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+    notes:
+      - "This gate proves hub_pipeline_lib/engine.rs reuses shared JSON parse and trimmed-string mechanics while keeping HubPipeline orchestration semantics local to the engine facade."
+      - "Focused Rust tests must prove HubPipeline request/response orchestration behavior remains unchanged after helper reuse."
+
   - feature_id: hub.web_search_tool_governance
     change_risk: high
     unit:

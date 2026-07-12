@@ -92,6 +92,13 @@ const cases = [
     writeFile('src/modules/llmswitch/bridge/provider-response-native-calls.ts', 'export const nativeCalls = true;\n');
   }, 'monitored bridge file must use shared native-json-invoker'),
 
+  runVerifier('config-local-json-mechanics', () => {
+    writeFile(
+      'src/modules/llmswitch/bridge/config-integrations.ts',
+      "import { parseNativeJsonResult } from './native-json-invoker.js';\nconst raw = JSON.stringify({});\nconst parsed = JSON.parse(raw);\nvoid parseNativeJsonResult;\nvoid parsed;\n"
+    );
+  }, 'config native JSON call mechanics must use'),
+
   runVerifier('missing-function-map-owner', ({ functionMap }) => {
     functionMap.owners = functionMap.owners.filter(
       (row) => row.feature_id !== 'hub.bridge_native_json_invoker_singleton'

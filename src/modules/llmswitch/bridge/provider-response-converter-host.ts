@@ -38,6 +38,7 @@ export {
 export {
   asFlatRecord,
   buildChoicesArrayBridgeDebugDetailsWithNative,
+  buildProviderResponseTimingBreakdownWithNative,
   containsBroadKillCommand,
   extractBridgeProviderResponsePayload,
   extractContentTextForStoplessScan,

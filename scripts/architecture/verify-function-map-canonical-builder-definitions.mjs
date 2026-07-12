@@ -145,6 +145,11 @@ function collapseTsJsSiblingHits(hits) {
   });
 }
 
+function isOwnerModulePath(ownerModule, relPath) {
+  if (relPath === ownerModule) return true;
+  return relPath.startsWith(`${ownerModule.replace(/\/$/u, '')}/`);
+}
+
 const owners = parseOwners(mapText);
 const failures = [];
 
@@ -164,7 +169,7 @@ for (const owner of owners) {
     ownerDefinitionCount.set(builder, normalizedOwnerHits.length);
 
     const allowedNonOwnerHits = collapseTsJsSiblingHits(owner.allowedPaths
-      .filter((relPath) => relPath !== owner.ownerModule)
+      .filter((relPath) => !isOwnerModulePath(owner.ownerModule, relPath))
       .flatMap((relPath) => findDefinitionHits(relPath, builder)));
     if (allowedNonOwnerHits.length > 0) {
       failures.push(`${owner.featureId}: canonical builder redefined outside owner_module but inside allowed_paths -> ${builder} :: ${allowedNonOwnerHits.join(', ')}`);

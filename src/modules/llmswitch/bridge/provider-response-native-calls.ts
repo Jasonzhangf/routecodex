@@ -268,6 +268,24 @@ export function buildChoicesArrayBridgeDebugDetailsWithNative(input: {
   );
 }
 
+export function buildProviderResponseTimingBreakdownWithNative<T extends Record<string, unknown>>(
+  input: T
+): T {
+  const hasSseStream = Object.prototype.hasOwnProperty.call(input, 'sseStream');
+  const { sseStream, ...jsonInput } = input;
+  const raw = requireNativeFunction(
+    getProviderResponseNativeBindingSync,
+    'buildProviderResponseTimingBreakdownJson',
+    { label }
+  )(stringifyNativeJsonArg('buildProviderResponseTimingBreakdownJson', jsonInput, { label }));
+  const projected = parseNativeJsonResult<Record<string, unknown>>(
+    'buildProviderResponseTimingBreakdownJson',
+    raw,
+    { label }
+  );
+  return (hasSseStream ? { ...projected, sseStream } : projected) as T;
+}
+
 export function executeHubPipelineWithNative(input: {
   config: Record<string, unknown>;
   request: Record<string, unknown>;

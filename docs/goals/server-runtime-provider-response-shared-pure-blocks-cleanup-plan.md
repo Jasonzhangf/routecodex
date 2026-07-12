@@ -109,3 +109,18 @@ Test design:
 - Module black-box: `provider-response-shared-pure-blocks.spec.ts` calls the native wrapper and scans `provider-response-converter.ts` to reject a reintroduced local TS helper.
 - Project black-box: request/response dry-run remains the closeout proof for final provider request samples and response converter output; this sub-slice does not change provider/client payload shape.
 - Known gap: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, usage/timing, and stream/body capture remain TS host glue; each needs a separate red/dry-run sample before migration.
+
+## 2026-07-12 Update: Timing Breakdown Projection
+
+Closed sub-slice:
+- `convertProviderResponseIfNeeded` no longer owns `clientInjectWaitMs` / `hubResponseExcludedMs` timing projection in TS.
+- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_provider_response_timing_breakdown`.
+- NAPI entry: `buildProviderResponseTimingBreakdownJson`.
+- TS shell: `src/modules/llmswitch/bridge/provider-response-native-calls.ts::buildProviderResponseTimingBreakdownWithNative` calls Rust with JSON-safe response fields and reattaches `sseStream` by reference so live streams do not cross the native JSON boundary.
+
+Test design:
+- Lifecycle: response host conversion may add timing breakdown after Rust response conversion and before the server returns the `PipelineExecutionResult`.
+- White-box: Rust unit test covers positive projection, negative clamp to zero, and no-op without `usageLogInfo.clientInjectWaitMs`.
+- Module black-box: `provider-response-shared-pure-blocks.spec.ts` calls the native wrapper, scans `provider-response-converter.ts` to reject local TS timing projection, and asserts non-JSON `sseStream` identity is preserved by the TS boundary shell.
+- Project black-box: existing request dry-run on port 5520 confirms final provider request output; response dry-run confirms converter black-box output remains `chat.completion` with one choice.
+- Known gap: broader `convertProviderResponseIfNeeded` SSE wrapper error remap, MetadataCenter sync, stage recorder, usage extraction / finish reason derivation, stream/body capture, and provider context/error mapping remain TS host glue; each requires its own red/dry-run sample before migration.

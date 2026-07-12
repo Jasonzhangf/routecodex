@@ -2843,6 +2843,56 @@ owners:
       - "Public NAPI names, JSON input/output contracts, provider/client payload shapes, and servertool business decisions must not change."
       - "Red fixtures must fail if broad local contextual serde_json parse/stringify wrappers are reintroduced in servertool_core_blocks.rs."
 
+  - feature_id: hub.pipeline_engine_shared_helpers
+    status: active
+    summary: "hub_pipeline_lib engine reuses shared Rust JSON/trim helper mechanics"
+    owner_kind: rust_helper
+    owner_scope: "shared helper placement for exact JSON parse error-context and trimmed-string mechanics only; HubPipeline engine remains the orchestration facade and semantic owner for route, stopless, continuation, context, and effect flow"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+    canonical_types:
+      - Value
+    canonical_builders:
+      - read_trimmed_string
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - scripts/architecture/verify-hub-pipeline-engine-shared-helpers.mjs
+      - scripts/tests/hub-pipeline-engine-shared-helpers-red-fixtures.mjs
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/hub-pipeline-shared-library-simplification-plan.md
+      - package.json
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+    forbidden_mentions_allowlist:
+      - hub-pipeline-engine-shared-helpers
+      - pipeline engine shared helpers
+      - parse_json_with_context
+      - read_trimmed_string
+    required_tests:
+      - scripts/tests/hub-pipeline-engine-shared-helpers-red-fixtures.mjs
+      - scripts/architecture/verify-hub-pipeline-engine-shared-helpers.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+    required_gates:
+      - npm run test:hub-pipeline-engine-shared-helpers-red-fixtures
+      - npm run verify:hub-pipeline-engine-shared-helpers
+      - npm run test:hub-pipeline-engine-shared-helpers-cargo
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This owner removes only exact local JSON parse and trimmed-string mechanics from hub_pipeline_lib/engine.rs by reusing shared_json_utils."
+      - "HubPipeline engine remains the owning facade for route selection, req/resp stage orchestration, stopless hook skeleton, context snapshot transfer, and effect plan assembly."
+      - "Public execute_hub_pipeline_json serde error-code behavior must remain unchanged."
+      - "Red fixtures must fail if local trimmed-string wrappers or stopless runtime/projection serde_json parse wrappers are reintroduced in engine.rs."
+
   - feature_id: hub.chat_envelope_type_surface
     status: retired
     summary: "retired Hub ChatEnvelope/StandardizedRequest TS bridge type surface"

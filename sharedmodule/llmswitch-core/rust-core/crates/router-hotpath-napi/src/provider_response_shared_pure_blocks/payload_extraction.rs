@@ -356,6 +356,45 @@ pub fn build_choices_array_bridge_debug_details(input: &Value) -> Value {
     })
 }
 
+pub fn build_provider_response_timing_breakdown(input: &Value) -> Value {
+    let input_map = match input.as_object() {
+        Some(map) => map,
+        None => return input.clone(),
+    };
+    let client_inject_wait_ms = input_map
+        .get("usageLogInfo")
+        .and_then(Value::as_object)
+        .and_then(|usage| usage.get("clientInjectWaitMs"))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .map(|value| value.floor().max(0.0) as i64);
+    let Some(client_inject_wait_ms) = client_inject_wait_ms else {
+        return input.clone();
+    };
+    let mut output = input_map.clone();
+    let mut timing_breakdown = output
+        .get("timingBreakdown")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let has_hub_response_excluded_ms = timing_breakdown.contains_key("hubResponseExcludedMs");
+    timing_breakdown.insert(
+        "clientInjectWaitMs".to_string(),
+        Value::Number(client_inject_wait_ms.into()),
+    );
+    if !has_hub_response_excluded_ms {
+        timing_breakdown.insert(
+            "hubResponseExcludedMs".to_string(),
+            Value::Number(client_inject_wait_ms.into()),
+        );
+    }
+    output.insert(
+        "timingBreakdown".to_string(),
+        Value::Object(timing_breakdown),
+    );
+    Value::Object(output)
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -668,6 +707,56 @@ mod tests {
                 "bridgePayloadKeys": ["data"],
                 "bridgePayloadHasChoices": false,
                 "bridgePayloadHasDataChoices": true
+            })
+        );
+    }
+
+    #[test]
+    fn provider_response_timing_breakdown_projects_client_inject_wait() {
+        assert_eq!(
+            build_provider_response_timing_breakdown(&json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {"clientInjectWaitMs": 12.9},
+                "timingBreakdown": {"upstreamMs": 50}
+            })),
+            json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {"clientInjectWaitMs": 12.9},
+                "timingBreakdown": {
+                    "upstreamMs": 50,
+                    "clientInjectWaitMs": 12,
+                    "hubResponseExcludedMs": 12
+                }
+            })
+        );
+
+        assert_eq!(
+            build_provider_response_timing_breakdown(&json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {"clientInjectWaitMs": -1},
+                "timingBreakdown": {"upstreamMs": 50}
+            })),
+            json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {"clientInjectWaitMs": -1},
+                "timingBreakdown": {
+                    "upstreamMs": 50,
+                    "clientInjectWaitMs": 0,
+                    "hubResponseExcludedMs": 0
+                }
+            })
+        );
+
+        assert_eq!(
+            build_provider_response_timing_breakdown(&json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {},
+                "timingBreakdown": {"upstreamMs": 50}
+            })),
+            json!({
+                "body": {"object": "chat.completion"},
+                "usageLogInfo": {},
+                "timingBreakdown": {"upstreamMs": 50}
             })
         );
     }
