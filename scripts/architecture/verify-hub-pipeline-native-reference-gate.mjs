@@ -34,7 +34,14 @@ const monitoredWhiteBoxTests = [
   'tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts',
   'tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts',
   'tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts',
+  'tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts',
 ];
+
+const monitoredBroadFakeHelperTests = new Set([
+  'tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts',
+  'tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts',
+  'tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts',
+]);
 
 function readText(relPath) {
   return fs.readFileSync(path.resolve(root, relPath), 'utf8');
@@ -101,6 +108,11 @@ function importsBroadNativeExports(source) {
 
 function usesCreateNativeExportsMock(source) {
   return /\bcreateNativeExportsMock\b/u.test(source);
+}
+
+function importsBroadNativeExportsFake(source) {
+  return /from\s+['"][^'"]*llmswitch-native-exports-fake(?:\.js|\.ts)?['"]/u.test(source)
+    || /import\s*\([^)]*['"][^'"]*llmswitch-native-exports-fake(?:\.js|\.ts)?['"][^)]*\)/u.test(source);
 }
 
 function importsDirectNativeHelper(source) {
@@ -171,7 +183,9 @@ function verifyHubPipelineNativeReferenceGate() {
     }
 
     if (monitoredWhiteBoxTests.includes(relPath)) {
-      if (importsBroadNativeExports(source) || usesCreateNativeExportsMock(source)) {
+      const importsForbiddenBroadFake = monitoredBroadFakeHelperTests.has(relPath)
+        && importsBroadNativeExportsFake(source);
+      if (importsBroadNativeExports(source) || usesCreateNativeExportsMock(source) || importsForbiddenBroadFake) {
         failures.push(`${relPath}: monitored white-box test must mock owner-specific host, not broad native-exports`);
       }
     }

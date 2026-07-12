@@ -43,6 +43,7 @@ Patterns:
 
 - `native-exports`
 - `createNativeExportsMock`
+- `llmswitch-native-exports-fake`
 - `runReqInboundPipelineJson`
 - `runReqProcessPipelineJson`
 - `runRespOutboundPipelineJson`
@@ -67,6 +68,7 @@ Initial compact inventory from current source-controlled files:
 | Retired request-stage TS bridge | `hub.request_stage_pipeline_bridge` | test-only `request-stage-direct-native.ts` / Rust NAPI | no active runtime owner | document and gate retired path |
 | Provider response post-servertool projection | `hub.response_post_servertool_client_projection` | `provider-response-converter-host.ts` / Rust `effect_plan.rs` | yes, partly owned by complete claim | gate and document; do not rework runtime |
 | Handler/executor native host mocks | `gate_id:handler_request_executor_native_host_reference_contraction` | owner-specific bridge hosts | test-only | active claim owns edits; handoff only if needed |
+| Handler/executor shared fake helpers | `hub.pipeline_rust_residual_reference_closeout` | `tests/providers/helpers/responses-handler-host-fakes.ts` | test-only | move monitored handler/executor tests off broad `llmswitch-native-exports-fake` |
 | Responses provider runtime tests | `conversion.shared.responses_openai.provider_runtime_tests` | owner-specific response/request hosts | test-only/provider runtime | active claim owns edits; avoid |
 | Direct-native evidence helpers | owner-specific feature tests | `tests/sharedmodule/helpers/*direct-native*` or `scripts/helpers/*direct-native*` | no runtime import allowed | gate runtime import ban |
 | Doc/wiki stale owner references | `hub.pipeline_rust_residual_reference_closeout` | this plan + wiki review surface | no | first safe slice |
@@ -78,6 +80,7 @@ Initial compact inventory from current source-controlled files:
 | runtime business caller importing `native-exports.ts` directly | no | must use owner-specific narrow host or Rust owner directly only through approved bridge |
 | owner-specific narrow host importing `./native-exports.js` | yes | host is IO/native-call shell only; no business semantics |
 | Jest white-box mock of broad `native-exports` | no for target Hub Pipeline host wiring tests | mock owner-specific host instead |
+| monitored test import of `llmswitch-native-exports-fake` | no for target Hub Pipeline host wiring tests | use owner-specific fake helper instead |
 | pure Rust/NAPI black-box evidence helper | yes | only under `tests/sharedmodule/helpers/*direct-native*` or `scripts/helpers/*direct-native*` |
 | runtime import of direct-native helper | no | direct-native helpers are test/script evidence surfaces only |
 | doc mention of `native-exports.ts` as private loader or forbidden legacy surface | yes | must not describe broad surface as Hub Pipeline owner |
@@ -95,12 +98,18 @@ The first safe slice is gate/doc/test-design only:
 
 This slice does not modify runtime code or claimed test files.
 
+The next safe test slice migrates monitored handler/executor tests from broad
+`llmswitch-native-exports-fake` imports to
+`tests/providers/helpers/responses-handler-host-fakes.ts`, while leaving
+provider runtime active-claim tests untouched.
+
 ## Gate Contract
 
 The architecture gate must fail when:
 
 - A runtime/source file imports broad `src/modules/llmswitch/bridge/native-exports`.
-- A monitored Hub Pipeline white-box test imports/mocks broad `native-exports` or `createNativeExportsMock`.
+- A monitored Hub Pipeline white-box test imports/mocks broad `native-exports`,
+  `createNativeExportsMock`, or broad `llmswitch-native-exports-fake`.
 - Runtime code imports `tests/sharedmodule/helpers/*direct-native*` or `scripts/helpers/*direct-native*`.
 - Wiki/doc owner surface describes broad `native-exports.ts` as the Hub Pipeline owner.
 - The closeout owner is missing from function-map or verification-map.

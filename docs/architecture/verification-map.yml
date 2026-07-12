@@ -1174,6 +1174,7 @@ verification:
     unit:
       - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
       - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
+      - tests/providers/helpers/responses-handler-host-fakes.ts
     contract:
       - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
       - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
@@ -1181,6 +1182,7 @@ verification:
     smoke:
       - npm run verify:hub-pipeline-native-reference-gate
       - npm run test:hub-pipeline-native-reference-gate-red-fixtures
+      - npm run jest:run -- --runTestsByPath tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts --runInBand
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-wiki-sync
       - npm run verify:architecture-wiki-html-sync
@@ -1189,7 +1191,7 @@ verification:
       - npm run verify:architecture-ci-longtail
     notes:
       - "This gate protects the reference interface surface only; passing it does not claim runtime behavior refactor completion."
-      - "Red fixtures must prove broad runtime native import, broad monitored white-box test mock, runtime direct-native helper import, stale doc owner wording, and missing map owner all fail."
+      - "Red fixtures must prove broad runtime native import, broad monitored white-box test mock/fake helper import, runtime direct-native helper import, stale doc owner wording, and missing map owner all fail."
 
   - feature_id: hub.chat_envelope_type_surface
     change_risk: low

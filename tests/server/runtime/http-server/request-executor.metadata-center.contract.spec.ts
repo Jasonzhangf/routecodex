@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it, jest } from '@jest/globals';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
-} from '../../../providers/helpers/llmswitch-native-exports-fake.js';
+} from '../../../providers/helpers/responses-handler-host-fakes.js';
 
 const mockRuntimeIntegrationsModule = {
   rebindResponsesConversationRequestId: jest.fn(async () => undefined),

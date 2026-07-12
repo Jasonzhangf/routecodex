@@ -83,8 +83,8 @@ const cases = [
     writeFile('tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts', "import { createNativeExportsMock } from '../providers/helpers/llmswitch-native-exports-fake.js';\njest.unstable_mockModule('../../src/modules/llmswitch/bridge/native-exports.js', () => createNativeExportsMock());\n");
   }, 'monitored white-box test must mock owner-specific host'),
 
-  runVerifier('responses-request-bridge-broad-native-fake', () => {
-    writeFile('tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts', "import { buildLlmswitchNativeExportsFake } from '../../../providers/helpers/llmswitch-native-exports-fake.js';\njest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => buildLlmswitchNativeExportsFake());\n");
+  runVerifier('handler-executor-broad-native-fake', () => {
+    writeFile('tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts', "import { buildLlmswitchNativeExportsFake } from '../../providers/helpers/llmswitch-native-exports-fake.js';\nexport const fake = buildLlmswitchNativeExportsFake();\n");
   }, 'monitored white-box test must mock owner-specific host'),
 
   runVerifier('runtime-direct-native-helper-import', () => {

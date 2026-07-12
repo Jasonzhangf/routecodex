@@ -177,6 +177,7 @@ description: RouteCodex 调试与架构路由入口
 - Dry-run 黑盒门禁：请求构造问题先用 request dry-run 固化 final `providerRequest`，响应处理问题先用 response dry-run 固化 `convertProviderResponseIfNeeded` 黑盒输出；serialized live `sseStream` 没有 `bodyText/raw/text` 不是离线 replay 证据，必须重新 capture。`test:pipeline-dry-run-blackbox-fixtures` 是 dry-run runtime refactor 前置门禁，不是事后补测。
 - Host bridge 收敛先收调用面：先把 broad `native-exports.ts` 外部调用点收敛到 owner-specific narrow host，再删除零引用 facade；禁止为了删桥让 handler/executor 直接接更多 native helper。
 - Host bridge 测试收敛分型：白盒 host wiring / mocked native-call tests 必须 mock owner-specific host（如 `routing-native-host.ts`、`runtime-lifecycle-host.ts`），不能 mock broad `native-exports.ts`；只有纯 Rust/NAPI 输出证据测试才迁到 `tests/sharedmodule/helpers/*direct-native*`。
+- Monitored handler/executor 白盒测试也不能 import `tests/providers/helpers/llmswitch-native-exports-fake.ts`；需要 handler 专属行为时放到 owner-specific fake（如 `responses-handler-host-fakes.ts`）。
 - Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
 
 ## 快查命令

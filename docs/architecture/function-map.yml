@@ -2433,6 +2433,10 @@ owners:
       - docs/architecture/wiki/html/hub-pipeline-rust-reference-closeout.html
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
+      - tests/providers/helpers/responses-handler-host-fakes.ts
+      - tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts
+      - tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts
+      - tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts
       - package.json
       - .agents/skills/rcc-dev-skills/SKILL.md
     forbidden_paths:
@@ -2464,7 +2468,8 @@ owners:
     notes:
       - "This is a gate/doc/test-design owner, not a runtime behavior owner."
       - "Broad `native-exports.ts` may remain a private loader for owner-specific narrow hosts, but must not be a runtime semantic caller seam or doc/wiki owner surface."
-      - "White-box host wiring tests must mock owner-specific narrow hosts; only pure Rust/NAPI black-box evidence may use direct-native helpers."
+      - "White-box host wiring tests must mock owner-specific narrow hosts or owner-specific test fakes, never broad `llmswitch-native-exports-fake` or `native-exports`."
+      - "Only pure Rust/NAPI black-box evidence may use direct-native helpers."
       - "Runtime source must never import test/script direct-native helpers."
 
 

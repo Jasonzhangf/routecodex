@@ -2523,3 +2523,8 @@
 - Verified slice: `hub.runtime_ingress_bridge` / `vr.route_host_effects` test reference contraction. `tests/sharedmodule/hub-pipeline-runtime-ingress.spec.ts` and `tests/sharedmodule/hub-pipeline.metadata-center-provider-protocol.spec.ts` mock `routing-native-host.js`, not broad `native-exports.js`.
 - Rule: do not force white-box host wiring tests into direct-native helpers when the test needs to inspect mocked native-call arguments. Mock the owner-specific host instead. Reserve `tests/sharedmodule/helpers/*direct-native*` for pure Rust/NAPI output evidence.
 - Evidence: focused Jest 3 suites / 240 tests, exact migrated-test `native-exports` scan zero hits, strict TS shell audit, rustification audit, function/mainline/resource gates, VR no-TS runtime, minimal TS surface, `git diff --check`, and `build:base` passed.
+
+[2026-07-12] Handler/executor monitored tests use responses handler host fake
+
+- `tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts`, `tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts`, and `tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts` must import `tests/providers/helpers/responses-handler-host-fakes.ts`, not broad `tests/providers/helpers/llmswitch-native-exports-fake.ts`.
+- `verify:hub-pipeline-native-reference-gate` now rejects monitored white-box imports of broad `llmswitch-native-exports-fake` in addition to broad `native-exports` mocks and `createNativeExportsMock`.

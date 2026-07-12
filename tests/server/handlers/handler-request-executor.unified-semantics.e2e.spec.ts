@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
-} from '../../providers/helpers/llmswitch-native-exports-fake.js';
+} from '../../providers/helpers/responses-handler-host-fakes.js';
 
 const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
