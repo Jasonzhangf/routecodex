@@ -196,6 +196,204 @@ pub struct ErrorErr03RuntimeClassifiedDecision {
     pub network_transport_like: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorErr05ExecutionDecisionInput {
+    pub classification: FailureClassification,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(default)]
+    pub error_code: Option<String>,
+    #[serde(default)]
+    pub upstream_code: Option<String>,
+    #[serde(default)]
+    pub provider_key: Option<String>,
+    #[serde(default)]
+    pub route_pool: Vec<String>,
+    #[serde(default)]
+    pub excluded_provider_keys: Vec<String>,
+    #[serde(default)]
+    pub route_pool_is_authoritative: bool,
+    #[serde(default)]
+    pub attempt: u32,
+    #[serde(default)]
+    pub max_attempts: u32,
+    #[serde(default)]
+    pub default_pool_available: bool,
+    #[serde(default)]
+    pub prompt_too_long: bool,
+    #[serde(default)]
+    pub provider_owned_continuation: bool,
+    #[serde(default)]
+    pub protocol_boundary_failure: bool,
+    #[serde(default)]
+    pub host_contract_failure: bool,
+    #[serde(default)]
+    pub force_exclude_current_provider_on_retry: bool,
+    #[serde(default)]
+    pub is_streaming_request: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorErr05RetrySwitchPlan {
+    pub switch_action: &'static str,
+    pub decision_label: &'static str,
+    pub runtime_scope_excluded: Vec<String>,
+    pub runtime_scope_excluded_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorErr05ExecutionDecision {
+    pub should_retry: bool,
+    pub excluded_current_provider: bool,
+    pub allow_retry_beyond_attempt_budget: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_switch_plan: Option<ErrorErr05RetrySwitchPlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_execution_policy_reason: Option<&'static str>,
+    pub route_pool_remaining_after_exclusion: Vec<String>,
+    pub default_pool_available: bool,
+    pub policy_exhausted: bool,
+    pub may_project: bool,
+    pub excluded_provider_keys: Vec<String>,
+}
+
+fn normalized_unique(values: &[String]) -> Vec<String> {
+    let mut output = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() && !output.iter().any(|current| current == trimmed) {
+            output.push(trimmed.to_string());
+        }
+    }
+    output
+}
+
+fn error_err05_switch_plan() -> ErrorErr05RetrySwitchPlan {
+    ErrorErr05RetrySwitchPlan {
+        switch_action: "exclude_and_reroute",
+        decision_label: "exclude_and_reroute",
+        runtime_scope_excluded: Vec::new(),
+        runtime_scope_excluded_count: 0,
+    }
+}
+
+pub fn resolve_error_err05_execution_decision(
+    input: ErrorErr05ExecutionDecisionInput,
+) -> ErrorErr05ExecutionDecision {
+    let provider_key = input
+        .provider_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let route_pool = normalized_unique(&input.route_pool);
+    let mut excluded = normalized_unique(&input.excluded_provider_keys);
+    let remaining = |excluded_values: &[String]| {
+        route_pool
+            .iter()
+            .filter(|candidate| !excluded_values.iter().any(|value| value == *candidate))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    if input.protocol_boundary_failure {
+        return ErrorErr05ExecutionDecision {
+            should_retry: false,
+            excluded_current_provider: false,
+            allow_retry_beyond_attempt_budget: false,
+            retry_switch_plan: None,
+            retry_execution_policy_reason: None,
+            route_pool_remaining_after_exclusion: remaining(&excluded),
+            default_pool_available: input.default_pool_available,
+            policy_exhausted: false,
+            may_project: true,
+            excluded_provider_keys: excluded,
+        };
+    }
+    let retryable = input.classification == FailureClassification::Recoverable;
+    let has_alternative_before_exclusion = route_pool.iter().any(|candidate| {
+        Some(candidate.as_str()) != provider_key
+            && !excluded.iter().any(|value| value == candidate)
+    });
+    let only_current_provider = provider_key.is_some()
+        && !route_pool.is_empty()
+        && route_pool.iter().all(|candidate| Some(candidate.as_str()) == provider_key);
+    let eligible_last_provider_stage = matches!(
+        input.stage.as_deref(),
+        Some("provider.send" | "provider.http" | "provider.sse_decode")
+    );
+    let may_retry_verified_last_provider = input.route_pool_is_authoritative
+        && only_current_provider
+        && !input.default_pool_available
+        && !input.prompt_too_long
+        && !input.provider_owned_continuation
+        && excluded.is_empty()
+        && input.attempt < input.max_attempts
+        && eligible_last_provider_stage
+        && retryable;
+    let unproven_last_provider = !input.route_pool_is_authoritative
+        && provider_key.is_some()
+        && retryable
+        && (input.stage.as_deref() == Some("provider.runtime_resolve")
+            || !route_pool.is_empty()
+            || normalize_code(input.error_code.as_deref()).as_deref() == Some("ERR_PROVIDER_NOT_FOUND")
+            || normalize_code(input.upstream_code.as_deref()).as_deref() == Some("ERR_PROVIDER_NOT_FOUND"))
+        && !has_alternative_before_exclusion;
+    let native_policy = resolve_retry_execution_policy(ProviderRetryExecutionPolicyInput {
+        classification: input.classification,
+        is_streaming_request: input.is_streaming_request,
+        host_contract_failure: input.host_contract_failure,
+        force_exclude_current_provider_on_retry: input.force_exclude_current_provider_on_retry,
+        prompt_too_long: input.prompt_too_long,
+        existing_exclusion: has_alternative_before_exclusion && !input.host_contract_failure,
+    });
+    let should_exclude = !input.host_contract_failure
+        && !may_retry_verified_last_provider
+        && provider_key.is_some()
+        && (has_alternative_before_exclusion
+            || unproven_last_provider
+            || input.default_pool_available)
+        && (native_policy.exclude_current_provider || retryable || input.prompt_too_long);
+    if should_exclude {
+        let key = provider_key.expect("provider key checked");
+        if !excluded.iter().any(|value| value == key) {
+            excluded.push(key.to_string());
+        }
+    }
+    let remaining_after_exclusion = remaining(&excluded);
+    let policy_exhausted = remaining_after_exclusion.is_empty() && !input.default_pool_available;
+    let has_reroute_target = !remaining_after_exclusion.is_empty() || input.default_pool_available;
+    if input.provider_owned_continuation && should_exclude {
+        return ErrorErr05ExecutionDecision {
+            should_retry: false,
+            excluded_current_provider: true,
+            allow_retry_beyond_attempt_budget: false,
+            retry_switch_plan: None,
+            retry_execution_policy_reason: None,
+            route_pool_remaining_after_exclusion: remaining_after_exclusion,
+            default_pool_available: input.default_pool_available,
+            policy_exhausted,
+            may_project: policy_exhausted,
+            excluded_provider_keys: excluded,
+        };
+    }
+    let should_retry = may_retry_verified_last_provider
+        || (should_exclude && (has_reroute_target || unproven_last_provider));
+    ErrorErr05ExecutionDecision {
+        should_retry,
+        excluded_current_provider: should_exclude,
+        allow_retry_beyond_attempt_budget: should_exclude && has_reroute_target,
+        retry_switch_plan: should_retry.then(error_err05_switch_plan),
+        retry_execution_policy_reason: should_retry.then_some(native_policy.reason),
+        route_pool_remaining_after_exclusion: remaining_after_exclusion,
+        default_pool_available: input.default_pool_available,
+        policy_exhausted,
+        may_project: !should_retry && policy_exhausted,
+        excluded_provider_keys: excluded,
+    }
+}
+
 fn normalize_code(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -1231,5 +1429,79 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(rejected.classification, None);
+    }
+
+    fn error_err05_input() -> ErrorErr05ExecutionDecisionInput {
+        ErrorErr05ExecutionDecisionInput {
+            classification: FailureClassification::Recoverable,
+            stage: Some("provider.send".to_string()),
+            error_code: Some("HTTP_503".to_string()),
+            upstream_code: Some("HTTP_503".to_string()),
+            provider_key: Some("p1.model".to_string()),
+            route_pool: vec!["p1.model".to_string(), "p2.model".to_string()],
+            excluded_provider_keys: Vec::new(),
+            route_pool_is_authoritative: true,
+            attempt: 1,
+            max_attempts: 6,
+            default_pool_available: false,
+            prompt_too_long: false,
+            provider_owned_continuation: false,
+            protocol_boundary_failure: false,
+            host_contract_failure: false,
+            force_exclude_current_provider_on_retry: false,
+            is_streaming_request: false,
+        }
+    }
+
+    #[test]
+    fn error_err05_explicit_alternative_excludes_and_reroutes() {
+        let decision = resolve_error_err05_execution_decision(error_err05_input());
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert_eq!(decision.route_pool_remaining_after_exclusion, vec!["p2.model"]);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_default_pool_prevents_premature_projection() {
+        let mut input = error_err05_input();
+        input.route_pool = vec!["p1.model".to_string()];
+        input.default_pool_available = true;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_verified_last_provider_retries_inside_budget() {
+        let mut input = error_err05_input();
+        input.route_pool = vec!["p1.model".to_string()];
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(!decision.excluded_current_provider);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_protocol_boundary_fails_fast_without_exclusion() {
+        let mut input = error_err05_input();
+        input.protocol_boundary_failure = true;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(!decision.should_retry);
+        assert!(!decision.excluded_current_provider);
+        assert!(decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_terminal_only_after_route_and_default_empty() {
+        let mut input = error_err05_input();
+        input.classification = FailureClassification::Unrecoverable;
+        input.route_pool.clear();
+        input.route_pool_is_authoritative = true;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(!decision.should_retry);
+        assert!(decision.policy_exhausted);
+        assert!(decision.may_project);
     }
 }

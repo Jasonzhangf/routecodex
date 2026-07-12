@@ -82,3 +82,64 @@ export function classifyErrorErr02HostCapturedNative(
     networkTransportLike: parsed.networkTransportLike,
   };
 }
+
+export type ErrorErr05ExecutionDecisionInput = {
+  classification: 'recoverable' | 'unrecoverable';
+  stage?: string;
+  errorCode?: string;
+  upstreamCode?: string;
+  providerKey?: string;
+  routePool?: string[];
+  excludedProviderKeys?: string[];
+  routePoolIsAuthoritative?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  defaultPoolAvailable?: boolean;
+  promptTooLong?: boolean;
+  providerOwnedContinuation?: boolean;
+  protocolBoundaryFailure?: boolean;
+  hostContractFailure?: boolean;
+  forceExcludeCurrentProviderOnRetry?: boolean;
+  isStreamingRequest?: boolean;
+};
+
+export type ErrorErr05ExecutionDecisionNative = {
+  shouldRetry: boolean;
+  excludedCurrentProvider: boolean;
+  allowRetryBeyondAttemptBudget: boolean;
+  retrySwitchPlan?: {
+    switchAction: 'exclude_and_reroute';
+    decisionLabel: 'exclude_and_reroute';
+    runtimeScopeExcluded: string[];
+    runtimeScopeExcludedCount: number;
+  };
+  retryExecutionPolicyReason?: string;
+  routePoolRemainingAfterExclusion: string[];
+  defaultPoolAvailable: boolean;
+  policyExhausted: boolean;
+  mayProject: boolean;
+  excludedProviderKeys: string[];
+};
+
+export function resolveErrorErr05ExecutionDecisionNative(
+  input: ErrorErr05ExecutionDecisionInput
+): ErrorErr05ExecutionDecisionNative {
+  const fn = getRouterHotpathJsonBindingSync().resolveErrorErr05ExecutionDecisionJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[error-execution-decision-host] resolveErrorErr05ExecutionDecisionJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ErrorErr05ExecutionDecisionNative>;
+  if (
+    typeof parsed.shouldRetry !== 'boolean'
+    || typeof parsed.excludedCurrentProvider !== 'boolean'
+    || typeof parsed.allowRetryBeyondAttemptBudget !== 'boolean'
+    || !Array.isArray(parsed.routePoolRemainingAfterExclusion)
+    || typeof parsed.defaultPoolAvailable !== 'boolean'
+    || typeof parsed.policyExhausted !== 'boolean'
+    || typeof parsed.mayProject !== 'boolean'
+    || !Array.isArray(parsed.excludedProviderKeys)
+  ) {
+    throw new Error('[error-execution-decision-host] resolveErrorErr05ExecutionDecisionJson returned invalid result');
+  }
+  return parsed as ErrorErr05ExecutionDecisionNative;
+}

@@ -3627,6 +3627,12 @@ pub fn classify_error_err02_host_captured_json(input_json: String) -> NapiResult
     stringify_napi_json(&failure_policy::classify_error_err02_host_captured(input))
 }
 
+#[napi(js_name = "resolveErrorErr05ExecutionDecisionJson")]
+pub fn resolve_error_err05_execution_decision_json(input_json: String) -> NapiResult<String> {
+    let input: failure_policy::ErrorErr05ExecutionDecisionInput = parse_napi_json(&input_json)?;
+    stringify_napi_json(&failure_policy::resolve_error_err05_execution_decision(input))
+}
+
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,
