@@ -431,8 +431,8 @@
         <p>Local-only request/response dry-run loop: real API requests stop at final provider HTTP request preparation, captured client samples replay through the same entrypoint, and captured provider responses reuse the existing response converter.</p>
         <p>Entry contract: <code>DebugDryRun01LocalRequest</code> via <code>docs/architecture/wiki/debug-unified-surface-mainline-source.md</code></p>
         <pre class="mermaid">flowchart LR
-          HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
           DebugDryRun04CapturedProviderResponse[&quot;DebugDryRun04CapturedProviderResponse&quot;]
+          HubRespOutbound04ClientSemantic[&quot;HubRespOutbound04ClientSemantic&quot;]
           DebugDryRun03CapturedRequestReplay[&quot;DebugDryRun03CapturedRequestReplay&quot;]
           ProviderReqOutbound07TransportRequest[&quot;ProviderReqOutbound07TransportRequest&quot;]
           DebugDryRun02InternalControlCarrier[&quot;DebugDryRun02InternalControlCarrier&quot;]
@@ -440,6 +440,7 @@
           DebugDryRun01LocalRequest --&gt;|ddr-01| DebugDryRun02InternalControlCarrier
           DebugDryRun02InternalControlCarrier --&gt;|ddr-02| ProviderReqOutbound07TransportRequest
           DebugDryRun02InternalControlCarrier --&gt;|ddr-03| DebugDryRun03CapturedRequestReplay
+          ProviderReqOutbound07TransportRequest --&gt;|ddr-02b| HubRespOutbound04ClientSemantic
           DebugDryRun04CapturedProviderResponse --&gt;|ddr-04| HubRespOutbound04ClientSemantic
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
@@ -448,8 +449,8 @@
           class DebugDryRun02InternalControlCarrier anchored;
           class ProviderReqOutbound07TransportRequest anchored;
           class DebugDryRun03CapturedRequestReplay anchored;
-          class DebugDryRun04CapturedProviderResponse anchored;
-          class HubRespOutbound04ClientSemantic anchored;</pre>
+          class HubRespOutbound04ClientSemantic anchored;
+          class DebugDryRun04CapturedProviderResponse anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -457,6 +458,7 @@
         <tr><td>ddr-01</td><td><code>DebugDryRun01LocalRequest -&gt; DebugDryRun02InternalControlCarrier</code></td><td>anchored</td><td><code>resolvePipelineDryRunForHandler -&gt; resolvePipelineDryRunControlFromHeaders</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
         <tr><td>ddr-02</td><td><code>DebugDryRun02InternalControlCarrier -&gt; ProviderReqOutbound07TransportRequest</code></td><td>anchored</td><td><code>executeHttpRequestOnce -&gt; buildProviderRequestDryRunResponse</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
         <tr><td>ddr-03</td><td><code>DebugDryRun02InternalControlCarrier -&gt; DebugDryRun03CapturedRequestReplay</code></td><td>anchored</td><td><code>main -&gt; fetch</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
+        <tr><td>ddr-02b</td><td><code>ProviderReqOutbound07TransportRequest -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>processIncoming -&gt; plan_provider_dry_run_terminal_action_json</code></td><td></td><td><code>debug.pipeline_dry_run_terminal_action_plan</code>&lt;br/&gt;Rust-owned terminal action that returns a marked provider-request dry-run response before provider response postprocessing</td></tr>
         <tr><td>ddr-04</td><td><code>DebugDryRun04CapturedProviderResponse -&gt; HubRespOutbound04ClientSemantic</code></td><td>anchored</td><td><code>main -&gt; convertProviderResponseIfNeeded</code></td><td></td><td><code>debug.pipeline_dry_run_loop</code>&lt;br/&gt;local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay</td></tr>
         </tbody>
         </table>

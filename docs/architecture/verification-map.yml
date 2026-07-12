@@ -2051,6 +2051,28 @@ verification:
       - "Captured response dry-run must reuse `convertProviderResponseIfNeeded`; no script-local response conversion truth is allowed."
       - "After fixing request/response bugs, closure requires request dry-run plus response dry-run on the relevant live/captured sample before claiming the fix."
 
+  - feature_id: debug.pipeline_dry_run_terminal_action_plan
+    change_risk: high
+    unit:
+      - cargo test -p router-hotpath-napi provider_dry_run_terminal_action
+      - tests/providers/runtime/responses-provider.direct-passthrough.spec.ts
+      - tests/providers/core/runtime/base-provider-success-report.spec.ts
+    contract:
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+    integration:
+      - npm run test:pipeline-dry-run-blackbox-fixtures
+      - "live relay provider-request dry-run returns HTTP 200 routecodex.pipeline_dry_run without entering Hub response conversion"
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive gate locks marked dry-run terminal return; negative gate locks ordinary provider responses into the normal postprocess/conversion path."
+
   - feature_id: debug.internal_error_numbering
     change_risk: high
     unit:

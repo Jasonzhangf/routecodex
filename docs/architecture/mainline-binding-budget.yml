@@ -73,15 +73,16 @@ chains:
       Debug unified surface is still an M0/M1 governance shell; one pending
       edge is intentionally budgeted until deeper runtime/module splits land.
   - chain_id: debug.pipeline_dry_run_loop.mainline
-    expected_total_edges: 4
-    min_anchored_edges: 4
+    expected_total_edges: 5
+    min_anchored_edges: 5
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: >
       Pipeline dry-run loop is fully anchored: provider-request dry-run stops at
       final transport request construction, captured request replay re-enters
       the same API route, and captured provider responses reuse the existing
-      response converter.
+      response converter; Rust terminates marked provider-request dry-run results
+      before provider response postprocessing.
   - chain_id: internal_error_numbering.mainline
     expected_total_edges: 6
     min_anchored_edges: 6

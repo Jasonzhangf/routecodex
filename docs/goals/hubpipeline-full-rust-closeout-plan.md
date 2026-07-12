@@ -544,3 +544,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - 全局安装版本、`rcc`/`routecodex` CLI、`~/.rcc/install/current`、目标端口 `/health.version` 严格一致。
 - managed restart 后无新增 server log 错误；旧失败样本或同入口真实样本 replay 通过。
 - 每个 slice 已分组提交；最终工作区只剩明确无关 dirty 或干净。
+
+### 11.6 已闭环 slice：provider-request dry-run terminal action（2026-07-13）
+
+- Rust owner：`provider_dry_run_terminal_action.rs`；marked dry-run 在 provider transport 返回后、provider response postprocess 之前 terminal return。
+- TS 仅观察 opaque marker 并执行 Rust `return_dry_run_terminal` / `continue_normal_response`；unknown action fail-fast。
+- 正向锁 marked dry-run 不进入 postprocess；反向锁 normal response 保持原链。
+- release `0.90.3932` 安装并 managed restart 5555；强制 relay 模型 `glm-5.2` 命中 `orangeai.key1.glm-5.2`，HTTP 200、`stoppedBeforeProviderSend=true`，无新增 `500-220`。

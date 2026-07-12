@@ -16,13 +16,14 @@ node_ids:
 step_ids:
   - ddr-01
   - ddr-02
+  - ddr-02b
   - ddr-03
   - ddr-04
 edge_status_counts:
-  anchored: 4
+  anchored: 5
   partial: 0
   binding_pending: 0
-  total: 4
+  total: 5
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

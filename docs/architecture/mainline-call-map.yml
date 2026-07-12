@@ -831,6 +831,22 @@ chains:
           side_channel_reads: []
           side_channel_writes: []
         status: anchored
+      - step_id: ddr-02b
+        from_node: ProviderReqOutbound07TransportRequest
+        to_node: HubRespOutbound04ClientSemantic
+        caller_symbol: processIncoming
+        caller_file: src/providers/core/runtime/base-provider.ts
+        callee_symbol: plan_provider_dry_run_terminal_action_json
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_dry_run_terminal_action.rs
+        owner_feature_id: debug.pipeline_dry_run_terminal_action_plan
+        semantic_input: "opaque provider-request dry-run response marker immediately after provider transport returns"
+        semantic_output: "terminal client result before provider postprocess, or explicit continuation through the normal response chain"
+        resource_flow:
+          consumes: [dryrun.provider_request_probe]
+          produces: [response.client_payload]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
       - step_id: ddr-04
         from_node: DebugDryRun04CapturedProviderResponse
         to_node: HubRespOutbound04ClientSemantic

@@ -335,8 +335,8 @@ Entry contract: `DebugDryRun01LocalRequest` via `docs/architecture/wiki/debug-un
 
 ```mermaid
 flowchart LR
-  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
   DebugDryRun04CapturedProviderResponse["DebugDryRun04CapturedProviderResponse"]
+  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
   DebugDryRun03CapturedRequestReplay["DebugDryRun03CapturedRequestReplay"]
   ProviderReqOutbound07TransportRequest["ProviderReqOutbound07TransportRequest"]
   DebugDryRun02InternalControlCarrier["DebugDryRun02InternalControlCarrier"]
@@ -344,6 +344,7 @@ flowchart LR
   DebugDryRun01LocalRequest -->|ddr-01| DebugDryRun02InternalControlCarrier
   DebugDryRun02InternalControlCarrier -->|ddr-02| ProviderReqOutbound07TransportRequest
   DebugDryRun02InternalControlCarrier -->|ddr-03| DebugDryRun03CapturedRequestReplay
+  ProviderReqOutbound07TransportRequest -->|ddr-02b| HubRespOutbound04ClientSemantic
   DebugDryRun04CapturedProviderResponse -->|ddr-04| HubRespOutbound04ClientSemantic
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
@@ -352,8 +353,8 @@ flowchart LR
   class DebugDryRun02InternalControlCarrier anchored;
   class ProviderReqOutbound07TransportRequest anchored;
   class DebugDryRun03CapturedRequestReplay anchored;
-  class DebugDryRun04CapturedProviderResponse anchored;
   class HubRespOutbound04ClientSemantic anchored;
+  class DebugDryRun04CapturedProviderResponse anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -361,6 +362,7 @@ flowchart LR
 | ddr-01 | `DebugDryRun01LocalRequest -> DebugDryRun02InternalControlCarrier` | anchored | `resolvePipelineDryRunForHandler -> resolvePipelineDryRunControlFromHeaders` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
 | ddr-02 | `DebugDryRun02InternalControlCarrier -> ProviderReqOutbound07TransportRequest` | anchored | `executeHttpRequestOnce -> buildProviderRequestDryRunResponse` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
 | ddr-03 | `DebugDryRun02InternalControlCarrier -> DebugDryRun03CapturedRequestReplay` | anchored | `main -> fetch` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
+| ddr-02b | `ProviderReqOutbound07TransportRequest -> HubRespOutbound04ClientSemantic` | anchored | `processIncoming -> plan_provider_dry_run_terminal_action_json` |  | `debug.pipeline_dry_run_terminal_action_plan`<br/>Rust-owned terminal action that returns a marked provider-request dry-run response before provider response postprocessing |
 | ddr-04 | `DebugDryRun04CapturedProviderResponse -> HubRespOutbound04ClientSemantic` | anchored | `main -> convertProviderResponseIfNeeded` |  | `debug.pipeline_dry_run_loop`<br/>local-only request/response dry-run loop for provider-request cut-point inspection and captured provider-response replay |
 
 ## internal_error_numbering.mainline

@@ -8,6 +8,8 @@ import type { IAuthProvider } from '../../auth/auth-interface.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { UnknownObject } from '../../../types/common-types.js';
+import { isProviderRequestDryRunResponse } from '../../../debug/pipeline-dry-run.js';
+import { planProviderDryRunTerminalActionNative } from '../../../modules/llmswitch/bridge/provider-dry-run-terminal-action-host.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import {
   emitProviderErrorAndWait,
@@ -138,6 +140,16 @@ export abstract class BaseProvider implements IProviderV2 {
     // 发送请求 (子类实现)
     const response = await this.sendRequest(processedRequest);
 
+    const terminalAction = planProviderDryRunTerminalActionNative(
+      isProviderRequestDryRunResponse(response),
+    );
+    if (terminalAction.action === 'return_dry_run_terminal') {
+      return response as UnknownObject;
+    }
+    if (terminalAction.action !== 'continue_normal_response') {
+      throw new Error(`unsupported provider dry-run terminal action: ${terminalAction.action}`);
+    }
+
     // 后处理响应
     const finalResponse = await this.postprocessResponse(response, context);
 
@@ -178,6 +190,16 @@ export abstract class BaseProvider implements IProviderV2 {
 
       // 发送请求 (子类实现)
       const response = await this.sendRequestInternal(processedRequest);
+
+      const terminalAction = planProviderDryRunTerminalActionNative(
+        isProviderRequestDryRunResponse(response),
+      );
+      if (terminalAction.action === 'return_dry_run_terminal') {
+        return response as UnknownObject;
+      }
+      if (terminalAction.action !== 'continue_normal_response') {
+        throw new Error(`unsupported provider dry-run terminal action: ${terminalAction.action}`);
+      }
 
       // 后处理响应
       const finalResponse = await this.postprocessResponse(response, context);

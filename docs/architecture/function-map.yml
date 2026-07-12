@@ -3684,6 +3684,45 @@ owners:
       - "Response dry-run must load captured `provider-response*.json` samples and call the existing provider response converter; it must not implement a second provider-response parser or execute nested live pipeline."
       - "This feature is diagnostic-only. It must not change normal provider request/response semantics, routing policy, health, cooldown, or retry decisions."
 
+  - feature_id: debug.pipeline_dry_run_terminal_action_plan
+    status: active
+    summary: "Rust-owned terminal action that returns a marked provider-request dry-run response before provider response postprocessing"
+    owner_kind: rust_runtime_owner
+    owner_scope: "classify the opaque provider-request dry-run response marker as terminal or normal; TS may observe the non-enumerable marker and execute the Rust action only"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_dry_run_terminal_action.rs
+    resource_bindings:
+      reads:
+        - dryrun.provider_request_probe@DebugDryRun02InternalControlCarrier
+      projects:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+      forbidden:
+        - response.provider_raw@HubRespInbound02Parsed
+    canonical_types:
+      - ProviderDryRunTerminalActionPlan
+    canonical_builders:
+      - plan_provider_dry_run_terminal_action_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_dry_run_terminal_action.rs
+      - src/modules/llmswitch/bridge/provider-dry-run-terminal-action-host.ts
+      - src/providers/core/runtime/base-provider.ts
+      - tests/providers/runtime/responses-provider.direct-passthrough.spec.ts
+      - docs
+      - scripts
+    forbidden_paths:
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+      - src/server/runtime/http-server/executor/provider-response-converter.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    required_tests:
+      - tests/providers/runtime/responses-provider.direct-passthrough.spec.ts
+      - tests/providers/core/runtime/base-provider-success-report.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "The dry-run response marker is an opaque host carrier; payload-shape classification and response-parser exceptions are forbidden."
+
   - feature_id: debug.internal_error_numbering
     status: active
     summary: "Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped"

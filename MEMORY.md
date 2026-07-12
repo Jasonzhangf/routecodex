@@ -2667,3 +2667,8 @@
 
 - On 5555, a provider-request dry-run is green on same-protocol direct but fails with HTTP 502 when VR selects a relay OpenAI-chat target: the `routecodex.pipeline_dry_run` envelope incorrectly enters Hub response parsing and is rejected for missing `choices` (`500-220`).
 - This is deterministic by selected route, not a restart readiness race. The repair owner must make provider-request dry-run terminal before relay response conversion while preserving the final provider request evidence; retrying until a direct provider is selected is invalid verification.
+# 2026-07-13: provider-request dry-run terminal action is Rust-owned before provider postprocess
+
+- A provider-request dry-run response is terminal immediately after provider transport returns. It must not enter provider response postprocessing or Hub response conversion.
+- Rust owns the closed `return_dry_run_terminal` / `continue_normal_response` action. TS may only observe the opaque internal response marker and execute the action; payload-shape predicates and response-parser dry-run exceptions are forbidden.
+- Live relay proof: `/v1/responses` dry-run with `glm-5.2` selected `orangeai.key1.glm-5.2` and returned HTTP 200 with `object=routecodex.pipeline_dry_run` and `stoppedBeforeProviderSend=true`, eliminating the prior route-specific `500-220 missing choices` failure.

@@ -289,8 +289,8 @@ describe('ResponsesProvider direct passthrough', () => {
     } as any);
 
     const dryRunResponse = await provider.processIncoming(dryRunInbound) as any;
-    const dryRunBody = dryRunResponse?.data?.body ?? dryRunResponse?.body ?? dryRunResponse;
-    expect(dryRunBody).toMatchObject({
+    expect(dryRunResponse.data).toBeUndefined();
+    expect(dryRunResponse.body).toMatchObject({
       object: 'routecodex.pipeline_dry_run',
       kind: 'provider_request',
       dryRun: true

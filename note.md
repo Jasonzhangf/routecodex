@@ -29720,3 +29720,9 @@ Pure Rust NAPI candidates:
 - Release install and managed 5555 restart passed at version `0.90.3932`; global `routecodex`, `rcc`, install/current, and `/health.version` align with ready/pipelineReady true.
 - Direct provider-request dry-run succeeded when VR selected `cc.key1.gpt-5.5`: HTTP 200, `stoppedBeforeProviderSend=true`, provider snapshot written, final model `gpt-5.5`.
 - Repeated HTTP 502 was not restart readiness: both reproductions selected relay target `orangeai.key1.glm-5.2`; provider-request dry-run then incorrectly entered Rust Hub response parsing with the dry-run envelope and failed `OpenAI chat response must contain choices array` (`500-220`). This is a separate dry-run terminal-action owner defect and must be the next slice; it cannot be hidden by retrying until direct is selected.
+# 2026-07-13 provider-request dry-run relay terminal boundary closed
+
+- Root cause: relay provider-request dry-run returned from provider transport but `BaseProvider.sendRequest/processIncoming` still passed the marked diagnostic response through provider response postprocessing, allowing the envelope to reach Hub response conversion and fail `500-220` for missing `choices`.
+- Rust owner: `provider_dry_run_terminal_action.rs` emits `return_dry_run_terminal` or `continue_normal_response`; TS only observes the opaque non-enumerable marker and executes return/continue, with unknown actions fail-fast.
+- Positive test locks marked dry-run at the top-level terminal response before postprocess; negative test keeps normal provider responses on the existing response path. Rust 2/2, focused Jest 24/24, fixed architecture/native/rustification gates, native/base/release build passed.
+- Installed `0.90.3932`, managed restart 5555, versions aligned. Forced relay replay with model `glm-5.2` selected `orangeai.key1.glm-5.2` and returned HTTP 200 `routecodex.pipeline_dry_run`, `stoppedBeforeProviderSend=true`; request `512457-173` has no new `500-220`.
