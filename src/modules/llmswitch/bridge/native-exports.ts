@@ -362,6 +362,7 @@ type NativeRouterHotpathJsonBinding = {
     upstreamCode: string | undefined,
     isNetworkError: boolean
   ) => string;
+  classifyErrorErr02HostCapturedJson?: (inputJson: string) => string;
   resolveProviderRetryExecutionPolicyJson?: (
     inputJson: string
   ) => string;

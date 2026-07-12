@@ -31,3 +31,50 @@ export function isRateLimitLikeErrorNative(message: string, ...codes: Array<stri
   }
   return parsed.result;
 }
+
+export type ErrorErr02HostCapturedInput = {
+  stage?: string;
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+  errorMessage?: string;
+  errorName?: string;
+  detailReason?: string;
+  detailUpstreamCode?: string;
+  detailUpstreamMessage?: string;
+  responseErrorMessage?: string;
+};
+
+export type ErrorErr03RuntimeClassifiedDecision = {
+  classification?: 'recoverable' | 'unrecoverable';
+  clientDisconnect: boolean;
+  networkTransportLike: boolean;
+};
+
+export function classifyErrorErr02HostCapturedNative(
+  input: ErrorErr02HostCapturedInput
+): ErrorErr03RuntimeClassifiedDecision {
+  const fn = getRouterHotpathJsonBindingSync().classifyErrorErr02HostCapturedJson;
+  if (typeof fn !== 'function') {
+    throw new Error('[error-execution-decision-host] classifyErrorErr02HostCapturedJson not available');
+  }
+  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ErrorErr03RuntimeClassifiedDecision> & {
+    classification?: ErrorErr03RuntimeClassifiedDecision['classification'] | null;
+  };
+  if (
+    (parsed.classification !== undefined
+      && parsed.classification !== null
+      && parsed.classification !== 'recoverable'
+      && parsed.classification !== 'unrecoverable')
+    || typeof parsed.clientDisconnect !== 'boolean'
+    || typeof parsed.networkTransportLike !== 'boolean'
+  ) {
+    throw new Error('[error-execution-decision-host] classifyErrorErr02HostCapturedJson returned invalid result');
+  }
+  return {
+    ...(parsed.classification ? { classification: parsed.classification } : {}),
+    clientDisconnect: parsed.clientDisconnect,
+    networkTransportLike: parsed.networkTransportLike,
+  };
+}
