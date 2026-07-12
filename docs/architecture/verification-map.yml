@@ -3189,3 +3189,25 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive tests lock route-safe and provider transport projections; negative tests lock payload mirrors, cyclic references, TS key lists, TS control projection, and host semantic revival out of runtime."
+
+  - feature_id: hub.direct_route_model_hooks
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+    contract:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    integration:
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+    smoke:
+      - npm run test:direct-route-model-hooks-rust-only-red-fixtures
+      - npm run verify:direct-route-model-hooks-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - npm run build:base
+    notes:
+      - "Positive locks cover canonical provider wire model, original client alias restore, thinking max->xhigh, JSON body/data/response, SSE, headers, and unchanged object identity. Negative locks cover malformed SSE preservation, nested diagnostic model isolation, and TS semantic helper revival."

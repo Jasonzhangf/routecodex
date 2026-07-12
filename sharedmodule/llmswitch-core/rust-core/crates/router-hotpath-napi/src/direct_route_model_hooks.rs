@@ -1,0 +1,207 @@
+use napi::bindgen_prelude::Result as NapiResult;
+use napi_derive::napi;
+use serde_json::{json, Map, Value};
+
+// feature_id: hub.direct_route_model_hooks
+fn trimmed(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn thinking_level(route_params: Option<&Map<String, Value>>) -> Option<String> {
+    for key in ["thinking", "reasoning_effort", "reasoningEffort"] {
+        let Some(value) = trimmed(route_params.and_then(|row| row.get(key))) else {
+            continue;
+        };
+        let normalized = value.to_ascii_lowercase();
+        if normalized == "max" {
+            return Some("xhigh".to_string());
+        }
+        if matches!(normalized.as_str(), "xhigh" | "high" | "medium" | "low") {
+            return Some(normalized);
+        }
+    }
+    None
+}
+
+fn plan_request_hooks(input: &Value) -> Value {
+    let root = input.as_object();
+    let mut payload = root
+        .and_then(|row| row.get("payload"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let inbound_model = trimmed(payload.get("model")).map(str::to_string);
+    let target_model = trimmed(root.and_then(|row| row.get("targetModelId"))).map(str::to_string);
+    let original_client_model = match (&target_model, &inbound_model) {
+        (Some(target), Some(inbound)) if target != inbound => Some(inbound.clone()),
+        _ => None,
+    };
+    let mut payload_changed = false;
+    if let Some(target) = target_model.as_ref() {
+        if inbound_model.as_deref() != Some(target.as_str()) {
+            payload.insert("model".to_string(), Value::String(target.clone()));
+            payload_changed = true;
+        }
+    }
+    if let Some(level) = thinking_level(
+        root.and_then(|row| row.get("routeParams"))
+            .and_then(Value::as_object),
+    ) {
+        payload_changed = true;
+        let mut reasoning = payload
+            .get("reasoning")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        reasoning.insert("effort".to_string(), Value::String(level.clone()));
+        payload.insert("reasoning_effort".to_string(), Value::String(level));
+        payload.insert("reasoning".to_string(), Value::Object(reasoning));
+    }
+    let provider_model_id = trimmed(payload.get("model")).map(str::to_string);
+    json!({
+        "payload": payload,
+        "originalClientModel": original_client_model,
+        "providerModelId": provider_model_id,
+        "payloadChanged": payload_changed,
+    })
+}
+
+fn rewrite_model_fields(value: &Value, client_model: &str) -> Value {
+    let Some(record) = value.as_object() else {
+        return value.clone();
+    };
+    let mut out = record.clone();
+    if trimmed(record.get("model")).is_some() {
+        out.insert("model".to_string(), Value::String(client_model.to_string()));
+    }
+    for key in ["response", "body", "data"] {
+        if record.get(key).and_then(Value::as_object).is_some() {
+            out.insert(
+                key.to_string(),
+                rewrite_model_fields(record.get(key).expect("checked object"), client_model),
+            );
+        }
+    }
+    Value::Object(out)
+}
+
+fn rewrite_sse_frame(frame: &str, client_model: &str) -> String {
+    frame
+        .split('\n')
+        .map(|line| {
+            let clean = line.strip_suffix('\r').unwrap_or(line);
+            let Some(raw) = clean.strip_prefix("data:") else {
+                return line.to_string();
+            };
+            let raw = raw.strip_prefix(' ').unwrap_or(raw);
+            if raw.is_empty() || raw == "[DONE]" {
+                return line.to_string();
+            }
+            let Ok(parsed) = serde_json::from_str::<Value>(raw) else {
+                return line.to_string();
+            };
+            let rewritten = rewrite_model_fields(&parsed, client_model);
+            format!("data: {}", serde_json::to_string(&rewritten).expect("JSON value serializes"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn project_headers(input: &Value) -> Value {
+    let mut headers = Map::new();
+    if let Some(source) = input.as_object() {
+        for (key, value) in source {
+            if let Some(text) = trimmed(Some(value)) {
+                headers.insert(key.clone(), Value::String(text.to_string()));
+            }
+        }
+    }
+    let has_content_type = headers.keys().any(|key| key.eq_ignore_ascii_case("content-type"));
+    let has_cache_control = headers.keys().any(|key| key.eq_ignore_ascii_case("cache-control"));
+    let has_connection = headers.keys().any(|key| key.eq_ignore_ascii_case("connection"));
+    if !has_content_type {
+        headers.insert("Content-Type".to_string(), Value::String("text/event-stream; charset=utf-8".to_string()));
+    }
+    if !has_cache_control {
+        headers.insert("Cache-Control".to_string(), Value::String("no-cache, no-transform".to_string()));
+    }
+    if !has_connection {
+        headers.insert("Connection".to_string(), Value::String("keep-alive".to_string()));
+    }
+    Value::Object(headers)
+}
+
+fn run(input_json: String, builder: fn(&Value) -> Value) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(format!("direct route model hook input parse failed: {error}")))?;
+    serde_json::to_string(&builder(&input))
+        .map_err(|error| napi::Error::from_reason(format!("direct route model hook output serialize failed: {error}")))
+}
+
+#[napi(js_name = "planDirectRouteRequestHooksJson")]
+pub fn plan_direct_route_request_hooks_json(input_json: String) -> NapiResult<String> {
+    run(input_json, plan_request_hooks)
+}
+
+#[napi(js_name = "rewriteDirectRouteResponseModelJson")]
+pub fn rewrite_direct_route_response_model_json(input_json: String) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(format!("direct response model input parse failed: {error}")))?;
+    let model = trimmed(input.get("clientModel")).unwrap_or_default();
+    serde_json::to_string(&rewrite_model_fields(input.get("value").unwrap_or(&Value::Null), model))
+        .map_err(|error| napi::Error::from_reason(format!("direct response model output serialize failed: {error}")))
+}
+
+#[napi(js_name = "rewriteDirectRouteSseFrameJson")]
+pub fn rewrite_direct_route_sse_frame_json(input_json: String) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|error| napi::Error::from_reason(format!("direct SSE model input parse failed: {error}")))?;
+    let frame = input.get("frame").and_then(Value::as_str).unwrap_or_default();
+    let model = trimmed(input.get("clientModel")).unwrap_or_default();
+    serde_json::to_string(&rewrite_sse_frame(frame, model))
+        .map_err(|error| napi::Error::from_reason(format!("direct SSE model output serialize failed: {error}")))
+}
+
+#[napi(js_name = "projectDirectRouteSseHeadersJson")]
+pub fn project_direct_route_sse_headers_json(input_json: String) -> NapiResult<String> {
+    run(input_json, project_headers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_plan_keeps_canonical_wire_model_and_thinking_truth() {
+        let output = plan_request_hooks(&json!({
+            "payload": {"model":"deepseek-v4-pro", "reasoning":{"summary":"auto"}},
+            "targetModelId":"DeepSeek-V4-Pro",
+            "routeParams":{"thinking":"max"}
+        }));
+        assert_eq!(output["payload"]["model"], "DeepSeek-V4-Pro");
+        assert_eq!(output["originalClientModel"], "deepseek-v4-pro");
+        assert_eq!(output["payload"]["reasoning_effort"], "xhigh");
+        assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn response_rewrite_restores_wrapped_data_model_without_touching_nested_payload() {
+        let output = rewrite_model_fields(&json!({
+            "status":200,
+            "data":{"model":"DeepSeek-V4-Pro", "result":{"model":"internal"}}
+        }), "deepseek-v4-pro");
+        assert_eq!(output["data"]["model"], "deepseek-v4-pro");
+        assert_eq!(output["data"]["result"]["model"], "internal");
+    }
+
+    #[test]
+    fn malformed_sse_data_is_preserved_while_standard_model_is_rewritten() {
+        assert_eq!(rewrite_sse_frame("event: x\ndata: nope", "client"), "event: x\ndata: nope");
+        assert_eq!(rewrite_sse_frame("  \ndata: [DONE]\n", "client"), "  \ndata: [DONE]\n");
+        let output = rewrite_sse_frame("event: response.created\ndata: {\"response\":{\"model\":\"wire\"}}", "client");
+        assert!(output.contains("\"model\":\"client\""));
+    }
+}

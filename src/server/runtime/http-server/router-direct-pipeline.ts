@@ -39,6 +39,12 @@ import {
   isProviderRequestDryRunResponse,
   propagatePipelineDryRunControl
 } from '../../../debug/pipeline-dry-run.js';
+import {
+  planDirectRouteRequestHooksNative,
+  projectDirectRouteSseHeadersNative,
+  rewriteDirectRouteResponseModelNative,
+  rewriteDirectRouteSseFrameNative,
+} from '../../../modules/llmswitch/bridge/direct-route-model-hooks-host.js';
 
 const HTTP_DIRECT_MODEL_OVERRIDE_WRITER: MetadataCenterWriter = {
   module: 'src/server/runtime/http-server/router-direct-pipeline.ts',
@@ -187,14 +193,15 @@ export async function executeRouterDirectPipeline(
   };
 
   // Apply hooks: model override + thinking effort override
-  const hookResult = applyDirectRouteHooks(
-    input.requestPayload,
-    target.modelId,
-    target.routeParams,
-  );
-  if (typeof hookResult.payload.model === 'string' && hookResult.payload.model.trim()) {
-    auditContext.providerModelId = hookResult.payload.model.trim();
+  const hookResult = planDirectRouteRequestHooksNative({
+    payload: input.requestPayload,
+    targetModelId: target.modelId,
+    routeParams: target.routeParams,
+  });
+  if (!hookResult.payloadChanged) {
+    hookResult.payload = input.requestPayload;
   }
+  auditContext.providerModelId = hookResult.providerModelId;
 
   // Write model override info to metadata center (on the metadata carrier)
   if (hookResult.originalClientModel) {
@@ -307,112 +314,8 @@ export async function executeRouterDirectPipeline(
 }
 
 // ---------------------------------------------------------------------------
-// Hook: Model override + Thinking effort override
-// ---------------------------------------------------------------------------
-
-interface DirectRouteHookResult {
-  payload: Record<string, unknown>;
-  originalClientModel?: string;
-}
-
-/**
- * Apply direct-route hooks to the request payload.
- *
- * Model override: if target.modelId differs from inbound model, override
- * payload.model and return originalClientModel for metadata center recording.
- *
- * Thinking effort override: if route params specify a thinking level, override
- * reasoning_effort and reasoning.effort.
- */
-function applyDirectRouteHooks(
-  payload: Record<string, unknown>,
-  targetModelId?: string,
-  routeParams?: Record<string, unknown>,
-): DirectRouteHookResult {
-  let result = payload;
-  let originalClientModel: string | undefined;
-  let effectiveModelId = typeof targetModelId === 'string' ? targetModelId.trim() : '';
-
-  // Model override hook
-  const inboundModel = typeof result.model === 'string' ? result.model.trim() : '';
-  if (effectiveModelId && effectiveModelId !== inboundModel) {
-    result = { ...result };
-    if (inboundModel) {
-      originalClientModel = inboundModel;
-    }
-    result.model = effectiveModelId;
-  } else if (!effectiveModelId) {
-    effectiveModelId = inboundModel;
-  }
-
-  // Thinking effort override hook
-  const level = resolveRouteThinkingLevel(routeParams);
-  if (level) {
-    const reasoning =
-      result.reasoning && typeof result.reasoning === 'object' && !Array.isArray(result.reasoning)
-        ? { ...(result.reasoning as Record<string, unknown>), effort: level }
-        : { effort: level };
-    result = {
-      ...result,
-      reasoning_effort: level,
-      reasoning,
-    };
-  }
-
-  return { payload: result, originalClientModel };
-}
-
-// ---------------------------------------------------------------------------
 // Hook: Response model restore + client-facing SSE headers (symmetric)
 // ---------------------------------------------------------------------------
-
-function rewriteDirectResponseModelCompat(value: unknown, clientModel: string): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return value;
-  }
-
-  const record = value as Record<string, unknown>;
-  let changed = false;
-  const out: Record<string, unknown> = { ...record };
-  if (typeof record.model === 'string' && record.model.trim()) {
-    out.model = clientModel;
-    changed = true;
-  }
-
-  const response = record.response;
-  if (response && typeof response === 'object' && !Array.isArray(response)) {
-    const responseRecord = response as Record<string, unknown>;
-    if (typeof responseRecord.model === 'string' && responseRecord.model.trim()) {
-      out.response = { ...responseRecord, model: clientModel };
-      changed = true;
-    }
-  }
-
-  return changed ? out : value;
-}
-
-function rewriteSseFrameClientModel(frame: string, clientModel: string): string {
-  const lines = frame.split(/\r?\n/);
-  return lines
-    .map((line) => {
-      if (!line.startsWith('data:')) {
-        return line;
-      }
-      const prefixLength = line.startsWith('data: ') ? 6 : 5;
-      const raw = line.slice(prefixLength);
-      if (!raw || raw === '[DONE]') {
-        return line;
-      }
-      try {
-        const parsed = JSON.parse(raw) as unknown;
-        const rewritten = rewriteDirectResponseModelCompat(parsed, clientModel);
-        return `data: ${JSON.stringify(rewritten)}`;
-      } catch {
-        return line;
-      }
-    })
-    .join('\n');
-}
 
 function createDirectClientModelRewriteStream(clientModel: string): Transform {
   let buffer = '';
@@ -425,13 +328,13 @@ function createDirectClientModelRewriteStream(clientModel: string): Transform {
         if (!part) {
           continue;
         }
-        this.push(`${rewriteSseFrameClientModel(part, clientModel)}\n\n`);
+        this.push(`${rewriteDirectRouteSseFrameNative(part, clientModel)}\n\n`);
       }
       callback();
     },
     flush(callback: TransformCallback) {
       if (buffer) {
-        this.push(rewriteSseFrameClientModel(buffer, clientModel));
+        this.push(rewriteDirectRouteSseFrameNative(buffer, clientModel));
         buffer = '';
       }
       callback();
@@ -447,27 +350,6 @@ function wrapDirectSseStreamWithClientModel(stream: unknown, clientModel: string
     return source.pipe(transform);
   }
   throw new Error('router-direct response contains sseStream that is not a readable stream');
-}
-
-function ensureDirectClientSseHeaders(headers: unknown): Record<string, string> {
-  const next: Record<string, string> = {};
-  if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
-    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-      if (typeof value === 'string' && value.trim()) {
-        next[key] = value;
-      }
-    }
-  }
-  if (!Object.keys(next).some((key) => key.toLowerCase() === 'content-type')) {
-    next['Content-Type'] = 'text/event-stream; charset=utf-8';
-  }
-  if (!Object.keys(next).some((key) => key.toLowerCase() === 'cache-control')) {
-    next['Cache-Control'] = 'no-cache, no-transform';
-  }
-  if (!Object.keys(next).some((key) => key.toLowerCase() === 'connection')) {
-    next.Connection = 'keep-alive';
-  }
-  return next;
 }
 
 /**
@@ -490,7 +372,7 @@ export function applyDirectRouteResponseHooks(
   const hasSse = record.sseStream !== undefined && record.sseStream !== null;
 
   if (hasSse) {
-    record.headers = ensureDirectClientSseHeaders(record.headers);
+    record.headers = projectDirectRouteSseHeadersNative(record.headers);
     if (clientModel) {
       record.sseStream = wrapDirectSseStreamWithClientModel(record.sseStream, clientModel);
     }
@@ -501,12 +383,7 @@ export function applyDirectRouteResponseHooks(
     return response;
   }
 
-  if (record.body && typeof record.body === 'object' && !Array.isArray(record.body)) {
-    record.body = rewriteDirectResponseModelCompat(record.body, clientModel) as Record<string, unknown>;
-    return record;
-  }
-
-  return rewriteDirectResponseModelCompat(record, clientModel);
+  return rewriteDirectRouteResponseModelNative(record, clientModel);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,38 +405,6 @@ function recordPayloadAudit(
     }
   }
   return payload;
-}
-
-// ---------------------------------------------------------------------------
-// Thinking effort helpers
-// ---------------------------------------------------------------------------
-
-function readThinkingLevel(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized === 'max') {
-    return 'xhigh';
-  }
-  if (['xhigh', 'high', 'medium', 'low'].includes(normalized)) {
-    return normalized;
-  }
-  return undefined;
-}
-
-function resolveRouteThinkingLevel(routeParams?: Record<string, unknown>): string | undefined {
-  if (!routeParams) {
-    return undefined;
-  }
-  return (
-    readThinkingLevel(routeParams.thinking) ??
-    readThinkingLevel(routeParams.reasoning_effort) ??
-    readThinkingLevel(routeParams.reasoningEffort)
-  );
 }
 
 /** Fields surfaced in audit logs/snapshots for traceability. */

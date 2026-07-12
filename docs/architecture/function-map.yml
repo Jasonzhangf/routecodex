@@ -6554,3 +6554,51 @@ owners:
     notes:
       - "Cycle removal is host JSON transport mechanics only; all field selection and control semantics remain in Rust."
       - "Router log-session extraction consumes the Rust-projected route-safe carrier before native identifier extraction, so cyclic request mirrors never enter the JSON boundary."
+
+  - feature_id: hub.direct_route_model_hooks
+    status: active
+    summary: "same-protocol direct canonical wire model, thinking override, and client model restoration are Rust-owned"
+    owner_kind: rust_ssot
+    owner_scope: "Rust plans request model/thinking changes and projects JSON/SSE/header client model restoration; TS only preserves unchanged object identity and executes stream transforms"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+    resource_bindings:
+      reads:
+        - request.normal_payload@ServerReqInbound01ClientRaw
+        - route.selection@VrRoute04SelectedTarget
+      writes:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+      forbidden:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - DirectRouteModelHookPlan
+    canonical_builders:
+      - plan_direct_route_request_hooks_json
+      - rewrite_direct_route_response_model_json
+      - rewrite_direct_route_sse_frame_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+      - scripts/architecture/verify-direct-route-model-hooks-rust-only.mjs
+      - scripts/tests/direct-route-model-hooks-rust-only-red-fixtures.mjs
+    forbidden_paths:
+      - src/client
+      - src/providers/profile
+    required_tests:
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
+    required_gates:
+      - npm run test:direct-route-model-hooks-rust-only-red-fixtures
+      - npm run verify:direct-route-model-hooks-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+      - npm run build:native-hotpath
+      - npm run build:base
+    migration_target: rust
+    notes:
+      - "Provider wire uses configured canonical modelId; client response restores the original alias."
+      - "Rust payloadChanged is the only decision used by TS to preserve direct passthrough object identity."

@@ -2212,7 +2212,7 @@ describe('direct passthrough route-level', () => {
     );
 
     expect(outcome.used).toBe(true);
-    expect(sentPayload?.model).toBe('deepseek-v4-pro');
+    expect(sentPayload?.model).toBe('DeepSeek-V4-Pro');
     expect((outcome.response as any)?.data?.model).toBe('deepseek-v4-pro');
     expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
   });

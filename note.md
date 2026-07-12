@@ -29670,3 +29670,10 @@ Pure Rust NAPI candidates:
 - `feature_id:hub.direct_runtime_metadata_projection` now owns route-safe metadata, MetadataCenter snapshot, provider transport controls, Responses direct marker, and pipeline dry-run projection in Rust; `direct-runtime-metadata.ts` is a two-call thin shell.
 - The cyclic-image route-level red was not inside the projector: `buildRouterRouteLogSessionContext` serialized live cyclic metadata first. It now feeds log-session extraction from the same Rust-produced route-safe carrier.
 - Evidence: Rust focused 2/2, metadata Jest 3/3, cyclic route-level 1/1, residue red fixtures/gate, function/resource maps, native build, required architecture gates, and `build:base` passed. Full direct suite improved from 21/12 to 22/11; remaining failures are separate SSE/modelId/retry owners.
+# 2026-07-13: direct route model hooks Rust closeout
+
+- `hub.direct_route_model_hooks` now owns direct request canonical model/thinking projection and bounded JSON/SSE/header client model restoration in Rust; TS retains NAPI JSON calls, unchanged object-reference preservation, and stream IO only.
+- Canonical model contract is dual-track: provider wire uses configured `modelId` (`DeepSeek-V4-Pro`), while client JSON/SSE restores the inbound alias (`deepseek-v4-pro`). Generic recursive model rewriting is forbidden; only top-level and recognized `response/body/data` envelopes are rewritten.
+- Rust explicitly returns `payloadChanged`; TS uses only that flag to preserve direct passthrough object identity and does not rederive model/thinking semantics.
+- SSE frame input is never trimmed before projection; malformed data, whitespace, and `[DONE]` remain transport-equivalent.
+- Evidence: Rust 3/3, router-direct 35/35, canonical route-level 1/1, residue/red, function/resource/mainline, native-reference and rustification gates passed; native hotpath and base build passed. Full 33-case direct suite is not closeout evidence because the pre-existing suite contains long 900s timeout/error-owner cases; the bounded focused contract is green.

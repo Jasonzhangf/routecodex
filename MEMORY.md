@@ -2628,3 +2628,8 @@
 - Direct route/provider metadata field selection and control projection are Rust-owned by `direct_runtime_metadata_projection.rs`; TS only performs cycle-aware JSON transport and NAPI invocation.
 - A cyclic request graph must be reduced by the Rust route-safe projection before any downstream JSON-only observer such as log-session identifier extraction. Sanitizing only the final VR call is too late because earlier observers can fail first.
 - Verified baseline after closeout: direct route-level suite moved from 21 passed / 12 failed to 22 passed / 11 failed; the cyclic image case is green while the remaining SSE/modelId/retry failures are independent owners.
+# 2026-07-13: direct model hooks use canonical wire / client alias dual-track truth
+
+- Same-protocol direct must send the configured canonical provider `modelId` on the wire and restore the original inbound alias only on the client response surface. Alias-to-wire and wire-to-client are separate directions, not competing expectations.
+- Direct model/thinking planning and bounded response model projection are Rust-owned. TS may preserve stream/object references and execute NAPI/stream IO, but must not infer whether a payload changed or recursively rewrite arbitrary diagnostic `model` fields.
+- Native JSON planners that may leave a payload unchanged must return an explicit `payloadChanged`; the TS host uses that Rust decision to preserve identity. SSE frame projection must preserve the original frame whitespace and malformed/terminal data verbatim.
