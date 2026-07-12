@@ -899,8 +899,7 @@ fn shell_script_looks_like_read(command: &str) -> bool {
 mod tests {
     use super::{
         classify_tool_call_for_report, detect_coding_tool, detect_last_assistant_tool_category,
-        detect_web_tool,
-        extract_meaningful_declared_tool_names,
+        detect_web_tool, extract_meaningful_declared_tool_names,
     };
     use serde_json::json;
 

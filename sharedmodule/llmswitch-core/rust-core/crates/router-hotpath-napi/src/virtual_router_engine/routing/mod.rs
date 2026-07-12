@@ -25,10 +25,6 @@ pub(crate) use error_err05_availability::{
     resolve_error_err05_route_availability_decision, ErrorErr05RouteAvailabilityDecisionInput,
 };
 pub(crate) use key_utils::{extract_key_alias, extract_provider_id};
-pub(crate) use utils::{
-    normalize_trimmed_string_values, normalize_unique_trimmed_strings, push_unique_trimmed,
-    trim_nonempty_str,
-};
 #[allow(unused_imports)]
 pub(crate) use metadata::{
     build_scoped_session_key, extract_excluded_provider_keys, extract_runtime_now_ms,
@@ -38,6 +34,10 @@ pub(crate) use metadata::{
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
     resolve_instruction_target, InstructionTargetMatchMode,
+};
+pub(crate) use utils::{
+    normalize_trimmed_string_values, normalize_unique_trimmed_strings, push_unique_trimmed,
+    trim_nonempty_str,
 };
 
 #[allow(unused_imports)]

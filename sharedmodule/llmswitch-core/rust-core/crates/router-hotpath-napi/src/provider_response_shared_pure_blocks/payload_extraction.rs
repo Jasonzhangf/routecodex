@@ -331,9 +331,7 @@ pub fn build_choices_array_bridge_debug_details(input: &Value) -> Value {
     if !message.contains("choices array") {
         return json!({});
     }
-    let bridge_payload = input_map
-        .get("bridgePayload")
-        .and_then(Value::as_object);
+    let bridge_payload = input_map.get("bridgePayload").and_then(Value::as_object);
     let nested_data = bridge_payload
         .and_then(|payload| payload.get("data"))
         .and_then(Value::as_object);

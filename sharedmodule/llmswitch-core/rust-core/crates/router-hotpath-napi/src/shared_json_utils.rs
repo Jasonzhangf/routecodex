@@ -301,7 +301,7 @@ mod tests {
     use super::{
         as_object, extract_balanced_json_array_at, extract_balanced_json_candidate_at,
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
-        parse_json_with_context, parse_js_number_like, read_first_object_trimmed_string,
+        parse_js_number_like, parse_json_with_context, read_first_object_trimmed_string,
         read_object_trimmed_string, read_string_array_command, read_trimmed_string,
         read_workdir_from_args, split_command_string, stringify_json_with_context,
         value_as_object_or_empty,

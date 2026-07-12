@@ -1221,10 +1221,7 @@ fn run_servertool_resp_stopless_hook_skeleton(
         "Rust stopless response hook runtime returned invalid JSON",
     )
     .map_err(|message| {
-        HubPipelineError::new(
-            "hub_pipeline_stopless_resp_hook_invalid_output",
-            message,
-        )
+        HubPipelineError::new("hub_pipeline_stopless_resp_hook_invalid_output", message)
     })?;
     let action = runtime_output
         .get("action")
@@ -1470,8 +1467,7 @@ fn build_response_record_effect_payload(
     payload: &Value,
     request_id: &str,
 ) -> Value {
-    if read_trimmed_string(metadata.get("clientProtocol")).as_deref() != Some("openai-responses")
-    {
+    if read_trimmed_string(metadata.get("clientProtocol")).as_deref() != Some("openai-responses") {
         return Value::Null;
     }
     serde_json::json!({

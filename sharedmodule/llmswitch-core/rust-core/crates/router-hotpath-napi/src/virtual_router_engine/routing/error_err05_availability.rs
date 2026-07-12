@@ -60,11 +60,10 @@ pub fn resolve_error_err05_route_availability_decision(
     input: &ErrorErr05RouteAvailabilityDecisionInput,
 ) -> ErrorErr05RouteAvailabilityDecision {
     let route_pool = normalize_unique_trimmed_strings(input.route_pool.iter().map(String::as_str));
-    let excluded: HashSet<String> = normalize_unique_trimmed_strings(
-        input.excluded_provider_keys.iter().map(String::as_str),
-    )
-        .into_iter()
-        .collect();
+    let excluded: HashSet<String> =
+        normalize_unique_trimmed_strings(input.excluded_provider_keys.iter().map(String::as_str))
+            .into_iter()
+            .collect();
     let provider_key = input
         .provider_key
         .as_ref()
@@ -146,7 +145,7 @@ fn resolve_default_pool_available(
         return false;
     };
     default_tier.targets.iter().any(|target| {
-            let Some(normalized) = trim_nonempty_str(target) else {
+        let Some(normalized) = trim_nonempty_str(target) else {
             return false;
         };
         !excluded.contains(&normalized) && !route_pool_set.contains(normalized.as_str())
