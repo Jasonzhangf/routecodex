@@ -30,6 +30,10 @@ describe('provider-response-converter contract', () => {
     expect(source).not.toContain('syncAdapterContextRuntimeBackToPipelineMetadata');
     expect(source).not.toContain('provider response stopless runtime pipeline sync');
     expect(source).not.toContain('provider response hub-stage-top debug snapshot sync');
+    expect(source).not.toContain('runtimeControl.stopless');
+    expect(source).not.toContain('runtimeControl.stopMessageCompareContext');
+    expect(source).not.toContain('debugSnapshot.hubStageTop');
+    expect(source).toContain('planProviderResponseMetadataSyncEffectNative');
     expect(source).not.toContain('adapterContext?: Record<string, unknown>');
     expect(source).not.toContain('args.metadata ?? args.adapterContext');
     expect(source).not.toContain('adapterContext\n    });');

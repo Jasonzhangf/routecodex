@@ -7,6 +7,12 @@ import { MetadataCenter } from '../../../../../src/server/runtime/http-server/me
 
 const mockConvertProviderResponse = jest.fn();
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
+const providerResponseNativeCalls = await import(
+  '../../../../../src/modules/llmswitch/bridge/provider-response-native-calls.js'
+);
+const providerResponseNativeHost = await import(
+  '../../../../../src/modules/llmswitch/bridge/provider-response-native-host.js'
+);
 
 const TEST_METADATA_WRITER = {
   module: 'tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts',
@@ -25,6 +31,8 @@ function buildPipelineMetadata(providerProtocol: string, extra: Record<string, u
   return metadata;
 }
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
+  ...providerResponseNativeCalls,
+  ...providerResponseNativeHost,
   convertProviderResponse: mockConvertProviderResponse
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({

@@ -2609,6 +2609,26 @@ verification:
       - "Host converter must only consume protocol truth already fixed by entry and VR metadata; payload-shape protocol inference is forbidden."
       - "Direct Responses prebuilt SSE passthrough gating is Rust-owned through `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`; TS shared blocks may only call the native helper."
 
+  - feature_id: hub.provider_response_metadata_sync_effect_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_metadata_sync_effect.rs
+      - src/modules/llmswitch/bridge/provider-response-metadata-sync-host.ts
+    contract:
+      - tests/server/runtime/http-server/executor/provider-response-converter.stopless-runtime-sync.spec.ts
+      - tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts
+    integration:
+      - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive gates lock bridge-center bind and owned runtime/debug writes; negative gates lock missing/same center no-op and forbid TS key/reason selection."
+
   - feature_id: server.response_inspection_helpers
     change_risk: medium
     unit:

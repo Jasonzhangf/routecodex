@@ -29,6 +29,7 @@ import {
   readRuntimeDebugSnapshotProjection,
 } from '../metadata-center/request-truth-readers.js';
 import { MetadataCenter } from '../metadata-center/metadata-center.js';
+import { planProviderResponseMetadataSyncEffectNative } from '../../../../modules/llmswitch/bridge/provider-response-metadata-sync-host.js';
 import {
   buildMetadataCenterTransportSnapshot,
   writeMetadataCenterSlot
@@ -76,18 +77,6 @@ export function buildBridgeProviderResponseSeed(
   }
   return seed;
 }
-
-const PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER = {
-  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
-  symbol: 'syncBridgeRuntimeBackToPipelineMetadata',
-  stage: 'provider_response_runtime_control'
-} as const;
-
-const PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER = {
-  module: 'src/server/runtime/http-server/executor/provider-response-converter.ts',
-  symbol: 'syncBridgeRuntimeBackToPipelineMetadata',
-  stage: 'provider_response_debug_snapshot'
-} as const;
 
 type ProviderResponseStageRecorder = {
   record(stage: string, payload: object): void;
@@ -151,46 +140,41 @@ function syncBridgeRuntimeBackToPipelineMetadata(options: {
   bridgeMetadata: Record<string, unknown>;
 }): void {
   const pipelineMetadata = asRecord(options.pipelineMetadata);
-  if (!pipelineMetadata) {
-    return;
-  }
   const bridgeCenter = MetadataCenter.read(options.bridgeMetadata);
   const pipelineCenter = MetadataCenter.read(pipelineMetadata);
-  if (bridgeCenter && !pipelineCenter) {
+  const plan = planProviderResponseMetadataSyncEffectNative({
+    pipelineMetadataIsRecord: Boolean(pipelineMetadata),
+    bridgeCenterExists: Boolean(bridgeCenter),
+    pipelineCenterExists: Boolean(pipelineCenter),
+    centersAreSame: Boolean(bridgeCenter && pipelineCenter && bridgeCenter === pipelineCenter),
+    bridgeRuntimeControl: bridgeCenter?.readRuntimeControl() ?? {},
+    bridgeDebugSnapshot: bridgeCenter?.readDebugSnapshot() ?? {},
+  });
+  if (plan.action === 'no_op') {
+    return;
+  }
+  if (plan.action === 'bind_bridge_center') {
+    if (!pipelineMetadata || !bridgeCenter) {
+      throw new Error('provider response metadata sync bind action requires pipeline metadata and bridge MetadataCenter');
+    }
     MetadataCenter.bind(pipelineMetadata, bridgeCenter);
-  } else if (bridgeCenter && pipelineCenter && pipelineCenter !== bridgeCenter) {
-    const runtimeControl = bridgeCenter.readRuntimeControl();
-    if (runtimeControl.stopless) {
-      writeMetadataCenterSlot({
-        target: pipelineMetadata,
-        family: 'runtime_control',
-        key: 'stopless',
-        value: runtimeControl.stopless,
-        writer: PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        reason: 'provider response stopless runtime pipeline sync'
-      });
-    }
-    if (runtimeControl.stopMessageCompareContext) {
-      writeMetadataCenterSlot({
-        target: pipelineMetadata,
-        family: 'runtime_control',
-        key: 'stopMessageCompareContext',
-        value: runtimeControl.stopMessageCompareContext,
-        writer: PROVIDER_RESPONSE_RUNTIME_CONTROL_WRITER,
-        reason: 'provider response stop-message compare pipeline sync'
-      });
-    }
-    const debugSnapshot = bridgeCenter.readDebugSnapshot();
-    if (Array.isArray(debugSnapshot.hubStageTop) && debugSnapshot.hubStageTop.length > 0) {
-      writeMetadataCenterSlot({
-        target: pipelineMetadata,
-        family: 'debug_snapshot',
-        key: 'hubStageTop',
-        value: debugSnapshot.hubStageTop,
-        writer: PROVIDER_RESPONSE_DEBUG_SNAPSHOT_WRITER,
-        reason: 'provider response hub-stage-top debug snapshot sync'
-      });
-    }
+    return;
+  }
+  if (plan.action !== 'apply_writes') {
+    throw new Error(`unsupported provider response metadata sync action: ${String((plan as { action?: unknown }).action)}`);
+  }
+  if (!pipelineMetadata) {
+    throw new Error('provider response metadata sync write action requires pipeline metadata');
+  }
+  for (const write of plan.writes) {
+    writeMetadataCenterSlot({
+      target: pipelineMetadata,
+      family: write.family,
+      key: write.key,
+      value: write.value,
+      writer: write.writer,
+      reason: write.reason,
+    });
   }
 }
 

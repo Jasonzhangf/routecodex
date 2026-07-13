@@ -551,3 +551,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS 仅观察 opaque marker 并执行 Rust `return_dry_run_terminal` / `continue_normal_response`；unknown action fail-fast。
 - 正向锁 marked dry-run 不进入 postprocess；反向锁 normal response 保持原链。
 - release `0.90.3932` 安装并 managed restart 5555；强制 relay 模型 `glm-5.2` 命中 `orangeai.key1.glm-5.2`，HTTP 200、`stoppedBeforeProviderSend=true`，无新增 `500-220`。
+
+### 11.7 已闭环 slice：provider-response MetadataCenter sync effect plan（2026-07-13）
+
+- Rust owner：`provider_response_metadata_sync_effect.rs`；闭合输出 `no_op` / `bind_bridge_center` / `apply_writes`，并拥有合法 family/key/value/reason/writer。
+- TS 只观察 request-local MetadataCenter existence/identity、读取 bridge snapshot、执行 Rust 指定的 bind/write IO；unknown action/target fail-fast，不保留本地 key/reason/action 判定。
+- 正向锁 center bind 和三类内部 control/debug write；反向锁无 center/no-change no-op、未知 action、provider/client payload 隔离。
+- Rust 2/2、converter Jest 22/22、function-map/native-reference/rustification/native/base/release gates 通过；安装版本 `0.90.3932` 与 5555 health 对齐。真实 relay `/v1/responses` 请求 `req_1783901694274_31145773` 返回 HTTP 200 `pong`，最新日志无 metadata sync/conversion 新错误，样本无内部 control/debug key 泄漏。

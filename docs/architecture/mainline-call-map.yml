@@ -1952,6 +1952,14 @@ shared_multi_reference_functions:
     reused_by_chains:
       - response.mainline
     note: "Thin host/native facade; truth owner remains Rust."
+  - function_id: native.provider_response_metadata_sync_effect
+    binding_status: confirmed
+    symbol: plan_provider_response_metadata_sync_effect_json
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_metadata_sync_effect.rs
+    owner_feature_id: hub.provider_response_metadata_sync_effect_plan
+    reused_by_chains:
+      - response.mainline
+    note: "Rust selects provider-response MetadataCenter no-op/bind/write effects; TS executes only opaque center binding and returned writes."
   - function_id: error.execution_decision_consumer
     binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan

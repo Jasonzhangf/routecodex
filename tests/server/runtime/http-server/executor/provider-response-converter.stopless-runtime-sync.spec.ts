@@ -3,8 +3,16 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { MetadataCenter } from '../../../../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const mockConvertProviderResponse = jest.fn();
+const providerResponseNativeCalls = await import(
+  '../../../../../src/modules/llmswitch/bridge/provider-response-native-calls.js'
+);
+const providerResponseNativeHost = await import(
+  '../../../../../src/modules/llmswitch/bridge/provider-response-native-host.js'
+);
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
+  ...providerResponseNativeCalls,
+  ...providerResponseNativeHost,
   convertProviderResponse: mockConvertProviderResponse,
 }));
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({

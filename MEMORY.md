@@ -2672,3 +2672,8 @@
 - A provider-request dry-run response is terminal immediately after provider transport returns. It must not enter provider response postprocessing or Hub response conversion.
 - Rust owns the closed `return_dry_run_terminal` / `continue_normal_response` action. TS may only observe the opaque internal response marker and execute the action; payload-shape predicates and response-parser dry-run exceptions are forbidden.
 - Live relay proof: `/v1/responses` dry-run with `glm-5.2` selected `orangeai.key1.glm-5.2` and returned HTTP 200 with `object=routecodex.pipeline_dry_run` and `stoppedBeforeProviderSend=true`, eliminating the prior route-specific `500-220 missing choices` failure.
+# 2026-07-13: provider-response MetadataCenter sync planning is Rust-owned
+
+- `hub.provider_response_metadata_sync_effect_plan` owns provider-response post-conversion MetadataCenter binding and write selection in Rust. The only legal write targets are `runtime_control.stopless`, `runtime_control.stopMessageCompareContext`, and `debug_snapshot.hubStageTop`.
+- TS may observe request-local MetadataCenter identity, read opaque bridge snapshots, and execute the closed Rust plan; it must not choose keys, reasons, actions, or synthesize writes. Unknown actions fail-fast.
+- Verified with Rust 2/2, converter Jest 22/22, required architecture/native/build/release gates, installed `0.90.3932`, managed 5555 restart, and a real relay `/v1/responses` HTTP 200 replay with no internal metadata/control leakage.

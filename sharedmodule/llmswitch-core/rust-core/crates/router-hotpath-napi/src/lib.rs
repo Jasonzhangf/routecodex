@@ -75,6 +75,7 @@ mod napi_json;
 mod openai_openai_codec;
 mod primary_exhausted_to_default_pool_blocks;
 mod provider_dry_run_terminal_action;
+mod provider_response_metadata_sync_effect;
 mod provider_response_shared_pure_blocks;
 mod provider_response_tool_validation_blocks;
 mod req_executor_pipeline_attempt;
