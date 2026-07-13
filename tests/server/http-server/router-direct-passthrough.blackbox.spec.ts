@@ -54,7 +54,12 @@ function routerEnv(tmp: string, options?: { snapshots?: boolean }): Array<() => 
   ];
 }
 
-async function writeProviderToml(tmp: string, providerId: string, upstreamPort: number): Promise<void> {
+async function writeProviderToml(
+  tmp: string,
+  providerId: string,
+  upstreamPort: number,
+  directSemantics?: 'routing' | 'passthrough',
+): Promise<void> {
   const dir = path.join(tmp, '.rcc', 'provider', providerId);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'config.v2.toml'), [
@@ -81,11 +86,19 @@ async function writeProviderToml(tmp: string, providerId: string, upstreamPort: 
     'supportsStreaming = true',
     'supportsThinking = true',
     'capabilities = ["text", "reasoning", "thinking", "tools"]',
+    ...(directSemantics ? [
+      '',
+      '[provider.models."gpt-5.5".direct]',
+      `semantics = "${directSemantics}"`,
+    ] : []),
     ''
   ].join('\n'), 'utf8');
 }
 
-function buildResponsesProvider(upstreamPort: number): Record<string, unknown> {
+function buildResponsesProvider(
+  upstreamPort: number,
+  directSemantics?: 'routing' | 'passthrough',
+): Record<string, unknown> {
   return {
     id: 'direct',
     enabled: true,
@@ -99,21 +112,39 @@ function buildResponsesProvider(upstreamPort: number): Record<string, unknown> {
       'gpt-5.5': {
         supportsStreaming: true,
         supportsThinking: true,
-        capabilities: ['text', 'reasoning', 'thinking', 'tools']
+        capabilities: ['text', 'reasoning', 'thinking', 'tools'],
+        ...(directSemantics ? { direct: { semantics: directSemantics } } : {}),
       }
     }
   };
 }
 
-function buildNamedResponsesProvider(providerId: string, upstreamPort: number): Record<string, unknown> {
+function buildNamedResponsesProvider(
+  providerId: string,
+  upstreamPort: number,
+  directSemantics?: 'routing' | 'passthrough',
+): Record<string, unknown> {
   return {
-    ...buildResponsesProvider(upstreamPort),
+    ...buildResponsesProvider(upstreamPort, directSemantics),
     id: providerId,
     auth: { type: 'apikey', entries: [{ alias: 'key1', apiKey: `sk-test-${providerId}-router-direct-1234567890` }] }
   };
 }
 
-async function writeRouterConfig(configPath: string, upstreamPort: number): Promise<Record<string, unknown>> {
+async function writeRouterConfig(
+  configPath: string,
+  upstreamPort: number,
+  options?: {
+    directSemantics?: 'routing' | 'passthrough';
+    routeThinking?: 'xhigh' | 'high' | 'medium' | 'low';
+  },
+): Promise<Record<string, unknown>> {
+  const thinkingRoute = {
+    id: 'blackbox-thinking',
+    mode: 'priority',
+    targets: ['direct.key1.gpt-5.5'],
+    ...(options?.routeThinking ? { thinking: options.routeThinking } : {}),
+  };
   const userConfig = {
     version: '2.0.0',
     virtualrouterMode: 'v2',
@@ -121,15 +152,15 @@ async function writeRouterConfig(configPath: string, upstreamPort: number): Prom
       ports: [{ port: 0, host: '127.0.0.1', mode: 'router', routingPolicyGroup: 'blackbox', sameProtocolBehavior: 'direct' }]
     },
     virtualrouter: {
-      providers: { direct: buildResponsesProvider(upstreamPort) },
+      providers: { direct: buildResponsesProvider(upstreamPort, options?.directSemantics) },
       routing: {
-        thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }],
+        thinking: [thinkingRoute],
         default: [{ id: 'blackbox-default', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }]
       },
       routingPolicyGroups: {
         blackbox: {
           routing: {
-            thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }],
+            thinking: [thinkingRoute],
             default: [{ id: 'blackbox-default', mode: 'priority', targets: ['direct.key1.gpt-5.5'] }]
           }
         }
@@ -140,7 +171,22 @@ async function writeRouterConfig(configPath: string, upstreamPort: number): Prom
   return userConfig;
 }
 
-async function writeRouterFailoverConfig(configPath: string, primaryPort: number, backupPort: number): Promise<Record<string, unknown>> {
+async function writeRouterFailoverConfig(
+  configPath: string,
+  primaryPort: number,
+  backupPort: number,
+  options?: {
+    primaryDirectSemantics?: 'routing' | 'passthrough';
+    backupDirectSemantics?: 'routing' | 'passthrough';
+    routeThinking?: 'xhigh' | 'high' | 'medium' | 'low';
+  },
+): Promise<Record<string, unknown>> {
+  const thinkingRoute = {
+    id: 'blackbox-thinking',
+    mode: 'priority',
+    targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'],
+    ...(options?.routeThinking ? { thinking: options.routeThinking } : {}),
+  };
   const userConfig = {
     version: '2.0.0',
     virtualrouterMode: 'v2',
@@ -149,17 +195,17 @@ async function writeRouterFailoverConfig(configPath: string, primaryPort: number
     },
     virtualrouter: {
       providers: {
-        primary: buildNamedResponsesProvider('primary', primaryPort),
-        backup: buildNamedResponsesProvider('backup', backupPort)
+        primary: buildNamedResponsesProvider('primary', primaryPort, options?.primaryDirectSemantics),
+        backup: buildNamedResponsesProvider('backup', backupPort, options?.backupDirectSemantics)
       },
       routing: {
-        thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }],
+        thinking: [thinkingRoute],
         default: [{ id: 'blackbox-default', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }]
       },
       routingPolicyGroups: {
         blackbox: {
           routing: {
-            thinking: [{ id: 'blackbox-thinking', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }],
+            thinking: [thinkingRoute],
             default: [{ id: 'blackbox-default', mode: 'priority', targets: ['primary.key1.gpt-5.5', 'backup.key1.gpt-5.5'] }]
           }
         }
@@ -184,6 +230,95 @@ async function startRouteCodex(configPath: string, userConfig: Record<string, un
 
 describe('router-direct passthrough HTTP blackbox', () => {
   jest.setTimeout(30000);
+
+  it.each([
+    {
+      label: 'default routing',
+      directSemantics: undefined,
+      expectedUpstreamModel: 'gpt-5.5',
+      expectedUpstreamThinking: 'high',
+      expectedClientModel: 'client-visible-model',
+    },
+    {
+      label: 'explicit passthrough',
+      directSemantics: 'passthrough' as const,
+      expectedUpstreamModel: 'client-visible-model',
+      expectedUpstreamThinking: 'low',
+      expectedClientModel: 'provider-response-model',
+    },
+  ])('HTTP BLACKBOX: $label applies paired request/response semantic projection', async ({
+    directSemantics,
+    expectedUpstreamModel,
+    expectedUpstreamThinking,
+    expectedClientModel,
+  }) => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-semantic-'));
+    const configPath = path.join(tmp, 'config.json');
+    let upstreamBody = '';
+    const upstream = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        req.on('data', (chunk) => { upstreamBody += Buffer.from(chunk).toString('utf8'); });
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'resp_direct_semantic',
+            object: 'response',
+            model: 'provider-response-model',
+            reasoning_effort: 'xhigh',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }],
+            output_text: 'ok',
+          }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const upstreamPort = await listen(upstream);
+    await writeProviderToml(tmp, 'direct', upstreamPort, directSemantics);
+    const userConfig = await writeRouterConfig(configPath, upstreamPort, {
+      directSemantics,
+      routeThinking: 'high',
+    });
+    const restores = routerEnv(tmp);
+    let server: RouteCodexHttpServer | undefined;
+    try {
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-route-hint': 'thinking',
+        },
+        body: JSON.stringify({
+          model: 'client-visible-model',
+          reasoning_effort: 'low',
+          reasoning: { effort: 'low', summary: 'auto' },
+          input: 'direct semantic projection probe',
+          stream: false,
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+      const forwarded = JSON.parse(upstreamBody) as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(forwarded.model).toBe(expectedUpstreamModel);
+      expect(forwarded.reasoning_effort).toBe(expectedUpstreamThinking);
+      expect((forwarded.reasoning as Record<string, unknown>).effort).toBe(expectedUpstreamThinking);
+      expect(body.model).toBe(expectedClientModel);
+      expect(body.reasoning_effort).toBe('xhigh');
+      expect(JSON.stringify(forwarded)).not.toContain('direct.semantic_policy');
+      expect(JSON.stringify(body)).not.toContain('direct.semantic_policy');
+    } finally {
+      await server?.stop().catch(() => undefined);
+      await closeServer(upstream);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 
   it('HTTP BLACKBOX: router-direct responses SSE is passthrough and does not enter response conversion', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-passthrough-'));
@@ -443,7 +578,7 @@ describe('router-direct passthrough HTTP blackbox', () => {
       });
       const bodyText = await response.text();
 
-      expect(response.status).toBe(520);
+      expect(response.status).toBe(502);
       expect(bodyText).toContain('HTTP_520');
       expect(upstreamPostCount).toBe(1);
 
@@ -535,6 +670,93 @@ describe('router-direct passthrough HTTP blackbox', () => {
       expect(text).not.toContain('Upstream provider error');
       expect(primaryPostCount).toBe(1);
       expect(backupPostCount).toBe(1);
+    } finally {
+      await server?.stop().catch(() => undefined);
+      await closeServer(primary);
+      await closeServer(backup);
+      for (const restore of restores.reverse()) restore();
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('HTTP BLACKBOX: retry resolves the new real target direct semantic policy', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-semantic-retry-'));
+    const configPath = path.join(tmp, 'config.json');
+    let primaryBody = '';
+    let backupBody = '';
+    const primary = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        req.on('data', (chunk) => { primaryBody += Buffer.from(chunk).toString('utf8'); });
+        req.on('end', () => {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'primary failed', code: 'HTTP_502' } }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const backup = http.createServer((req, res) => {
+      if (req.method === 'POST') {
+        req.on('data', (chunk) => { backupBody += Buffer.from(chunk).toString('utf8'); });
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'resp_semantic_retry',
+            object: 'response',
+            model: 'backup-provider-model',
+            reasoning_effort: 'xhigh',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'backup-ok' }] }],
+            output_text: 'backup-ok',
+          }));
+        });
+        return;
+      }
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [] }));
+    });
+    const primaryPort = await listen(primary);
+    const backupPort = await listen(backup);
+    await writeProviderToml(tmp, 'primary', primaryPort, 'passthrough');
+    await writeProviderToml(tmp, 'backup', backupPort, 'routing');
+    const userConfig = await writeRouterFailoverConfig(configPath, primaryPort, backupPort, {
+      primaryDirectSemantics: 'passthrough',
+      backupDirectSemantics: 'routing',
+      routeThinking: 'high',
+    });
+    const restores = routerEnv(tmp);
+    let server: RouteCodexHttpServer | undefined;
+    try {
+      const started = await startRouteCodex(configPath, userConfig);
+      server = started.server;
+      const response = await fetch(`http://127.0.0.1:${started.port}/v1/responses`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-route-hint': 'thinking',
+        },
+        body: JSON.stringify({
+          model: 'client-visible-model',
+          reasoning_effort: 'low',
+          reasoning: { effort: 'low' },
+          input: 'semantic retry probe',
+          stream: false,
+        }),
+      });
+      const body = await response.json() as Record<string, unknown>;
+      const primaryForwarded = JSON.parse(primaryBody) as Record<string, unknown>;
+      const backupForwarded = JSON.parse(backupBody) as Record<string, unknown>;
+
+      expect(response.status).toBe(200);
+      expect(primaryForwarded.model).toBe('client-visible-model');
+      expect(primaryForwarded.reasoning_effort).toBe('low');
+      expect(backupForwarded.model).toBe('gpt-5.5');
+      expect(backupForwarded.reasoning_effort).toBe('high');
+      expect(body.model).toBe('client-visible-model');
+      expect(body.reasoning_effort).toBe('xhigh');
     } finally {
       await server?.stop().catch(() => undefined);
       await closeServer(primary);

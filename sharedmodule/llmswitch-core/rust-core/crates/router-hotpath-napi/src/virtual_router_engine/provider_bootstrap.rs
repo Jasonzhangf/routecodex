@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use crate::direct_semantic_classification::{
+    validate_config_direct_02, DirectSemanticClass,
+};
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::profile_utils::{
@@ -112,6 +115,8 @@ struct ProviderRuntimeProfileJson {
     anthropic_thinking: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     anthropic_thinking_budgets: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    direct_semantic: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +161,7 @@ struct ProviderProfileJson {
     model_capabilities: Option<BTreeMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     alias_to_model: Option<BTreeMap<String, String>>,
+    direct_semantic: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -169,6 +175,8 @@ struct ModelIndexEntry {
     alias_to_model: BTreeMap<String, String>,
     #[serde(default)]
     compatibility_profiles: BTreeMap<String, String>,
+    #[serde(default)]
+    direct_semantics: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -389,6 +397,7 @@ fn build_provider_runtime_entries(
                     anthropic_thinking_config: None,
                     anthropic_thinking: None,
                     anthropic_thinking_budgets: None,
+                    direct_semantic: None,
                 },
             );
         }
@@ -456,6 +465,11 @@ fn build_provider_profiles(
             resolve_anthropic_thinking_budgets(runtime, &canonical_model_id).cloned();
         let compatibility_profile =
             resolve_model_compatibility_profile(runtime, model_info, &canonical_model_id);
+        let direct_semantic = model_info
+            .direct_semantics
+            .get(&canonical_model_id)
+            .cloned()
+            .unwrap_or_else(|| "routing".to_string());
 
         profiles.insert(
             target_key.clone(),
@@ -489,6 +503,7 @@ fn build_provider_profiles(
                 } else {
                     Some(model_info.alias_to_model.clone())
                 },
+                direct_semantic: direct_semantic.clone(),
             },
         );
 
@@ -501,6 +516,7 @@ fn build_provider_profiles(
         resolved_runtime.anthropic_thinking =
             resolve_anthropic_thinking(runtime, &canonical_model_id);
         resolved_runtime.anthropic_thinking_budgets = anthropic_thinking_budgets;
+        resolved_runtime.direct_semantic = Some(direct_semantic);
         target_runtime.insert(target_key.clone(), resolved_runtime);
     }
 
@@ -644,6 +660,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
     let mut collected: Vec<String> = Vec::new();
     let mut alias_to_model: BTreeMap<String, String> = BTreeMap::new();
     let mut compatibility_profiles: BTreeMap<String, String> = BTreeMap::new();
+    let mut direct_semantics: BTreeMap<String, String> = BTreeMap::new();
     let mut seen = HashSet::new();
 
     if let Some(models_value) = provider.get("models") {
@@ -654,6 +671,9 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                         continue;
                     };
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
+                        let direct_semantic =
+                            normalize_model_direct_semantic(&model_id, model_obj)?;
+                        direct_semantics.insert(model_id.trim().to_string(), direct_semantic);
                         if let Some(profile) =
                             read_optional_string(model_obj.get("compatibilityProfile"))
                         {
@@ -688,6 +708,9 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                     let canonical_model_id = model_name.trim().to_string();
                     push_unique_trimmed(&mut collected, &mut seen, &canonical_model_id);
                     if let Some(model_obj) = model_raw.as_object() {
+                        let direct_semantic =
+                            normalize_model_direct_semantic(&canonical_model_id, model_obj)?;
+                        direct_semantics.insert(canonical_model_id.clone(), direct_semantic);
                         if let Some(profile) =
                             read_optional_string(model_obj.get("compatibilityProfile"))
                         {
@@ -704,6 +727,14 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                                 }
                             }
                         }
+                    } else if !model_raw.is_null() {
+                        return Err(format!(
+                            "Provider model {} must be an object",
+                            canonical_model_id
+                        ));
+                    } else {
+                        direct_semantics
+                            .insert(canonical_model_id.clone(), "routing".to_string());
                     }
                 }
             }
@@ -716,7 +747,31 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
         models: collected,
         alias_to_model,
         compatibility_profiles,
+        direct_semantics,
     })
+}
+
+fn normalize_model_direct_semantic(
+    model_id: &str,
+    model: &Map<String, Value>,
+) -> Result<String, String> {
+    for forbidden in [
+        "modelPassthrough",
+        "thinkingPassthrough",
+        "restoreResponseModel",
+    ] {
+        if model.contains_key(forbidden) {
+            return Err(format!(
+                "Provider model {} uses forbidden direct semantic field {}",
+                model_id, forbidden
+            ));
+        }
+    }
+    Ok(match validate_config_direct_02(model_id, model.get("direct"))?.semantic_class {
+        DirectSemanticClass::Routing => "routing",
+        DirectSemanticClass::Passthrough => "passthrough",
+    }
+    .to_string())
 }
 
 fn push_model_alias(
@@ -1303,6 +1358,80 @@ mod alias_tests {
             output["targetRuntime"]["DF.key1.deepseek-v4-pro"]["modelId"],
             json!("DeepSeek-V4-Pro")
         );
+    }
+
+    #[test]
+    fn provider_bootstrap_compiles_model_direct_semantics_with_routing_default() {
+        let providers = json!({
+            "DS": {
+                "id": "DS",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "routing-model": {},
+                    "passthrough-model": {
+                        "direct": { "semantics": "passthrough" }
+                    }
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let profiles = bootstrap_virtual_router_provider_profiles_json(
+            json!(["DS.key1.routing-model", "DS.key1.passthrough-model"]).to_string(),
+            providers_bootstrap_json["aliasIndex"].to_string(),
+            providers_bootstrap_json["modelIndex"].to_string(),
+            providers_bootstrap_json["runtimeEntries"].to_string(),
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&profiles).unwrap();
+
+        assert_eq!(
+            output["profiles"]["DS.key1.routing-model"]["directSemantic"],
+            json!("routing")
+        );
+        assert_eq!(
+            output["profiles"]["DS.key1.passthrough-model"]["directSemantic"],
+            json!("passthrough")
+        );
+        assert_eq!(
+            output["targetRuntime"]["DS.key1.passthrough-model"]["directSemantic"],
+            json!("passthrough")
+        );
+    }
+
+    #[test]
+    fn provider_bootstrap_rejects_invalid_direct_semantic_authoring() {
+        for direct in [
+            json!({"semantics": ""}),
+            json!({"semantics": "unknown"}),
+            json!({"semantics": []}),
+            json!({"modelPassthrough": true}),
+        ] {
+            let providers = json!({
+                "DS": {
+                    "id": "DS",
+                    "enabled": true,
+                    "type": "openai",
+                    "baseURL": "https://example.invalid/v1",
+                    "auth": {
+                        "type": "apikey",
+                        "entries": [{ "alias": "key1", "apiKey": "test" }]
+                    },
+                    "models": {
+                        "model": { "direct": direct }
+                    }
+                }
+            });
+            assert!(bootstrap_virtual_router_providers_json(providers.to_string()).is_err());
+        }
     }
 
     #[test]

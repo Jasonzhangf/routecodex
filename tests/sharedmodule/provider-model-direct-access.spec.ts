@@ -3,6 +3,82 @@ import { VirtualRouterEngine } from './helpers/virtual-router-engine-direct-nati
 import { VirtualRouterError } from './helpers/native-router-hotpath-loader.js';
 
 describe('provider.model direct access without routing', () => {
+  it('materializes deterministic routing and explicit passthrough semantics per real target', () => {
+    const result = bootstrapVirtualRouterConfig({
+      virtualrouter: {
+        providers: {
+          glm: {
+            id: 'glm',
+            type: 'glm',
+            enabled: true,
+            endpoint: 'https://apis.glm.cn/v1',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'glm-4.7': {
+                aliases: ['client-routing-model'],
+              },
+              'glm-5': {
+                aliases: ['client-passthrough-model'],
+                direct: { semantics: 'passthrough' },
+              },
+            },
+          },
+        },
+        routing: {
+          default: ['glm.glm-4.7', 'glm.glm-5'],
+        },
+      },
+    });
+
+    const targets = result.targetRuntime ?? {};
+    const routingTarget = Object.values(targets).find(
+      (entry) => entry.modelId === 'glm-4.7',
+    );
+    const passthroughTarget = Object.values(targets).find(
+      (entry) => entry.modelId === 'glm-5',
+    );
+
+    expect(routingTarget).toMatchObject({
+      modelId: 'glm-4.7',
+      directSemantic: 'routing',
+    });
+    expect(passthroughTarget).toMatchObject({
+      modelId: 'glm-5',
+      directSemantic: 'passthrough',
+    });
+  });
+
+  it.each([
+    { direct: { semantics: '' } },
+    { direct: { semantics: 'unknown' } },
+    { direct: { semantics: [] } },
+    { direct: { semantics: {} } },
+    { direct: [] },
+    { modelPassthrough: true },
+    { thinkingPassthrough: true },
+    { restoreResponseModel: false },
+  ])('rejects invalid direct semantic authoring: %j', (modelConfig) => {
+    expect(() => bootstrapVirtualRouterConfig({
+      virtualrouter: {
+        providers: {
+          glm: {
+            id: 'glm',
+            type: 'glm',
+            enabled: true,
+            endpoint: 'https://apis.glm.cn/v1',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'glm-5': modelConfig,
+            },
+          },
+        },
+        routing: {
+          default: ['glm.glm-5'],
+        },
+      },
+    })).toThrow(VirtualRouterError);
+  });
+
   it('should route directly to provider.model when specified in request', async () => {
     const input: any = {
       virtualrouter: {

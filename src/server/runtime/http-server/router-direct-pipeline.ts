@@ -44,8 +44,10 @@ import {
   planDirectRouteRequestHooksNative,
   planDirectRouteModelObservationEffectsNative,
   projectDirectRouteSseHeadersNative,
+  resolveDirectSemanticClassificationNative,
   rewriteDirectRouteResponseModelNative,
   rewriteDirectRouteSseFrameNative,
+  type DirectRouteResolvedSemantics,
 } from '../../../modules/llmswitch/bridge/direct-route-model-hooks-host.js';
 import { planDirectRouteResponseErrorNative } from '../../../modules/llmswitch/bridge/direct-route-response-error-host.js';
 import { planDirectRouteEligibilityNative } from '../../../modules/llmswitch/bridge/direct-route-eligibility-host.js';
@@ -74,6 +76,8 @@ export interface RouterDirectAuditContext {
   originalClientModel?: string;
   /** The provider model actually sent after direct-route hooks. */
   providerModelId?: string;
+  /** Request-scoped direct semantic contract resolved after real target selection. */
+  resolvedDirectSemantics?: DirectRouteResolvedSemantics;
 }
 
 export interface RouterDirectInput {
@@ -84,9 +88,11 @@ export interface RouterDirectInput {
     providerKey: string;
     providerType: string;
     runtimeKey?: string;
-    routeParams?: Record<string, unknown>;
+    routeThinking?: unknown;
     /** The provider modelId selected by the Virtual Router. Used to override payload.model. */
     modelId?: string;
+    /** Compiled provider/model direct semantic policy. */
+    directSemantic?: unknown;
   };
   routingDecision?: { routeName?: string; pool?: string[] };
   requestId?: string;
@@ -196,11 +202,20 @@ export async function executeRouterDirectPipeline(
     routingDecision: input.routingDecision,
   };
 
-  // Apply hooks: model override + thinking effort override
+  const resolvedDirectSemantics = resolveDirectSemanticClassificationNative({
+    directSemantic: target.directSemantic,
+    selectedProviderKey: target.providerKey,
+    selectedRuntimeKey: runtimeKey,
+    targetModelId: target.modelId,
+    payload: input.requestPayload,
+    routeThinking: target.routeThinking,
+  });
+  auditContext.resolvedDirectSemantics = resolvedDirectSemantics;
+
+  // Apply the request projection plan from the resolved direct semantic contract.
   const hookResult = planDirectRouteRequestHooksNative({
     payload: input.requestPayload,
-    targetModelId: target.modelId,
-    routeParams: target.routeParams,
+    resolvedSemantics: resolvedDirectSemantics,
   });
   if (!hookResult.payloadChanged) {
     hookResult.payload = input.requestPayload;
@@ -278,7 +293,7 @@ export async function executeRouterDirectPipeline(
 
   // Symmetric response hook: restore client-visible model / stream headers.
   response = applyDirectRouteResponseHooks(response, {
-    originalClientModel: auditContext.originalClientModel,
+    resolvedSemantics: resolvedDirectSemantics,
   });
 
   input.onSnapshotAfter?.(response, auditContext);
@@ -339,14 +354,14 @@ function wrapDirectSseStreamWithClientModel(stream: unknown, clientModel: string
  */
 export function applyDirectRouteResponseHooks(
   response: unknown,
-  options: { originalClientModel?: string }
+  options: { resolvedSemantics: DirectRouteResolvedSemantics }
 ): unknown {
   const responseIsRecord = Boolean(response) && typeof response === 'object' && !Array.isArray(response);
   const sourceRecord = responseIsRecord ? response as Record<string, unknown> : undefined;
   const plan = planDirectRouteResponseActionNative({
     responseIsRecord,
     hasSseStream: sourceRecord?.sseStream !== undefined && sourceRecord?.sseStream !== null,
-    clientModel: options.originalClientModel,
+    resolvedSemantics: options.resolvedSemantics,
   });
   if (plan.action === 'passthrough') {
     return response;

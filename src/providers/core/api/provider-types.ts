@@ -161,6 +161,7 @@ export interface ProviderRuntimeProfile {
   auth: ProviderRuntimeAuth;
   compatibilityProfile?: string;
   outboundProfile?: string;
+  directSemantic?: 'routing' | 'passthrough';
   defaultModel?: string;
   streaming?: 'auto' | 'always' | 'never';
   modelStreaming?: Record<string, 'auto' | 'always' | 'never'>;

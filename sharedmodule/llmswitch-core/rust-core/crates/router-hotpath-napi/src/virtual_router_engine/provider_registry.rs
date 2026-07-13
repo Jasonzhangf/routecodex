@@ -21,6 +21,7 @@ pub(crate) struct ProviderProfile {
     pub server_tools_disabled: bool,
     pub series: Option<String>,
     pub alias_to_model: Option<BTreeMap<String, String>>,
+    pub direct_semantic: String,
     pub provider_specific_config: HashMap<String, Value>,
 }
 
@@ -207,6 +208,10 @@ impl ProviderRegistry {
         if profile.server_tools_disabled {
             target.insert("serverToolsDisabled".to_string(), Value::Bool(true));
         }
+        target.insert(
+            "directSemantic".to_string(),
+            Value::String(profile.direct_semantic.clone()),
+        );
         for (key, value) in &profile.provider_specific_config {
             target.insert(key.clone(), value.clone());
         }
@@ -283,6 +288,13 @@ impl ProviderRegistry {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
         let alias_to_model = read_model_alias_map(map.get("aliasToModel"));
+        let direct_semantic = map
+            .get("directSemantic")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("routing")
+            .to_string();
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
             "providerKey",
@@ -308,6 +320,7 @@ impl ProviderRegistry {
             "contextTokens",
             "context_tokens",
             "serverToolsDisabled",
+            "directSemantic",
         ];
         let mut provider_specific_config: HashMap<String, Value> = HashMap::new();
         for (k, v) in map {
@@ -332,6 +345,7 @@ impl ProviderRegistry {
             server_tools_disabled,
             series,
             alias_to_model,
+            direct_semantic,
             provider_specific_config,
         })
     }

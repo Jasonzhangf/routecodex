@@ -631,6 +631,9 @@ impl VirtualRouterEngineCore {
             if let Some(route_params) = selection.route_params.clone() {
                 map.insert("routeParams".to_string(), Value::Object(route_params));
             }
+            if let Some(route_thinking) = selection.route_thinking.clone() {
+                map.insert("routeThinking".to_string(), Value::String(route_thinking));
+            }
             if self.web_search_force {
                 map.insert("forceWebSearch".to_string(), Value::Bool(true));
             }

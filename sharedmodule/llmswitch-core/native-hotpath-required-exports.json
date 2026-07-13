@@ -594,6 +594,7 @@
   "buildRouterDirectRouteMetadataJson",
   "buildDirectProviderRuntimeMetadataJson",
   "planRouterDirectRuntimeMetadataEffectJson",
+  "resolveDirectSemanticClassificationJson",
   "planDirectRouteRequestHooksJson",
   "planDirectRouteModelObservationEffectsJson",
   "rewriteDirectRouteResponseModelJson",

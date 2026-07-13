@@ -97,11 +97,11 @@ describe('Rust runtime config materialization', () => {
     expect(manifest.virtualRouterBootstrapInput.providers).not.toHaveProperty('unused');
     expect(manifest.virtualRouterBootstrapInput.routing.default).toEqual([
       expect.objectContaining({
-        id: 'beta-route',
         target: 'fwd.gpt.gpt-5.5',
         routeParams: { routePolicyGroup: 'beta' }
       })
     ]);
+    expect(manifest.virtualRouterBootstrapInput.routing.default[0]).not.toHaveProperty('id');
     expect(manifest.virtualRouterBootstrapInput.forwarders?.['fwd.gpt.gpt-5.5']).toEqual(
       expect.objectContaining({
         forwarderId: 'fwd.gpt.gpt-5.5',
@@ -119,7 +119,7 @@ describe('Rust runtime config materialization', () => {
     expect(manifest.pipelineRuntimeConfig.routingTiersByRoute).toEqual({
       default: [
         {
-          id: 'beta-route',
+          id: 'default:0',
           targets: ['fwd.gpt.gpt-5.5'],
           priority: 0
         }

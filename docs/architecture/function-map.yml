@@ -6926,6 +6926,96 @@ owners:
       - "Cycle removal is host JSON transport mechanics only; all field selection and control semantics remain in Rust."
       - "Router log-session extraction consumes the Rust-projected route-safe carrier before native identifier extraction, so cyclic request mirrors never enter the JSON boundary."
 
+  - feature_id: hub.direct_semantic_classification
+    status: active
+    summary: "Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors"
+    owner_kind: rust_ssot
+    owner_scope: "typed Rust lifecycle for explicit provider/model direct semantics: config validation, request-scoped real-target resolution, and closed request/response projection plans; TS/Host only invokes native plans and performs IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+    resource_bindings:
+      writes:
+        - direct.semantic_policy@VrDirect03ResolvedSemantics
+      reads:
+        - config.provider_profile_projection@ConfigDirect02ValidatedPolicy
+        - route.selection@VrRoute04SelectedTarget
+        - request.normal_payload@ServerReqInbound01ClientRaw
+        - response.provider_raw@ProviderRespInbound01Raw
+      forbidden:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - continuation.scope_state@ChatProcReqContinuation02OwnerResolved
+    canonical_types:
+      - ConfigDirect01AuthoringPolicy
+      - ConfigDirect02ValidatedPolicy
+      - VrDirect03ResolvedSemantics
+      - DirectReq04ProjectionPlan
+      - DirectResp05ProjectionPlan
+      - DirectSemanticClass
+      - DirectFieldProjection
+    canonical_builders:
+      - validate_config_direct_02
+      - resolve_direct_semantic_classification
+      - build_direct_req_04_projection_plan
+      - build_direct_resp_05_projection_plan
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/types.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_registry.rs
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
+      - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
+      - src/modules/llmswitch/bridge/direct-route-response-action-host.ts
+      - src/server/runtime/http-server/index.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
+      - src/providers/core/api/provider-types.ts
+      - tests/sharedmodule/provider-model-direct-access.spec.ts
+      - tests/sharedmodule/virtual-router-forwarder-multimodal-route.spec.ts
+      - tests/server/http-server/router-direct-passthrough.blackbox.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - scripts/architecture/verify-direct-semantic-classification-design.mjs
+      - scripts/architecture/verify-direct-semantic-classification-runtime.mjs
+      - docs/design/direct-semantic-classification.md
+      - docs/goals/direct-semantic-classification-test-design.md
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/mainline-manifests/direct.semantic_classification.mainline.yml
+      - docs/architecture/wiki/direct-semantic-classification-mainline.md
+      - docs/architecture/wiki/html/direct-semantic-classification-mainline.html
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/design/pipeline-type-topology-and-module-boundaries.md
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/forwarder.rs
+      - src/server/runtime/http-server/metadata-center
+    required_tests:
+      - docs/goals/direct-semantic-classification-test-design.md
+      - tests/sharedmodule/provider-model-direct-access.spec.ts
+      - tests/sharedmodule/virtual-router-forwarder-multimodal-route.spec.ts
+      - tests/server/http-server/router-direct-passthrough.blackbox.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+    required_gates:
+      - npm run verify:direct-semantic-classification-runtime
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:direct-semantic-classification-design
+    migration_target: rust
+    notes:
+      - "Authoring exposes one closed enum: `routing` or explicit `passthrough`; independent model/thinking/response booleans are forbidden because they create invalid combinations and patch branches."
+      - "Missing policy compiles to `routing`; unknown policy fails config validation. There is no runtime fallback or compatibility inference."
+      - "Forwarders remain pure provider selection. Direct semantics resolve only after a forwarder yields the real provider/model target."
+      - "Virtual Router resolves the semantic class and provenance only; it must not mutate request or response payload."
+      - "`RoutePoolTier.thinking` must flow through `SelectionResult.route_thinking` and selected target `routeThinking`; resolver/projectors must not read route thinking from `routeParams`."
+      - "Virtual Router is the sole writer of request-scoped `direct.semantic_policy`; config compilation writes provider profile projection only."
+      - "Request and response projectors consume the same resolved contract. Response code must not depend on request projector output or infer mode from `originalClientModel` or whether request fields changed."
+      - "All four lifecycle edges are anchored to real Rust caller/callee symbols; Host consumes closed native plans and never branches on semantic class."
+
   - feature_id: hub.direct_route_model_hooks
     status: active
     summary: "same-protocol direct canonical wire model, thinking override, and client model restoration are Rust-owned"

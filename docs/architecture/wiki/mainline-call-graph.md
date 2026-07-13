@@ -225,6 +225,40 @@ flowchart LR
 | rdp-01 | `ServerReqInbound01ClientRaw -> VrRoute04SelectedTarget` | anchored | `executeRouterDirectPipelineForPort -> route` |  | `responses.direct_tool_shape_contract`<br/>Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape |
 | rdp-02 | `VrRoute04SelectedTarget -> ProviderReqOutbound06WirePayload` | anchored | `executeRouterDirectPipelineForPort -> executeRouterDirectPipeline` |  | `responses.direct_tool_shape_contract`<br/>Responses direct passthrough must keep the current request body as provider wire; live direct does not validate, sanitize, replay raw metadata, or force relay for tool shape |
 
+## direct.semantic_classification.mainline
+
+Explicit provider/model direct policy compiles to a closed semantic class, resolves only after Virtual Router selects a real target, and drives paired request/response projection plans without payload inference.
+
+Entry contract: `ConfigDirect01AuthoringPolicy` via `docs/design/direct-semantic-classification.md`
+
+```mermaid
+flowchart LR
+  DirectResp05ProjectionPlan["DirectResp05ProjectionPlan"]
+  DirectReq04ProjectionPlan["DirectReq04ProjectionPlan"]
+  VrDirect03ResolvedSemantics["VrDirect03ResolvedSemantics"]
+  ConfigDirect02ValidatedPolicy["ConfigDirect02ValidatedPolicy"]
+  ConfigDirect01AuthoringPolicy["ConfigDirect01AuthoringPolicy"]
+  ConfigDirect01AuthoringPolicy -->|dsc-01| ConfigDirect02ValidatedPolicy
+  ConfigDirect02ValidatedPolicy -->|dsc-02| VrDirect03ResolvedSemantics
+  VrDirect03ResolvedSemantics -->|dsc-03| DirectReq04ProjectionPlan
+  VrDirect03ResolvedSemantics -->|dsc-04| DirectResp05ProjectionPlan
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ConfigDirect01AuthoringPolicy anchored;
+  class ConfigDirect02ValidatedPolicy anchored;
+  class VrDirect03ResolvedSemantics anchored;
+  class DirectReq04ProjectionPlan anchored;
+  class DirectResp05ProjectionPlan anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| dsc-01 | `ConfigDirect01AuthoringPolicy -> ConfigDirect02ValidatedPolicy` | anchored | `normalize_model_direct_semantic -> validate_config_direct_02` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-02 | `ConfigDirect02ValidatedPolicy -> VrDirect03ResolvedSemantics` | anchored | `resolve_direct_semantic_classification_json -> resolve_direct_semantic_classification` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-03 | `VrDirect03ResolvedSemantics -> DirectReq04ProjectionPlan` | anchored | `plan_request_hooks -> build_direct_req_04_projection_plan` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+| dsc-04 | `VrDirect03ResolvedSemantics -> DirectResp05ProjectionPlan` | anchored | `plan_direct_route_response_action -> build_direct_resp_05_projection_plan` |  | `hub.direct_semantic_classification`<br/>Rust-owned provider/model direct semantic classification shared by Virtual Router real-target resolution and paired request/response projectors |
+
 ## response.mainline
 
 Provider response enters Hub, gets governed, then projects to client protocol and server frame.

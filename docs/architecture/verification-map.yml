@@ -3366,6 +3366,57 @@ verification:
     notes:
       - "Positive tests lock route-safe and provider transport projections; negative tests lock payload mirrors, cyclic references, TS key lists, TS control projection, and host semantic revival out of runtime."
 
+  - feature_id: hub.direct_semantic_classification
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/types.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/selection.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+      - src/server/runtime/http-server/index.ts
+      - scripts/architecture/verify-direct-semantic-classification-design.mjs
+      - scripts/architecture/verify-direct-semantic-classification-runtime.mjs
+      - docs/design/direct-semantic-classification.md
+      - docs/goals/direct-semantic-classification-test-design.md
+    contract:
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/mainline-manifests/direct.semantic_classification.mainline.yml
+    integration:
+      - tests/sharedmodule/provider-model-direct-access.spec.ts
+      - tests/sharedmodule/virtual-router-forwarder-multimodal-route.spec.ts
+      - tests/server/http-server/router-direct-passthrough.blackbox.spec.ts
+      - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - docs/architecture/wiki/direct-semantic-classification-mainline.md
+      - docs/architecture/wiki/html/direct-semantic-classification-mainline.html
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:direct-semantic-classification-design
+      - npm run verify:direct-semantic-classification-runtime
+      - npm run test:direct-route-model-hooks-rust-only-red-fixtures
+      - npm run verify:direct-route-model-hooks-rust-only
+      - npm run test:direct-route-response-action-rust-only-red-fixtures
+      - npm run verify:direct-route-response-action-rust-only
+      - npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/provider-model-direct-access.spec.ts tests/sharedmodule/virtual-router-forwarder-multimodal-route.spec.ts
+      - npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/router-direct-pipeline.spec.ts
+      - npm run jest:run -- --runInBand --runTestsByPath tests/server/http-server/router-direct-passthrough.blackbox.spec.ts -t 'semantic projection|retry resolves the new real target direct semantic policy'
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Design gate locks one closed semantic enum, default routing behavior, explicit passthrough, forwarder-after-resolution policy lookup, paired request/response consumption, and no MetadataCenter/config reread."
+      - "Runtime tests lock config compile, `RoutePoolTier.thinking -> SelectionResult.route_thinking -> target.routeThinking`, real-target resolution, request projection, JSON/SSE response projection, unknown-value fail-fast, and no Host/forwarder/MetadataCenter policy ownership."
+      - "Live completion still requires global install, managed restart, version alignment, and same-entry routing/passthrough/forwarder/retry replay."
+
   - feature_id: hub.direct_route_model_hooks
     change_risk: high
     unit:

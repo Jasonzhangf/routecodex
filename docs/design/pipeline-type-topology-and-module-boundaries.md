@@ -159,6 +159,37 @@ ServerReqInbound01ClientRaw
 - owning module：`src/providers/core/runtime/` 与 provider-specific runtime。
 - 禁止：Hub 工具治理、route 重选、metadata 进入 SDK options。
 
+### 3.8 Direct Semantic Classification Side Chain
+
+Same-protocol direct 不新增 Hub 请求主链中间节点。它使用独立 control side chain，最终只在现有 provider wire/client frame 边界执行已解析投影：
+
+```text
+ConfigDirect01AuthoringPolicy
+  -> ConfigDirect02ValidatedPolicy
+  -> VrDirect03ResolvedSemantics
+      -> DirectReq04ProjectionPlan
+          -> ProviderReqOutbound06WirePayload
+      -> DirectResp05ProjectionPlan
+          -> ServerRespOutbound05ClientFrame
+```
+
+节点合同：
+
+| 节点 | 唯一职责 | 禁止 |
+|---|---|---|
+| `ConfigDirect01AuthoringPolicy` | provider/model 显式声明 `direct.semantics` | 多布尔开关、route/forwarder 重复声明 |
+| `ConfigDirect02ValidatedPolicy` | 编译闭合枚举；缺省 `routing`；未知值 fail-fast；写 provider profile projection | 创建 request-scoped policy、runtime 猜测、兼容 fallback |
+| `VrDirect03ResolvedSemantics` | real target 选定后唯一创建 request-scoped class/provenance | 修改 payload、provider 特例、MetadataCenter 取策略 |
+| `DirectReq04ProjectionPlan` | 生成 request preserve/set 计划 | 重新读配置、Host 本地分支 |
+| `DirectResp05ProjectionPlan` | 基于同一 resolved contract 生成 response passthrough/restore 计划 | 依赖 request projector 输出；用 `originalClientModel`、`payloadChanged` 或 response shape 猜模式 |
+
+分类只有：
+
+- `routing`：canonical provider model + route thinking；响应恢复 client-visible model。
+- `passthrough`：client request model/thinking 原样上游；provider response model/thinking 原样客户端。
+
+`direct.semantic_policy` 是 control contract，不得进入 provider/client normal payload。forwarder 只选择 real provider；分类必须在 forwarder resolve 之后完成。
+
 ## 4. 响应链拓扑
 
 响应链是模型/provider 端进入 Hub，再由 Hub 投影到客户端的唯一正常数据链，必须单向。这里的 `Inbound` / `Outbound` 均以 Hub 为参照：`RespInbound` 表示 provider response 进入 Hub；`RespOutbound` 表示 Hub response 出到客户端入口协议。

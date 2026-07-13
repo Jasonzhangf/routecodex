@@ -547,8 +547,12 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
     }, root);
 
     expect((materialized.userConfig.virtualrouter as any).routing.default).toEqual([
-      expect.objectContaining({ id: 'route-a' })
+      expect.objectContaining({
+        targets: ['alpha.model-a'],
+        routeParams: { routePolicyGroup: 'group_a' }
+      })
     ]);
+    expect((materialized.userConfig.virtualrouter as any).routing.default[0]).not.toHaveProperty('id');
     expect((materialized.userConfig.virtualrouter as any).providers).toHaveProperty('alpha');
     expect((materialized.userConfig.virtualrouter as any).providers).not.toHaveProperty('beta');
   });
@@ -640,7 +644,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
 
     const input = await compileVirtualRouterInput(userConfig, root);
     expect(input.routing.multimodal).toHaveLength(1);
-    expect(input.routing.multimodal[0].id).toBe('manual-multimodal');
+    expect(input.routing.multimodal[0]).not.toHaveProperty('id');
     expect(input.routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
     expect(input.routing.web_search?.[0]?.targets).toEqual(['ali-coding-plan.manual-search']);
   });

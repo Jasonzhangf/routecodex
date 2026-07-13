@@ -2,6 +2,10 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{json, Map, Value};
 
+use crate::direct_semantic_classification::{
+    build_direct_req_04_projection_plan, DirectFieldProjection, VrDirect03ResolvedSemantics,
+};
+
 // feature_id: hub.direct_route_model_hooks
 fn trimmed(value: Option<&Value>) -> Option<&str> {
     value
@@ -10,46 +14,31 @@ fn trimmed(value: Option<&Value>) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn thinking_level(route_params: Option<&Map<String, Value>>) -> Option<String> {
-    for key in ["thinking", "reasoning_effort", "reasoningEffort"] {
-        let Some(value) = trimmed(route_params.and_then(|row| row.get(key))) else {
-            continue;
-        };
-        let normalized = value.to_ascii_lowercase();
-        if normalized == "max" {
-            return Some("xhigh".to_string());
-        }
-        if matches!(normalized.as_str(), "xhigh" | "high" | "medium" | "low") {
-            return Some(normalized);
-        }
-    }
-    None
-}
-
-fn plan_request_hooks(input: &Value) -> Value {
+fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let root = input.as_object();
     let mut payload = root
         .and_then(|row| row.get("payload"))
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    let resolved_value = root
+        .and_then(|row| row.get("resolvedSemantics"))
+        .ok_or_else(|| "direct request projector requires resolvedSemantics".to_string())?;
+    let resolved: VrDirect03ResolvedSemantics =
+        serde_json::from_value(resolved_value.clone()).map_err(|error| {
+            format!("direct request projector received invalid resolvedSemantics: {error}")
+        })?;
+    let projection = build_direct_req_04_projection_plan(&resolved);
     let inbound_model = trimmed(payload.get("model")).map(str::to_string);
-    let target_model = trimmed(root.and_then(|row| row.get("targetModelId"))).map(str::to_string);
-    let original_client_model = match (&target_model, &inbound_model) {
-        (Some(target), Some(inbound)) if target != inbound => Some(inbound.clone()),
-        _ => None,
-    };
+    let original_client_model = resolved.original_client_model.clone();
     let mut payload_changed = false;
-    if let Some(target) = target_model.as_ref() {
+    if let DirectFieldProjection::Set(target) = &projection.model {
         if inbound_model.as_deref() != Some(target.as_str()) {
             payload.insert("model".to_string(), Value::String(target.clone()));
             payload_changed = true;
         }
     }
-    if let Some(level) = thinking_level(
-        root.and_then(|row| row.get("routeParams"))
-            .and_then(Value::as_object),
-    ) {
+    if let DirectFieldProjection::Set(level) = &projection.thinking {
         payload_changed = true;
         let mut reasoning = payload
             .get("reasoning")
@@ -57,16 +46,17 @@ fn plan_request_hooks(input: &Value) -> Value {
             .cloned()
             .unwrap_or_default();
         reasoning.insert("effort".to_string(), Value::String(level.clone()));
-        payload.insert("reasoning_effort".to_string(), Value::String(level));
+        payload.insert("reasoning_effort".to_string(), Value::String(level.clone()));
         payload.insert("reasoning".to_string(), Value::Object(reasoning));
     }
     let provider_model_id = trimmed(payload.get("model")).map(str::to_string);
-    json!({
+    Ok(json!({
         "payload": payload,
         "originalClientModel": original_client_model,
         "providerModelId": provider_model_id,
         "payloadChanged": payload_changed,
-    })
+        "resolvedSemantics": resolved,
+    }))
 }
 
 // feature_id: hub.router_direct_model_observation_effect_plan
@@ -168,9 +158,19 @@ fn run(input_json: String, builder: fn(&Value) -> Value) -> NapiResult<String> {
         .map_err(|error| napi::Error::from_reason(format!("direct route model hook output serialize failed: {error}")))
 }
 
+fn run_result(input_json: String, builder: fn(&Value) -> Result<Value, String>) -> NapiResult<String> {
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!("direct semantic input parse failed: {error}"))
+    })?;
+    let output = builder(&input).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!("direct semantic output serialize failed: {error}"))
+    })
+}
+
 #[napi(js_name = "planDirectRouteRequestHooksJson")]
 pub fn plan_direct_route_request_hooks_json(input_json: String) -> NapiResult<String> {
-    run(input_json, plan_request_hooks)
+    run_result(input_json, plan_request_hooks)
 }
 
 #[napi(js_name = "planDirectRouteModelObservationEffectsJson")]
@@ -205,18 +205,70 @@ pub fn project_direct_route_sse_headers_json(input_json: String) -> NapiResult<S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::direct_semantic_classification::resolve_direct_semantic_classification;
 
     #[test]
     fn request_plan_keeps_canonical_wire_model_and_thinking_truth() {
-        let output = plan_request_hooks(&json!({
+        let resolved = resolve_direct_semantic_classification(&json!({
             "payload": {"model":"deepseek-v4-pro", "reasoning":{"summary":"auto"}},
             "targetModelId":"DeepSeek-V4-Pro",
-            "routeParams":{"thinking":"max"}
-        }));
+            "routeThinking":"max"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {"model":"deepseek-v4-pro", "reasoning":{"summary":"auto"}},
+            "resolvedSemantics": resolved
+        }))
+        .expect("routing request plan");
         assert_eq!(output["payload"]["model"], "DeepSeek-V4-Pro");
         assert_eq!(output["originalClientModel"], "deepseek-v4-pro");
         assert_eq!(output["payload"]["reasoning_effort"], "xhigh");
         assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn resolved_passthrough_semantics_preserve_request_model_and_thinking() {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "directSemantic": "passthrough",
+            "selectedProviderKey": "provider.key1.wire-model",
+            "selectedRuntimeKey": "provider.key1",
+            "targetModelId": "wire-model",
+            "payload": {
+                "model": "client-model",
+                "reasoning_effort": "low",
+                "reasoning": { "effort": "low", "summary": "auto" }
+            },
+            "routeThinking": "high"
+        }))
+        .expect("resolved passthrough semantics");
+        assert_eq!(resolved.semantic_class, crate::direct_semantic_classification::DirectSemanticClass::Passthrough);
+        let output = plan_request_hooks(&json!({
+            "payload": {
+                "model": "client-model",
+                "reasoning_effort": "low",
+                "reasoning": { "effort": "low", "summary": "auto" }
+            },
+            "resolvedSemantics": resolved
+        }))
+        .expect("passthrough request plan");
+        assert_eq!(output["payload"]["model"], "client-model");
+        assert_eq!(output["payload"]["reasoning_effort"], "low");
+        assert_eq!(output["payload"]["reasoning"]["effort"], "low");
+        assert_eq!(output["payloadChanged"], false);
+    }
+
+    #[test]
+    fn resolved_semantics_reject_unknown_class_and_missing_request_contract() {
+        assert!(resolve_direct_semantic_classification(&json!({
+            "directSemantic": "invalid",
+            "payload": {"model": "client"},
+            "targetModelId": "wire"
+        }))
+        .is_err());
+        assert!(plan_request_hooks(&json!({
+            "payload": {"model": "client"}
+        }))
+        .is_err());
     }
 
     #[test]

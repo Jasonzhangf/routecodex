@@ -317,7 +317,9 @@
     "verify:metadata-center-dualwrite-api": "node scripts/architecture/verify-metadata-center-dualwrite-api.mjs",
     "verify:architecture-metadata-center-write-boundaries": "node scripts/architecture/verify-architecture-metadata-center-write-boundaries.mjs",
     "verify:vr-route-availability-default-floor": "node scripts/architecture/verify-vr-route-availability-default-floor.mjs",
-    "verify:route-metadata-preselected-route-owner": "node scripts/architecture/verify-route-metadata-preselected-route-owner.mjs"
+    "verify:route-metadata-preselected-route-owner": "node scripts/architecture/verify-route-metadata-preselected-route-owner.mjs",
+    "verify:direct-semantic-classification-design": "node scripts/architecture/verify-direct-semantic-classification-design.mjs",
+    "verify:direct-semantic-classification-runtime": "node scripts/architecture/verify-direct-semantic-classification-runtime.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

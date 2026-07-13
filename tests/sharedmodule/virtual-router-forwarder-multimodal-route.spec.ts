@@ -22,7 +22,10 @@ describe('VirtualRouter multimodal forwarder routing', () => {
       {
         providerId: 'media',
         models: {
-          'gpt-5.4-mini': { capabilities: ['text', 'multimodal'] }
+          'gpt-5.4-mini': {
+            capabilities: ['text', 'multimodal'],
+            direct: { semantics: 'passthrough' }
+          }
         }
       },
       {
@@ -75,7 +78,8 @@ describe('VirtualRouter multimodal forwarder routing', () => {
                 {
                   id: 'multimodal-forwarder',
                   mode: 'priority',
-                  targets: ['fwd.gpt.gpt-5.4-mini']
+                  targets: ['fwd.gpt.gpt-5.4-mini'],
+                  thinking: 'medium'
                 }
               ],
               default: [
@@ -116,6 +120,8 @@ describe('VirtualRouter multimodal forwarder routing', () => {
     );
 
     expect(result.target.providerKey).toBe('media.key1.gpt-5.4-mini');
+    expect(result.target.directSemantic).toBe('passthrough');
+    expect(result.target.routeThinking).toBe('medium');
     expect(result.decision.routeName).toBe('multimodal');
   });
 });

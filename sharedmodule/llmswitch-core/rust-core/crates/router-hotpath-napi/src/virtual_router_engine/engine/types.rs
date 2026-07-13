@@ -8,6 +8,7 @@ pub(super) struct SelectionResult {
     pub route_pool: Vec<String>,
     pub pool_id: Option<String>,
     pub route_params: Option<Map<String, Value>>,
+    pub route_thinking: Option<String>,
     pub unavailable_providers: Option<Value>,
     pub reasoning_tag: Option<String>,
     pub default_floor_protected: bool,
@@ -28,6 +29,7 @@ impl SelectionResult {
             route_pool,
             pool_id,
             route_params: None,
+            route_thinking: None,
             unavailable_providers: None,
             reasoning_tag: None,
             default_floor_protected: false,
@@ -36,6 +38,11 @@ impl SelectionResult {
 
     pub(super) fn with_route_params(mut self, route_params: Option<Map<String, Value>>) -> Self {
         self.route_params = route_params;
+        self
+    }
+
+    pub(super) fn with_route_thinking(mut self, route_thinking: Option<String>) -> Self {
+        self.route_thinking = route_thinking;
         self
     }
 

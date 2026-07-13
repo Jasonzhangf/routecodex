@@ -172,6 +172,19 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
 
+  - resource_id: direct.semantic_policy
+    resource_kind: control_contract
+    lifecycle: direct.semantic_classification.mainline
+    identity: [providerKey, runtimeKey, configuredModelId, semanticClass]
+    owner_feature_id: hub.direct_semantic_classification
+    owner_node: VrDirect03ResolvedSemantics
+    allowed_readers: [DirectReq04ProjectionPlan, DirectResp05ProjectionPlan, provider_runtime.observation]
+    allowed_writers: [VrDirect03ResolvedSemantics]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, ProviderRespInbound01Raw, ServerRespOutbound05ClientFrame, metadata.runtime_control]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:architecture-mainline-call-map]
+
   - resource_id: error.action_backoff_queue
     resource_kind: side_channel
     lifecycle: error.control_surface.mainline

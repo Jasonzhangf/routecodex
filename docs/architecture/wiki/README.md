@@ -69,28 +69,31 @@
 16. `docs/architecture/wiki/responses-direct-relay-map.md`
    - 看 `/v1/responses` 的 `direct` vs `relay` continuation ownership、合法入口、非法 crossing、provider pin。
 
-17. `docs/architecture/wiki/servertool-followup-call-graph.md`
+17. `docs/architecture/wiki/direct-semantic-classification-mainline.md`
+   - 看 same-protocol direct 的 provider/model policy 如何从 config 编译，经 VR real-target 分类，再驱动成对 request/response projector。
+
+18. `docs/architecture/wiki/servertool-followup-call-graph.md`
    - 看 `followup / CLI projection / stopless` 三条 servertool 分支如何回到主链，以及谁是 owner。
 
-18. `docs/architecture/wiki/stopless-session-mainline-source.md`
+19. `docs/architecture/wiki/stopless-session-mainline-source.md`
    - 看 stopless 的 runtime metadata 主线、当前请求 `tool_outputs` 恢复、以及 file/tmux/sessionDir 已移除到什么程度。
 
-19. `docs/architecture/wiki/coverage-matrix.md`
+20. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
-20. `docs/architecture/wiki/topology-residual-node-review.md`
+21. `docs/architecture/wiki/topology-residual-node-review.md`
    - 看 topology SSOT 中尚未成为 first-class mainline edge 的 residual nodes。
    - 这里替代旧 `topology-sync-manifest.yml` debt allowlist，不再把 residual nodes 隐藏成未消费 debt。
 
-21. `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md`
+22. `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md`
    - 看 Hub Pipeline Rust 残留引用接口如何从 broad native surface 收敛到 owner-specific narrow host 或 direct-native evidence helper。
    - 这里是 gate/doc/test-design review 面，不代表 runtime refactor 已开始。
 
-22. `docs/architecture/verification-map.yml`
+23. `docs/architecture/verification-map.yml`
    - 看最小验证栈。
 
-23. `docs/goals/*`
+24. `docs/goals/*`
    - 看当前专题 closeout / 审计 / migration 计划。
 
 ## Path Roles
@@ -118,6 +121,7 @@
 - `docs/architecture/wiki/chat-process-protocol-mapping.md`
 - `docs/architecture/wiki/server-responses-sse-bridge-map.md`
 - `docs/architecture/wiki/responses-direct-relay-map.md`
+- `docs/architecture/wiki/direct-semantic-classification-mainline.md`
 - `docs/architecture/wiki/servertool-followup-call-graph.md`
 - `docs/architecture/wiki/topology-residual-node-review.md`
 - `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md`

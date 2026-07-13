@@ -555,6 +555,81 @@ chains:
         status: anchored
         note: "Provider/runtime owns any provider-specific rejection. Direct passthrough must not force relay or fail-fast because of historical Responses tool-output shape."
 
+  - chain_id: direct.semantic_classification.mainline
+    summary: "Explicit provider/model direct policy compiles to a closed semantic class, resolves only after Virtual Router selects a real target, and drives paired request/response projection plans without payload inference."
+    entry_contract:
+      node: ConfigDirect01AuthoringPolicy
+      owner_doc: docs/design/direct-semantic-classification.md
+    edges:
+      - step_id: dsc-01
+        from_node: ConfigDirect01AuthoringPolicy
+        to_node: ConfigDirect02ValidatedPolicy
+        caller_symbol: normalize_model_direct_semantic
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+        callee_symbol: validate_config_direct_02
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+        owner_feature_id: hub.direct_semantic_classification
+        semantic_input: "provider/model authoring field `direct.semantics` with allowed values routing or passthrough"
+        semantic_output: "deterministic validated direct policy; missing value materializes routing and unknown value fails validation"
+        resource_flow:
+          consumes: [config.authoring_surface]
+          produces: [config.provider_profile_projection]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+        note: "Provider model authoring is compiled once into the deterministic provider profile projection; missing semantics materializes routing and illegal shapes fail before runtime."
+      - step_id: dsc-02
+        from_node: ConfigDirect02ValidatedPolicy
+        to_node: VrDirect03ResolvedSemantics
+        caller_symbol: resolve_direct_semantic_classification_json
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+        callee_symbol: resolve_direct_semantic_classification
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+        owner_feature_id: hub.direct_semantic_classification
+        semantic_input: "compiled provider/model policy plus Virtual Router real selected provider/model target and selected target routeThinking"
+        semantic_output: "request-scoped DirectSemanticClass and source provenance after forwarder resolution, including route_thinking from selected target routeThinking"
+        resource_flow:
+          consumes: [config.provider_profile_projection, route.selection]
+          produces: [direct.semantic_policy]
+          side_channel_reads: [route.selection]
+          side_channel_writes: [direct.semantic_policy]
+        status: anchored
+        note: "VR may resolve classification and provenance only. Route thinking must come from RoutePoolTier.thinking through SelectionResult.route_thinking and target.routeThinking, not routeParams. It must not mutate request/response payload, read MetadataCenter as policy truth, or let a forwarder own the policy."
+      - step_id: dsc-03
+        from_node: VrDirect03ResolvedSemantics
+        to_node: DirectReq04ProjectionPlan
+        caller_symbol: plan_request_hooks
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+        callee_symbol: build_direct_req_04_projection_plan
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+        owner_feature_id: hub.direct_semantic_classification
+        semantic_input: "resolved semantic class plus current client request, selected canonical model, route thinking, and explicit request thinking"
+        semantic_output: "closed request field projection plan using preserve/set actions"
+        resource_flow:
+          consumes: [direct.semantic_policy, request.normal_payload, route.selection]
+          produces: [provider.wire_payload]
+          side_channel_reads: [direct.semantic_policy, route.selection]
+          side_channel_writes: []
+        status: anchored
+        note: "Routing plans canonical model plus route thinking. Passthrough plans preserve client model/thinking. Host performs IO only and cannot branch on semantic class."
+      - step_id: dsc-04
+        from_node: VrDirect03ResolvedSemantics
+        to_node: DirectResp05ProjectionPlan
+        caller_symbol: plan_direct_route_response_action
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_response_action.rs
+        callee_symbol: build_direct_resp_05_projection_plan
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+        owner_feature_id: hub.direct_semantic_classification
+        semantic_input: "same request-scoped resolved semantic contract and raw provider JSON/SSE response"
+        semantic_output: "closed response projection plan using passthrough or restore-original actions"
+        resource_flow:
+          consumes: [direct.semantic_policy, response.provider_raw]
+          produces: [response.client_payload]
+          side_channel_reads: [direct.semantic_policy]
+          side_channel_writes: []
+        status: anchored
+        note: "Response consumes the same resolved contract as request. It must not infer mode from originalClientModel, payloadChanged, response shape, or provider name."
+
   - chain_id: response.mainline
     summary: "Provider response enters Hub, gets governed, then projects to client protocol and server frame."
     entry_contract:

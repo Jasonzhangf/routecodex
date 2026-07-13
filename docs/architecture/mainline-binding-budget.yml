@@ -49,6 +49,16 @@ chains:
       and provider direct dispatch must keep the current request body as the
       provider wire payload without provider-wire preflight, repair, sanitize,
       raw replay, or forced relay.
+  - chain_id: direct.semantic_classification.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 0
+    max_partial_edges: 0
+    max_binding_pending_edges: 4
+    note: >
+      Design-only budget for config validation, VR real-target classification,
+      request projection, and response projection. All four edges must remain
+      binding pending until Rust types/builders and paired positive/negative
+      tests land; no fifth edge or host/provider/forwarder shortcut is allowed.
   - chain_id: response.mainline
     expected_total_edges: 4
     min_anchored_edges: 4

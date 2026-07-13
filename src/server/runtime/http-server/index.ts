@@ -1923,6 +1923,8 @@ export class RouteCodexHttpServer {
         providerType,
         runtimeKey,
         modelId: typeof target.modelId === 'string' ? target.modelId : undefined,
+        routeThinking: target.routeThinking,
+        directSemantic: target.directSemantic,
       },
       routingDecision: routingDecision as { routeName?: string; pool?: string[] } | undefined,
       requestInfo: {

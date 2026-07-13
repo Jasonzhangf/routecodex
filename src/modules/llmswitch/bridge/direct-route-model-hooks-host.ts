@@ -12,17 +12,43 @@ type JsonObject = Record<string, unknown>;
 const getBinding = getRouterHotpathJsonBindingSync as unknown as () => Record<string, unknown>;
 const options = { label: 'direct-route-model-hooks-host' };
 
+export interface DirectRouteResolvedSemantics {
+  semanticClass: 'routing' | 'passthrough';
+  selectedProviderKey?: string;
+  selectedRuntimeKey?: string;
+  configuredModelId?: string;
+  requestModel?: string;
+  routeThinking?: string;
+  requestThinking?: string;
+  originalClientModel?: string;
+}
+
+export function resolveDirectSemanticClassificationNative(input: unknown): DirectRouteResolvedSemantics {
+  return assertNativeObject(
+    'resolveDirectSemanticClassificationJson',
+    callNativeJsonCapability(getBinding, 'resolveDirectSemanticClassificationJson', [input], options),
+    options,
+  ) as unknown as DirectRouteResolvedSemantics;
+}
+
 export function planDirectRouteRequestHooksNative(input: unknown): {
   payload: JsonObject;
   originalClientModel?: string;
   providerModelId?: string;
   payloadChanged: boolean;
+  resolvedSemantics: DirectRouteResolvedSemantics;
 } {
   return assertNativeObject(
     'planDirectRouteRequestHooksJson',
     callNativeJsonCapability(getBinding, 'planDirectRouteRequestHooksJson', [input], options),
     options,
-  ) as { payload: JsonObject; originalClientModel?: string; providerModelId?: string; payloadChanged: boolean };
+  ) as {
+    payload: JsonObject;
+    originalClientModel?: string;
+    providerModelId?: string;
+    payloadChanged: boolean;
+    resolvedSemantics: DirectRouteResolvedSemantics;
+  };
 }
 
 export interface DirectRouteModelObservationEffect {

@@ -964,7 +964,8 @@ impl VirtualRouterEngineCore {
                                     execution_decision_route_pool.clone(),
                                     Some(pool.id.clone()),
                                 )
-                                .with_route_params(pool.route_params.clone()),
+                                .with_route_params(pool.route_params.clone())
+                                .with_route_thinking(pool.thinking.clone()),
                             );
                         }
                     }
@@ -1031,6 +1032,7 @@ impl VirtualRouterEngineCore {
                         Some(pool.id.clone()),
                     )
                     .with_route_params(pool.route_params.clone())
+                    .with_route_thinking(pool.thinking.clone())
                     .with_default_floor_protected(default_floor_protected)
                     .with_reasoning_tag(
                         (route_name == "longcontext")

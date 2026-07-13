@@ -94,7 +94,7 @@ describe('router-direct-pipeline', () => {
           status: 200,
           body: { id: 'r1', object: 'response', model: 'grok-build', status: 'completed' },
         },
-        { originalClientModel: 'gpt-5.5' }
+        { resolvedSemantics: { semanticClass: 'routing', originalClientModel: 'gpt-5.5' } }
       ) as { body: { model: string } };
       expect(out.body.model).toBe('gpt-5.5');
     });
@@ -117,7 +117,7 @@ describe('router-direct-pipeline', () => {
             metadata: { model: 'provider-metadata-model' },
           },
         },
-        { originalClientModel: 'gpt-5.5' }
+        { resolvedSemantics: { semanticClass: 'routing', originalClientModel: 'gpt-5.5' } }
       ) as {
         body: {
           model: string;
@@ -146,7 +146,7 @@ describe('router-direct-pipeline', () => {
           headers: { 'x-upstream-mode': 'sse' },
           sseStream: upstream,
         },
-        { originalClientModel: 'gpt-5.5' }
+        { resolvedSemantics: { semanticClass: 'routing', originalClientModel: 'gpt-5.5' } }
       ) as { headers: Record<string, string>; sseStream: Readable };
 
       expect(out.headers['Content-Type'] || out.headers['content-type']).toMatch(/text\/event-stream/);
@@ -168,8 +168,52 @@ describe('router-direct-pipeline', () => {
           headers: { 'x-upstream-mode': 'sse' },
           sseStream: { serialized: true },
         },
-        { originalClientModel: 'gpt-5.5' }
+        { resolvedSemantics: { semanticClass: 'routing', originalClientModel: 'gpt-5.5' } }
       )).toThrow(/not a readable stream/);
+    });
+
+    it('preserves provider JSON model and thinking for passthrough semantics', () => {
+      const response = {
+        status: 200,
+        body: {
+          id: 'r_passthrough',
+          model: 'provider-model',
+          reasoning_effort: 'xhigh',
+        },
+      };
+      expect(applyDirectRouteResponseHooks(
+        response,
+        { resolvedSemantics: { semanticClass: 'passthrough', originalClientModel: 'client-model' } },
+      )).toBe(response);
+    });
+
+    it('preserves provider SSE model for passthrough semantics while projecting stream headers', async () => {
+      const upstream = Readable.from([
+        `data: ${JSON.stringify({ type: 'response.completed', response: { model: 'provider-model' } })}\n\n`,
+      ]);
+      const out = applyDirectRouteResponseHooks(
+        {
+          status: 200,
+          headers: { 'x-upstream-mode': 'sse' },
+          sseStream: upstream,
+        },
+        { resolvedSemantics: { semanticClass: 'passthrough', originalClientModel: 'client-model' } },
+      ) as { headers: Record<string, string>; sseStream: Readable };
+
+      const chunks: string[] = [];
+      for await (const chunk of out.sseStream) {
+        chunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      }
+      expect(chunks.join('')).toContain('"model":"provider-model"');
+      expect(chunks.join('')).not.toContain('"model":"client-model"');
+      expect(out.headers['Content-Type'] || out.headers['content-type']).toMatch(/text\/event-stream/);
+    });
+
+    it('fails fast when the response projector has no resolved contract', () => {
+      expect(() => applyDirectRouteResponseHooks(
+        { status: 200, body: { model: 'provider-model' } },
+        { resolvedSemantics: undefined as never },
+      )).toThrow(/resolvedSemantics/);
     });
   });
 
@@ -309,7 +353,7 @@ describe('router-direct-pipeline', () => {
           providerKey: 'openai.gpt-5.5',
           providerType: 'openai',
           runtimeKey: openaiHandle.runtimeKey,
-          routeParams: { thinking: 'medium' },
+          routeThinking: 'medium',
         },
         routingDecision: { routeName: 'thinking', pool: ['openai.gpt-5.5'] },
         requestInfo: { path: '/v1/chat/completions', headers: {} },
@@ -330,6 +374,52 @@ describe('router-direct-pipeline', () => {
       expect(openaiHandle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
+    it('explicit passthrough preserves direct request and provider response model/thinking', async () => {
+      const requestPayload = {
+        model: 'client-model',
+        reasoning_effort: 'low',
+        reasoning: { effort: 'low', summary: 'auto' },
+        messages: [{ role: 'user', content: 'raw' }],
+      };
+      (openaiHandle.instance.processIncomingDirect as jest.Mock).mockResolvedValueOnce({
+        status: 200,
+        body: {
+          id: 'chatcmpl_direct_semantic_passthrough',
+          model: 'provider-response-model',
+          reasoning_effort: 'xhigh',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        },
+      });
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'wire-model', messages: [{ role: 'user', content: 'raw' }] },
+        requestPayload,
+        target: {
+          providerKey: 'openai.key1.wire-model',
+          providerType: 'openai',
+          runtimeKey: openaiHandle.runtimeKey,
+          modelId: 'wire-model',
+          directSemantic: 'passthrough',
+          routeThinking: 'high',
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.key1.wire-model'] },
+        requestInfo: { path: '/v1/chat/completions', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === openaiHandle.runtimeKey ? openaiHandle : undefined,
+      });
+
+      const sentPayload = (openaiHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).toBe(requestPayload);
+      expect(sentPayload.model).toBe('client-model');
+      expect(sentPayload.reasoning_effort).toBe('low');
+      expect(sentPayload.reasoning).toEqual({ effort: 'low', summary: 'auto' });
+      expect(result.response).toMatchObject({
+        body: {
+          model: 'provider-response-model',
+          reasoning_effort: 'xhigh',
+        },
+      });
+    });
+
     it('keeps direct request object untouched when route thinking config is absent', async () => {
       const requestPayload = {
         model: 'gpt-5.5',
@@ -348,7 +438,6 @@ describe('router-direct-pipeline', () => {
           providerKey: 'openai.gpt-5.5',
           providerType: 'openai',
           runtimeKey: openaiHandle.runtimeKey,
-          routeParams: {},
         },
         routingDecision: { routeName: 'thinking', pool: ['openai.gpt-5.5'] },
         requestInfo: { path: '/v1/chat/completions', headers: {} },
