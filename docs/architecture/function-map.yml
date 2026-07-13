@@ -5195,6 +5195,53 @@ owners:
     notes:
       - "TS may observe opaque MetadataCenter existence/identity and execute returned bind/write effects, but may not select keys, families, reasons, or default actions."
 
+  - feature_id: hub.provider_response_servertool_retirement_effect_plan
+    status: active
+    summary: "Rust-owned provider-response legacy servertool retirement effect plan"
+    owner_kind: rust_runtime_owner
+    owner_scope: "validate legacy servertool runtime actions, select continue/reject, and project optional stop-gateway write plus fail-fast error; TS only executes returned IO/error effects"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    resource_bindings:
+      writes:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      reads:
+        - servertool.followup_state@HubRespChatProcess03Governed
+        - response.hub_semantic@HubRespChatProcess03Governed
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+    canonical_types:
+      - ProviderResponseServertoolRetirementEffectPlan
+    canonical_builders:
+      - plan_provider_response_servertool_retirement_effect
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - docs
+      - scripts
+    forbidden_paths:
+      - src/server
+      - src/providers
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "TS may execute Rust-returned stop-gateway MetadataCenter IO and throw the Rust-owned error, but may not inspect action arrays, select write tuples, or own retirement messages."
+
   - feature_id: server.response_inspection_helpers
     status: active
     summary: "request-executor response inspection helpers stay pure and queryable as one file-scoped owner"

@@ -19,6 +19,16 @@ export type ProviderResponseRuntimeEffectPlan = {
   [key: string]: unknown;
 };
 
+export type ProviderResponseServertoolRetirementEffectPlan = {
+  action: 'continue' | 'reject_legacy_actions';
+  stopGatewayWrite?: {
+    stopGatewayContext: Record<string, unknown>;
+    writer: { module: string; symbol: string; stage: string };
+    reason: string;
+  } | null;
+  errorMessage?: string;
+};
+
 export type PublishResponsesRecordPlan = {
   recordArgs: {
     requestId: string;
@@ -315,6 +325,17 @@ export function normalizeProviderResponseEffectPlanWithNative(input: {
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'normalizeProviderResponseEffectPlanJson',
+    [input],
+    { label }
+  );
+}
+
+export function planProviderResponseServertoolRetirementEffectWithNative(input: {
+  servertoolRuntimeActions: unknown;
+}): ProviderResponseServertoolRetirementEffectPlan {
+  return callNativeJsonCapability(
+    getProviderResponseNativeBindingSync,
+    'planProviderResponseServertoolRetirementEffectJson',
     [input],
     { label }
   );

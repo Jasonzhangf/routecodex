@@ -1,5 +1,6 @@
 import {
   normalizeProviderResponseEffectPlanWithNative,
+  planProviderResponseServertoolRetirementEffectWithNative,
   planChatProcessSessionUsageWithNative,
   publishResponsesRecordPlanWithNative,
   type NativeSseRuntimeProtocol,
@@ -90,25 +91,24 @@ export async function executeProviderResponseNativeServertoolEffects(args: {
   void args.entryEndpoint;
   void args.providerProtocol;
   void args.stageRecorder;
-  if (!Array.isArray(args.runtimeEffects.servertoolRuntimeActions)) {
-    throw new Error('Rust HubPipeline response path returned malformed servertool runtime actions');
+  const plan = planProviderResponseServertoolRetirementEffectWithNative({
+    servertoolRuntimeActions: args.runtimeEffects.servertoolRuntimeActions,
+  });
+  if (plan.action === 'continue') {
+    return { payload: args.payload, stage: 'unchanged' };
   }
-  const servertoolRuntimeActions = args.runtimeEffects.servertoolRuntimeActions;
-  if (servertoolRuntimeActions.length > 0) {
-    const firstAction = servertoolRuntimeActions.find(isRecord);
-    const stopGateway = isRecord(firstAction?.stopGateway) ? firstAction.stopGateway : undefined;
-    if (stopGateway) {
+  if (plan.action === 'reject_legacy_actions') {
+    if (plan.stopGatewayWrite) {
       writeRustStopGatewayContextToMetadataCenter({
         metadata: args.context as unknown as Record<string, unknown>,
-        stopGatewayContext: stopGateway,
-        writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
-        reason: 'rust stop gateway control signal',
+        stopGatewayContext: plan.stopGatewayWrite.stopGatewayContext,
+        writer: plan.stopGatewayWrite.writer,
+        reason: plan.stopGatewayWrite.reason,
       });
     }
-    throw new Error('Rust HubPipeline returned unsupported servertool runtime actions; server-side tool execution has been removed and CLI-owned tools must be projected by Rust');
+    throw new Error(plan.errorMessage);
   }
-
-  return { payload: args.payload, stage: 'unchanged' };
+  throw new Error(`unsupported provider response servertool retirement action: ${String(plan.action)}`);
 }
 
 export function executeProviderResponseNativeRuntimeStateEffect(args: {

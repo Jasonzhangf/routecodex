@@ -546,6 +546,7 @@
   "executeHubPipelineJson",
   "runHubPipelineLibJson",
   "normalizeProviderResponseEffectPlanJson",
+  "planProviderResponseServertoolRetirementEffectJson",
   "buildRespInboundSseErrorDescriptorJson",
   "deriveToolCallKeyJson",
   "extractToolCallsFromReasoningTextJson",

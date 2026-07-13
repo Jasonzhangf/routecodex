@@ -2629,6 +2629,28 @@ verification:
     notes:
       - "Positive gates lock bridge-center bind and owned runtime/debug writes; negative gates lock missing/same center no-op and forbid TS key/reason selection."
 
+  - feature_id: hub.provider_response_servertool_retirement_effect_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+    integration:
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks empty-action continue and retired-action reject/write; negatives lock malformed input, unknown native action, and TS action/reason/message revival."
+
   - feature_id: server.response_inspection_helpers
     change_risk: medium
     unit:

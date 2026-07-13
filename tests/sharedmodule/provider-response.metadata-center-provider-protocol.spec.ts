@@ -9,6 +9,29 @@ const normalizeProviderResponseEffectPlanWithNativeMock = jest.fn(() => ({
   },
   servertoolRuntimeActions: []
 }));
+const planProviderResponseServertoolRetirementEffectMock = jest.fn(
+  ({ servertoolRuntimeActions }: { servertoolRuntimeActions: unknown }) => {
+    if (!Array.isArray(servertoolRuntimeActions)) {
+      throw new Error('Rust HubPipeline response path returned malformed servertool runtime actions');
+    }
+    if (servertoolRuntimeActions.length === 0) return { action: 'continue' };
+    const firstAction = servertoolRuntimeActions.find(
+      (value) => value && typeof value === 'object' && !Array.isArray(value)
+    ) as Record<string, unknown> | undefined;
+    const stopGateway = firstAction?.stopGateway;
+    return {
+      action: 'reject_legacy_actions',
+      stopGatewayWrite: stopGateway && typeof stopGateway === 'object' && !Array.isArray(stopGateway)
+        ? {
+            stopGatewayContext: stopGateway,
+            writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
+            reason: 'rust stop gateway control signal',
+          }
+        : null,
+      errorMessage: 'Rust HubPipeline returned unsupported servertool runtime actions; server-side tool execution has been removed and CLI-owned tools must be projected by Rust',
+    };
+  }
+);
 const materializeProviderResponseSsePayloadWithNativeMock = jest.fn(async ({ payload }: { payload: unknown }) => payload);
 const planChatProcessSessionUsageMock = jest.fn();
 const buildSseFramesFromJsonWithNativeMock = jest.fn(() => ({
@@ -55,6 +78,9 @@ jest.unstable_mockModule(
       },
       normalizeProviderResponseEffectPlanJson: (inputJson: string) => JSON.stringify(
         normalizeProviderResponseEffectPlanWithNativeMock(JSON.parse(inputJson))
+      ),
+      planProviderResponseServertoolRetirementEffectJson: (inputJson: string) => JSON.stringify(
+        planProviderResponseServertoolRetirementEffectMock(JSON.parse(inputJson))
       ),
       resolveProviderProtocolJson: (inputJson: string) => {
         const input = JSON.parse(inputJson) as { metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null };

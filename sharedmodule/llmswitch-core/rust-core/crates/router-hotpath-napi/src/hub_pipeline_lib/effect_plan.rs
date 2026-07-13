@@ -174,6 +174,63 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> napi:
         .map_err(|error| napi::Error::from_reason(format!("serialize effect plan failed: {error}")))
 }
 
+// feature_id: hub.provider_response_servertool_retirement_effect_plan
+pub fn plan_provider_response_servertool_retirement_effect(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline response servertool retirement planner missing input".to_string()
+    })?;
+    let actions = record
+        .get("servertoolRuntimeActions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "Rust HubPipeline response path returned malformed servertool runtime actions"
+                .to_string()
+        })?;
+
+    if actions.is_empty() {
+        return Ok(json!({ "action": "continue" }));
+    }
+
+    let stop_gateway_write = actions.iter().find_map(|action| {
+        action.as_object().and_then(|record| {
+            record.get("stopGateway").filter(|value| value.is_object()).map(|value| {
+                json!({
+                    "stopGatewayContext": value,
+                    "writer": {
+                        "module": "provider-response.ts",
+                        "symbol": "convertProviderResponse",
+                        "stage": "HubRespChatProcess03Governed"
+                    },
+                    "reason": "rust stop gateway control signal"
+                })
+            })
+        })
+    });
+
+    Ok(json!({
+        "action": "reject_legacy_actions",
+        "stopGatewayWrite": stop_gateway_write,
+        "errorMessage": "Rust HubPipeline returned unsupported servertool runtime actions; server-side tool execution has been removed and CLI-owned tools must be projected by Rust"
+    }))
+}
+
+pub fn plan_provider_response_servertool_retirement_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid provider response servertool retirement input JSON: {error}"
+        ))
+    })?;
+    let output = plan_provider_response_servertool_retirement_effect(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize provider response servertool retirement plan failed: {error}"
+        ))
+    })
+}
+
 pub fn project_metadata_write_plan_to_runtime_control(input: &Value) -> Result<Value, String> {
     let record = input.as_object().ok_or_else(|| {
         "Rust HubPipeline metadata write plan projector missing input".to_string()
@@ -452,7 +509,9 @@ pub fn build_request_stage_hub_pipeline_result_json(input_json: String) -> napi:
 mod tests {
     use super::{
         build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
-        normalize_provider_response_effect_plan, project_metadata_write_plan_to_runtime_control,
+        normalize_provider_response_effect_plan,
+        plan_provider_response_servertool_retirement_effect,
+        project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
     };
     use serde_json::{json, Value};
@@ -503,6 +562,38 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.contains("unsupported effect kind"));
+    }
+
+    #[test]
+    fn plans_provider_response_servertool_retirement_continue_and_reject_paths() {
+        let continue_plan = plan_provider_response_servertool_retirement_effect(&json!({
+            "servertoolRuntimeActions": []
+        }))
+        .unwrap();
+        assert_eq!(continue_plan, json!({ "action": "continue" }));
+
+        let reject_plan = plan_provider_response_servertool_retirement_effect(&json!({
+            "servertoolRuntimeActions": [{
+                "action": "requireResponseHookRuntime",
+                "stopGateway": { "observed": true, "eligible": true }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(reject_plan["action"], json!("reject_legacy_actions"));
+        assert_eq!(
+            reject_plan["stopGatewayWrite"]["stopGatewayContext"],
+            json!({ "observed": true, "eligible": true })
+        );
+        assert_eq!(
+            reject_plan["stopGatewayWrite"]["reason"],
+            json!("rust stop gateway control signal")
+        );
+
+        let malformed = plan_provider_response_servertool_retirement_effect(&json!({
+            "servertoolRuntimeActions": null
+        }))
+        .unwrap_err();
+        assert!(malformed.contains("malformed servertool runtime actions"));
     }
 
     #[test]

@@ -601,6 +601,10 @@ describe('hub pipeline stage residue audit', () => {
     );
     const hostSource = fs.readFileSync(hostPath, 'utf8');
     const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const effectPlanRustSource = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
+    ), 'utf8');
 
     expect(hostSource).toContain('executeHubPipelineWithNative');
     expect(hostSource).toContain('runProviderResponseRustHubPipeline');
@@ -620,7 +624,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).toContain('executeProviderResponseNativeOutboundEffects');
     expect(effectsSource).toContain('executeProviderResponseNativeServertoolEffects');
     expect(effectsSource).toContain('executeProviderResponseNativeRuntimeStateEffect');
-    expect(effectsSource).toContain('server-side tool execution has been removed');
+    expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
+    expect(effectPlanRustSource).toContain('CLI-owned tools must be projected by Rust');
+    expect(effectsSource).not.toContain('server-side tool execution has been removed');
+    expect(effectsSource).toContain('planProviderResponseServertoolRetirementEffectWithNative');
+    expect(effectsSource).not.toContain('servertoolRuntimeActions.length > 0');
+    expect(effectsSource).not.toContain("firstAction?.stopGateway");
+    expect(effectsSource).not.toContain("reason: 'rust stop gateway control signal'");
     expect(hostSource).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(hostSource).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(hostSource).not.toContain('runServertoolResponseStageOrchestrationShell');
@@ -671,6 +681,10 @@ describe('hub pipeline stage residue audit', () => {
     const source = fs.readFileSync(filePath, 'utf8');
     const nativeCallsSource = fs.readFileSync(nativeCallsPath, 'utf8');
     const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const effectPlanRustSource = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
+    ), 'utf8');
     const splitSources = `${source}\n${nativeCallsSource}\n${effectsSource}`;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
       entries?: Array<{
@@ -701,7 +715,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(source).not.toContain('publishResponsesRecordPlanWithNative');
     expect(nativeCallsSource).toContain('publishResponsesRecordPlanWithNative');
     expect(source).toContain('buildSseFramesFromJsonWithNative');
-    expect(splitSources).toContain('server-side tool execution has been removed');
+    expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
+    expect(splitSources).not.toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('runServertoolResponseStageOrchestrationShell');
     expect(findings).toEqual([]);
   });
@@ -5863,6 +5878,10 @@ describe('hub pipeline stage residue audit', () => {
     const nativeCallsSource = fs.readFileSync(nativeCallsPath, 'utf8');
     const metadataEffectsSource = fs.readFileSync(metadataEffectsPath, 'utf8');
     const effectsSource = fs.readFileSync(effectsPath, 'utf8');
+    const effectPlanRustSource = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
+    ), 'utf8');
     const splitSources = `${hostSource}\n${nativeCallsSource}\n${metadataEffectsSource}\n${effectsSource}`;
     const findings = collectMatches(splitSources, [
       { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
@@ -5877,7 +5896,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).toContain('resolveProviderProtocolWithNative');
     expect(metadataEffectsSource).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
-    expect(splitSources).toContain('server-side tool execution has been removed');
+    expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
+    expect(splitSources).not.toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');
     expect(splitSources).not.toContain('resolveProviderResponsePostServertoolEffectWithNative');
     expect(splitSources).not.toContain('projectPostServertoolHubRespOutbound04ClientSemanticWithNative');

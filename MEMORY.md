@@ -2677,3 +2677,8 @@
 - `hub.provider_response_metadata_sync_effect_plan` owns provider-response post-conversion MetadataCenter binding and write selection in Rust. The only legal write targets are `runtime_control.stopless`, `runtime_control.stopMessageCompareContext`, and `debug_snapshot.hubStageTop`.
 - TS may observe request-local MetadataCenter identity, read opaque bridge snapshots, and execute the closed Rust plan; it must not choose keys, reasons, actions, or synthesize writes. Unknown actions fail-fast.
 - Verified with Rust 2/2, converter Jest 22/22, required architecture/native/build/release gates, installed `0.90.3932`, managed 5555 restart, and a real relay `/v1/responses` HTTP 200 replay with no internal metadata/control leakage.
+# 2026-07-13: provider-response retired servertool action handling is Rust-owned
+
+- `hub.provider_response_servertool_retirement_effect_plan` owns validation and closed `continue` / `reject_legacy_actions` planning, including optional stop-gateway MetadataCenter write and the rejection message.
+- `provider-response-effects.ts` may call the native planner, execute the returned write, return unchanged payload, or throw the returned error. It must not inspect action arrays, extract stopGateway, or own writer/reason/error strings.
+- Verified by Rust 1/1, provider-response Jest 261/261, required architecture/native/base/release gates, installed `0.90.3932`, managed 5555 restart, and real relay HTTP 200 replay without internal action/control leakage.
