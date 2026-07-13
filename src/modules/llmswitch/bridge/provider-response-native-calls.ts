@@ -38,6 +38,13 @@ export type ProviderResponseStoplessRuntimeControlEffectPlan =
       reason: string;
     };
 
+export type ProviderResponseStreamPipeEffectPlan =
+  | { action: 'no_pipe' }
+  | {
+      action: 'use_pipe';
+      pipe: { codec: string; requestId: string; payload: Record<string, unknown> };
+    };
+
 export type PublishResponsesRecordPlan = {
   recordArgs: {
     requestId: string;
@@ -356,6 +363,17 @@ export function planProviderResponseStoplessRuntimeControlEffectWithNative(input
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'planProviderResponseStoplessRuntimeControlEffectJson',
+    [input],
+    { label }
+  );
+}
+
+export function planProviderResponseStreamPipeEffectWithNative(input: {
+  streamPipe: unknown;
+}): ProviderResponseStreamPipeEffectPlan {
+  return callNativeJsonCapability(
+    getProviderResponseNativeBindingSync,
+    'planProviderResponseStreamPipeEffectJson',
     [input],
     { label }
   );

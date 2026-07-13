@@ -2,6 +2,7 @@ import {
   normalizeProviderResponseEffectPlanWithNative,
   planProviderResponseServertoolRetirementEffectWithNative,
   planProviderResponseStoplessRuntimeControlEffectWithNative,
+  planProviderResponseStreamPipeEffectWithNative,
   planChatProcessSessionUsageWithNative,
   publishResponsesRecordPlanWithNative,
   type NativeSseRuntimeProtocol,
@@ -177,15 +178,14 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
 export function readProviderResponseNativeStreamPipe(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
 }): { codec: NativeSseRuntimeProtocol | string; requestId: string; payload: JsonObject } | null {
-  const streamPipe = asRecord(args.runtimeEffects.streamPipe) ?? null;
-  if (!streamPipe) {
+  const plan = planProviderResponseStreamPipeEffectWithNative({
+    streamPipe: args.runtimeEffects.streamPipe,
+  });
+  if (plan.action === 'no_pipe') {
     return null;
   }
-  const codec = readString(streamPipe.codec);
-  const requestId = readString(streamPipe.requestId);
-  const payload = asRecord(streamPipe.payload) as JsonObject | undefined;
-  if (!codec || !requestId || !payload) {
-    throw new Error('Rust HubPipeline response path returned malformed stream pipe effect');
+  if (plan.action === 'use_pipe') {
+    return plan.pipe;
   }
-  return { codec: codec as NativeSseRuntimeProtocol | string, requestId, payload };
+  throw new Error('unsupported provider response stream-pipe action');
 }

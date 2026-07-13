@@ -572,3 +572,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS 仅调用 native planner并执行返回的 MetadataCenter write；旧 truthy 分支、通用 projector 调用、本地 writer/reason 已物理删除，unknown action fail-fast。
 - 正向锁 stopless + compare-context 写入且排除 learned-note；反向锁 absent/null-only no-op、旧 `{plan: ...}` 包装和未知字段拒绝、TS key/writer/reason 复活。
 - Rust 1/1、provider-response Jest 261/261、TypeScript、servertool/function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay 请求 `req_1783904054042_3dbaf9a4` 返回 HTTP 200 `pong`，当前主日志无新增错误，样本 provider/client 文件无内部 stopless/runtime-control key 泄漏。
+
+### 11.10 已闭环 slice：provider-response stream-pipe effect plan（2026-07-13）
+
+- Rust owner：`hub_pipeline_lib/effect_plan.rs`；闭合 `no_pipe` / `use_pipe`，验证并归一化 `codec`、`requestId`、object `payload`，拥有 malformed error。
+- TS `readProviderResponseNativeStreamPipe` 只调用 native plan、返回 pipe 或 null、拒绝未知 action；旧 `asRecord/readString` 字段校验和 malformed 文案已物理删除，Node SSE IO 保持不变。
+- 正向锁 trimmed codec/requestId 与 payload；反向锁 absent no-pipe、非 object/缺字段/空字符串 malformed、TS validation/error 复活。
+- Rust 1/1、provider-response Jest 261/261、TypeScript、function/resource/mainline/native-reference/rustification/wiki/native/base/release gates通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay SSE 请求 `req_1783905286656_132cccdc` HTTP 200，输出 `STREAM_PIPE_OK`、`response.completed`、`response.done` 且无 `event:error`；当前主日志与样本无内部 effect key 泄漏。

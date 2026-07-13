@@ -353,6 +353,61 @@ pub fn plan_provider_response_stopless_runtime_control_effect_json(
     })
 }
 
+// feature_id: hub.provider_response_stream_pipe_effect_plan
+pub fn plan_provider_response_stream_pipe_effect(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust provider response stream-pipe planner missing input".to_string()
+    })?;
+    let source = record.get("streamPipe").unwrap_or(&Value::Null);
+    if source.is_null() {
+        return Ok(json!({ "action": "no_pipe" }));
+    }
+    let pipe = source.as_object().ok_or_else(|| {
+        "Rust HubPipeline response path returned malformed stream pipe effect".to_string()
+    })?;
+    let codec = pipe
+        .get("codec")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let request_id = pipe
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let payload = pipe.get("payload").filter(|value| value.is_object());
+    let (Some(codec), Some(request_id), Some(payload)) = (codec, request_id, payload) else {
+        return Err(
+            "Rust HubPipeline response path returned malformed stream pipe effect".to_string(),
+        );
+    };
+    Ok(json!({
+        "action": "use_pipe",
+        "pipe": {
+            "codec": codec,
+            "requestId": request_id,
+            "payload": payload
+        }
+    }))
+}
+
+pub fn plan_provider_response_stream_pipe_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid provider response stream-pipe input JSON: {error}"
+        ))
+    })?;
+    let output = plan_provider_response_stream_pipe_effect(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize provider response stream-pipe plan failed: {error}"
+        ))
+    })
+}
+
 pub fn project_metadata_write_plan_to_runtime_control_write_plan_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -582,6 +637,7 @@ mod tests {
         normalize_provider_response_effect_plan,
         plan_provider_response_servertool_retirement_effect,
         plan_provider_response_stopless_runtime_control_effect,
+        plan_provider_response_stream_pipe_effect,
         project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
     };
@@ -726,6 +782,40 @@ mod tests {
         }))
         .unwrap_err();
         assert_eq!(malformed, "Rust provider response stopless runtime-control planner unknown write-plan field: plan");
+    }
+
+    #[test]
+    fn plans_provider_response_stream_pipe_effects() {
+        assert_eq!(
+            plan_provider_response_stream_pipe_effect(&json!({ "streamPipe": null })).unwrap(),
+            json!({ "action": "no_pipe" })
+        );
+        let output = plan_provider_response_stream_pipe_effect(&json!({
+            "streamPipe": {
+                "codec": " openai-responses ",
+                "requestId": " req-stream-1 ",
+                "payload": { "id": "resp-1" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(output, json!({
+            "action": "use_pipe",
+            "pipe": {
+                "codec": "openai-responses",
+                "requestId": "req-stream-1",
+                "payload": { "id": "resp-1" }
+            }
+        }));
+        for malformed in [
+            json!({ "streamPipe": false }),
+            json!({ "streamPipe": { "codec": "openai-chat", "requestId": "req-1" } }),
+            json!({ "streamPipe": { "codec": "", "requestId": "req-1", "payload": {} } }),
+        ] {
+            assert_eq!(
+                plan_provider_response_stream_pipe_effect(&malformed).unwrap_err(),
+                "Rust HubPipeline response path returned malformed stream pipe effect"
+            );
+        }
     }
 
     #[test]

@@ -5289,6 +5289,50 @@ owners:
     notes:
       - "Canonical input is the direct StoplessMetadataCenterWritePlan shape. TS must not restore the obsolete nested plan wrapper, select runtime-control keys, or own writer/reason strings."
 
+  - feature_id: hub.provider_response_stream_pipe_effect_plan
+    status: active
+    summary: "Rust-owned provider-response stream-pipe effect plan"
+    owner_kind: rust_runtime_owner
+    owner_scope: "validate streamPipe presence and canonical codec/requestId/payload shape, then select no_pipe/use_pipe; TS only consumes the returned pipe for Node stream IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    resource_bindings:
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - sse.provider_stream_aggregate@HubRespChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    canonical_types:
+      - ProviderResponseStreamPipeEffectPlan
+    canonical_builders:
+      - plan_provider_response_stream_pipe_effect
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - docs
+      - scripts
+    forbidden_paths:
+      - src/server
+      - src/providers
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "TS may preserve and operate Node stream references after this plan, but it may not validate or normalize codec/requestId/payload or own malformed-shape errors."
+
   - feature_id: server.response_inspection_helpers
     status: active
     summary: "request-executor response inspection helpers stay pure and queryable as one file-scoped owner"

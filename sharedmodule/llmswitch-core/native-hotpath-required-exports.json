@@ -548,6 +548,7 @@
   "normalizeProviderResponseEffectPlanJson",
   "planProviderResponseServertoolRetirementEffectJson",
   "planProviderResponseStoplessRuntimeControlEffectJson",
+  "planProviderResponseStreamPipeEffectJson",
   "buildRespInboundSseErrorDescriptorJson",
   "deriveToolCallKeyJson",
   "extractToolCallsFromReasoningTextJson",

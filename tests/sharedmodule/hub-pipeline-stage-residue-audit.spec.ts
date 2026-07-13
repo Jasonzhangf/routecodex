@@ -5898,6 +5898,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).toContain('planProviderResponseStoplessRuntimeControlEffectWithNative');
     expect(effectsSource).not.toContain('if (args.runtimeEffects.stoplessMetadataCenterWrite)');
     expect(effectsSource).not.toContain("reason: 'rust response chatprocess runtime control'");
+    expect(effectsSource).toContain('planProviderResponseStreamPipeEffectWithNative');
+    expect(effectsSource).not.toContain('const codec = readString(streamPipe.codec)');
+    expect(effectsSource).not.toContain('const requestId = readString(streamPipe.requestId)');
+    expect(effectsSource).not.toContain('const payload = asRecord(streamPipe.payload)');
+    expect(effectsSource).not.toContain('Rust HubPipeline response path returned malformed stream pipe effect');
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');

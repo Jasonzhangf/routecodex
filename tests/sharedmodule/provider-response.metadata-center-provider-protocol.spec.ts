@@ -106,6 +106,20 @@ jest.unstable_mockModule(
           reason: 'rust response chatprocess runtime control',
         } : { action: 'no_op' });
       },
+      planProviderResponseStreamPipeEffectJson: (inputJson: string) => {
+        const { streamPipe } = JSON.parse(inputJson) as { streamPipe?: unknown };
+        if (streamPipe === null || streamPipe === undefined) return JSON.stringify({ action: 'no_pipe' });
+        if (typeof streamPipe !== 'object' || Array.isArray(streamPipe)) {
+          throw new Error('Rust HubPipeline response path returned malformed stream pipe effect');
+        }
+        const pipe = streamPipe as Record<string, unknown>;
+        const codec = typeof pipe.codec === 'string' ? pipe.codec.trim() : '';
+        const requestId = typeof pipe.requestId === 'string' ? pipe.requestId.trim() : '';
+        if (!codec || !requestId || typeof pipe.payload !== 'object' || pipe.payload === null || Array.isArray(pipe.payload)) {
+          throw new Error('Rust HubPipeline response path returned malformed stream pipe effect');
+        }
+        return JSON.stringify({ action: 'use_pipe', pipe: { codec, requestId, payload: pipe.payload } });
+      },
       resolveProviderProtocolJson: (inputJson: string) => {
         const input = JSON.parse(inputJson) as { metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null };
         return JSON.stringify({ providerProtocol: input.metadataCenterSnapshot?.runtimeControl?.providerProtocol });

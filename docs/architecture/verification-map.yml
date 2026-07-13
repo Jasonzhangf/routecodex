@@ -2673,6 +2673,27 @@ verification:
     notes:
       - "Positive locks direct stopless/stopMessageCompareContext projection and learned-note exclusion; negatives lock absent/no-op, malformed/unknown fields, unknown native action, and TS key/writer/reason revival."
 
+  - feature_id: hub.provider_response_stream_pipe_effect_plan
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+    integration:
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks trimmed canonical codec/requestId plus object payload; negatives lock no-pipe, non-object/missing/empty fields, unknown native action, and TS field-validation/error revival."
+
   - feature_id: server.response_inspection_helpers
     change_risk: medium
     unit:
