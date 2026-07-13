@@ -2682,3 +2682,9 @@
 - `hub.provider_response_servertool_retirement_effect_plan` owns validation and closed `continue` / `reject_legacy_actions` planning, including optional stop-gateway MetadataCenter write and the rejection message.
 - `provider-response-effects.ts` may call the native planner, execute the returned write, return unchanged payload, or throw the returned error. It must not inspect action arrays, extract stopGateway, or own writer/reason/error strings.
 - Verified by Rust 1/1, provider-response Jest 261/261, required architecture/native/base/release gates, installed `0.90.3932`, managed 5555 restart, and real relay HTTP 200 replay without internal action/control leakage.
+
+# 2026-07-13: provider-response stopless runtime-control effect planning is Rust-owned
+
+- `hub.provider_response_stopless_runtime_control_effect_plan` consumes the direct canonical `StoplessMetadataCenterWritePlan` shape. It must not reuse the generic `{ plan: ... }` projector contract or add compatibility fallback.
+- Rust owns `no_op` / `apply_runtime_control`, the allowed `stopless` and `stopMessageCompareContext` projection, learned-note exclusion, writer/reason, and malformed/unknown-field rejection. TS only executes returned MetadataCenter IO and rejects unknown actions.
+- Verified by Rust 1/1, provider-response Jest 261/261, required architecture/native/base/release gates, installed `0.90.3932`, managed 5555 restart, and real relay request `req_1783904054042_3dbaf9a4` returning HTTP 200 `pong` without internal stopless/runtime-control leakage.

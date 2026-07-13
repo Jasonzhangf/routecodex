@@ -29,6 +29,15 @@ export type ProviderResponseServertoolRetirementEffectPlan = {
   errorMessage?: string;
 };
 
+export type ProviderResponseStoplessRuntimeControlEffectPlan =
+  | { action: 'no_op' }
+  | {
+      action: 'apply_runtime_control';
+      runtimeControl: Record<string, unknown>;
+      writer: { module: string; symbol: string; stage: string };
+      reason: string;
+    };
+
 export type PublishResponsesRecordPlan = {
   recordArgs: {
     requestId: string;
@@ -336,6 +345,17 @@ export function planProviderResponseServertoolRetirementEffectWithNative(input: 
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'planProviderResponseServertoolRetirementEffectJson',
+    [input],
+    { label }
+  );
+}
+
+export function planProviderResponseStoplessRuntimeControlEffectWithNative(input: {
+  stoplessMetadataCenterWrite: unknown;
+}): ProviderResponseStoplessRuntimeControlEffectPlan {
+  return callNativeJsonCapability(
+    getProviderResponseNativeBindingSync,
+    'planProviderResponseStoplessRuntimeControlEffectJson',
     [input],
     { label }
   );

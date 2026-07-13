@@ -1,6 +1,7 @@
 import {
   normalizeProviderResponseEffectPlanWithNative,
   planProviderResponseServertoolRetirementEffectWithNative,
+  planProviderResponseStoplessRuntimeControlEffectWithNative,
   planChatProcessSessionUsageWithNative,
   publishResponsesRecordPlanWithNative,
   type NativeSseRuntimeProtocol,
@@ -12,7 +13,6 @@ import {
   applyNativeRuntimeControlWritePlan,
   asRecord,
   isRecord,
-  projectNativeMetadataWritePlanToRuntimeControlWritePlan,
   readRequestTruthFromBoundMetadataCenter,
   readRuntimeControlFromBoundMetadataCenter,
   writeRustStopGatewayContextToMetadataCenter,
@@ -118,16 +118,18 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
   response: JsonObject;
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
 }): void {
-  if (args.runtimeEffects.stoplessMetadataCenterWrite) {
-    const writePlan = projectNativeMetadataWritePlanToRuntimeControlWritePlan(args.runtimeEffects.stoplessMetadataCenterWrite);
-    if (writePlan.runtimeControl) {
-      applyNativeRuntimeControlWritePlan({
-        metadata: args.context as unknown as Record<string, unknown>,
-        runtimeControl: writePlan.runtimeControl,
-        writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
-        reason: 'rust response chatprocess runtime control',
-      });
-    }
+  const stoplessWritePlan = planProviderResponseStoplessRuntimeControlEffectWithNative({
+    stoplessMetadataCenterWrite: args.runtimeEffects.stoplessMetadataCenterWrite,
+  });
+  if (stoplessWritePlan.action === 'apply_runtime_control') {
+    applyNativeRuntimeControlWritePlan({
+      metadata: args.context as unknown as Record<string, unknown>,
+      runtimeControl: stoplessWritePlan.runtimeControl,
+      writer: stoplessWritePlan.writer,
+      reason: stoplessWritePlan.reason,
+    });
+  } else if (stoplessWritePlan.action !== 'no_op') {
+    throw new Error('unsupported provider response stopless runtime-control action');
   }
 
   const runtimeStateWrite = asRecord(args.runtimeEffects.runtimeStateWrite) ?? null;

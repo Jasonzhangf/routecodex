@@ -283,6 +283,76 @@ pub fn project_metadata_write_plan_to_runtime_control_write_plan(
     }))
 }
 
+// feature_id: hub.provider_response_stopless_runtime_control_effect_plan
+pub fn plan_provider_response_stopless_runtime_control_effect(
+    input: &Value,
+) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust provider response stopless runtime-control planner missing input".to_string()
+    })?;
+    let source = record.get("stoplessMetadataCenterWrite").unwrap_or(&Value::Null);
+    let is_absent = source.is_null()
+        || source.as_bool() == Some(false)
+        || source.as_f64() == Some(0.0)
+        || source.as_str() == Some("");
+    if is_absent {
+        return Ok(json!({ "action": "no_op" }));
+    }
+
+    let source = source.as_object().ok_or_else(|| {
+        "Rust provider response stopless runtime-control planner malformed write plan".to_string()
+    })?;
+    for key in source.keys() {
+        if !matches!(key.as_str(), "stopless" | "stopMessageCompareContext" | "learnedNote") {
+            return Err(format!(
+                "Rust provider response stopless runtime-control planner unknown write-plan field: {key}"
+            ));
+        }
+    }
+    let mut runtime_control = Map::new();
+    for key in ["stopless", "stopMessageCompareContext"] {
+        if let Some(value) = source.get(key).filter(|value| !value.is_null()) {
+            if !value.is_object() {
+                return Err(format!(
+                    "Rust provider response stopless runtime-control planner malformed {key}"
+                ));
+            }
+            runtime_control.insert(key.to_string(), value.clone());
+        }
+    }
+    if runtime_control.is_empty() {
+        return Ok(json!({ "action": "no_op" }));
+    }
+
+    Ok(json!({
+        "action": "apply_runtime_control",
+        "runtimeControl": Value::Object(runtime_control),
+        "writer": {
+            "module": "provider-response.ts",
+            "symbol": "convertProviderResponse",
+            "stage": "HubRespChatProcess03Governed"
+        },
+        "reason": "rust response chatprocess runtime control"
+    }))
+}
+
+pub fn plan_provider_response_stopless_runtime_control_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid provider response stopless runtime-control input JSON: {error}"
+        ))
+    })?;
+    let output = plan_provider_response_stopless_runtime_control_effect(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize provider response stopless runtime-control plan failed: {error}"
+        ))
+    })
+}
+
 pub fn project_metadata_write_plan_to_runtime_control_write_plan_json(
     input_json: String,
 ) -> napi::Result<String> {
@@ -511,6 +581,7 @@ mod tests {
         build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
         normalize_provider_response_effect_plan,
         plan_provider_response_servertool_retirement_effect,
+        plan_provider_response_stopless_runtime_control_effect,
         project_metadata_write_plan_to_runtime_control,
         project_metadata_write_plan_to_runtime_control_write_plan,
     };
@@ -617,6 +688,44 @@ mod tests {
                 "nested": { "keep": true }
             })
         );
+    }
+
+    #[test]
+    fn plans_provider_response_stopless_runtime_control_effects() {
+        for absent in [Value::Null, json!(false), json!(0), json!("")] {
+            let output = plan_provider_response_stopless_runtime_control_effect(&json!({
+                "stoplessMetadataCenterWrite": absent
+            }))
+            .unwrap();
+            assert_eq!(output, json!({ "action": "no_op" }));
+        }
+
+        let empty = plan_provider_response_stopless_runtime_control_effect(&json!({
+            "stoplessMetadataCenterWrite": { "stopless": null, "stopMessageCompareContext": null, "learnedNote": {} }
+        }))
+        .unwrap();
+        assert_eq!(empty, json!({ "action": "no_op" }));
+
+        let apply = plan_provider_response_stopless_runtime_control_effect(&json!({
+            "stoplessMetadataCenterWrite": {
+                "stopless": { "active": true },
+                "stopMessageCompareContext": { "decision": "trigger" },
+                "learnedNote": { "ignored": true }
+            }
+        }))
+        .unwrap();
+        assert_eq!(apply["action"], json!("apply_runtime_control"));
+        assert_eq!(apply["runtimeControl"], json!({
+            "stopless": { "active": true },
+            "stopMessageCompareContext": { "decision": "trigger" }
+        }));
+        assert_eq!(apply["reason"], json!("rust response chatprocess runtime control"));
+
+        let malformed = plan_provider_response_stopless_runtime_control_effect(&json!({
+            "stoplessMetadataCenterWrite": { "plan": {} }
+        }))
+        .unwrap_err();
+        assert_eq!(malformed, "Rust provider response stopless runtime-control planner unknown write-plan field: plan");
     }
 
     #[test]

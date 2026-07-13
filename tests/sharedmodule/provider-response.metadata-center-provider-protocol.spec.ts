@@ -82,6 +82,30 @@ jest.unstable_mockModule(
       planProviderResponseServertoolRetirementEffectJson: (inputJson: string) => JSON.stringify(
         planProviderResponseServertoolRetirementEffectMock(JSON.parse(inputJson))
       ),
+      planProviderResponseStoplessRuntimeControlEffectJson: (inputJson: string) => {
+        const input = JSON.parse(inputJson) as { stoplessMetadataCenterWrite?: unknown };
+        const source = input.stoplessMetadataCenterWrite;
+        if (!source) return JSON.stringify({ action: 'no_op' });
+        if (typeof source !== 'object' || source === null || Array.isArray(source)) {
+          throw new Error('Rust provider response stopless runtime-control planner malformed write plan');
+        }
+        const parsed = source as Record<string, unknown>;
+        const allowed = new Set(['stopless', 'stopMessageCompareContext', 'learnedNote']);
+        const unknown = Object.keys(parsed).find((key) => !allowed.has(key));
+        if (unknown) throw new Error(`Rust provider response stopless runtime-control planner unknown write-plan field: ${unknown}`);
+        const runtimeControl = Object.fromEntries(
+          ['stopless', 'stopMessageCompareContext']
+            .filter((key) => parsed[key] !== null && parsed[key] !== undefined)
+            .map((key) => [key, parsed[key]])
+        );
+        const projected = { runtimeControl: Object.keys(runtimeControl).length > 0 ? runtimeControl : null };
+        return JSON.stringify(projected.runtimeControl ? {
+          action: 'apply_runtime_control',
+          runtimeControl: projected.runtimeControl,
+          writer: { module: 'provider-response.ts', symbol: 'convertProviderResponse', stage: 'HubRespChatProcess03Governed' },
+          reason: 'rust response chatprocess runtime control',
+        } : { action: 'no_op' });
+      },
       resolveProviderProtocolJson: (inputJson: string) => {
         const input = JSON.parse(inputJson) as { metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null };
         return JSON.stringify({ providerProtocol: input.metadataCenterSnapshot?.runtimeControl?.providerProtocol });

@@ -5895,6 +5895,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(nativeCallsSource).toContain('buildProviderResponseMetadataSnapshotWithNative');
     expect(hostSource).toContain('resolveProviderProtocolWithNative');
     expect(metadataEffectsSource).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
+    expect(effectsSource).toContain('planProviderResponseStoplessRuntimeControlEffectWithNative');
+    expect(effectsSource).not.toContain('if (args.runtimeEffects.stoplessMetadataCenterWrite)');
+    expect(effectsSource).not.toContain("reason: 'rust response chatprocess runtime control'");
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');

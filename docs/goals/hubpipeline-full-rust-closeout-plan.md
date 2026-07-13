@@ -565,3 +565,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS 仅调用 native plan、执行返回的 MetadataCenter write、返回 unchanged payload 或抛 Rust error；旧 array scan、stopGateway extraction、reason/message 已物理删除，unknown action fail-fast。
 - 正向锁 empty continue 与 non-empty reject/write；反向锁 malformed actions、无 stopGateway reject、TS action/reason/message 复活。
 - Rust 1/1、provider-response Jest 261/261、TypeScript、servertool/function-map/native-reference/rustification/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay 请求 `req_1783902800867_58653283` 返回 HTTP 200 `pong`，日志与样本无新增错误或内部 action/control 泄漏。
+
+### 11.9 已闭环 slice：provider-response stopless runtime-control effect plan（2026-07-13）
+
+- Rust owner：`hub_pipeline_lib/effect_plan.rs`；直接消费 canonical `StoplessMetadataCenterWritePlan`，产出 `no_op` / `apply_runtime_control`，并拥有 `stopless` / `stopMessageCompareContext` 投影、writer/reason 与 malformed/unknown-field fail-fast。
+- TS 仅调用 native planner并执行返回的 MetadataCenter write；旧 truthy 分支、通用 projector 调用、本地 writer/reason 已物理删除，unknown action fail-fast。
+- 正向锁 stopless + compare-context 写入且排除 learned-note；反向锁 absent/null-only no-op、旧 `{plan: ...}` 包装和未知字段拒绝、TS key/writer/reason 复活。
+- Rust 1/1、provider-response Jest 261/261、TypeScript、servertool/function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay 请求 `req_1783904054042_3dbaf9a4` 返回 HTTP 200 `pong`，当前主日志无新增错误，样本 provider/client 文件无内部 stopless/runtime-control key 泄漏。

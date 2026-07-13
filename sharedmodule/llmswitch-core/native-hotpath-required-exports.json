@@ -547,6 +547,7 @@
   "runHubPipelineLibJson",
   "normalizeProviderResponseEffectPlanJson",
   "planProviderResponseServertoolRetirementEffectJson",
+  "planProviderResponseStoplessRuntimeControlEffectJson",
   "buildRespInboundSseErrorDescriptorJson",
   "deriveToolCallKeyJson",
   "extractToolCallsFromReasoningTextJson",

@@ -5242,6 +5242,53 @@ owners:
     notes:
       - "TS may execute Rust-returned stop-gateway MetadataCenter IO and throw the Rust-owned error, but may not inspect action arrays, select write tuples, or own retirement messages."
 
+  - feature_id: hub.provider_response_stopless_runtime_control_effect_plan
+    status: active
+    summary: "Rust-owned provider-response stopless runtime-control effect plan"
+    owner_kind: rust_runtime_owner
+    owner_scope: "validate the canonical stopless MetadataCenter write-plan shape and select no-op/apply_runtime_control with owned runtime-control projection, writer, and reason; TS only executes returned MetadataCenter IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    resource_bindings:
+      writes:
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+      forbidden:
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+    canonical_types:
+      - ProviderResponseStoplessRuntimeControlEffectPlan
+    canonical_builders:
+      - plan_provider_response_stopless_runtime_control_effect
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - docs
+      - scripts
+    forbidden_paths:
+      - src/server
+      - src/providers
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    required_gates:
+      - npm run verify:servertool-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "Canonical input is the direct StoplessMetadataCenterWritePlan shape. TS must not restore the obsolete nested plan wrapper, select runtime-control keys, or own writer/reason strings."
+
   - feature_id: server.response_inspection_helpers
     status: active
     summary: "request-executor response inspection helpers stay pure and queryable as one file-scoped owner"

@@ -1969,6 +1969,15 @@ shared_multi_reference_functions:
       - response.mainline
       - servertool.hook_skeleton.mainline
     note: "Rust selects continue/reject and optional stop-gateway write for retired provider-response servertool actions; TS executes only the returned effects."
+  - function_id: native.provider_response_stopless_runtime_control_effect
+    binding_status: confirmed
+    symbol: plan_provider_response_stopless_runtime_control_effect_json
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    owner_feature_id: hub.provider_response_stopless_runtime_control_effect_plan
+    reused_by_chains:
+      - response.mainline
+      - servertool.hook_skeleton.mainline
+    note: "Rust validates the direct stopless MetadataCenter write-plan shape and selects no-op/apply_runtime_control with the complete runtime-control projection; TS executes only returned MetadataCenter IO."
   - function_id: error.execution_decision_consumer
     binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan
