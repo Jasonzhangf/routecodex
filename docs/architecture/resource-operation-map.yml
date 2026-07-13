@@ -978,6 +978,19 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
+  - resource_id: response.runtime_effect_materialization
+    resource_kind: projection
+    lifecycle: response.mainline
+    identity: [requestId, ownerFeatureId, hubResponseNode]
+    owner_feature_id: hub.provider_response_outbound_effect_materialization
+    owner_node: HubRespChatProcess03Governed
+    allowed_readers: [ProviderResponseHostEffectIo]
+    allowed_writers: [materialize_provider_response_outbound_effect_plan]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
   - resource_id: debug.internal_error_envelope
     resource_kind: side_channel
     lifecycle: internal_error_numbering.mainline

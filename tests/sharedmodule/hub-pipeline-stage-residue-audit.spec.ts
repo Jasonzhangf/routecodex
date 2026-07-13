@@ -617,8 +617,14 @@ describe('hub pipeline stage residue audit', () => {
     expect(hostSource).not.toContain('__nativeResponsePlan');
     expect(hostSource).not.toContain('runtimeStateWrite');
     expect(hostSource).not.toContain('servertoolRuntimeActions');
-    expect(effectsSource).toContain('nativeResponsePlan.effectPlan.effects');
-    expect(effectsSource).toContain('__nativeResponsePlan');
+    expect(effectsSource).toContain('materializeProviderResponseOutboundEffectPlanWithNative');
+    expect(effectsSource).not.toContain('nativeResponsePlan.effectPlan.effects');
+    expect(effectsSource).not.toContain('nativeResponsePlan.payload');
+    expect(effectsSource).not.toContain('nativeResponsePlan.diagnostics');
+    expect(effectsSource).not.toContain('nativeResponsePlan.requestId');
+    expect(effectsSource).not.toContain('__nativeResponsePlan');
+    expect(effectsSource).not.toContain("Array.isArray(effects)");
+    expect(effectsSource).not.toContain('Rust HubPipeline response path returned malformed effect plan');
     expect(effectsSource).toContain('runtimeStateWrite');
     expect(effectsSource).toContain('servertoolRuntimeActions');
     expect(effectsSource).toContain('executeProviderResponseNativeOutboundEffects');
@@ -710,7 +716,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(manifestEntry).toBeUndefined();
     expect(source).toContain('executeHubPipelineWithNative');
     expect(source).not.toContain('normalizeProviderResponseEffectPlanWithNative');
-    expect(nativeCallsSource).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(nativeCallsSource).toContain('materializeProviderResponseOutboundEffectPlanWithNative');
+    expect(nativeCallsSource).not.toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(source).toContain('materializeProviderResponseSsePayloadWithNative');
     expect(source).not.toContain('publishResponsesRecordPlanWithNative');
     expect(nativeCallsSource).toContain('publishResponsesRecordPlanWithNative');
@@ -5891,7 +5898,8 @@ describe('hub pipeline stage residue audit', () => {
       { label: 'ts-post-servertool-responses-projection-owner', pattern: /buildResponsesPayloadFromChatWithNative/ },
     ]);
 
-    expect(nativeCallsSource).toContain('normalizeProviderResponseEffectPlanWithNative');
+    expect(nativeCallsSource).toContain('materializeProviderResponseOutboundEffectPlanWithNative');
+    expect(nativeCallsSource).not.toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(nativeCallsSource).toContain('buildProviderResponseMetadataSnapshotWithNative');
     expect(hostSource).toContain('resolveProviderProtocolWithNative');
     expect(metadataEffectsSource).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');

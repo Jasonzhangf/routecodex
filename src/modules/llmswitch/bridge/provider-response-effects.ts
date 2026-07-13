@@ -1,5 +1,5 @@
 import {
-  normalizeProviderResponseEffectPlanWithNative,
+  materializeProviderResponseOutboundEffectPlanWithNative,
   planProviderResponseDiagnosticAlarmEffectWithNative,
   planProviderResponseServertoolRetirementEffectWithNative,
   planProviderResponseStoplessRuntimeControlEffectWithNative,
@@ -51,24 +51,13 @@ export function executeProviderResponseNativeOutboundEffects(args: {
   rawPayload: JsonObject;
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
 } {
-  const rawPayload = args.nativeResponsePlan.payload as JsonObject;
-  const effects = args.nativeResponsePlan.effectPlan.effects;
-  if (!Array.isArray(effects)) {
-    throw new Error('Rust HubPipeline response path returned malformed effect plan');
-  }
-  emitNativeHubPipelineDiagnosticAlarms({
-    requestId: args.nativeResponsePlan.requestId,
-    diagnostics: args.nativeResponsePlan.diagnostics,
-  });
-  const normalizedEffects = normalizeProviderResponseEffectPlanWithNative({ effects });
-  const runtimeEffects = normalizedEffects as ProviderResponseRuntimeEffectPlan;
-  (args.context as Record<string, unknown>).__nativeResponsePlan = {
-    payload: rawPayload,
-    effectPlan: { effects },
-    runtimeEffects,
-    diagnostics: args.nativeResponsePlan.diagnostics,
+  void args.context;
+  const materialized = materializeProviderResponseOutboundEffectPlanWithNative(args.nativeResponsePlan);
+  emitNativeHubPipelineDiagnosticAlarms(materialized.diagnosticInput);
+  return {
+    rawPayload: materialized.rawPayload,
+    runtimeEffects: materialized.runtimeEffects,
   };
-  return { rawPayload, runtimeEffects };
 }
 
 export async function executeProviderResponseNativeServertoolEffects(args: {

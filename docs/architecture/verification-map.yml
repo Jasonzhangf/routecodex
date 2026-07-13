@@ -2719,6 +2719,28 @@ verification:
     notes:
       - "Positive locks trimmed alarm/request identifiers and complete detail message projection; negatives lock missing/non-alarm no-op, malformed diagnostics, unknown native action, TS filtering/formatting/try-catch fallback revival, and payload isolation."
 
+  - feature_id: hub.provider_response_outbound_effect_materialization
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+    contract:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+    integration:
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive locks total native plan materialization; negatives lock malformed payload/requestId/diagnostics/effects, old normalize export, nested TS plan inspection, and dead context cache revival."
+
   - feature_id: server.response_inspection_helpers
     change_risk: medium
     unit:

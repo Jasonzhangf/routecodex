@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 // feature_id: hub.response_post_servertool_client_projection
+// feature_id: hub.provider_response_outbound_effect_materialization
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +100,7 @@ fn normalize_stream_pipe_payload(payload: &Value) -> Result<Value, String> {
     Ok(output)
 }
 
-pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, String> {
+fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, String> {
     let record = plan
         .as_object()
         .ok_or_else(|| "Rust HubPipeline response native effect plan unavailable".to_string())?;
@@ -165,13 +166,57 @@ pub fn normalize_provider_response_effect_plan(plan: &Value) -> Result<Value, St
     }))
 }
 
-pub fn normalize_provider_response_effect_plan_json(input_json: String) -> napi::Result<String> {
+pub fn materialize_provider_response_outbound_effect_plan(plan: &Value) -> Result<Value, String> {
+    let record = plan.as_object().ok_or_else(|| {
+        "Rust HubPipeline response outbound effect materializer missing native plan".to_string()
+    })?;
+    let raw_payload = record
+        .get("payload")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| {
+            "Rust HubPipeline response outbound effect materializer missing payload".to_string()
+        })?;
+    let request_id = record
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "Rust HubPipeline response outbound effect materializer missing requestId".to_string()
+        })?;
+    let diagnostics = record
+        .get("diagnostics")
+        .filter(|value| value.is_array())
+        .ok_or_else(|| {
+            "Rust HubPipeline response outbound effect materializer missing diagnostics".to_string()
+        })?;
+    let effect_plan = record.get("effectPlan").ok_or_else(|| {
+        "Rust HubPipeline response outbound effect materializer missing effectPlan".to_string()
+    })?;
+    let runtime_effects = normalize_provider_response_effect_plan(effect_plan)?;
+
+    Ok(json!({
+        "rawPayload": raw_payload,
+        "runtimeEffects": runtime_effects,
+        "diagnosticInput": {
+            "requestId": request_id,
+            "diagnostics": diagnostics,
+        },
+    }))
+}
+
+pub fn materialize_provider_response_outbound_effect_plan_json(
+    input_json: String,
+) -> napi::Result<String> {
     let value: Value = serde_json::from_str(&input_json)
-        .map_err(|error| napi::Error::from_reason(format!("invalid effect plan JSON: {error}")))?;
-    let output =
-        normalize_provider_response_effect_plan(&value).map_err(napi::Error::from_reason)?;
-    serde_json::to_string(&output)
-        .map_err(|error| napi::Error::from_reason(format!("serialize effect plan failed: {error}")))
+        .map_err(|error| napi::Error::from_reason(format!("invalid response outbound effect materialization JSON: {error}")))?;
+    let output = materialize_provider_response_outbound_effect_plan(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize response outbound effect materialization failed: {error}"
+        ))
+    })
 }
 
 // feature_id: hub.provider_response_diagnostic_alarm_effect_plan
@@ -698,6 +743,7 @@ pub fn build_request_stage_hub_pipeline_result_json(input_json: String) -> napi:
 mod tests {
     use super::{
         build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
+        materialize_provider_response_outbound_effect_plan,
         normalize_provider_response_effect_plan,
         plan_provider_response_diagnostic_alarm_effect,
         plan_provider_response_servertool_retirement_effect,
@@ -733,6 +779,103 @@ mod tests {
         );
         assert_eq!(output["runtimeStateWrite"]["requestId"], json!("req-1"));
         assert_eq!(output["servertoolRuntimeActions"], json!([]));
+    }
+
+    #[test]
+    fn materializes_provider_response_outbound_effect_plan() {
+        let output = materialize_provider_response_outbound_effect_plan(&json!({
+            "success": true,
+            "requestId": " req-materialize-1 ",
+            "payload": {
+                "id": "chatcmpl-materialize-1",
+                "object": "chat.completion"
+            },
+            "diagnostics": [
+                { "details": { "alarm": "missing_session" } }
+            ],
+            "effectPlan": {
+                "effects": [
+                    {
+                        "kind": "streamPipe",
+                        "payload": {
+                            "codec": "openai-responses",
+                            "requestId": " req-materialize-1 ",
+                            "payload": { "id": "resp-materialize-1" }
+                        }
+                    },
+                    {
+                        "kind": "runtimeStateWrite",
+                        "payload": {
+                            "requestId": "req-materialize-1",
+                            "keepForSubmitToolOutputs": true
+                        }
+                    },
+                    {
+                        "kind": "stoplessMetadataCenterWrite",
+                        "payload": {
+                            "stopless": { "active": true }
+                        }
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            output["rawPayload"],
+            json!({ "id": "chatcmpl-materialize-1", "object": "chat.completion" })
+        );
+        assert_eq!(output["diagnosticInput"]["requestId"], json!("req-materialize-1"));
+        assert_eq!(
+            output["diagnosticInput"]["diagnostics"][0]["details"]["alarm"],
+            json!("missing_session")
+        );
+        assert_eq!(
+            output["runtimeEffects"]["streamPipe"],
+            json!({
+                "codec": "openai-responses",
+                "requestId": "req-materialize-1",
+                "payload": { "id": "resp-materialize-1" }
+            })
+        );
+        assert_eq!(
+            output["runtimeEffects"]["runtimeStateWrite"]["keepForSubmitToolOutputs"],
+            json!(true)
+        );
+        assert_eq!(
+            output["runtimeEffects"]["stoplessMetadataCenterWrite"]["stopless"]["active"],
+            json!(true)
+        );
+        assert_eq!(output["runtimeEffects"]["servertoolRuntimeActions"], json!([]));
+    }
+
+    #[test]
+    fn rejects_malformed_provider_response_outbound_effect_materialization_inputs() {
+        for (input, expected) in [
+            (
+                json!(null),
+                "Rust HubPipeline response outbound effect materializer missing native plan",
+            ),
+            (
+                json!({ "requestId": "req", "diagnostics": [], "effectPlan": { "effects": [] } }),
+                "Rust HubPipeline response outbound effect materializer missing payload",
+            ),
+            (
+                json!({ "payload": {}, "requestId": " ", "diagnostics": [], "effectPlan": { "effects": [] } }),
+                "Rust HubPipeline response outbound effect materializer missing requestId",
+            ),
+            (
+                json!({ "payload": {}, "requestId": "req", "diagnostics": null, "effectPlan": { "effects": [] } }),
+                "Rust HubPipeline response outbound effect materializer missing diagnostics",
+            ),
+            (
+                json!({ "payload": {}, "requestId": "req", "diagnostics": [], "effectPlan": { "effects": null } }),
+                "Rust HubPipeline response native effect plan unavailable",
+            ),
+        ] {
+            let error = materialize_provider_response_outbound_effect_plan(&input).unwrap_err();
+            assert_eq!(error, expected);
+        }
     }
 
     #[test]

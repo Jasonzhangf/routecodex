@@ -1995,6 +1995,14 @@ shared_multi_reference_functions:
     reused_by_chains:
       - response.mainline
     note: "Rust selects diagnostic alarm entries and emits complete console message effects; TS executes console.warn IO only."
+  - function_id: native.provider_response_outbound_effect_materialization
+    binding_status: confirmed
+    symbol: materialize_provider_response_outbound_effect_plan_json
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    owner_feature_id: hub.provider_response_outbound_effect_materialization
+    reused_by_chains:
+      - response.mainline
+    note: "Rust validates the total response plan and returns payload, request/diagnostic projection, and normalized runtime effects; TS performs host IO only."
   - function_id: error.execution_decision_consumer
     binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan

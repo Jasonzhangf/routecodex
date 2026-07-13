@@ -875,9 +875,11 @@ pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String> {
         .map_err(|error| napi::Error::from_reason(format!("{}: {}", error.code, error.message)))
 }
 
-#[napi(js_name = "normalizeProviderResponseEffectPlanJson")]
-pub fn normalize_provider_response_effect_plan_json(input_json: String) -> NapiResult<String> {
-    hub_pipeline_lib::effect_plan::normalize_provider_response_effect_plan_json(input_json)
+#[napi(js_name = "materializeProviderResponseOutboundEffectPlanJson")]
+pub fn materialize_provider_response_outbound_effect_plan_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::materialize_provider_response_outbound_effect_plan_json(input_json)
 }
 
 #[napi(js_name = "planProviderResponseDiagnosticAlarmEffectJson")]

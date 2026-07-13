@@ -23,6 +23,17 @@ export type ProviderResponseDiagnosticAlarmEffectPlan =
   | { action: 'no_op' }
   | { action: 'emit'; messages: string[] };
 
+export type ProviderResponseDiagnosticAlarmInput = {
+  requestId: string;
+  diagnostics: Array<Record<string, unknown>>;
+};
+
+export type ProviderResponseOutboundEffectMaterialization = {
+  rawPayload: JsonObject;
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+  diagnosticInput: ProviderResponseDiagnosticAlarmInput;
+};
+
 export type ProviderResponseServertoolRetirementEffectPlan = {
   action: 'continue' | 'reject_legacy_actions';
   stopGatewayWrite?: {
@@ -342,21 +353,20 @@ export function buildProviderResponseMetadataSnapshotWithNative(input: unknown):
   );
 }
 
-export function normalizeProviderResponseEffectPlanWithNative(input: {
-  effects: unknown[];
-}): ProviderResponseRuntimeEffectPlan {
+export function materializeProviderResponseOutboundEffectPlanWithNative(
+  input: ProviderResponseNativePlan
+): ProviderResponseOutboundEffectMaterialization {
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
-    'normalizeProviderResponseEffectPlanJson',
+    'materializeProviderResponseOutboundEffectPlanJson',
     [input],
     { label }
   );
 }
 
-export function planProviderResponseDiagnosticAlarmEffectWithNative(input: {
-  requestId: string;
-  diagnostics: Array<Record<string, unknown>>;
-}): ProviderResponseDiagnosticAlarmEffectPlan {
+export function planProviderResponseDiagnosticAlarmEffectWithNative(
+  input: ProviderResponseDiagnosticAlarmInput
+): ProviderResponseDiagnosticAlarmEffectPlan {
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'planProviderResponseDiagnosticAlarmEffectJson',

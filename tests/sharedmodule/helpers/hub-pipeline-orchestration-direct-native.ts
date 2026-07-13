@@ -64,6 +64,15 @@ export type ProviderResponseRuntimeEffectPlan = {
   servertoolRuntimeActions: Array<Record<string, unknown>>;
 };
 
+export type ProviderResponseOutboundEffectMaterialization = {
+  rawPayload: Record<string, unknown>;
+  runtimeEffects: ProviderResponseRuntimeEffectPlan;
+  diagnosticInput: {
+    requestId: string;
+    diagnostics: Array<Record<string, unknown>>;
+  };
+};
+
 export type ProviderProtocolPlan = {
   providerProtocol: string;
 };
@@ -381,13 +390,38 @@ function parseRecord(raw: string, stage: string): Record<string, unknown> | null
   return parsed as Record<string, unknown>;
 }
 
-export function normalizeProviderResponseEffectPlanWithNative(
-  effectPlan: { effects: Array<Record<string, unknown>> }
-): ProviderResponseRuntimeEffectPlan {
-  const capability = 'normalizeProviderResponseEffectPlanJson';
-  const fail = (reason?: string) => failNativeRequired<ProviderResponseRuntimeEffectPlan>(capability, reason);
-  const raw = callNativeJsonString(capability, effectPlan);
-  return parseProviderResponseRuntimeEffectPlan(raw) ?? fail('invalid payload');
+export function materializeProviderResponseOutboundEffectPlanWithNative(
+  nativePlan: HubPipelineLibOutput
+): ProviderResponseOutboundEffectMaterialization {
+  const capability = 'materializeProviderResponseOutboundEffectPlanJson';
+  const fail = (reason?: string) => failNativeRequired<ProviderResponseOutboundEffectMaterialization>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, nativePlan), 'parseProviderResponseOutboundEffectMaterialization');
+  const rawPayload = parsed?.rawPayload;
+  const diagnosticInput = parsed?.diagnosticInput;
+  const runtimeEffectsRaw = parsed?.runtimeEffects;
+  if (
+    !rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)
+    || !diagnosticInput || typeof diagnosticInput !== 'object' || Array.isArray(diagnosticInput)
+    || !runtimeEffectsRaw || typeof runtimeEffectsRaw !== 'object' || Array.isArray(runtimeEffectsRaw)
+  ) {
+    return fail('invalid payload');
+  }
+  const runtimeEffects = parseProviderResponseRuntimeEffectPlan(JSON.stringify(runtimeEffectsRaw));
+  if (!runtimeEffects) {
+    return fail('invalid payload');
+  }
+  const diagnosticRecord = diagnosticInput as Record<string, unknown>;
+  if (typeof diagnosticRecord.requestId !== 'string' || !Array.isArray(diagnosticRecord.diagnostics)) {
+    return fail('invalid payload');
+  }
+  return {
+    rawPayload: rawPayload as Record<string, unknown>,
+    runtimeEffects,
+    diagnosticInput: {
+      requestId: diagnosticRecord.requestId,
+      diagnostics: diagnosticRecord.diagnostics as Array<Record<string, unknown>>,
+    },
+  };
 }
 
 export function resolveProviderProtocolWithNative(input: {

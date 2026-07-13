@@ -3,11 +3,11 @@ import { Readable } from 'node:stream';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
 const executeHubPipelineWithNativeMock = jest.fn();
-const normalizeProviderResponseEffectPlanWithNativeMock = jest.fn(() => ({
+const materializeProviderResponseOutboundEffectPlanWithNativeMock = jest.fn(() => ({
   runtimeStateWrite: {
     keepForSubmitToolOutputs: false
   },
-  servertoolRuntimeActions: []
+  servertoolRuntimeActions: [],
 }));
 const planProviderResponseServertoolRetirementEffectMock = jest.fn(
   ({ servertoolRuntimeActions }: { servertoolRuntimeActions: unknown }) => {
@@ -76,9 +76,34 @@ jest.unstable_mockModule(
         : directMetadataCenterSnapshot ?? nestedMetadataCenterSnapshot ?? null
         });
       },
-      normalizeProviderResponseEffectPlanJson: (inputJson: string) => JSON.stringify(
-        normalizeProviderResponseEffectPlanWithNativeMock(JSON.parse(inputJson))
-      ),
+      materializeProviderResponseOutboundEffectPlanJson: (inputJson: string) => {
+        const nativePlan = JSON.parse(inputJson) as Record<string, unknown>;
+        if (!nativePlan.payload || typeof nativePlan.payload !== 'object' || Array.isArray(nativePlan.payload)) {
+          throw new Error('Rust HubPipeline response outbound effect materializer missing payload');
+        }
+        if (typeof nativePlan.requestId !== 'string' || !nativePlan.requestId.trim()) {
+          throw new Error('Rust HubPipeline response outbound effect materializer missing requestId');
+        }
+        if (!Array.isArray(nativePlan.diagnostics)) {
+          throw new Error('Rust HubPipeline response outbound effect materializer missing diagnostics');
+        }
+        const effectPlan = nativePlan.effectPlan as { effects?: unknown } | undefined;
+        if (!effectPlan || !Array.isArray(effectPlan.effects)) {
+          throw new Error('Rust HubPipeline response native effect plan unavailable');
+        }
+        const projected = materializeProviderResponseOutboundEffectPlanWithNativeMock(nativePlan) as Record<string, unknown>;
+        if (projected.rawPayload && projected.runtimeEffects && projected.diagnosticInput) {
+          return JSON.stringify(projected);
+        }
+        return JSON.stringify({
+          rawPayload: nativePlan.payload,
+          runtimeEffects: projected,
+          diagnosticInput: {
+            requestId: nativePlan.requestId.trim(),
+            diagnostics: nativePlan.diagnostics,
+          },
+        });
+      },
       planProviderResponseDiagnosticAlarmEffectJson: (inputJson: string) => {
         const input = JSON.parse(inputJson) as {
           requestId: string;
@@ -243,13 +268,14 @@ const TEST_METADATA_WRITER = {
 describe('provider response metadata center providerProtocol contract', () => {
   beforeEach(() => {
     executeHubPipelineWithNativeMock.mockReset();
-    normalizeProviderResponseEffectPlanWithNativeMock.mockClear();
+    materializeProviderResponseOutboundEffectPlanWithNativeMock.mockClear();
     materializeProviderResponseSsePayloadWithNativeMock.mockClear();
     planChatProcessSessionUsageMock.mockClear();
     buildSseFramesFromJsonWithNativeMock.mockClear();
     recordResponsesResponse.mockClear();
     executeHubPipelineWithNativeMock.mockReturnValue({
       success: true,
+      requestId: 'req_provider_response_center_protocol',
       payload: {
         id: 'chatcmpl_provider_response_center_protocol',
         object: 'chat.completion',
@@ -333,6 +359,7 @@ describe('provider response metadata center providerProtocol contract', () => {
   it('fails fast when Rust returns a malformed provider response effect plan', async () => {
     executeHubPipelineWithNativeMock.mockReturnValueOnce({
       success: true,
+      requestId: 'req_provider_response_malformed_effect_plan',
       payload: {
         id: 'chatcmpl_provider_response_malformed_effect_plan',
         object: 'chat.completion',
@@ -373,12 +400,12 @@ describe('provider response metadata center providerProtocol contract', () => {
       context: context as any,
       entryEndpoint: '/v1/chat/completions',
       wantsStream: false
-    })).rejects.toThrow('Rust HubPipeline response path returned malformed effect plan');
-    expect(normalizeProviderResponseEffectPlanWithNativeMock).not.toHaveBeenCalled();
+    })).rejects.toThrow('Rust HubPipeline response native effect plan unavailable');
+    expect(materializeProviderResponseOutboundEffectPlanWithNativeMock).not.toHaveBeenCalled();
   });
 
   it('fails fast when Rust returns malformed provider response servertool runtime actions', async () => {
-    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+    materializeProviderResponseOutboundEffectPlanWithNativeMock.mockReturnValueOnce({
       runtimeStateWrite: {
         keepForSubmitToolOutputs: false
       },
@@ -413,7 +440,7 @@ describe('provider response metadata center providerProtocol contract', () => {
   });
 
   it('fails fast when Rust returns retired provider response servertool runtime actions', async () => {
-    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+    materializeProviderResponseOutboundEffectPlanWithNativeMock.mockReturnValueOnce({
       runtimeStateWrite: {
         keepForSubmitToolOutputs: false
       },
@@ -461,7 +488,7 @@ describe('provider response metadata center providerProtocol contract', () => {
   });
 
   it('fails fast when Rust returns malformed provider response stream pipe effect', async () => {
-    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+    materializeProviderResponseOutboundEffectPlanWithNativeMock.mockReturnValueOnce({
       runtimeStateWrite: {
         keepForSubmitToolOutputs: false
       },
@@ -500,7 +527,7 @@ describe('provider response metadata center providerProtocol contract', () => {
   });
 
   it('uses request truth id, not streamPipe-local id, when encoding Responses SSE frames', async () => {
-    normalizeProviderResponseEffectPlanWithNativeMock.mockReturnValueOnce({
+    materializeProviderResponseOutboundEffectPlanWithNativeMock.mockReturnValueOnce({
       runtimeStateWrite: {
         keepForSubmitToolOutputs: false
       },

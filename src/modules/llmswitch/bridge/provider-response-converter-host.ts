@@ -144,9 +144,6 @@ function runProviderResponseRustHubPipeline(nativeOptions: Parameters<typeof exe
     const message = nativeResponsePlan.error?.message ?? 'Rust HubPipeline response path failed';
     throw new Error(`Rust HubPipeline response path failed: ${code}: ${message}`);
   }
-  if (!nativeResponsePlan.payload || typeof nativeResponsePlan.payload !== 'object') {
-    throw new Error('Rust HubPipeline response path returned no payload');
-  }
   return nativeResponsePlan;
 }
 

@@ -156,7 +156,7 @@ function validateSourceSplit() {
     failures.push(`${hostFile}: host file must stay under 850 lines after split`);
   }
   for (const pattern of [
-    /\bfunction\s+(?:executeHubPipelineWithNative|buildProviderResponseMetadataSnapshotWithNative|normalizeProviderResponseEffectPlanWithNative|resolveProviderProtocolWithNative|publishResponsesRecordPlanWithNative|buildProviderSseStreamReadErrorDescriptorWithNative|materializeProviderResponseSsePayloadWithNative|resolveProviderResponseContextHelpersWithNative|planChatProcessSessionUsageWithNative|buildSseFramesFromJsonWithNative)\s*\(/u,
+    /\bfunction\s+(?:executeHubPipelineWithNative|buildProviderResponseMetadataSnapshotWithNative|materializeProviderResponseOutboundEffectPlanWithNative|resolveProviderProtocolWithNative|publishResponsesRecordPlanWithNative|buildProviderSseStreamReadErrorDescriptorWithNative|materializeProviderResponseSsePayloadWithNative|resolveProviderResponseContextHelpersWithNative|planChatProcessSessionUsageWithNative|buildSseFramesFromJsonWithNative)\s*\(/u,
     /\bfunction\s+(?:readBoundMetadataCenter|applyNativeRuntimeControlWritePlan|projectNativeMetadataWritePlanToRuntimeControlWritePlan|readMetadataCenterSnapshotForRust|writeRustStopGatewayContextToMetadataCenter)\s*\(/u,
     /\bfunction\s+(?:executeProviderResponseNativeOutboundEffects|executeProviderResponseNativeServertoolEffects|executeProviderResponseNativeRuntimeStateEffect|readProviderResponseNativeStreamPipe)\s*\(/u,
   ]) {

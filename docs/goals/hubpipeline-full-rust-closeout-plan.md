@@ -601,3 +601,11 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - 正向锁合法 alarm 完整消息；反向锁无 alarm no-op、malformed diagnostics fail-fast、TS filtering/formatting/fallback 不复活及 provider/client payload 隔离。
 - Rust focused 1/1、真实 native binding alarm integration 1/1、provider-response Jest 27/27、residue、TypeScript、resource/function/mainline/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。
 - 真实 normal/no-op `/v1/responses` 请求 `openai-responses-router-glm-5.2-20260713T100720868-512965-681` 返回 HTTP 200 `DIAGNOSTIC_NORMAL_OK`；无显式 session 的请求 `openai-responses-router-glm-5.2-20260713T100726469-512966-682` 由 runtime 生成 request-local session truth 并返回 HTTP 200 `DIAGNOSTIC_ALARM_OK`，因此 live 入口不会自然产生 missing-session alarm。emit 分支由真实 NAPI integration 锁住，输出 `[hub-pipeline][alarm] stopless_missing_session_id ...`；最新 canonical sample 无 diagnostic/runtime-control/continuation 内部字段泄漏，当前主日志无新增目标错误。
+
+### 11.14 已闭环 slice：provider-response outbound effect materialization（2026-07-13）
+
+- Rust owner：`materializeProviderResponseOutboundEffectPlanJson` 消费 total native response plan，验证 payload/requestId/diagnostics/effectPlan 并产出闭合 payload、diagnostic input 与 runtime effects。
+- TS 只调用 native materializer、执行 console/metadata/store/stream host IO；禁止读取 nested native plan、校验 effects array、重建 runtime projection 或保留零消费者 `__nativeResponsePlan` cache。
+- 正向锁 total plan materialization；反向锁 malformed payload/requestId/diagnostics/effects、旧 normalize export 与 TS nested inspection/cache 不复活。
+- Rust 正反 focused 2/2、provider-response Jest 27/27、residue、TypeScript、resource/function/host-split/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932`，`routecodex` / `rcc` / install current / 5555 health 四点一致。
+- 真实 5555 cross-protocol `/v1/responses` 请求 `req_1783911950468_327981fa` 从 `gpt-5.5` relay 到 `orangeai.key1.glm-5.2`，HTTP 200，返回 `EFFECT_MATERIALIZATION_LIVE_OK` 与 `requires_action`，日志 `finish_reason=tool_calls`；canonical sample 无 runtime-control/continuation/cache/materialization 内部字段泄漏。

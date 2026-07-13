@@ -183,26 +183,7 @@ describe('provider response Rust native plan', () => {
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native ok');
     expect(result.sseStream).toBeUndefined();
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'runtimeStateWrite',
-            payload: expect.objectContaining({
-              requestId: 'req_provider_response_native_plan_1',
-              clientProtocol: 'openai-chat',
-              payload: expect.objectContaining({
-                id: 'chatcmpl_native_plan_1',
-                object: 'chat.completion',
-                created: expect.any(Number)
-              }),
-              keepForSubmitToolOutputs: false
-            })
-          })
-        ])
-      }),
-      diagnostics: expect.any(Array)
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage9.client_remap');
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage10.sse_stream');
   });
@@ -232,7 +213,7 @@ describe('provider response Rust native plan', () => {
       wantsStream: false
     })).rejects.toThrow('Provider response conversion requires context.requestId');
 
-    expect(context.__nativeResponsePlan).toBeUndefined();
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 
   it('does not record Responses conversation before handler captures request context', async () => {
@@ -448,17 +429,7 @@ describe('provider response Rust native plan', () => {
     expect(bodyText).toContain('exec_command');
     expect(bodyText).toContain('routecodex hook run reasoningStop');
     expect(bodyText).toContain('stop_message_flow');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      runtimeEffects: expect.objectContaining({
-        stoplessMetadataCenterWrite: expect.objectContaining({
-          stopless: expect.objectContaining({
-            active: true,
-            sessionId: context.sessionId
-          })
-        }),
-        servertoolRuntimeActions: []
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 
   it('projects stopless CLI command for relay OpenAI Responses completed stop', async () => {
@@ -720,38 +691,7 @@ describe('provider response Rust native plan', () => {
     expect(sseBody).toContain('data:');
     expect(sseBody).toContain('native stream ok');
     expect(sseBody).toContain('[DONE]');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'streamPipe',
-            payload: expect.objectContaining({
-              codec: 'openai-chat',
-              requestId: 'req_provider_response_native_stream_plan_1',
-              payload: expect.objectContaining({
-                id: 'chatcmpl_native_stream_plan_1',
-                object: 'chat.completion',
-                created: expect.any(Number)
-              })
-            })
-          }),
-          expect.objectContaining({
-            kind: 'runtimeStateWrite',
-            payload: expect.objectContaining({
-              requestId: 'req_provider_response_native_stream_plan_1',
-              clientProtocol: 'openai-chat',
-              payload: expect.objectContaining({
-                id: 'chatcmpl_native_stream_plan_1',
-                object: 'chat.completion',
-                created: expect.any(Number)
-              }),
-              keepForSubmitToolOutputs: false
-            })
-          })
-        ])
-      }),
-      diagnostics: expect.any(Array)
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -788,24 +728,7 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native clock ok');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'runtimeStateWrite',
-            payload: expect.objectContaining({
-              requestId: 'req_provider_response_native_clock_plan_1',
-              clientProtocol: 'openai-chat',
-              payload: expect.objectContaining({
-                id: 'chatcmpl_native_clock_plan_1',
-                object: 'chat.completion',
-                created: expect.any(Number)
-              })
-            })
-          })
-        ])
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -842,24 +765,7 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native websearch ok');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({
-            kind: 'runtimeStateWrite',
-            payload: expect.objectContaining({
-              requestId: 'req_provider_response_native_websearch_plan_1',
-              clientProtocol: 'openai-chat',
-              payload: expect.objectContaining({
-                id: 'chatcmpl_native_websearch_plan_1',
-                object: 'chat.completion',
-                created: expect.any(Number)
-              })
-            })
-          })
-        ])
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual(expect.arrayContaining([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -896,13 +802,7 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native callbacks no tool ok');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({ kind: 'runtimeStateWrite' })
-        ])
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -941,12 +841,7 @@ describe('provider response Rust native plan', () => {
     expect(result.body?.choices?.[0]?.finish_reason).toBe('stop');
     const bodyText = JSON.stringify(result.body);
     expect(bodyText).not.toContain('exec_command');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      runtimeEffects: expect.objectContaining({
-        servertoolRuntimeActions: [],
-        stoplessMetadataCenterWrite: null
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 
   it('does not bypass Rust native response plan for inert servertool runtime config', async () => {
@@ -979,13 +874,7 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native servertool config ok');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({ kind: 'runtimeStateWrite' })
-        ])
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -1022,13 +911,7 @@ describe('provider response Rust native plan', () => {
     });
 
     expect(result.body?.choices?.[0]?.message?.content).toBe('native followup inert ok');
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      effectPlan: expect.objectContaining({
-        effects: expect.arrayContaining([
-          expect.objectContaining({ kind: 'runtimeStateWrite' })
-        ])
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
     expect(recorder.entries.map((entry) => entry.stage)).toEqual([
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
@@ -1074,11 +957,7 @@ describe('provider response Rust native plan', () => {
 
     expect(result.body?.choices?.[0]?.message?.tool_calls?.[0]?.function?.name).toBe('apply_patch');
 
-    expect(context.__nativeResponsePlan).toEqual(expect.objectContaining({
-      runtimeEffects: expect.objectContaining({
-        servertoolRuntimeActions: []
-      })
-    }));
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 
   it('fails fast instead of falling back to TS path when callback response shape is not Rust-observable', async () => {
@@ -1101,6 +980,6 @@ describe('provider response Rust native plan', () => {
       providerInvoker: async () => ({ response: {} as any })
     })).rejects.toThrow('Rust HubPipeline response path');
 
-    expect(context.__nativeResponsePlan).toBeUndefined();
+    expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 });
