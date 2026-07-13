@@ -219,6 +219,72 @@ pub fn materialize_provider_response_outbound_effect_plan_json(
     })
 }
 
+// feature_id: hub.provider_response_stage_recorder_effect_plan
+pub fn plan_provider_response_stage_recorder_effect(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline response stage recorder planner missing input".to_string()
+    })?;
+    let client_semantic = record
+        .get("clientSemantic")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| {
+            "Rust HubPipeline response stage recorder planner missing clientSemantic".to_string()
+        })?;
+    let stream_pipe = record.get("streamPipe").ok_or_else(|| {
+        "Rust HubPipeline response stage recorder planner missing streamPipe".to_string()
+    })?;
+    let protocol = if stream_pipe.is_null() {
+        "native-effect-plan"
+    } else {
+        let stream_pipe_record = stream_pipe.as_object().ok_or_else(|| {
+            "Rust HubPipeline response stage recorder planner malformed streamPipe".to_string()
+        })?;
+        stream_pipe_record
+            .get("codec")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                "Rust HubPipeline response stage recorder planner malformed streamPipe codec"
+                    .to_string()
+            })?
+    };
+
+    Ok(json!({
+        "records": [
+            {
+                "stage": "chat_process.resp.stage9.client_remap",
+                "payload": client_semantic,
+            },
+            {
+                "stage": "chat_process.resp.stage10.sse_stream",
+                "payload": {
+                    "passthrough": false,
+                    "protocol": protocol,
+                    "payload": client_semantic,
+                },
+            }
+        ]
+    }))
+}
+
+pub fn plan_provider_response_stage_recorder_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid response stage recorder effect JSON: {error}"
+        ))
+    })?;
+    let output = plan_provider_response_stage_recorder_effect(&value)
+        .map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize response stage recorder effect failed: {error}"
+        ))
+    })
+}
+
 // feature_id: hub.provider_response_diagnostic_alarm_effect_plan
 pub fn plan_provider_response_diagnostic_alarm_effect(input: &Value) -> Result<Value, String> {
     let record = input.as_object().ok_or_else(|| {
@@ -746,6 +812,7 @@ mod tests {
         materialize_provider_response_outbound_effect_plan,
         normalize_provider_response_effect_plan,
         plan_provider_response_diagnostic_alarm_effect,
+        plan_provider_response_stage_recorder_effect,
         plan_provider_response_servertool_retirement_effect,
         plan_provider_response_stopless_runtime_control_effect,
         plan_provider_response_stream_pipe_effect,
@@ -875,6 +942,61 @@ mod tests {
         ] {
             let error = materialize_provider_response_outbound_effect_plan(&input).unwrap_err();
             assert_eq!(error, expected);
+        }
+    }
+
+    #[test]
+    fn provider_response_stage_recorder_effect_projects_body_and_stream_records() {
+        let body_plan = plan_provider_response_stage_recorder_effect(&json!({
+            "clientSemantic": {"id": "resp-body"},
+            "streamPipe": null
+        }))
+        .expect("body stage recorder plan");
+        assert_eq!(
+            body_plan,
+            json!({
+                "records": [
+                    {
+                        "stage": "chat_process.resp.stage9.client_remap",
+                        "payload": {"id": "resp-body"}
+                    },
+                    {
+                        "stage": "chat_process.resp.stage10.sse_stream",
+                        "payload": {
+                            "passthrough": false,
+                            "protocol": "native-effect-plan",
+                            "payload": {"id": "resp-body"}
+                        }
+                    }
+                ]
+            })
+        );
+
+        let stream_plan = plan_provider_response_stage_recorder_effect(&json!({
+            "clientSemantic": {"id": "resp-stream"},
+            "streamPipe": {
+                "codec": "openai-responses",
+                "requestId": "req-stage",
+                "payload": {"id": "resp-stream"}
+            }
+        }))
+        .expect("stream stage recorder plan");
+        assert_eq!(
+            stream_plan["records"][1]["payload"]["protocol"],
+            json!("openai-responses")
+        );
+    }
+
+    #[test]
+    fn provider_response_stage_recorder_effect_rejects_malformed_input() {
+        for input in [
+            json!(null),
+            json!({"clientSemantic": "bad", "streamPipe": null}),
+            json!({"clientSemantic": {}, "streamPipe": []}),
+            json!({"clientSemantic": {}, "streamPipe": {"codec": ""}}),
+        ] {
+            let error = plan_provider_response_stage_recorder_effect(&input).unwrap_err();
+            assert!(error.contains("stage recorder"));
         }
     }
 

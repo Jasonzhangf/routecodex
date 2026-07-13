@@ -5923,6 +5923,13 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).not.toContain('const alarm = readString(details?.alarm)');
     expect(effectsSource).not.toContain('details=${JSON.stringify(details)}');
     expect(effectsSource).not.toContain('try {\n      console.warn');
+    expect(nativeCallsSource).toContain('planProviderResponseStageRecorderEffectWithNative');
+    expect(hostSource).toContain('planProviderResponseStageRecorderEffectWithNative');
+    expect(hostSource).not.toContain("'chat_process.resp.stage9.client_remap'");
+    expect(hostSource).not.toContain("'chat_process.resp.stage10.sse_stream'");
+    expect(hostSource).not.toContain("protocol: 'native-effect-plan'");
+    expect(hostSource).not.toContain('function normalizeRecordPayload');
+    expect(hostSource).not.toContain('[hub-pipeline] recordStage failed:');
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');

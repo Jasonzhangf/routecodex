@@ -4,12 +4,11 @@ import {
   buildSseFramesFromJsonWithNative,
   executeHubPipelineWithNative,
   materializeProviderResponseSsePayloadWithNative,
+  planProviderResponseStageRecorderEffectWithNative,
   resolveProviderProtocolWithNative,
   resolveProviderResponseContextHelpersWithNative,
 } from './provider-response-native-calls.js';
 import {
-  asRecord,
-  isRecord,
   readMetadataCenterSnapshotForRust,
 } from './provider-response-metadata-effects.js';
 import {
@@ -81,31 +80,21 @@ function buildReadableFromSseFrames(frames: string[]): Readable {
   return stream;
 }
 
-function normalizeRecordPayload(payload: unknown): object {
-  if (isRecord(payload)) {
-    return payload;
-  }
-  if (typeof payload === 'string' && payload.trim()) {
-    try {
-      const parsed = JSON.parse(payload) as unknown;
-      if (isRecord(parsed)) {
-        return parsed;
-      }
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function recordStage(recorder: StageRecorder | undefined, stageId: string, payload: unknown): void {
+function recordProviderResponseStages(args: {
+  recorder: StageRecorder | undefined;
+  clientSemantic: JsonObject;
+  streamPipe: { codec: string } | null;
+}): void {
+  const { recorder } = args;
   if (!recorder) {
     return;
   }
-  try {
-    recorder.record(stageId, normalizeRecordPayload(payload));
-  } catch (error) {
-    console.warn('[hub-pipeline] recordStage failed:', error instanceof Error ? error.message : String(error));
+  const plan = planProviderResponseStageRecorderEffectWithNative({
+    clientSemantic: args.clientSemantic,
+    streamPipe: args.streamPipe,
+  });
+  for (const record of plan.records) {
+    recorder.record(record.stage, record.payload);
   }
 }
 
@@ -293,11 +282,10 @@ export async function convertProviderResponse(
     runtimeEffects: outboundEffect.runtimeEffects
   });
   if (!streamPipe) {
-    recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
-    recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
-      passthrough: false,
-      protocol: 'native-effect-plan',
-      payload: hubRespOutbound04ClientSemantic
+    recordProviderResponseStages({
+      recorder: options.stageRecorder,
+      clientSemantic: hubRespOutbound04ClientSemantic,
+      streamPipe: null
     });
     return { body: hubRespOutbound04ClientSemantic };
   }
@@ -314,11 +302,10 @@ export async function convertProviderResponse(
     model: "",
   });
   const stream = buildReadableFromSseFrames(frameResult.frames);
-  recordStage(options.stageRecorder, 'chat_process.resp.stage9.client_remap', hubRespOutbound04ClientSemantic);
-  recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
-    passthrough: false,
-    protocol: streamPipe.codec,
-    payload: hubRespOutbound04ClientSemantic
+  recordProviderResponseStages({
+    recorder: options.stageRecorder,
+    clientSemantic: hubRespOutbound04ClientSemantic,
+    streamPipe
   });
   return {
     sseStream: stream as Readable,

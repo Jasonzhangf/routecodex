@@ -188,6 +188,38 @@ describe('provider response Rust native plan', () => {
     expect(recorder.entries.map((entry) => entry.stage)).toContain('chat_process.resp.stage10.sse_stream');
   });
 
+  it('fails fast when provider response stage recorder IO fails', async () => {
+    const context: Record<string, unknown> = withMetadataCenter({
+      requestId: 'req_provider_response_stage_recorder_failure_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      stopMessageEnabled: false,
+      routecodexPortStopMessageEnabled: false
+    });
+
+    await expect(convertProviderResponse({
+      providerProtocol: 'openai-chat',
+      providerResponse: {
+        id: 'chatcmpl_stage_recorder_failure_1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'must not hide recorder failure' },
+          finish_reason: 'stop'
+        }]
+      },
+      context: context as any,
+      entryEndpoint: '/v1/chat/completions',
+      wantsStream: false,
+      stageRecorder: {
+        record(): void {
+          throw new Error('stage recorder IO failed');
+        }
+      }
+    })).rejects.toThrow('stage recorder IO failed');
+  });
+
   it('fails fast when provider response context has no requestId instead of synthesizing unknown', async () => {
     const context: Record<string, unknown> = withMetadataCenter({
       entryEndpoint: '/v1/chat/completions',
@@ -696,6 +728,12 @@ describe('provider response Rust native plan', () => {
       'chat_process.resp.stage9.client_remap',
       'chat_process.resp.stage10.sse_stream'
     ]));
+    expect(recorder.entries.find((entry) => entry.stage === 'chat_process.resp.stage10.sse_stream')?.payload)
+      .toMatchObject({
+        passthrough: false,
+        protocol: 'openai-chat',
+        payload: { id: 'chatcmpl_native_stream_plan_1' }
+      });
   });
 
   it('does not bypass Rust native response plan for clock runtime metadata', async () => {

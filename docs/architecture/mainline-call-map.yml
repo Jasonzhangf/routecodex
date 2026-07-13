@@ -2003,6 +2003,14 @@ shared_multi_reference_functions:
     reused_by_chains:
       - response.mainline
     note: "Rust validates the total response plan and returns payload, request/diagnostic projection, and normalized runtime effects; TS performs host IO only."
+  - function_id: native.provider_response_stage_recorder_effect
+    binding_status: confirmed
+    symbol: plan_provider_response_stage_recorder_effect_json
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    owner_feature_id: hub.provider_response_stage_recorder_effect_plan
+    reused_by_chains:
+      - response.mainline
+    note: "Rust emits ordered response debug stage records; TS only executes recorder IO and does not own stage names or debug payload envelopes."
   - function_id: error.execution_decision_consumer
     binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan

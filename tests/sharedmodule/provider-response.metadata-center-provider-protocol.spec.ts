@@ -159,6 +159,32 @@ jest.unstable_mockModule(
         }
         return JSON.stringify({ action: 'use_pipe', pipe: { codec, requestId, payload: pipe.payload } });
       },
+      planProviderResponseStageRecorderEffectJson: (inputJson: string) => {
+        const { clientSemantic, streamPipe } = JSON.parse(inputJson) as {
+          clientSemantic?: unknown;
+          streamPipe?: unknown;
+        };
+        if (!clientSemantic || typeof clientSemantic !== 'object' || Array.isArray(clientSemantic)) {
+          throw new Error('Rust HubPipeline response stage recorder planner missing clientSemantic');
+        }
+        const protocol = streamPipe === null
+          ? 'native-effect-plan'
+          : typeof streamPipe === 'object' && streamPipe !== null && !Array.isArray(streamPipe)
+            ? String((streamPipe as Record<string, unknown>).codec ?? '').trim()
+            : '';
+        if (!protocol) {
+          throw new Error('Rust HubPipeline response stage recorder planner malformed streamPipe');
+        }
+        return JSON.stringify({
+          records: [
+            { stage: 'chat_process.resp.stage9.client_remap', payload: clientSemantic },
+            {
+              stage: 'chat_process.resp.stage10.sse_stream',
+              payload: { passthrough: false, protocol, payload: clientSemantic },
+            },
+          ],
+        });
+      },
       resolveProviderProtocolJson: (inputJson: string) => {
         const input = JSON.parse(inputJson) as { metadataCenterSnapshot?: { runtimeControl?: Record<string, unknown> } | null };
         return JSON.stringify({ providerProtocol: input.metadataCenterSnapshot?.runtimeControl?.providerProtocol });

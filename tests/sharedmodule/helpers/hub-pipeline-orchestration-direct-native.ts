@@ -424,6 +424,39 @@ export function materializeProviderResponseOutboundEffectPlanWithNative(
   };
 }
 
+export function planProviderResponseStageRecorderEffectWithNative(input: {
+  clientSemantic: Record<string, unknown>;
+  streamPipe: unknown;
+}): { records: Array<{ stage: string; payload: Record<string, unknown> }> } {
+  const capability = 'planProviderResponseStageRecorderEffectJson';
+  const fail = (reason?: string) => failNativeRequired<{
+    records: Array<{ stage: string; payload: Record<string, unknown> }>;
+  }>(capability, reason);
+  const parsed = parseRecord(callNativeJsonString(capability, input), 'parseProviderResponseStageRecorderEffect');
+  if (!parsed || !Array.isArray(parsed.records)) {
+    return fail('invalid payload');
+  }
+  const records = parsed.records.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return [];
+    }
+    const row = entry as Record<string, unknown>;
+    if (
+      typeof row.stage !== 'string'
+      || !row.payload
+      || typeof row.payload !== 'object'
+      || Array.isArray(row.payload)
+    ) {
+      return [];
+    }
+    return [{ stage: row.stage, payload: row.payload as Record<string, unknown> }];
+  });
+  if (records.length !== parsed.records.length) {
+    return fail('invalid payload');
+  }
+  return { records };
+}
+
 export function resolveProviderProtocolWithNative(input: {
   metadataCenterSnapshot: Record<string, unknown> | null;
 }): ProviderProtocolPlan {

@@ -60,6 +60,10 @@ export type ProviderResponseStreamPipeEffectPlan =
       pipe: { codec: string; requestId: string; payload: Record<string, unknown> };
     };
 
+export type ProviderResponseStageRecorderEffectPlan = {
+  records: Array<{ stage: string; payload: Record<string, unknown> }>;
+};
+
 export type PublishResponsesRecordPlan = {
   recordArgs: {
     requestId: string;
@@ -403,6 +407,18 @@ export function planProviderResponseStreamPipeEffectWithNative(input: {
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'planProviderResponseStreamPipeEffectJson',
+    [input],
+    { label }
+  );
+}
+
+export function planProviderResponseStageRecorderEffectWithNative(input: {
+  clientSemantic: Record<string, unknown>;
+  streamPipe: unknown;
+}): ProviderResponseStageRecorderEffectPlan {
+  return callNativeJsonCapability(
+    getProviderResponseNativeBindingSync,
+    'planProviderResponseStageRecorderEffectJson',
     [input],
     { label }
   );

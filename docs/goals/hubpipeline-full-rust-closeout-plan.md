@@ -609,3 +609,11 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - 正向锁 total plan materialization；反向锁 malformed payload/requestId/diagnostics/effects、旧 normalize export 与 TS nested inspection/cache 不复活。
 - Rust 正反 focused 2/2、provider-response Jest 27/27、residue、TypeScript、resource/function/host-split/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932`，`routecodex` / `rcc` / install current / 5555 health 四点一致。
 - 真实 5555 cross-protocol `/v1/responses` 请求 `req_1783911950468_327981fa` 从 `gpt-5.5` relay 到 `orangeai.key1.glm-5.2`，HTTP 200，返回 `EFFECT_MATERIALIZATION_LIVE_OK` 与 `requires_action`，日志 `finish_reason=tool_calls`；canonical sample 无 runtime-control/continuation/cache/materialization 内部字段泄漏。
+
+### 11.15 已闭环 slice：provider-response stage recorder effect plan（2026-07-13）
+
+- Rust owner：`planProviderResponseStageRecorderEffectJson` 验证 client semantic 与 stream pipe，产出有序 stage record 列表。
+- TS 只在 recorder 存在时调用 Rust planner 并执行 `recorder.record(stage, payload)`；禁止本地维护 stage9/stage10 字符串、`native-effect-plan` protocol、passthrough/payload envelope 或 string payload normalizer。
+- 正向锁 body 与 stream stage records；反向锁 malformed input、TS stage-name/envelope/normalizer 复活，以及 recorder IO failure 必须 fail-fast、不得吞错伪成功。
+- Rust focused 2/2、provider-response Rust plan + metadata protocol 28/28、metadata protocol 6/6、residue 234/234、TypeScript、resource/function/host-split/native-reference/rustification/wiki/native/base/release gates 通过；安装版本 `0.90.3932` 与 5555 health 对齐。
+- 真实 5555 cross-protocol `/v1/responses` 请求 `req_1783914007571_505e44b3` 从 `gpt-5.5` relay 到 `orangeai.key1.glm-5.2`，HTTP 200，返回 `STAGE_RECORDER_LIVE_OK`、`status=completed`，日志 `finish_reason=stop`；canonical sample 无 stage-recorder/runtime-control/continuation/native-plan 内部字段泄漏，目标请求附近无 `recordStage failed` 或新 `InvalidData`。
