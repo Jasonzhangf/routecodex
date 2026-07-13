@@ -174,6 +174,70 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> napi:
         .map_err(|error| napi::Error::from_reason(format!("serialize effect plan failed: {error}")))
 }
 
+// feature_id: hub.provider_response_diagnostic_alarm_effect_plan
+pub fn plan_provider_response_diagnostic_alarm_effect(input: &Value) -> Result<Value, String> {
+    let record = input.as_object().ok_or_else(|| {
+        "Rust HubPipeline response diagnostic alarm planner missing input".to_string()
+    })?;
+    let request_id = record
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "Rust HubPipeline response diagnostic alarm planner missing requestId".to_string()
+        })?;
+    let diagnostics = record
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "Rust HubPipeline response diagnostic alarm planner missing diagnostics".to_string()
+        })?;
+
+    let mut messages = Vec::new();
+    for diagnostic in diagnostics {
+        let Some(details) = diagnostic.get("details").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(alarm) = details
+            .get("alarm")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let details_json = serde_json::to_string(details).map_err(|error| {
+            format!("serialize provider response diagnostic alarm details failed: {error}")
+        })?;
+        messages.push(format!(
+            "[hub-pipeline][alarm] {alarm} requestId={request_id} details={details_json}"
+        ));
+    }
+
+    if messages.is_empty() {
+        return Ok(json!({ "action": "no_op" }));
+    }
+    Ok(json!({ "action": "emit", "messages": messages }))
+}
+
+pub fn plan_provider_response_diagnostic_alarm_effect_json(
+    input_json: String,
+) -> napi::Result<String> {
+    let value: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "invalid provider response diagnostic alarm input JSON: {error}"
+        ))
+    })?;
+    let output =
+        plan_provider_response_diagnostic_alarm_effect(&value).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "serialize provider response diagnostic alarm effect failed: {error}"
+        ))
+    })
+}
+
 // feature_id: hub.provider_response_servertool_retirement_effect_plan
 pub fn plan_provider_response_servertool_retirement_effect(input: &Value) -> Result<Value, String> {
     let record = input.as_object().ok_or_else(|| {
@@ -635,6 +699,7 @@ mod tests {
     use super::{
         build_request_stage_hub_pipeline_result, build_request_stage_native_result_plan,
         normalize_provider_response_effect_plan,
+        plan_provider_response_diagnostic_alarm_effect,
         plan_provider_response_servertool_retirement_effect,
         plan_provider_response_stopless_runtime_control_effect,
         plan_provider_response_stream_pipe_effect,
@@ -668,6 +733,38 @@ mod tests {
         );
         assert_eq!(output["runtimeStateWrite"]["requestId"], json!("req-1"));
         assert_eq!(output["servertoolRuntimeActions"], json!([]));
+    }
+
+    #[test]
+    fn plans_provider_response_diagnostic_alarm_emit_and_no_op_paths() {
+        let emit = plan_provider_response_diagnostic_alarm_effect(&json!({
+            "requestId": " req-alarm ",
+            "diagnostics": [
+                { "details": { "alarm": " stopless_missing_session_id ", "reason": "missing session" } },
+                { "details": { "alarm": " " } },
+                { "details": null }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(emit["action"], json!("emit"));
+        assert_eq!(
+            emit["messages"],
+            json!(["[hub-pipeline][alarm] stopless_missing_session_id requestId=req-alarm details={\"alarm\":\" stopless_missing_session_id \",\"reason\":\"missing session\"}"])
+        );
+
+        let no_op = plan_provider_response_diagnostic_alarm_effect(&json!({
+            "requestId": "req-no-alarm",
+            "diagnostics": [{ "details": { "status": "ok" } }]
+        }))
+        .unwrap();
+        assert_eq!(no_op, json!({ "action": "no_op" }));
+
+        let malformed = plan_provider_response_diagnostic_alarm_effect(&json!({
+            "requestId": "req-malformed",
+            "diagnostics": null
+        }))
+        .unwrap_err();
+        assert!(malformed.contains("missing diagnostics"));
     }
 
     #[test]

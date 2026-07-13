@@ -5910,6 +5910,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).not.toContain('...(plan.recordArgs.sessionId ?');
     expect(effectsSource).toContain('runtimeStateWrite: args.runtimeEffects.runtimeStateWrite ?? null');
     expect(effectsSource).not.toContain('asRecord(args.runtimeEffects.runtimeStateWrite)');
+    expect(effectsSource).toContain('planProviderResponseDiagnosticAlarmEffectWithNative');
+    expect(effectsSource).not.toContain('for (const diagnostic of args.diagnostics)');
+    expect(effectsSource).not.toContain('const alarm = readString(details?.alarm)');
+    expect(effectsSource).not.toContain('details=${JSON.stringify(details)}');
+    expect(effectsSource).not.toContain('try {\n      console.warn');
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');

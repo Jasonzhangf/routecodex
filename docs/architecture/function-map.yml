@@ -5333,6 +5333,52 @@ owners:
     notes:
       - "TS may preserve and operate Node stream references after this plan, but it may not validate or normalize codec/requestId/payload or own malformed-shape errors."
 
+  - feature_id: hub.provider_response_diagnostic_alarm_effect_plan
+    status: active
+    summary: "Rust-owned provider-response diagnostic alarm console effect plan"
+    owner_kind: rust_runtime_owner
+    owner_scope: "select diagnostic alarm entries, normalize alarm/request identifiers, and format complete console messages; TS only executes console.warn IO"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    resource_bindings:
+      writes:
+        - debug.diagnostic_alarm_effect@HubRespChatProcess03Governed
+      reads:
+        - response.hub_semantic@HubRespChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - ProviderResponseDiagnosticAlarmEffectPlan
+    canonical_builders:
+      - plan_provider_response_diagnostic_alarm_effect
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-response-native-calls.ts
+      - src/modules/llmswitch/bridge/provider-response-effects.ts
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - docs
+      - scripts
+    forbidden_paths:
+      - src/server
+      - src/providers
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/provider-response-rust-plan.spec.ts
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:hub-pipeline-native-reference-gate
+      - npm run verify:llmswitch-rustification-audit
+    migration_target: rust
+    notes:
+      - "TS may loop over Rust-returned message strings and call console.warn, but must not inspect diagnostics/details/alarm, trim identifiers, serialize details, choose no-op/emit, or own fallback message text."
+
   - feature_id: server.response_inspection_helpers
     status: active
     summary: "request-executor response inspection helpers stay pure and queryable as one file-scoped owner"

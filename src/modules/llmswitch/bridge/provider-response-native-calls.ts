@@ -19,6 +19,10 @@ export type ProviderResponseRuntimeEffectPlan = {
   [key: string]: unknown;
 };
 
+export type ProviderResponseDiagnosticAlarmEffectPlan =
+  | { action: 'no_op' }
+  | { action: 'emit'; messages: string[] };
+
 export type ProviderResponseServertoolRetirementEffectPlan = {
   action: 'continue' | 'reject_legacy_actions';
   stopGatewayWrite?: {
@@ -344,6 +348,18 @@ export function normalizeProviderResponseEffectPlanWithNative(input: {
   return callNativeJsonCapability(
     getProviderResponseNativeBindingSync,
     'normalizeProviderResponseEffectPlanJson',
+    [input],
+    { label }
+  );
+}
+
+export function planProviderResponseDiagnosticAlarmEffectWithNative(input: {
+  requestId: string;
+  diagnostics: Array<Record<string, unknown>>;
+}): ProviderResponseDiagnosticAlarmEffectPlan {
+  return callNativeJsonCapability(
+    getProviderResponseNativeBindingSync,
+    'planProviderResponseDiagnosticAlarmEffectJson',
     [input],
     { label }
   );

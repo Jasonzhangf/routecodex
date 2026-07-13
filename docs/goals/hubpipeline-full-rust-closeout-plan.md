@@ -593,3 +593,11 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS effect executor 只把 Rust runtime effect 值原样交给 native planner，absent 才投影为 null；禁止 `asRecord` 把 malformed shape 静默改成 null。
 - 正向锁 canonical object/null 继续产出 record/finalize/usage plan；反向锁 array/scalar 与 TS malformed-to-null coercion。
 - Rust focused 1/1、responses-history Rust 89/89、provider-response Jest 27/27、residue、TypeScript、function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay `/v1/responses` 请求 `req_1783907455629_46f0da58` 返回 HTTP 200 `RUNTIME_STATE_WRITE_OK`；最新 provider/client 样本无 runtime-state、continuation owner/scope 或内部 runtime-control key 泄漏，当前主日志无本请求新增错误。
+
+### 11.13 已闭环 slice：provider-response diagnostic alarm effect plan（2026-07-13）
+
+- Rust owner：`planProviderResponseDiagnosticAlarmEffectJson` 验证 requestId/diagnostics，筛选合法 `details.alarm`，trim 标识并生成完整 console message，闭合 `no_op` / `emit`。
+- TS 只遍历 Rust 返回的 message 字符串并执行 `console.warn`；禁止读取 diagnostics/details/alarm、JSON stringify details、选择 no-op/emit 或维护 try/catch fallback 文案。
+- 正向锁合法 alarm 完整消息；反向锁无 alarm no-op、malformed diagnostics fail-fast、TS filtering/formatting/fallback 不复活及 provider/client payload 隔离。
+- Rust focused 1/1、真实 native binding alarm integration 1/1、provider-response Jest 27/27、residue、TypeScript、resource/function/mainline/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。
+- 真实 normal/no-op `/v1/responses` 请求 `openai-responses-router-glm-5.2-20260713T100720868-512965-681` 返回 HTTP 200 `DIAGNOSTIC_NORMAL_OK`；无显式 session 的请求 `openai-responses-router-glm-5.2-20260713T100726469-512966-682` 由 runtime 生成 request-local session truth 并返回 HTTP 200 `DIAGNOSTIC_ALARM_OK`，因此 live 入口不会自然产生 missing-session alarm。emit 分支由真实 NAPI integration 锁住，输出 `[hub-pipeline][alarm] stopless_missing_session_id ...`；最新 canonical sample 无 diagnostic/runtime-control/continuation 内部字段泄漏，当前主日志无新增目标错误。

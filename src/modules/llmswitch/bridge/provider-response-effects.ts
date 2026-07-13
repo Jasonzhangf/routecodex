@@ -1,5 +1,6 @@
 import {
   normalizeProviderResponseEffectPlanWithNative,
+  planProviderResponseDiagnosticAlarmEffectWithNative,
   planProviderResponseServertoolRetirementEffectWithNative,
   planProviderResponseStoplessRuntimeControlEffectWithNative,
   planProviderResponseStreamPipeEffectWithNative,
@@ -12,7 +13,6 @@ import {
 } from './provider-response-native-calls.js';
 import {
   applyNativeRuntimeControlWritePlan,
-  isRecord,
   readRequestTruthFromBoundMetadataCenter,
   readRuntimeControlFromBoundMetadataCenter,
   writeRustStopGatewayContextToMetadataCenter,
@@ -27,28 +27,21 @@ type JsonObject = Record<string, unknown>;
 type StageRecorder = { record(stage: string, payload: object): void };
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
 function emitNativeHubPipelineDiagnosticAlarms(args: {
   requestId: string;
   diagnostics: Array<Record<string, unknown>>;
 }): void {
-  for (const diagnostic of args.diagnostics) {
-    const details = isRecord(diagnostic.details) ? diagnostic.details : null;
-    const alarm = readString(details?.alarm);
-    if (!alarm) {
-      continue;
-    }
-    try {
-      console.warn(
-        `[hub-pipeline][alarm] ${alarm} requestId=${args.requestId} details=${JSON.stringify(details)}`
-      );
-    } catch {
-      console.warn(`[hub-pipeline][alarm] ${alarm} requestId=${args.requestId}`);
-    }
+  const plan = planProviderResponseDiagnosticAlarmEffectWithNative(args);
+  if (plan.action === 'no_op') {
+    return;
   }
+  if (plan.action === 'emit') {
+    for (const message of plan.messages) {
+      console.warn(message);
+    }
+    return;
+  }
+  throw new Error('unsupported provider response diagnostic alarm action');
 }
 
 export function executeProviderResponseNativeOutboundEffects(args: {

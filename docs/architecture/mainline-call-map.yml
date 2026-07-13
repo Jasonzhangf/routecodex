@@ -1987,6 +1987,14 @@ shared_multi_reference_functions:
       - response.mainline
       - sse.chat_stream_projection.mainline
     note: "Rust validates streamPipe and selects no_pipe/use_pipe with canonical codec/requestId/payload; TS consumes the returned pipe only for Node stream IO."
+  - function_id: native.provider_response_diagnostic_alarm_effect
+    binding_status: confirmed
+    symbol: plan_provider_response_diagnostic_alarm_effect_json
+    file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+    owner_feature_id: hub.provider_response_diagnostic_alarm_effect_plan
+    reused_by_chains:
+      - response.mainline
+    note: "Rust selects diagnostic alarm entries and emits complete console message effects; TS executes console.warn IO only."
   - function_id: error.execution_decision_consumer
     binding_status: confirmed
     symbol: resolveProviderRetryExecutionPlan

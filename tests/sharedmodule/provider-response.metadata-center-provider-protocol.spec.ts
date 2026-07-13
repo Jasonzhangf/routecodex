@@ -79,6 +79,20 @@ jest.unstable_mockModule(
       normalizeProviderResponseEffectPlanJson: (inputJson: string) => JSON.stringify(
         normalizeProviderResponseEffectPlanWithNativeMock(JSON.parse(inputJson))
       ),
+      planProviderResponseDiagnosticAlarmEffectJson: (inputJson: string) => {
+        const input = JSON.parse(inputJson) as {
+          requestId: string;
+          diagnostics: Array<{ details?: Record<string, unknown> }>;
+        };
+        const messages = input.diagnostics.flatMap((diagnostic) => {
+          const details = diagnostic.details;
+          const alarm = typeof details?.alarm === 'string' ? details.alarm.trim() : '';
+          return alarm
+            ? [`[hub-pipeline][alarm] ${alarm} requestId=${input.requestId.trim()} details=${JSON.stringify(details)}`]
+            : [];
+        });
+        return JSON.stringify(messages.length > 0 ? { action: 'emit', messages } : { action: 'no_op' });
+      },
       planProviderResponseServertoolRetirementEffectJson: (inputJson: string) => JSON.stringify(
         planProviderResponseServertoolRetirementEffectMock(JSON.parse(inputJson))
       ),

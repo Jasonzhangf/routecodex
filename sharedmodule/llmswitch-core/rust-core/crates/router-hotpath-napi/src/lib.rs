@@ -880,6 +880,13 @@ pub fn normalize_provider_response_effect_plan_json(input_json: String) -> NapiR
     hub_pipeline_lib::effect_plan::normalize_provider_response_effect_plan_json(input_json)
 }
 
+#[napi(js_name = "planProviderResponseDiagnosticAlarmEffectJson")]
+pub fn plan_provider_response_diagnostic_alarm_effect_json(
+    input_json: String,
+) -> NapiResult<String> {
+    hub_pipeline_lib::effect_plan::plan_provider_response_diagnostic_alarm_effect_json(input_json)
+}
+
 #[napi(js_name = "planProviderResponseServertoolRetirementEffectJson")]
 pub fn plan_provider_response_servertool_retirement_effect_json(
     input_json: String,
