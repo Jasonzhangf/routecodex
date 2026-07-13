@@ -735,7 +735,7 @@ chains:
           side_channel_reads: [metadata.request_truth]
           side_channel_writes: [continuation.scope_state]
         status: anchored
-        note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; Rust `publishResponsesRecordPlanJson` emits the complete record args and TS passes them directly to store IO without rebuilding owner/entry/scope fields. SSE/handler closeout must not revive save logic."
+        note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; Rust `publishResponsesRecordPlanJson` validates runtimeStateWrite, emits the complete record args, and TS passes both effect input and record output without shape coercion or owner/entry/scope rebuilding. SSE/handler closeout must not revive save logic."
       - step_id: rct-07
         from_node: ChatProcRespContinuation07CanonicalSaved
         to_node: ChatProcRespContinuation08Released

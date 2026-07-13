@@ -1899,6 +1899,7 @@ verification:
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "Tests must lock response save request-id priority: the current active provider request label passed to the Rust record planner wins over stale `requestTruth.requestId` after request-executor rebind."
       - "Tests and residue gates must lock the complete Rust record effect contract: entryKind, continuationOwner, allowScopeContinuation, and optional scope/provider/route fields reach store IO unchanged; TS object reconstruction or field filtering must fail."
+      - "Runtime-state effect tests must pair a valid object/null path with malformed array/scalar rejection in Rust; residue gates must reject TS `asRecord(runtimeStateWrite)` coercion or any malformed-to-null compatibility path."
       - "SSE tests are not continuation gates. `handler-response-sse.ts` must not contain continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic."
       - "Handler response-store integration tests are stale continuation-owner evidence if they expect `sendPipelineResponse` or SSE transport to save continuation; migrate those assertions to bridge/Rust owner tests instead of reintroducing handler-side save logic."
 

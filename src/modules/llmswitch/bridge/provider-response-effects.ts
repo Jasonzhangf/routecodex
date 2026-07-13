@@ -12,7 +12,6 @@ import {
 } from './provider-response-native-calls.js';
 import {
   applyNativeRuntimeControlWritePlan,
-  asRecord,
   isRecord,
   readRequestTruthFromBoundMetadataCenter,
   readRuntimeControlFromBoundMetadataCenter,
@@ -133,7 +132,6 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
     throw new Error('unsupported provider response stopless runtime-control action');
   }
 
-  const runtimeStateWrite = asRecord(args.runtimeEffects.runtimeStateWrite) ?? null;
   const metadataCenterSnapshot = {
     requestTruth: readRequestTruthFromBoundMetadataCenter(args.context as unknown as Record<string, unknown>),
     runtimeControl: readRuntimeControlFromBoundMetadataCenter(args.context as unknown as Record<string, unknown>),
@@ -142,7 +140,7 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
     requestId: args.requestId,
     response: args.response,
     context: metadataCenterSnapshot,
-    runtimeStateWrite: runtimeStateWrite ?? null,
+    runtimeStateWrite: args.runtimeEffects.runtimeStateWrite ?? null,
     entryEndpoint: args.entryEndpoint,
   });
 

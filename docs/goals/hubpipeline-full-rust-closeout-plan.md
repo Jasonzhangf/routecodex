@@ -586,3 +586,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS effect executor 只能把 `plan.recordArgs` 原样交给 conversation store IO；禁止重建 object、truthy 过滤字段或补 owner/default。
 - 正向锁完整 record contract 直达 store；反向锁 TS 固定常量、optional spread 与第二语义 owner 不复活。
 - Rust 1/1、provider-response Jest 261/261、TypeScript、responses-history/function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay `/v1/responses` 请求 `req_1783906711085_1c5ea6bc` 返回 HTTP 200 `RECORD_EFFECT_OK`；最新样本 provider/client 响应无 continuation owner/scope 或内部 runtime-control key 泄漏，当前主日志无本请求新增错误。
+
+### 11.12 已闭环 slice：provider-response runtime-state write input contract（2026-07-13）
+
+- Rust owner：`publishResponsesRecordPlanJson` 解析并验证 `runtimeStateWrite` 必须是 object 或 null；非法 JSON、array、scalar 显式失败。
+- TS effect executor 只把 Rust runtime effect 值原样交给 native planner，absent 才投影为 null；禁止 `asRecord` 把 malformed shape 静默改成 null。
+- 正向锁 canonical object/null 继续产出 record/finalize/usage plan；反向锁 array/scalar 与 TS malformed-to-null coercion。
+- Rust focused 1/1、responses-history Rust 89/89、provider-response Jest 27/27、residue、TypeScript、function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay `/v1/responses` 请求 `req_1783907455629_46f0da58` 返回 HTTP 200 `RUNTIME_STATE_WRITE_OK`；最新 provider/client 样本无 runtime-state、continuation owner/scope 或内部 runtime-control key 泄漏，当前主日志无本请求新增错误。

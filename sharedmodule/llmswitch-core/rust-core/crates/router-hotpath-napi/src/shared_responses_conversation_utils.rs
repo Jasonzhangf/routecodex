@@ -6370,8 +6370,13 @@ pub fn publish_responses_record_plan_json(
         .map_err(|e| napi::Error::from_reason(format!("invalid response JSON: {e}")))?;
     let context: Value = serde_json::from_str(&context_json)
         .map_err(|e| napi::Error::from_reason(format!("invalid context JSON: {e}")))?;
-    let runtime_state_write: Value =
-        serde_json::from_str(&runtime_state_write_json).unwrap_or(Value::Null);
+    let runtime_state_write: Value = serde_json::from_str(&runtime_state_write_json)
+        .map_err(|e| napi::Error::from_reason(format!("invalid runtime state write JSON: {e}")))?;
+    if !runtime_state_write.is_null() && !runtime_state_write.is_object() {
+        return Err(napi::Error::from_reason(
+            "runtime state write must be an object or null",
+        ));
+    }
 
     let session_id =
         read_request_truth_field(&context, "sessionId").and_then(|v| read_trimmed_string(Some(v)));
@@ -6593,6 +6598,33 @@ mod tests {
         assert_eq!(
             planned["recordArgs"]["routingPolicyGroup"],
             json!("gateway-priority-5555")
+        );
+    }
+
+    #[test]
+    fn publish_responses_record_plan_rejects_non_object_runtime_state_write() {
+        let error = publish_responses_record_plan_json(
+            "req_runtime_state_shape".to_string(),
+            serde_json::to_string(&json!({
+                "id": "resp_runtime_state_shape",
+                "object": "response",
+                "status": "completed",
+                "output": []
+            }))
+            .unwrap(),
+            serde_json::to_string(&json!({
+                "requestTruth": { "sessionId": "sess_runtime_state_shape" }
+            }))
+            .unwrap(),
+            serde_json::to_string(&json!(["invalid-runtime-state-write"])).unwrap(),
+            "/v1/responses".to_string(),
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .reason
+                .contains("runtime state write must be an object or null")
         );
     }
 

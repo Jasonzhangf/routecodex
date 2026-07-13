@@ -5672,6 +5672,7 @@ owners:
       - "Control semantics required across the boundary must be carried in MetadataCenter; payload/history are data-plane truth and must not receive route/provider/protocol/control pins."
       - "Response save must use the current active provider request label passed to `publishResponsesRecordPlanJson` before any stale `requestTruth.requestId`; provider request-id rebind must not record under the old router id."
       - "`publishResponsesRecordPlanJson` owns the complete record effect contract, including entryKind=responses, continuationOwner=relay, allowScopeContinuation=true, and optional scope/provider/route fields. TS must pass recordArgs directly to store IO without rebuilding or filtering them."
+      - "`publishResponsesRecordPlanJson` also owns runtimeStateWrite outer-shape validation and fail-fast. TS must pass the Rust effect value unchanged (or null when absent), never coerce malformed arrays/scalars to null with `asRecord`."
       - "Handler response-store integration tests are not continuation owner gates. Stale tests that expect `sendPipelineResponse` or SSE transport to save continuation must be migrated to bridge/Rust owner tests or deleted, not greened by adding handler-side save logic."
 
   - feature_id: server.responses_sse_bridge_surface
