@@ -21,7 +21,10 @@ describe('install-release dependency installation', () => {
     expect(releaseScript).not.toContain('install-release.runtime-version-adoption');
   });
 
-  it('uses restart for live runtime and no-restart start only when no live runtime is available', () => {
+  it('uses one aggregate restart located by verify port and no-restart start only when stopped', () => {
+    expect(releaseScript).toContain('restart_release_runtime_for_aggregate');
+    expect(releaseScript).not.toContain('restart_release_runtime_for_port');
+    expect(releaseScript).toContain('定位并重启聚合 RouteCodex server instance（只请求一次）');
     expect(releaseScript).toContain('rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"');
     expect(releaseScript).not.toContain('|| start_release_runtime_for_port');
     expect(releaseScript).toMatch(

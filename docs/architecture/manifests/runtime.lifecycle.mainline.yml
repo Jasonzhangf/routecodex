@@ -1,8 +1,8 @@
 lifecycle_id: runtime.lifecycle.mainline
-summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime
-  workdir root; pid cache writes on start, stop-intent writes on stop, and
-  `tmuxSessionId` / request `sessionId` / `conversationId` stay separate
-  namespaces rather than directory-derived identity."
+summary: "Managed server lifecycle: restart identity is one aggregate listener
+  PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the
+  runtime workdir root, and tmux/request/conversation identities remain separate
+  namespaces."
 owner_feature_id: runtime.lifecycle.instance_registry
 entrypoint:
   node_id: ServerStartCommand

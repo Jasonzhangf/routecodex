@@ -541,7 +541,7 @@ flowchart LR
 
 ## runtime.lifecycle.mainline
 
-Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity.
+Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces.
 
 Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle-ssot.md`
 
@@ -595,8 +595,8 @@ flowchart LR
 | rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> planRuntimePidCacheWrite` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> planRuntimeStopIntentWrite` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> planRuntimeStopIntentConsume` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
-| rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session |
-| rtl-06 | `ServerRestartCommand -> RestartProcessSignal` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session |
+| rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
+| rtl-06 | `ServerRestartCommand -> RestartProcessSignal` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |
 | rtl-07 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-08 | `DaemonSupervisorLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-09 | `DaemonRestartLoop -> RuntimeInstanceRecord` | anchored | `writeRuntimeInstance -> planRuntimeInstanceWrite` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |

@@ -4,13 +4,13 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 // feature_id: runtime.lifecycle.restart_command
-import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
-import { resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
+import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccSessionsDir } from '../../config/user-data-paths.js';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 import { decodeUserConfigFileSync } from '../../config/user-config-codec.js';
 import { resolvePortGroupFromConfig } from './port-group-resolver.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
-import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
+import { formatUnknownError } from '../../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
   probeRouteCodexHealth,
@@ -71,6 +71,18 @@ type RestartApiKeyResolution = {
   source: 'config' | 'env' | 'none';
 };
 
+type RestartMember = {
+  host: string;
+  port: number;
+  oldPids: number[];
+};
+
+type RestartTarget = {
+  host: string;
+  port: number;
+  oldPids: number[];
+  members: RestartMember[];
+};
 
 function logRestartNonBlocking(
   ctx: RestartCommandContext,
@@ -338,6 +350,44 @@ function normalizeHostForHttp(host: string): string {
   return resolvePreferredLocalConnectHost(host);
 }
 
+function normalizePids(pids: number[]): number[] {
+  return Array.from(new Set(
+    pids.filter((pid) => Number.isFinite(pid) && pid > 0).map((pid) => Math.floor(pid))
+  )).sort((a, b) => a - b);
+}
+
+function pidIdentityKey(pids: number[]): string {
+  return normalizePids(pids).join(',');
+}
+
+function formatRestartMember(member: Pick<RestartMember, 'host' | 'port'>): string {
+  return `${member.host}:${member.port}`;
+}
+
+function isAggregateMemberReady(probe: RouteCodexHealthProbeResult | null): boolean {
+  return probe?.ok === true
+    && probe.body.ready === true
+    && probe.body.pipelineReady === true;
+}
+
+async function resolveMemberProbeHost(
+  ctx: RestartCommandContext,
+  member: Pick<RestartMember, 'host' | 'port'>
+): Promise<{ host: string; probe: RouteCodexHealthProbeResult | null }> {
+  const probeHosts = buildLocalProbeHostCandidates(member.host);
+  let lastProbe: RouteCodexHealthProbeResult | null = null;
+  for (const probeHost of probeHosts) {
+    lastProbe = await probeRouteCodexServer(ctx, probeHost, member.port);
+    if (lastProbe.ok) {
+      return { host: probeHost, probe: lastProbe };
+    }
+  }
+  if (!lastProbe) {
+    lastProbe = await probeRouteCodexServer(ctx, member.host, member.port);
+  }
+  return { host: member.host, probe: lastProbe };
+}
+
 async function requestProcessRestartViaHttp(
   ctx: RestartCommandContext,
   target: RestartTarget,
@@ -399,13 +449,7 @@ function planRestartTransport(
   });
 }
 
-type RestartTarget = {
-  host: string;
-  port: number;
-  oldPids: number[];
-};
-
-async function resolveRestartTargets(ctx: RestartCommandContext, options: RestartCommandOptions, spinner: Spinner): Promise<RestartTarget[]> {
+async function resolveRestartTarget(ctx: RestartCommandContext, options: RestartCommandOptions, spinner: Spinner): Promise<RestartTarget> {
   const explicitPort = parsePortOption(ctx, spinner, options.port);
   const explicitHost = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : null;
 
@@ -415,164 +459,226 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
       : resolvePortGroupFromConfig(ctx, {
           configPath: options.config,
           targetPort: explicitPort,
-          includeSiblingsForTarget: false
+          includeSiblingsForTarget: true
         });
-    const portsToRestart = grouped?.ports?.length ? grouped.ports : [explicitPort];
-    const host = explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;
-    const targets: RestartTarget[] = [];
-    for (const port of portsToRestart) {
-      const pids = ctx.findListeningPids(port);
-      if (!pids.length) {
-        spinner.fail(`No RouteCodex server found on ${host}:${port}`);
-        ctx.exit(1);
-      }
-      const probeHosts = buildLocalProbeHostCandidates(host);
-      let secondaryProbe: RouteCodexHealthProbeResult | null = null;
-      for (const probeHost of probeHosts) {
-        secondaryProbe = await probeRouteCodexServer(ctx, probeHost, port);
-        if (secondaryProbe.ok) {
-          break;
-        }
-      }
-      if (!secondaryProbe) {
-        secondaryProbe = await probeRouteCodexServer(ctx, host, port);
-      }
-      if (!secondaryProbe.ok) {
+    const configuredMembers = grouped?.members?.length
+      ? grouped.members
+      : [{ port: explicitPort, host: grouped?.host || LOCAL_HOSTS.LOCALHOST }];
+    const members: RestartMember[] = configuredMembers
+      .map((member) => ({
+        port: member.port,
+        host: explicitHost || member.host || LOCAL_HOSTS.LOCALHOST,
+        oldPids: normalizePids(ctx.findListeningPids(member.port))
+      }))
+      .sort((a, b) => a.port - b.port);
+    const locator = members.find((member) => member.port === explicitPort);
+    if (!locator?.oldPids.length) {
+      const host = locator?.host || explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;
+      spinner.fail(`No RouteCodex server found on ${host}:${explicitPort}`);
+      ctx.exit(1);
+    }
+    const locatorIdentity = pidIdentityKey(locator.oldPids);
+    const conflictingMember = members.find((member) => (
+      member.oldPids.length > 0 && pidIdentityKey(member.oldPids) !== locatorIdentity
+    ));
+    if (conflictingMember) {
+      spinner.fail('Configured aggregate server ports resolve to different listener identities');
+      ctx.logger.error(
+        `Locator ${formatRestartMember(locator)} pid(s)=${locatorIdentity}; `
+        + `${formatRestartMember(conflictingMember)} pid(s)=${pidIdentityKey(conflictingMember.oldPids)}`
+      );
+      ctx.exit(1);
+    }
+    for (const member of members) {
+      const resolved = await resolveMemberProbeHost(ctx, member);
+      member.host = resolved.host;
+      if (!isAggregateMemberReady(resolved.probe)) {
+        const probeDetails = resolved.probe?.ok
+          ? `ready=${String(resolved.probe.body.ready)} pipelineReady=${String(resolved.probe.body.pipelineReady)}`
+          : resolved.probe
+            ? describeHealthProbeFailure(resolved.probe)
+            : 'no probe result';
         spinner.warn(
-          `Health probe degraded on ${host}:${port} (${describeHealthProbeFailure(secondaryProbe)}); sending in-place restart signal to managed pid(s).`
+          `Health probe degraded on ${formatRestartMember(member)} `
+          + `(${probeDetails}); `
+          + 'requesting one aggregate in-session restart.'
         );
       }
-      targets.push({
-        host,
-        port,
-        oldPids: pids
-      });
     }
-    targets.sort((a, b) => a.port - b.port);
-    if (targets.length > 1) {
-      ctx.logger.info(`[restart] resolved config port-group: ${targets.map((t) => t.port).join(', ')}`);
+    if (members.length > 1) {
+      ctx.logger.info(`[restart] resolved aggregate members: ${members.map((member) => member.port).join(', ')}`);
     }
-    return targets;
+    return {
+      host: locator.host,
+      port: locator.port,
+      oldPids: locator.oldPids,
+      members
+    };
   }
 
-  const candidatePorts = new Set<number>();
+  const candidateMembers = new Map<number, { port: number; host: string; required: boolean }>();
+  const addCandidate = (port: number, host: string, required = false): void => {
+    if (Number.isFinite(port) && port > 0 && !candidateMembers.has(port)) {
+      candidateMembers.set(port, {
+        port: Math.floor(port),
+        host: explicitHost || host || LOCAL_HOSTS.LOCALHOST,
+        required
+      });
+      return;
+    }
+    const existing = candidateMembers.get(Math.floor(port));
+    if (existing && required) {
+      existing.required = true;
+      existing.host = explicitHost || host || existing.host;
+    }
+  };
 
   for (const p of getSessionCandidatePorts(ctx)) {
-    candidatePorts.add(p);
+    addCandidate(p, LOCAL_HOSTS.LOCALHOST);
   }
 
   if (ctx.isDevPackage) {
     const envPort = Number(ctx.env?.ROUTECODEX_PORT || ctx.env?.RCC_PORT || NaN);
     if (!Number.isNaN(envPort) && envPort > 0) {
-      candidatePorts.add(envPort);
+      addCandidate(envPort, LOCAL_HOSTS.LOCALHOST);
     }
-    candidatePorts.add(ctx.defaultDevPort);
+    addCandidate(ctx.defaultDevPort, LOCAL_HOSTS.LOCALHOST);
   }
 
   const configMaybe = resolveConfigPortHostMaybe(ctx, options, spinner, { strict: Boolean(options.config) });
-  if (configMaybe?.port) {
-    candidatePorts.add(configMaybe.port);
+  const configuredGroup = ctx.isDevPackage
+    ? null
+    : resolvePortGroupFromConfig(ctx, { configPath: options.config });
+  if (configuredGroup?.members?.length) {
+    for (const member of configuredGroup.members) {
+      addCandidate(member.port, member.host, true);
+    }
+  } else if (configMaybe?.port) {
+    addCandidate(configMaybe.port, configMaybe.host, true);
   }
 
-  const ports = Array.from(candidatePorts.values()).filter((p) => Number.isFinite(p) && p > 0);
-  if (!ports.length) {
+  const candidates = Array.from(candidateMembers.values()).sort((a, b) => a.port - b.port);
+  if (!candidates.length) {
     spinner.fail('No known server ports to restart');
     ctx.logger.error('Start a server first or specify a port: routecodex restart --port <port>');
     ctx.exit(1);
   }
 
-  const targets: RestartTarget[] = [];
-  for (const port of ports) {
-    const pids = ctx.findListeningPids(port);
+  const membersByPort = new Map<number, RestartMember>();
+  for (const candidate of candidates) {
+    const pids = normalizePids(ctx.findListeningPids(candidate.port));
     if (!pids.length) {
-      continue;
-    }
-    let ok = false;
-    let resolvedProbe: RouteCodexHealthProbeResult | null = null;
-    let hostUsed: string = explicitHost || LOCAL_HOSTS.LOCALHOST;
-    const healthHosts = explicitHost
-      ? buildLocalProbeHostCandidates(explicitHost)
-      : buildLocalProbeHostCandidates(LOCAL_HOSTS.ANY);
-    for (const h of healthHosts) {
-      const probe = await probeRouteCodexServer(ctx, h, port);
-      resolvedProbe = probe;
-      if (probe.ok) {
-        ok = true;
-        hostUsed = h;
-        break;
-      }
-      if (probe.kind !== 'starting') {
-        logRestartHealthProbeNonBlocking(ctx, 'resolve_targets.health_probe', probe, {
-          host: h,
-          port,
-          kind: probe.kind
+      if (candidate.required) {
+        membersByPort.set(candidate.port, {
+          host: candidate.host,
+          port: candidate.port,
+          oldPids: []
         });
       }
-    }
-    if (!ok) {
       continue;
     }
-    targets.push({
-      host: hostUsed,
-      port,
+    const resolved = await resolveMemberProbeHost(ctx, candidate);
+    if (resolved.probe && !resolved.probe.ok && resolved.probe.kind !== 'starting') {
+      logRestartHealthProbeNonBlocking(ctx, 'resolve_target.health_probe', resolved.probe, {
+        host: resolved.host,
+        port: candidate.port,
+        kind: resolved.probe.kind
+      });
+    }
+    membersByPort.set(candidate.port, {
+      host: resolved.host,
+      port: candidate.port,
       oldPids: pids
     });
   }
 
-  if (!targets.length) {
+  const activeMembers = Array.from(membersByPort.values()).filter((member) => member.oldPids.length > 0);
+  if (!activeMembers.length) {
     spinner.fail('No RouteCodex servers found to restart');
-    ctx.logger.error(`Checked ports: ${ports.join(', ')}`);
+    ctx.logger.error(`Checked ports: ${candidates.map((candidate) => candidate.port).join(', ')}`);
     ctx.logger.info('Tip: specify the port explicitly: routecodex restart --port <port>');
     ctx.exit(1);
   }
 
-  // Deterministic ordering for logs/tests.
-  targets.sort((a, b) => a.port - b.port);
-  if (targets.length > 1) {
-    const candidates = targets.map((item) => `${item.host}:${item.port}`).join(', ');
-    spinner.fail('Multiple RouteCodex servers detected; broadcast restart is disabled');
-    ctx.logger.error(`Detected servers: ${candidates}`);
-    ctx.logger.info('Use explicit single target: routecodex restart --port <port>');
+  const identityKeys = Array.from(new Set(activeMembers.map((member) => pidIdentityKey(member.oldPids))));
+  if (identityKeys.length > 1) {
+    spinner.fail('Multiple aggregate RouteCodex server instances detected');
+    ctx.logger.error(
+      `Detected instances: ${activeMembers.map((member) => `${formatRestartMember(member)} pid(s)=${pidIdentityKey(member.oldPids)}`).join(', ')}`
+    );
+    ctx.logger.info('Use --port only to locate one aggregate server instance.');
     ctx.exit(1);
   }
-  return [targets[0]];
+  const members = Array.from(membersByPort.values());
+  members.sort((a, b) => a.port - b.port);
+  const locator = members.find((member) => member.oldPids.length > 0)!;
+  if (members.length > 1) {
+    ctx.logger.info(`[restart] grouped aggregate members by listener identity: ${members.map((member) => member.port).join(', ')}`);
+  }
+  return {
+    host: locator.host,
+    port: locator.port,
+    oldPids: locator.oldPids,
+    members
+  };
 }
 
-async function waitForRestart(ctx: RestartCommandContext, host: string, port: number, oldPids: number[]): Promise<void> {
+async function waitForRestart(ctx: RestartCommandContext, target: RestartTarget): Promise<void> {
   const deadline = Date.now() + resolveRestartWaitMs(ctx);
-  const old = new Set(oldPids);
+  const old = new Set(target.oldPids);
   let sawNewPid = false;
   let sawEndpointUnavailable = false;
   let samePidHealthyStreak = 0;
-  const probeHosts = buildLocalProbeHostCandidates(host);
   while (Date.now() < deadline) {
-    const current = ctx.findListeningPids(port);
-    if (!current.length) {
+    const currentMembers = target.members.map((member) => ({
+      member,
+      pids: normalizePids(ctx.findListeningPids(member.port))
+    }));
+    if (currentMembers.some((item) => item.pids.length === 0)) {
       sawEndpointUnavailable = true;
       samePidHealthyStreak = 0;
       await ctx.sleep(150);
       continue;
     }
+    const identityKeys = Array.from(new Set(currentMembers.map((item) => pidIdentityKey(item.pids))));
+    if (identityKeys.length !== 1) {
+      samePidHealthyStreak = 0;
+      await ctx.sleep(150);
+      continue;
+    }
+    const current = currentMembers[0].pids;
     if (current.some((pid) => !old.has(pid))) {
       sawNewPid = true;
     }
-    let probe: RouteCodexHealthProbeResult | null = null;
-    for (const probeHost of probeHosts) {
-      probe = await probeRouteCodexServer(ctx, probeHost, port);
-      if (probe.ok) {
+    let allHealthy = true;
+    for (const item of currentMembers) {
+      const resolved = await resolveMemberProbeHost(ctx, item.member);
+      item.member.host = resolved.host;
+      if (!isAggregateMemberReady(resolved.probe)) {
+        allHealthy = false;
+        sawEndpointUnavailable = true;
+        samePidHealthyStreak = 0;
+        if (resolved.probe?.ok) {
+          ctx.logger.info(
+            `[restart] wait_for_restart.not_ready host=${resolved.host} port=${item.member.port} `
+            + `ready=${String(resolved.probe.body.ready)} pipelineReady=${String(resolved.probe.body.pipelineReady)}`
+          );
+        } else if (resolved.probe?.kind !== 'starting') {
+          logRestartHealthProbeNonBlocking(
+            ctx,
+            'wait_for_restart.health_probe',
+            resolved.probe || { ok: false, kind: 'network_error' },
+            {
+              host: resolved.host,
+              port: item.member.port,
+              kind: resolved.probe?.kind
+            }
+          );
+        }
         break;
       }
     }
-    if (!probe || !probe.ok) {
-      sawEndpointUnavailable = true;
-      samePidHealthyStreak = 0;
-      if (probe?.kind !== 'starting') {
-        logRestartHealthProbeNonBlocking(ctx, 'wait_for_restart.health_probe', probe || { ok: false, kind: 'network_error' }, {
-          host: probeHosts[0] || host,
-          port,
-          kind: probe?.kind
-        });
-      }
+    if (!allHealthy) {
       await ctx.sleep(sawNewPid ? 250 : 150);
       continue;
     }
@@ -592,7 +698,10 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
     }
     await ctx.sleep(150);
   }
-  throw new Error('Timeout waiting for server to restart');
+  throw new Error(
+    `Timeout waiting for aggregate server to restart and restore members: `
+    + target.members.map(formatRestartMember).join(', ')
+  );
 }
 
 function requestInPlaceRestart(ctx: RestartCommandContext, target: RestartTarget): void {
@@ -614,15 +723,15 @@ function requestInPlaceRestart(ctx: RestartCommandContext, target: RestartTarget
 export function createRestartCommand(program: Command, ctx: RestartCommandContext): void {
   program
     .command('restart')
-    .description('Restart one RouteCodex server (broadcast restart disabled)')
+    .description('Restart one aggregate RouteCodex server instance')
     .option('-c, --config <config>', 'Configuration file path')
-    .option('-p, --port <port>', 'Restart a specific RouteCodex server port')
+    .option('-p, --port <port>', 'Member port used to locate the aggregate server instance')
     .option('--host <host>', 'Host for health probing (default: localhost)')
     .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
     .option('--codex', 'Use Codex system prompt (tools unchanged)')
     .option('--claude', 'Use Claude system prompt (tools unchanged)')
     .action(async (options: RestartCommandOptions) => {
-      const spinner = await ctx.createSpinner('Restarting RouteCodex server(s)...');
+      const spinner = await ctx.createSpinner('Restarting aggregate RouteCodex server...');
       try {
         const restartApiKey = resolveRestartApiKey(ctx, options);
         // Prompt flags cannot be applied via restart endpoint (server reloads from its own config/env).
@@ -631,54 +740,52 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           ctx.exit(1);
         }
 
-        const targets = await resolveRestartTargets(ctx, options, spinner);
+        const target = await resolveRestartTarget(ctx, options, spinner);
         await ctx.ensureGuardianDaemon?.();
         await ctx.registerGuardianProcess?.({
           source: 'restart',
           pid: process.pid,
           ppid: process.ppid,
           metadata: {
-            targets: targets.map((item) => `${item.host}:${item.port}`)
+            locator: `${target.host}:${target.port}`,
+            members: target.members.map(formatRestartMember)
           }
         });
 
         spinner.text = 'Requesting RouteCodex restart...';
-        for (const t of targets) {
-          const approved = await ctx.reportGuardianLifecycle?.({
-            action: 'restart_request',
-            source: 'cli.restart',
-            actorPid: process.pid,
-            metadata: {
-              host: t.host,
-              port: t.port
-            }
-          });
-          if (ctx.reportGuardianLifecycle && approved !== true) {
-            throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
+        const approved = await ctx.reportGuardianLifecycle?.({
+          action: 'restart_request',
+          source: 'cli.restart',
+          actorPid: process.pid,
+          metadata: {
+            host: target.host,
+            locatorPort: target.port,
+            memberPorts: target.members.map((member) => member.port)
           }
-          const plan = planRestartTransport(ctx, t, restartApiKey);
-          const transport = plan.preferredTransport === 'http'
-            ? await requestProcessRestartViaHttp(ctx, t, restartApiKey.value, plan.httpFallbackTransport)
-            : plan.preferredTransport === 'signal'
-              ? (() => {
-                requestInPlaceRestart(ctx, t);
-                return 'signal' as const;
-              })()
-              : (() => {
-                throw new Error(`no restart transport available for ${t.host}:${t.port} (${plan.reasonCode})`);
-              })();
-          if (transport === 'signal') {
-            spinner.warn(`Used in-place signal restart for ${t.host}:${t.port}.`);
-          }
+        });
+        if (ctx.reportGuardianLifecycle && approved !== true) {
+          throw new Error(`guardian lifecycle apply rejected for aggregate server at ${target.host}:${target.port}`);
+        }
+        const plan = planRestartTransport(ctx, target, restartApiKey);
+        const transport = plan.preferredTransport === 'http'
+          ? await requestProcessRestartViaHttp(ctx, target, restartApiKey.value, plan.httpFallbackTransport)
+          : plan.preferredTransport === 'signal'
+            ? (() => {
+              requestInPlaceRestart(ctx, target);
+              return 'signal' as const;
+            })()
+            : (() => {
+              throw new Error(`no restart transport available for aggregate server at ${target.host}:${target.port} (${plan.reasonCode})`);
+            })();
+        if (transport === 'signal') {
+          spinner.warn(`Used one in-place signal restart for aggregate server at ${target.host}:${target.port}.`);
         }
 
-        spinner.text = 'Waiting for server to restart...';
-        for (const t of targets) {
-          await waitForRestart(ctx, t.host || LOCAL_HOSTS.LOCALHOST, t.port, t.oldPids);
-        }
+        spinner.text = 'Waiting for aggregate server members to become healthy...';
+        await waitForRestart(ctx, target);
 
-        const ports = targets.map((t) => `${t.host}:${t.port}`).join(', ');
-        spinner.succeed(`RouteCodex server restarted: ${ports}`);
+        const members = target.members.map(formatRestartMember).join(', ');
+        spinner.succeed(`Aggregate RouteCodex server restarted: ${members}`);
       } catch (e) {
         spinner.fail(`Failed to restart: ${(e as Error).message}`);
         ctx.exit(1);

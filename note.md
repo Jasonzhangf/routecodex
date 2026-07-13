@@ -29748,3 +29748,12 @@ Pure Rust NAPI candidates:
 - Rust `hub_pipeline_lib/effect_plan.rs` now owns `no_pipe` / `use_pipe`, trims and validates codec/requestId, requires object payload, and owns malformed-shape errors. TS only consumes the returned pipe for Node stream IO and rejects unknown actions.
 - Red/green: residue audit first failed on the missing native planner and live TS codec/requestId/payload checks. Rust focused 1/1, provider-response Jest 261/261, TypeScript, function/resource/mainline/native-reference/rustification/wiki/native/base/release gates passed.
 - Live: installed/global/5555 versions align at `0.90.3932`; relay SSE request `req_1783905286656_132cccdc` returned HTTP 200 with `STREAM_PIPE_OK`, `response.completed`, and `response.done`, no `event:error`; current primary log has no matching error and provider/client samples expose no internal effect keys.
+
+## 2026-07-13 aggregate server restart definition and live closeout
+
+- Correction: restart identity is the aggregate RouteCodex process, not each configured port. `--port` is a locator only.
+- Red: aggregate positive test saw only locator health; mixed-PID configured members were incorrectly allowed to restart.
+- Fix: restart target now contains locator + all configured/listening members. Same listener PID set is grouped into one instance, mixed non-empty PID sets fail before IO, one HTTP/SIGUSR2 request is executed, and completion requires every member to be ready/pipelineReady on one identity.
+- Docs/maps/skills: updated lifecycle SSOT, AGENTS, installation docs, function/mainline/verification maps, generated manifests/wiki/HTML, release script, main skill, config SSOT reference, and July lesson L93-141; L93-68 is explicitly superseded.
+- Gates: focused restart/install/native Jest 23/23, TypeScript, runtime lifecycle/function-map/mainline/wiki/browser, native build, base build, and release install passed.
+- Live: before install all 4444/5520/5555/10000 listeners were PID 52949. Install used locator 5520, process lifecycle recorded one restart signal at 2026-07-13T05:30:57.106Z, and new PID 85361 remained under parent 24613. All four ports are ready/pipelineReady at version 0.90.3932.

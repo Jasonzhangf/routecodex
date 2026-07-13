@@ -2694,3 +2694,11 @@
 - `hub.provider_response_stream_pipe_effect_plan` owns `no_pipe` / `use_pipe`, canonical codec/requestId normalization, object payload validation, and malformed errors in Rust.
 - TS may consume the returned pipe for Node SSE IO, return null for `no_pipe`, and reject unknown actions. It must not inspect streamPipe fields or recreate malformed-shape policy.
 - Verified by Rust 1/1, provider-response Jest 261/261, required architecture/native/base/release gates, installed `0.90.3932`, managed 5555 restart, and relay SSE request `req_1783905286656_132cccdc` completing with `STREAM_PIPE_OK`, `response.completed`, and `response.done` without internal effect leakage.
+
+# 2026-07-13: Aggregate server restart supersedes single-port restart
+
+- Supersedes the 2026-07-06 rule that treated explicit `restart --port` as a single-port lifecycle action.
+- RouteCodex restart identity is one aggregate server process/listener PID set. `--port` is only a locator for that instance.
+- Configured/listening member ports with the same PID identity receive exactly one `/daemon/restart-process` or SIGUSR2 request. Different non-empty PID identities fail before restart IO; per-port restart loops are forbidden.
+- Restart success requires every configured member port to return healthy with one listener identity. The original managed parent/session restart contract remains unchanged.
+- Verified on 2026-07-13: focused positive/negative restart contracts passed 23/23; TypeScript, runtime lifecycle/function-map/mainline/wiki/browser/native/base/release gates passed. Global install used locator 5520 and emitted one aggregate restart. PID changed `52949 -> 85361` under the same parent `24613`; 4444/5520/5555/10000 all reported ready/pipelineReady with version `0.90.3932`.

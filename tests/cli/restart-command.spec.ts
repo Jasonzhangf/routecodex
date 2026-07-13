@@ -30,7 +30,7 @@ describe('cli restart command', () => {
       sendSignal: () => {},
       fetch: (async (url: string) => {
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -56,7 +56,7 @@ describe('cli restart command', () => {
       sendSignal: () => {},
       fetch: (async (url: string) => {
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -95,7 +95,7 @@ describe('cli restart command', () => {
       },
       fetch: (async (url: string) => {
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -142,7 +142,7 @@ describe('cli restart command', () => {
       },
       fetch: (async (url: string) => {
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -181,7 +181,7 @@ describe('cli restart command', () => {
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+        return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         if (String(url).includes('/daemon/restart-process')) {
           throw new Error('should not call daemon restart endpoint without apikey when local pid is known');
@@ -229,7 +229,7 @@ describe('cli restart command', () => {
         if (healthCall <= 2) {
           return { ok: false, status: 503, json: async () => ({}) };
         }
-        return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) };
+        return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) };
       }) as any,
       env: {},
       exit: (code) => {
@@ -257,7 +257,7 @@ describe('cli restart command', () => {
       },
       fetch: (async (url: string) => {
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -309,7 +309,7 @@ describe('cli restart command', () => {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ server: 'routecodex', status: 'ok' })
+            json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true })
           } as any;
         }
         if (String(url).includes('/daemon/restart-process')) {
@@ -366,7 +366,7 @@ describe('cli restart command', () => {
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
         if (String(url).includes('/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok' }) } as any;
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         if (String(url).includes('/daemon/restart-process')) {
           throw new Error('should not call daemon restart endpoint when config apikey is explicitly empty');
@@ -393,11 +393,11 @@ describe('cli restart command', () => {
     expect(fetchCalls.some((url) => url.includes('/daemon/restart-process'))).toBe(false);
   });
 
-  it('uses target port host from multi-port config for explicit --port restart', async () => {
+  it('uses configured member hosts for aggregate restart probes', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     const fetchCalls: string[] = [];
-    let call = 0;
+    let restarted = false;
 
     createRestartCommand(program, {
       isDevPackage: false,
@@ -406,23 +406,23 @@ describe('cli restart command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
       findListeningPids: (port) => {
-        call += 1;
-        if (port !== 10000) {
+        if (![5520, 10000].includes(port)) {
           return [];
         }
-        return call <= 1 ? [701] : [702];
+        return restarted ? [702] : [701];
       },
       sleep: async () => {},
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
+        restarted = true;
       },
       fetch: (async (url: string) => {
         fetchCalls.push(String(url));
         if (String(url).includes('127.0.0.1:10000/health')) {
           throw new Error('restart must not probe top-level loopback host for 10000 multi-port target');
         }
-        if (String(url).includes(':10000/health')) {
-          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true }) } as any;
+        if (String(url).includes(':10000/health') || String(url).includes(':5520/health')) {
+          return { ok: true, status: 200, json: async () => ({ server: 'routecodex', status: 'ok', ready: true, pipelineReady: true }) } as any;
         }
         return { ok: false, status: 404, text: async () => '' } as any;
       }) as any,
@@ -460,6 +460,214 @@ describe('cli restart command', () => {
 
     expect(fetchCalls.some((url) => url.includes('127.0.0.1:10000/health'))).toBe(false);
     expect(signals).toEqual([{ pid: 701, signal: 'SIGUSR2' }]);
+  });
+
+  it('restarts one aggregate instance once and verifies every configured member port', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const healthPorts = new Set<number>();
+    let restarted = false;
+
+    createRestartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        if (![4444, 5520, 5555, 10000].includes(port)) {
+          return [];
+        }
+        return restarted ? [802] : [801];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+        restarted = true;
+      },
+      fetch: (async (url: string) => {
+        const match = String(url).match(/:(\d+)\/health/);
+        if (match) {
+          healthPorts.add(Number(match[1]));
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              server: 'routecodex',
+              status: 'ok',
+              ready: true,
+              pipelineReady: true
+            })
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => [
+          '[httpserver]',
+          'host = "127.0.0.1"',
+          'port = 5520',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5520',
+          'host = "0.0.0.0"',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5555',
+          'host = "0.0.0.0"',
+          '',
+          '[[httpserver.ports]]',
+          'port = 10000',
+          'host = "0.0.0.0"',
+          '',
+          '[[httpserver.ports]]',
+          'port = 4444',
+          'host = "0.0.0.0"',
+          ''
+        ].join('\n')
+      } as any,
+      getHomeDir: () => '/home/test',
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
+
+    expect(signals).toEqual([{ pid: 801, signal: 'SIGUSR2' }]);
+    expect(Array.from(healthPorts).sort((a, b) => a - b)).toEqual([4444, 5520, 5555, 10000]);
+  });
+
+  it('rejects configured aggregate members owned by different listener identities', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+
+    createRestartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        if (port === 5520) {
+          return [901];
+        }
+        if (port === 5555) {
+          return [902];
+        }
+        return [];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              server: 'routecodex',
+              status: 'ok',
+              ready: true,
+              pipelineReady: true
+            })
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => [
+          '[httpserver]',
+          'port = 5520',
+          'host = "127.0.0.1"',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5520',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5555',
+          ''
+        ].join('\n')
+      } as any,
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' })
+    ).rejects.toThrow('exit:1');
+    expect(signals).toEqual([]);
+  });
+
+  it('groups discovered ports with the same listener identity without --port', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let restarted = false;
+
+    createRestartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        if (![5520, 5555].includes(port)) {
+          return [];
+        }
+        return restarted ? [1002] : [1001];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+        restarted = true;
+      },
+      fetch: (async (url: string) => {
+        if (String(url).includes('/health')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              server: 'routecodex',
+              status: 'ok',
+              ready: true,
+              pipelineReady: true
+            })
+          } as any;
+        }
+        return { ok: false, status: 404, text: async () => '' } as any;
+      }) as any,
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => [
+          '[httpserver]',
+          'port = 5520',
+          'host = "127.0.0.1"',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5520',
+          '',
+          '[[httpserver.ports]]',
+          'port = 5555',
+          ''
+        ].join('\n'),
+        readdirSync: () => [],
+        statSync: () => ({ isDirectory: () => false })
+      } as any,
+      getHomeDir: () => '/home/test',
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 1001, signal: 'SIGUSR2' }]);
   });
 
   it('requests in-session restart when live version lags behind current release', async () => {

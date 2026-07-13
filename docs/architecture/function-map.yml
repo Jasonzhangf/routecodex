@@ -4933,9 +4933,9 @@ owners:
       - "Wired from start.ts (daemon supervisor / daemon restart / direct spawn / shutdown-intent) and stop.ts (shutdown-intent); pid cache remains the transient hint, instance.json is the authoritative description."
   - feature_id: runtime.lifecycle.restart_command
     status: active
-    summary: "CLI restart requests the existing RouteCodex process or its original start supervisor to restart in-session"
+    summary: "CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports"
     owner_kind: rust_ssot
-    owner_scope: "restart transport decision plan; TS restart command only resolves targets and executes planned HTTP/SIGUSR2 IO"
+    owner_scope: "restart transport decision plan; TS restart command only discovers configured/listening member ports, resolves one aggregate listener identity, executes one planned HTTP/SIGUSR2 IO, and verifies all members"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
@@ -4950,17 +4950,22 @@ owners:
     canonical_types:
       - RestartCommandOptions
       - RestartCommandContext
+      - RestartMember
       - RestartTarget
     canonical_builders:
       - plan_runtime_restart_request_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/cli/commands/port-group-resolver.ts
       - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/cli/commands/restart.ts
       - src/cli/register/restart-command.ts
       - src/cli.ts
       - src/server/runtime/http-server/daemon-admin/restart-handler.ts
       - tests/cli/restart-command.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
+      - scripts/install-release.sh
+      - docs/goals/runtime-aggregate-restart-test-design.md
       - tests/cli/restart-command.probe-host.spec.ts
       - docs
     forbidden_paths:
@@ -4968,12 +4973,15 @@ owners:
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     migration_target: rust
+      - "Restart identity is the aggregate listener PID set. `--port` is only a locator; configured members sharing that identity receive one restart request and must all recover before success."
+      - "Different non-empty listener PID sets must fail as multiple instances. Looping restart once per member port is forbidden."
     notes:
       - "Rust plan chooses the restart transport. TS may call /daemon/restart-process or send SIGUSR2 to the target pid only as instructed; it must not spawn a detached start --restart takeover path."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."

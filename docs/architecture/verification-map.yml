@@ -3290,6 +3290,7 @@ verification:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
     integration: []
     smoke:
       - npm run verify:resource-operation-map
@@ -3300,6 +3301,8 @@ verification:
       - npm run build:base
     notes:
       - "Restart command must request restart from the existing process/session via /daemon/restart-process or SIGUSR2; it must not spawn start --restart as a takeover path when live version differs."
+      - "Positive gate: configured/discovered member ports sharing one PID identity produce exactly one restart request and all member health probes pass."
+      - "Negative gate: different non-empty PID identities fail before any restart IO; per-port broadcast loops are forbidden."
 
   - feature_id: runtime.lifecycle.start_command
     change_risk: medium

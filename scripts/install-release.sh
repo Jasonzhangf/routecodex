@@ -270,7 +270,8 @@ verify_runtime_health() {
     curl -fsS --max-time 2 "$VERIFY_HEALTH_URL" >/dev/null 2>&1
   }
 
-  restart_release_runtime_for_port() {
+  restart_release_runtime_for_aggregate() {
+    echo "♻️  使用成员端口 ${VERIFY_PORT} 定位并重启聚合 RouteCodex server instance（只请求一次）"
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
     ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
     RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
@@ -287,7 +288,7 @@ verify_runtime_health() {
   }
 
   if probe_release_runtime_available; then
-    restart_release_runtime_for_port
+    restart_release_runtime_for_aggregate
   else
     echo "ℹ️  ${VERIFY_HEALTH_URL} 当前不可用，按 stopped 状态启动 release runtime"
     start_release_runtime_when_stopped

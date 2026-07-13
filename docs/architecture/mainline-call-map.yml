@@ -1238,7 +1238,7 @@ chains:
         note: "Hit-log projection is diagnostics only; it must not reselect routes, mutate provider payload, or implement retry/reroute policy."
 
   - chain_id: runtime.lifecycle.mainline
-    summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
+    summary: "Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces."
     entry_contract:
       node: ServerPidCacheRecord
       owner_doc: docs/design/server-runtime-lifecycle-ssot.md
@@ -1315,8 +1315,8 @@ chains:
         callee_symbol: planRuntimeRestartRequest
         callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.restart_command
-        semantic_input: "target host/port plus resolved local pid hints, configured restart API key, and HTTP-only mode"
-        semantic_output: "Rust plan selects HTTP restart request only when allowed; TS POSTs /daemon/restart-process without detached start --restart takeover"
+        semantic_input: "one aggregate target: locator host/port, configured/listening member ports, canonical listener pid identity, configured restart API key, and HTTP-only mode"
+        semantic_output: "Rust plan selects one HTTP restart request only when allowed; TS POSTs locator /daemon/restart-process once, then verifies all aggregate members without detached start --restart takeover"
         resource_flow:
           consumes: []
           produces: [runtime.admin_restart_request]
@@ -1331,8 +1331,8 @@ chains:
         callee_symbol: planRuntimeRestartRequest
         callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.restart_command
-        semantic_input: "target pid hints from listener discovery plus restart API-key state"
-        semantic_output: "Rust plan selects signal restart; TS sends SIGUSR2 to existing RouteCodex child so the managed start parent restarts inside the original session"
+        semantic_input: "canonical aggregate listener pid identity from all configured/listening member ports plus restart API-key state"
+        semantic_output: "Rust plan selects signal restart; TS sends SIGUSR2 once per aggregate pid identity, then verifies every member port while the managed start parent restarts inside the original session"
         resource_flow:
           consumes: [runtime.pid_cache]
           produces: [runtime.restart_signal]

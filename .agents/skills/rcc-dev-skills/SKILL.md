@@ -79,8 +79,8 @@ description: RouteCodex 调试与架构路由入口
 ## 全局安装 / release 验证硬规则
 
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
-- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <port>` -> `/health.version` 三点一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
-- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` / `/health.version` 确认版本，再用 `routecodex restart --port <port>` 重启验证。
+- Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <locator-port>` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
+- 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，用任一成员端口作为 locator 执行一次 `routecodex restart --port <locator-port>`，然后验证该 aggregate instance 的全部配置成员端口。禁止逐端口循环 restart。
 - Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
 - 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
 - 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。

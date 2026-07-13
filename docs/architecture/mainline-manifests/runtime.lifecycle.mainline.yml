@@ -1,7 +1,7 @@
 lifecycle_id: runtime.lifecycle.mainline
-summary: "Managed server lifecycle: `ROUTECODEX_SESSION_DIR` is only the runtime workdir root; pid cache writes on start, stop-intent writes on stop, and `tmuxSessionId` / request `sessionId` / `conversationId` stay separate namespaces rather than directory-derived identity."
+summary: "Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; `ROUTECODEX_SESSION_DIR` is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces."
 owner_feature_id: runtime.lifecycle.pid_cache
-owner_module: src/utils/server-runtime-pid.ts
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
 entrypoint:
   node_id: ServerPidCacheRecord
   wiki_page: docs/design/server-runtime-lifecycle-ssot.md
@@ -9,10 +9,14 @@ entrypoint:
 node_ids:
   - DaemonRestartLoop
   - DaemonSupervisorLoop
+  - RestartProcessHttpRequest
+  - RestartProcessSignal
   - RuntimeInstanceRecord
   - ServerPidCacheRecord
+  - ServerRestartCommand
   - ServerStartCommand
   - ServerStopCommand
+  - StartRestartTakeoverGuard
   - StartShutdownHandler
   - StopIntentRecord
 step_ids:
@@ -20,17 +24,20 @@ step_ids:
   - rtl-02
   - rtl-03
   - rtl-04
+  - rtl-05
+  - rtl-06
   - rtl-07
   - rtl-08
   - rtl-09
   - rtl-10
   - rtl-11
   - rtl-12
+  - rtl-13
 edge_status_counts:
-  anchored: 10
+  anchored: 13
   partial: 0
   binding_pending: 0
-  total: 10
+  total: 13
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

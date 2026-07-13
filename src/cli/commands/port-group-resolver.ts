@@ -13,6 +13,10 @@ export type PortGroupResolveContext = {
 export type ResolvedPortGroup = {
   ports: number[];
   host: string;
+  members: Array<{
+    port: number;
+    host: string;
+  }>;
   configPath: string;
 };
 
@@ -45,7 +49,7 @@ export function resolvePortGroupFromParsedConfig(
 
   const defaultHost = String(httpserver.host ?? server.host ?? parsed.host ?? LOCAL_HOSTS.LOCALHOST);
 
-  const fromPorts: number[] = [];
+  const membersByPort = new Map<number, { port: number; host: string }>();
   const portsRaw = httpserver.ports;
   let matchedPortHost = '';
   let matchedPortSeen = false;
@@ -54,24 +58,30 @@ export function resolvePortGroupFromParsedConfig(
       const record = asRecord(entry);
       const p = record ? asValidPort(record.port) : null;
       if (p) {
-        fromPorts.push(p);
+        const memberHost = readHost(record) || defaultHost;
+        if (!membersByPort.has(p)) {
+          membersByPort.set(p, { port: p, host: memberHost });
+        }
         if (options?.targetPort && p === options.targetPort) {
           matchedPortSeen = true;
-          matchedPortHost = readHost(record);
+          matchedPortHost = memberHost;
         }
       }
     }
   }
 
-  if (fromPorts.length > 0) {
-    const unique = Array.from(new Set(fromPorts)).sort((a, b) => a - b);
+  if (membersByPort.size > 0) {
+    const allMembers = Array.from(membersByPort.values()).sort((a, b) => a.port - b.port);
     if (options?.targetPort && !matchedPortSeen) {
       return null;
     }
-    const resolvedPorts = options?.targetPort && !options.includeSiblingsForTarget ? [options.targetPort] : unique;
+    const members = options?.targetPort && !options.includeSiblingsForTarget
+      ? allMembers.filter((member) => member.port === options.targetPort)
+      : allMembers;
     return {
-      ports: resolvedPorts,
+      ports: members.map((member) => member.port),
       host: matchedPortHost || defaultHost,
+      members,
       configPath: options?.configPath || ''
     };
   }
@@ -86,6 +96,7 @@ export function resolvePortGroupFromParsedConfig(
   return {
     ports: [single],
     host: defaultHost,
+    members: [{ port: single, host: defaultHost }],
     configPath: options?.configPath || ''
   };
 }

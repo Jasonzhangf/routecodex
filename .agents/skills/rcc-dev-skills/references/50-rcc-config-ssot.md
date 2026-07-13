@@ -92,15 +92,16 @@
    - `routecodex config validate`
 3. 先确认当前运行配置就是要启动的配置，避免用户刚回退旧配置时误重启
 4. live 验证必须使用全局安装版本；不要用 repo-local `node dist/cli.js start ...` 或 `routecodex start ...` 作为交付口径
-5. 重启目标端口：
-   - `routecodex restart --port <port>`
-6. 健康检查：
-   - `curl -s http://127.0.0.1:<port>/health`
+5. 用任一成员端口定位 aggregate instance，只执行一次重启：
+   - `routecodex restart --port <locator-port>`
+6. 健康检查配置中的全部成员端口：
+   - `curl -s http://127.0.0.1:<member-port>/health`
+   - 所有成员必须 `ready=true`、`pipelineReady=true`、version 一致，listener PID identity 一致。
 7. 再做 live `/v1/responses` 或 `/v1/chat/completions` probe
 
 ## 安装面边界
 - 交付级测试默认只认全局 `routecodex` 安装面；repo-local build、手工 snapshot、临时 shim 只能定位问题。
-- 实验验证顺序：安装目标产物 → `routecodex --version` → `curl /health` 核版本 → `routecodex restart --port <port>` → live probe。
+- 实验验证顺序：安装目标产物 → `routecodex --version` → `routecodex restart --port <locator-port>` 一次 → 全部成员端口 `/health`/version → live probe。端口是 locator，不是独立 restart target。
 - 未经 Jason 明确要求，不覆盖 `rcc` release 安装或 Homebrew/global shim；不要为了验证 `routecodex` 产物顺手改掉 `rcc` 的 release 面。
 - 若用户要求验证 `rcc` release，全局安装后必须证明 `rcc --version`、`routecodex --version`、`~/.rcc/install/current/package.json`、`/health.version` 一致。
 - 若怀疑某个测试导致 server 停止，先记录 `server-<port>.log` 行数和 `/health`，只运行该测试，再检查新增 lifecycle 行；没有新增 `signal_received` / `self_termination` / `restart_signal_received` 时，不得把停止归因给该测试。Jest/WebUI 单测必须保持无 live server 生命周期副作用。

@@ -13,7 +13,7 @@ npm run install:release
 rcc --version
 ```
 
-`npm run install:release` 会自动执行隔离构建、依赖准备、release snapshot 安装，并在安装后执行 `rcc restart --port 5520` 与 `/health` 验证。
+`npm run install:release` 会自动执行隔离构建、依赖准备、release snapshot 安装，并用 `rcc restart --port 5520` 定位聚合服务器、只请求一次重启。命令会等待配置中的全部成员端口恢复；5520 不是独立重启目标。
 
 升级/卸载：
 

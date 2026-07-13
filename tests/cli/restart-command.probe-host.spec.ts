@@ -67,7 +67,16 @@ describe('cli restart command probe host resolution', () => {
           return { ok: true, status: 204, text: async () => '' } as any;
         }
         if (String(url).includes(`${lanHost}:10000/health`)) {
-          return { ok: true, status: 200, text: async () => JSON.stringify({ server: 'routecodex', status: 'ok' }) } as any;
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              server: 'routecodex',
+              status: 'ok',
+              ready: true,
+              pipelineReady: true
+            })
+          } as any;
         }
         if (String(url).includes('/health')) {
           return { ok: false, status: 503, text: async () => JSON.stringify({ server: 'other', status: 'bad' }) } as any;

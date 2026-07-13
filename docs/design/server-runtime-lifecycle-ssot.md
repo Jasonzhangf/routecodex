@@ -6,9 +6,9 @@
 
 1. **进程身份不属于文件系统真相**。pid 是 OS 进程属性，需要发信号时动态解析。`server-<port>.pid` 只作为 cache，不作为真源；缺失不应报错，过期必须清理。
 2. **生命周期真相来自控制面**。HTTP server 的 `start/stop/restart/status` 由 `/health` 与 `/shutdown` 控制面表达；guardian 作为多实例的 owner 时，再以 control plane 表达。
-3. **端口 + identity 是存活的唯一证明**。判定 server 状态：先 HTTP `/health`；连接失败再 `lsof -iTCP:<port> -sTCP:LISTEN` 拿 listener 集合；对每个 listener pid 调 `ps -o command=` 做 trusted RouteCodex 判定；命中即 `running`，不命中即 `port-conflict`。
+3. **聚合实例 identity + 成员端口是存活证明**。一个 RouteCodex server process 可以监听多个配置端口；canonical restart identity 是这些成员端口共同的 listener PID 集合。单个端口只用于定位、探测和记录，不是独立 restart instance。
 4. **状态文件按功能分层**，禁止散落在根目录。`run/` 放运行态瞬时 cache；`state/runtime-lifecycle/` 放实例 registry 与 stop intent；`state/backups/` 放历史 snapshot；`config/archive/` 放历史 config。根目录只留真源。
-5. **每个受管端口只允许一个 instance 声明**。同一端口不允许多个 pid cache 叠加；冲突时 stop 全部、走 start 重建。
+5. **每个受管端口只允许映射到一个 aggregate instance 声明**。同一聚合进程可拥有多个端口，但同一端口不能映射到多个 PID identity，也不允许多个 pid cache 叠加。
 6. **stop intent 必须有 reaper**。`daemon-stop-<port>.json` 是 cross-process 信号，不是状态真相。它必须带 TTL，独立 reaper 必须在 TTL 内消费或清理。
 
 ## 1.1 Session Dir Clarification
@@ -107,18 +107,21 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 
 `rcc restart --port 5555`：
 
-1. `status(port)`。
-2. `stopped` → fail-fast 提示先 `start`；`restart` 不负责新建 detached session。
-3. `running` / `degraded` → 请求现有进程重启：优先 `/daemon/restart-process`，否则只对目标 listener pid 发 `SIGUSR2`。
-4. 受管 `start` parent 存在时，server child 以 restart code `75` 退出，由原 parent supervisor 在原 session 内重新拉起 child。
-5. `port-conflict` → fail-fast 报 `port-conflict`，要求用户手动处理。
-6. 禁止 `restart` 命令自行 spawn `start --restart` 接管；版本落后也必须通过原进程/原 supervisor 重启。
-7. install/release 验证也不得用 `start --restart` 或 `/shutdown` 接管旧 runtime；live runtime 存在时只能调用 `rcc restart`，重启后版本仍不匹配则显式失败。
+1. `--port 5555` 只定位包含 5555 的 aggregate server instance；它不表示只重启 5555。
+2. 从配置成员端口与 OS listener discovery 建立成员表，并按标准化 listener PID 集合确认一个 aggregate identity。
+3. locator 未监听 → fail-fast 提示先 `start`；`restart` 不负责新建 detached session。
+4. 配置成员端口若同时监听但 PID identity 不一致 → fail-fast，禁止合并、禁止逐端口广播。
+5. `running` / `degraded` → 对 aggregate identity 只请求一次重启：优先 locator 的 `/daemon/restart-process`，否则只对该 identity 的 listener PID 集合发一次 `SIGUSR2`。
+6. 受管 `start` parent 存在时，server child 以 restart code `75` 退出，由原 parent supervisor 在原 session 内重新拉起 child。
+7. 完成条件不是 locator 单端口恢复；配置内全部成员端口必须重新 LISTEN、`/health` 成功，且 listener PID identity 一致。
+8. 无 `--port` 时，发现的多个端口只有在 PID identity 唯一时才能自动归并；存在多个 aggregate identity 时显式报歧义，不广播。
+9. 禁止 `restart` 命令自行 spawn `start --restart` 接管；版本落后也必须通过原进程/原 supervisor 重启。
+10. install/release 验证也不得用 `start --restart` 或 `/shutdown` 接管旧 runtime；live runtime 存在时只能调用一次 `rcc restart`，重启后任一成员端口版本/健康不匹配都显式失败。
 
 `rcc start --restart --port 5555`：
 
 1. 这不是 restart transport。若目标端口/端口组已有 listener 或健康 RouteCodex runtime，必须在写 stop-intent 和调用端口释放逻辑之前 fail-fast。
-2. 用户需要原 session 内重启时使用 `rcc restart --port 5555`。
+2. 用户需要原 session 内重启时使用 `rcc restart --port 5555`；5555 只是 aggregate locator。
 3. 只有目标确认处于 stopped/free 状态时，`start` 才能继续 launch；若需要显式停止，必须走 `rcc stop` 或明确 destructive/exclusive 流程。
 
 `rcc start --port 5555`：
@@ -185,7 +188,7 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 - 老路径在 `~/.rcc/` 根目录不再出现任何 `server-*.pid` / `daemon-stop-*.json` / `token-stats.json.tmp-*`。
 - 新路径下，start 路径生成 pid.cache，server exit 路径 unlink，stop 路径必消费 stop-intent，reaper 清理 TTL 过期 stop-intent。
 - 红测先红后绿：先写一个 grep 根目录禁止路径的 red test，确认当前根目录命中为红；改造后该 red test 必绿。
-- 真实运行回归：`rcc start --port 5555`、`rcc status --port 5555`、`rcc stop --port 5555`、`rcc restart --port 5555` 全部跑通，lsof identity 命中 trusted RouteCodex。
+- 真实运行回归：`rcc restart --port <locator-port>` 只产生一次 restart request；随后配置内全部成员端口 `/health` 通过、版本一致、lsof listener PID identity 一致。
 - Live probe：`curl /health` 200，`POST /shutdown` 200，端口在 `STOP_WAIT_MS` 内释放。
 
 ## 11. 反模式 / 边界
@@ -194,6 +197,8 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 - ❌ pid 文件被当成“判断 server 是否在跑”的真源。
 - ❌ start 路径不写 stop intent 消费；stop intent 永久残留。
 - ❌ 一端口多 pid 文件并存；多进程共享同一端口。
+- ❌ 对同一 aggregate listener PID 依次执行 `restart --port 5520`、`restart --port 5555`、`restart --port 10000`。
+- ❌ 只验证 locator 端口健康就宣称 aggregate restart 完成。
 - ❌ pid 文件的清理靠 `pkill` / `killall` / `lsof | xargs kill`。
 - ❌ 把老 `~/.routecodex` 与新 `~/.rcc` 混用（迁移必须一次完成）。
 
