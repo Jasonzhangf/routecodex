@@ -6587,6 +6587,9 @@ mod tests {
             json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(planned["recordArgs"]["matchedPort"], json!(5555));
+        assert_eq!(planned["recordArgs"]["entryKind"], json!("responses"));
+        assert_eq!(planned["recordArgs"]["continuationOwner"], json!("relay"));
+        assert_eq!(planned["recordArgs"]["allowScopeContinuation"], json!(true));
         assert_eq!(
             planned["recordArgs"]["routingPolicyGroup"],
             json!("gateway-priority-5555")

@@ -579,3 +579,10 @@ cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p r
 - TS `readProviderResponseNativeStreamPipe` 只调用 native plan、返回 pipe 或 null、拒绝未知 action；旧 `asRecord/readString` 字段校验和 malformed 文案已物理删除，Node SSE IO 保持不变。
 - 正向锁 trimmed codec/requestId 与 payload；反向锁 absent no-pipe、非 object/缺字段/空字符串 malformed、TS validation/error 复活。
 - Rust 1/1、provider-response Jest 261/261、TypeScript、function/resource/mainline/native-reference/rustification/wiki/native/base/release gates通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay SSE 请求 `req_1783905286656_132cccdc` HTTP 200，输出 `STREAM_PIPE_OK`、`response.completed`、`response.done` 且无 `event:error`；当前主日志与样本无内部 effect key 泄漏。
+
+### 11.11 已闭环 slice：provider-response continuation record effect contract（2026-07-13）
+
+- Rust owner：`publishResponsesRecordPlanJson` 产出完整 `recordArgs`，包括固定 `entryKind=responses`、`continuationOwner=relay`、`allowScopeContinuation=true` 及可选 scope/provider/route 字段。
+- TS effect executor 只能把 `plan.recordArgs` 原样交给 conversation store IO；禁止重建 object、truthy 过滤字段或补 owner/default。
+- 正向锁完整 record contract 直达 store；反向锁 TS 固定常量、optional spread 与第二语义 owner 不复活。
+- Rust 1/1、provider-response Jest 261/261、TypeScript、responses-history/function-map/native-reference/rustification/wiki/native/base/release gates 通过；安装 `0.90.3932` 与 5555 health 对齐。真实 relay `/v1/responses` 请求 `req_1783906711085_1c5ea6bc` 返回 HTTP 200 `RECORD_EFFECT_OK`；最新样本 provider/client 响应无 continuation owner/scope 或内部 runtime-control key 泄漏，当前主日志无本请求新增错误。

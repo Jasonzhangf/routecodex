@@ -5903,6 +5903,11 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).not.toContain('const requestId = readString(streamPipe.requestId)');
     expect(effectsSource).not.toContain('const payload = asRecord(streamPipe.payload)');
     expect(effectsSource).not.toContain('Rust HubPipeline response path returned malformed stream pipe effect');
+    expect(effectsSource).toContain('recordResponsesResponse(plan.recordArgs)');
+    expect(effectsSource).not.toContain("entryKind: 'responses'");
+    expect(effectsSource).not.toContain("continuationOwner: 'relay'");
+    expect(effectsSource).not.toContain('allowScopeContinuation: true');
+    expect(effectsSource).not.toContain('...(plan.recordArgs.sessionId ?');
     expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');

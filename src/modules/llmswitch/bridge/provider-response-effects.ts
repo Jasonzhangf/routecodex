@@ -147,19 +147,7 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
   });
 
   if (plan.recordArgs) {
-    recordResponsesResponse({
-      requestId: plan.recordArgs.requestId,
-      response: plan.recordArgs.response as Parameters<typeof recordResponsesResponse>[0]['response'],
-      ...(plan.recordArgs.sessionId ? { sessionId: plan.recordArgs.sessionId } : {}),
-      ...(plan.recordArgs.conversationId ? { conversationId: plan.recordArgs.conversationId } : {}),
-      ...(plan.recordArgs.providerKey ? { providerKey: plan.recordArgs.providerKey } : {}),
-      entryKind: 'responses',
-      continuationOwner: 'relay',
-      matchedPort: plan.recordArgs.matchedPort,
-      ...(plan.recordArgs.routingPolicyGroup ? { routingPolicyGroup: plan.recordArgs.routingPolicyGroup } : {}),
-      allowScopeContinuation: true,
-      ...(plan.recordArgs.routeHint ? { routeHint: plan.recordArgs.routeHint } : {}),
-    });
+    recordResponsesResponse(plan.recordArgs);
   }
   if (plan.finalizeArgs) {
     finalizeResponsesConversationRequestRetention(

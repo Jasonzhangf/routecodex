@@ -52,8 +52,11 @@ export type PublishResponsesRecordPlan = {
     sessionId?: string;
     conversationId?: string;
     providerKey?: string;
+    entryKind: 'responses';
+    continuationOwner: 'relay';
     matchedPort?: number;
     routingPolicyGroup?: string;
+    allowScopeContinuation: true;
     routeHint?: string;
   } | null;
   finalizeArgs: {
