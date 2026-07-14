@@ -75,16 +75,16 @@ describe('Server module help contract (Phase Server-A)', () => {
     }
   });
 
-  it('documents unified error action queue fixed-cycle blocking policy', () => {
+  it('documents unified error action queue fixed 3s blocking policy', () => {
     const src = fs.readFileSync('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs', 'utf8');
     const queue = readSrc('src/server/runtime/http-server/executor/request-executor-error-action-queue.ts');
     expect(src).toContain('module_id: "server.error_action_queue"');
     expect(src).toContain('owner_builder: Some("describeErrorActionQueueContract")');
-    for (const token of ['1s -> 2s -> 3s -> repeat', 'servertool_followup']) {
+    for (const token of ['fixed 3000ms for every error', 'servertool_followup']) {
       expect(src).toContain(token);
     }
     expect(queue).toContain('feature_id: error.backoff_action_queue');
     expect(queue).toContain('describeErrorActionQueueContract');
-    expect(queue).toContain('ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 2_000, 3_000]');
+    expect(queue).toContain('ERROR_ACTION_DELAY_SEQUENCE_MS = [3_000]');
   });
 });

@@ -23,22 +23,22 @@ describe('request-executor-error-action-queue', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  test('uses fixed 1s-2s-3s cycling delays', () => {
+  test('uses a fixed 3s delay for every consecutive error', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(computeErrorActionBackoffDelayMs)).toEqual([
-      1000,
-      2000,
       3000,
-      1000,
-      2000,
       3000,
-      1000
+      3000,
+      3000,
+      3000,
+      3000,
+      3000
     ]);
   });
 
   test('describes unified contract for help and architecture map queries', () => {
     expect(describeErrorActionQueueContract()).toEqual({
       featureId: 'feature_id: error.backoff_action_queue',
-      delaySequenceMs: [1000, 2000, 3000],
+      delaySequenceMs: [3000],
       blockingWait: true,
       maxWaiters: 64,
       categories: [
@@ -57,11 +57,11 @@ describe('request-executor-error-action-queue', () => {
     expect(recordErrorActionBackoff({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
-    })).toBe(1000);
+    })).toBe(3000);
     expect(recordErrorActionBackoff({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
-    })).toBe(2000);
+    })).toBe(3000);
     expect(peekErrorActionBackoffConsecutiveForTests({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
@@ -69,10 +69,10 @@ describe('request-executor-error-action-queue', () => {
     expect(peekErrorActionBackoffWaitMs({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
-    })).toBe(2000);
+    })).toBe(3000);
     expect(events).toEqual([
-      expect.objectContaining({ type: 'record', delayMs: 1000, consecutive: 1 }),
-      expect.objectContaining({ type: 'record', delayMs: 2000, consecutive: 2 })
+      expect.objectContaining({ type: 'record', delayMs: 3000, consecutive: 1 }),
+      expect.objectContaining({ type: 'record', delayMs: 3000, consecutive: 2 })
     ]);
 
     unregister();
@@ -93,10 +93,10 @@ describe('request-executor-error-action-queue', () => {
       scopeKey: 'global:busy'
     });
 
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(first).resolves.toBe(1000);
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(second).resolves.toBe(1000);
+    await jest.advanceTimersByTimeAsync(3000);
+    await expect(first).resolves.toBe(3000);
+    await jest.advanceTimersByTimeAsync(3000);
+    await expect(second).resolves.toBe(3000);
   });
 
   test('reset clears one category/scope without touching other categories', () => {
@@ -121,7 +121,7 @@ describe('request-executor-error-action-queue', () => {
     expect(peekErrorActionBackoffWaitMs({
       category: 'global_error',
       scopeKey: 'global:error'
-    })).toBe(1000);
+    })).toBe(3000);
   });
 
   test('uses a fixed waiter cap without per-call env configuration', async () => {
@@ -146,7 +146,7 @@ describe('request-executor-error-action-queue', () => {
       })
     });
 
-    await jest.advanceTimersByTimeAsync(64_000);
+    await jest.advanceTimersByTimeAsync(192_000);
     await Promise.all(waiters);
   });
 });

@@ -33,7 +33,7 @@ type ErrorActionQueueState = {
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 type ErrorActionQueueHook = (event: ErrorActionQueueEvent) => void;
 
-const ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 2_000, 3_000] as const;
+const ERROR_ACTION_DELAY_SEQUENCE_MS = [3_000] as const;
 const ERROR_ACTION_STATE_TTL_MS = 10 * 60_000;
 const ERROR_ACTION_MAX_WAITERS = 64;
 
@@ -218,7 +218,7 @@ function pruneExpired(currentMs = nowMs()): void {
 
 export function computeErrorActionBackoffDelayMs(consecutive: number): number {
   const step = Math.max(1, Math.floor(Number.isFinite(consecutive) ? consecutive : 1));
-  return ERROR_ACTION_DELAY_SEQUENCE_MS[(step - 1) % ERROR_ACTION_DELAY_SEQUENCE_MS.length] ?? 1_000;
+  return ERROR_ACTION_DELAY_SEQUENCE_MS[(step - 1) % ERROR_ACTION_DELAY_SEQUENCE_MS.length] ?? 3_000;
 }
 
 export function recordErrorActionBackoff(args: {

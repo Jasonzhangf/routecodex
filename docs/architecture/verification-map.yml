@@ -678,7 +678,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Minimal change stack must prove the fixed 3s delay for every error, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
       - "The traffic-governor TS shell must use the narrow `traffic-governor-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 

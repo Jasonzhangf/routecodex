@@ -30544,3 +30544,9 @@ Pure Rust NAPI candidates:
 - Locked a new Hub v1 request/response chain because P6 published numbering cannot accept missing Chat Process/continuation/execution stages.
 - Defined four independent axes, routed/pinned target merge, static Rust hook slots, Config declaration-only capability/hook references, local continuation immutable interval, and P6 freeze/migrate/cutover/delete order.
 - Added V3 resources/mainline/verification/wiki, architecture checks, and five negative contract mutations. All new Hub v1 bindings remain pending; no runtime/provider/config/live mutation was made.
+
+# 2026-07-14T14:30Z: Error action delay fixed at three seconds
+
+- `error.backoff_action_queue` now blocks for `3000ms` after every error in the same category/scope; the old cycling sequence is removed from the sole owner.
+- Contracts, maps, audit docs, and focused tests were synchronized. Five Jest suites passed with 36 tests; function-map and resource-operation gates passed.
+- Existing V3 and V3-related dirty worktree changes were preserved and excluded from this change.

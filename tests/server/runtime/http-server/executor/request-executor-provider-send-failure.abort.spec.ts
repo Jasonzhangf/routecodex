@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { processProviderSendFailure } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-send-failure.js';
 import { resetErrorActionQueueStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
 
+jest.setTimeout(10_000);
+
 describe('request executor provider send failure abort handling', () => {
   afterEach(() => {
     jest.useRealTimers();
@@ -70,29 +72,29 @@ describe('request executor provider send failure abort handling', () => {
       'req_provider_switch_wait',
       expect.objectContaining({
         scopeKey: 'port:unknown|spark.key1.gpt-5.3-codex-spark|tools|provider.send',
-        delayMs: 1000
+        delayMs: 3000
       })
     );
-    await jest.advanceTimersByTimeAsync(1000);
+    await jest.advanceTimersByTimeAsync(3000);
     expect(logStage).toHaveBeenCalledWith(
       'provider.error_action_backoff_wait.completed',
       'req_provider_switch_wait',
-      expect.objectContaining({ delayMs: 1000 })
+      expect.objectContaining({ delayMs: 3000 })
     );
     expect(logStage).toHaveBeenCalledWith(
       'provider.switch_backoff_wait',
       'req_provider_switch_wait',
       expect.objectContaining({
         scopeKey: 'gateway_priority_5555|tools|provider-switch',
-        waitMs: 1000
+        waitMs: 3000
       })
     );
-    await jest.advanceTimersByTimeAsync(1000);
+    await jest.advanceTimersByTimeAsync(3000);
     await expect(pending).resolves.toMatchObject({ lastError: error });
     expect(logStage).toHaveBeenCalledWith(
       'provider.switch_backoff_wait.completed',
       'req_provider_switch_wait',
-      expect.objectContaining({ waitMs: 1000 })
+      expect.objectContaining({ waitMs: 3000 })
     );
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
       switchAction: 'exclude_and_reroute',

@@ -3165,3 +3165,9 @@
 - Hub branching has four independent axes: entry protocol, continuation ownership, execution mode, and provider wire protocol. Same protocol does not imply Direct; Responses does not imply remote continuation; provider family/model prefix cannot select a Hub branch.
 - Non-GPT Responses providers may use RouteCodex-local continuation. Local context is immutable from response Chat Process save through next request Chat Process restore; only round-trip-equivalent normalization, scope validation, storage/transport, expiry, and release are allowed.
 - Contract/maps/gates are defined only; all Hub v1 edges/resources remain `binding_pending`. No Hub v1 runtime, Relay, continuation, or additional provider protocol implementation is claimed.
+
+# 2026-07-14: Error action backoff is always three seconds
+
+- `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts` is the sole owner and returns a fixed `3000ms` delay for every consecutive error in the same category/scope.
+- Do not restore a `1s/2s/3s` or `1s/3s/5s` sequence in provider, executor, or projection layers. Tests, server help, function map, verification map, and error-chain audit docs must assert the same fixed delay.
+- Verified by five focused Jest suites (36 tests), function-map compile gate, resource-operation map gate, diff check, and stale-contract scan.

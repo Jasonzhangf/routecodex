@@ -27,29 +27,27 @@ describe('request-executor-global-error-backoff', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  test('applies minimum 1s wait after first error in same scope', () => {
+  test('applies a fixed 3s wait after the first error in the same scope', () => {
     const delayMs = recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
-    expect(delayMs).toBe(1000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
+    expect(delayMs).toBe(3000);
+    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
   });
 
-  test('cycles 1s to 3s to 5s for consecutive same-scope errors and resets on success', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
+  test('keeps a fixed 3s delay for consecutive same-scope errors and resets on success', () => {
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(5000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(5000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
 
     resetErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
   });
 
   test('does not accumulate delayed debt after the current backoff window elapses in same scope', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
 
-    jest.advanceTimersByTime(1000);
+    jest.advanceTimersByTime(3000);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
 
     expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
@@ -57,21 +55,21 @@ describe('request-executor-global-error-backoff', () => {
   });
 
   test('resets consecutive scoped errors after provider-scope success', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(1000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(3000);
     resetErrorActionBackoffByScopePrefix({
       category: GLOBAL_ERROR_CATEGORY,
       scopePrefix: '5520|openai.key1.gpt-5.3-codex-low|'
     });
 
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(0);
   });
 
   test('isolates scopes by port / provider / error-code', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(1000);
+    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
+    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeB })).toBe(0);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeC })).toBe(0);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(0);
@@ -83,8 +81,8 @@ describe('request-executor-global-error-backoff', () => {
       category: GLOBAL_ERROR_CATEGORY,
       scopeKey: scopeA
     });
-    await jest.advanceTimersByTimeAsync(1000);
-    await expect(waiting).resolves.toBe(1000);
+    await jest.advanceTimersByTimeAsync(3000);
+    await expect(waiting).resolves.toBe(3000);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
     expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeB })).toBe(0);
   });

@@ -49,7 +49,7 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
     expect(excludedProviderKeys.has('minimax.key1.MiniMax-M3')).toBe(false);
-  });
+  }, 10_000);
 
   test('provider failure plan records and blocks through global error action queue', async () => {
     jest.useFakeTimers();
@@ -98,7 +98,7 @@ describe('request-executor-provider-failure-plan', () => {
       return plan;
     });
 
-    await jest.advanceTimersByTimeAsync(999);
+    await jest.advanceTimersByTimeAsync(2999);
     expect(resolved).toBe(false);
     await jest.advanceTimersByTimeAsync(1);
     const plan = await promise;
@@ -106,9 +106,9 @@ describe('request-executor-provider-failure-plan', () => {
 
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
     expect(events).toEqual([
-      expect.objectContaining({ type: 'record', category: 'global_error', delayMs: 1000 }),
-      expect.objectContaining({ type: 'wait_start', category: 'global_error', delayMs: 1000 }),
-      expect.objectContaining({ type: 'wait_end', category: 'global_error', delayMs: 1000 })
+      expect.objectContaining({ type: 'record', category: 'global_error', delayMs: 3000 }),
+      expect.objectContaining({ type: 'wait_start', category: 'global_error', delayMs: 3000 }),
+      expect.objectContaining({ type: 'wait_end', category: 'global_error', delayMs: 3000 })
     ]);
     expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait')).toBe(true);
     expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait.completed')).toBe(true);

@@ -235,7 +235,7 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
             owner_module: "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts",
             owner_builder: Some("describeErrorActionQueueContract"),
             phase: "server.error_action",
-            description: "Unified error action queue for all host-side storm prevention waits. It records category/scope events, emits queue hooks, and performs blocking waits through one gate. Delay policy is fixed 1000ms -> 2000ms -> 3000ms cycle. It does not classify errors, mutate provider health, or project client errors.",
+            description: "Unified error action queue for all host-side storm prevention waits. It records category/scope events, emits queue hooks, and performs blocking waits through one gate. Delay policy is a fixed 3000ms for every error. It does not classify errors, mutate provider health, or project client errors.",
             allowed_request_metadata_fields: &[],
             forbidden_metadata_fields: &["metadata", "metaCarrier", "__rt", "errorCarrier"],
             forbidden_provider_exits: vec![],

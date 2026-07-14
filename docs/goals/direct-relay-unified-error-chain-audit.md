@@ -23,7 +23,7 @@ Last updated: 2026-06-15
 | 段 | 唯一真源 | 文件 |
 | --- | --- | --- |
 | Provider error 分类（classify / affectsHealth / action） | `ProviderFailurePolicy` | `src/providers/core/runtime/provider-failure-policy.ts` |
-| 错误统一动作队列（1s->2s->3s blocking wait） | `request-executor-error-action-queue` | `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts` |
+| 错误统一动作队列（每次固定 3s blocking wait） | `request-executor-error-action-queue` | `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts` |
 | Router direct reroute decision（统一 decision consumer） | `decideDirectRouterRetry` | `src/server/runtime/http-server/direct-decision.ts` |
 | Provider direct decision（统一 decision consumer） | `decideDirectProviderRetry` | `src/server/runtime/http-server/direct-decision.ts` |
 | Client projection | `mapErrorToHttp` / `ErrorErr06ClientProjected` | `src/server/utils/http-error-mapper.ts` |
