@@ -25,6 +25,36 @@ describe('logRequestError diagnostics', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=EPIPE'));
   });
 
+  it('prints the final selected provider and wire model without changing the upstream error', () => {
+    const err: any = new Error('API Key 所属分组已删除');
+    err.statusCode = 403;
+    err.code = 'HTTP_403';
+    err.providerKey = 'cc-sol[key1]';
+    err.providerModel = 'gpt-5.6-sol';
+
+    logRequestError('/v1/responses', 'req_provider_model_observation', err);
+
+    const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+    expect(err.message).toBe('API Key 所属分组已删除');
+    expect(rendered).toContain('failed: Upstream provider error');
+    expect(rendered).toContain('status=403');
+    expect(rendered).toContain('code=HTTP_403');
+    expect(rendered).toContain('provider=cc-sol[key1]');
+    expect(rendered).toContain('model=gpt-5.6-sol');
+  });
+
+  it('does not print empty provider/model observation fields', () => {
+    const err: any = new Error('provider failed before target selection');
+    err.providerKey = '   ';
+    err.providerModel = '';
+
+    logRequestError('/v1/responses', 'req_without_provider_model_observation', err);
+
+    const rendered = String(errorSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).not.toContain('provider=');
+    expect(rendered).not.toContain('model=');
+  });
+
   it('prints internalCode when present on the error object', () => {
     const err: any = new Error('internal debug error');
     err.internalCode = '500-300';

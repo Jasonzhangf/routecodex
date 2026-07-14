@@ -178,6 +178,7 @@ function extractErrorLogFields(error: unknown, summary: string): {
   catalogCode?: string;
   catalogKey?: string;
   providerKey?: string;
+  providerModel?: string;
   providerType?: string;
   routeName?: string;
   stage?: string;
@@ -266,6 +267,10 @@ function extractErrorLogFields(error: unknown, summary: string): {
     readTrimmedString(bag.providerKey)
     ?? readTrimmedString(details?.providerKey)
     ?? readTrimmedString(responseError?.providerKey);
+  const providerModel =
+    readTrimmedString(bag.providerModel)
+    ?? readTrimmedString(details?.providerModel)
+    ?? readTrimmedString(responseError?.providerModel);
   const providerType =
     readTrimmedString(bag.providerType)
     ?? readTrimmedString(details?.providerType)
@@ -293,6 +298,7 @@ function extractErrorLogFields(error: unknown, summary: string): {
     ...(catalogCode ? { catalogCode } : {}),
     ...(catalogKey ? { catalogKey } : {}),
     ...(providerKey ? { providerKey } : {}),
+    ...(providerModel ? { providerModel } : {}),
     ...(providerType ? { providerType } : {}),
     ...(routeName ? { routeName } : {}),
     ...(stage ? { stage } : {}),
@@ -501,6 +507,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
         fields.catalogCode ? `catalogCode=${fields.catalogCode}` : undefined,
         fields.catalogKey ? `catalogKey=${fields.catalogKey}` : undefined,
         fields.providerKey ? `provider=${fields.providerKey}` : undefined,
+        fields.providerModel ? `model=${fields.providerModel}` : undefined,
         fields.providerType ? `providerType=${fields.providerType}` : undefined,
         fields.routeName ? `route=${fields.routeName}` : undefined,
         fields.stage ? `stage=${fields.stage}` : undefined,

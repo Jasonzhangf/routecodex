@@ -2716,3 +2716,8 @@
 - The packaged blackbox lives at `/opt/homebrew/lib/node_modules/routecodex/scripts/tests/stopless-contract-blackbox.mjs`. Executing that absolute script proves its relative imports resolve to the global package `dist`, while the repo working directory supplies only the tracked real-request fixture.
 - The installed-artifact gate passed `no_schema`, `invalid_schema`, and `next_step`, inspecting final dry-run `providerRequest.body` for the complete system schema, transparent user continuation or exact `next_step`, internal-marker absence, `stoppedBeforeProviderSend=true`, and no second upstream request.
 - Global installer isolated builds must copy tracked governance authoring sources required by architecture gates. Copy `.agent-collab/PROTOCOL.md`, `schema`, and `examples`, but never package runtime `runs`, `claims`, heartbeats, evidence, or kill-switch state.
+
+# 2026-07-14: Terminal provider failure observation
+
+- Final provider failures must preserve the selected target as diagnostic observation on the original error: `providerKey` plus provider wire `providerModel`.
+- `ErrorErr06` request logging may render those fields, but must not infer them from text, overwrite existing observation truth, alter message/status/code, change client/provider payloads, or affect retry/reroute policy.

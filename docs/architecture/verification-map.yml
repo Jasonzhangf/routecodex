@@ -3212,6 +3212,8 @@ verification:
       - tests/server/utils/http-error-mapper-499-client-disconnect.spec.ts
       - tests/server/utils/http-error-mapper.policy-exhausted-gate.spec.ts
       - tests/server/handlers/handler-response-utils.sse-finish-reason.spec.ts
+      - tests/server/handlers/request-error-log.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-error-observation.spec.ts
     integration:
       - tests/server/utils/http-error-mapper-malformed-request.spec.ts
       - tests/server/utils/http-error-mapper-public-leak.spec.ts

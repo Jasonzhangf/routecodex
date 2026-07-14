@@ -29773,3 +29773,10 @@ Pure Rust NAPI candidates:
 - Installed dry-run evidence: the packaged script exists at `/opt/homebrew/lib/node_modules/routecodex/scripts/tests/stopless-contract-blackbox.mjs`; its SHA-256 equals the repo gate script and its relative imports resolve to `/opt/homebrew/lib/node_modules/routecodex/dist/...`, not repo `dist`.
 - Running that packaged script from the repo fixture root passed `no_schema`, `invalid_schema`, and `next_step`. The final dry-run `providerRequest.body` contained the complete system stop schema and only the expected ordinary user continuation prompt/exact `next_step`, rejected all internal stopless markers, and stopped before a second provider send.
 - Release/live evidence: one aggregate `routecodex restart --port 5555` was used. CLI, install/current, and all configured member health endpoints `4444/5520/5555/10000` report ready `0.90.3934`.
+
+# 2026-07-14T11:20Z: terminal provider errors lacked selected target observation in request failure logs
+
+- Trace: the request log formatter already rendered `providerKey`, but final provider-send errors only received retry status/code fields; selected provider/model remained local executor variables and were lost before handler logging.
+- Unique fix: attach the final attempt's actual `providerKey` and provider wire `providerModel` to the original error as diagnostic observation fields, then render `model` beside the existing provider field. Existing values are never overwritten; blank values are omitted.
+- Boundary: no message/status/code rewrite, client payload change, provider payload change, retry/reroute policy change, fallback, or Responses continuation mutation.
+- Red/green: focused request-error test failed because `model=gpt-5.6-sol` was absent; focused positive/negative suites now pass.

@@ -6502,6 +6502,8 @@ owners:
       - tests/server/utils/http-error-mapper-public-leak.spec.ts
       - tests/server/utils/http-error-mapper-timeout.spec.ts
       - tests/server/utils/http-error-mapper-native-projection.spec.ts
+      - tests/server/handlers/request-error-log.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-error-observation.spec.ts
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
     required_gates:
       - npm run verify:error-pipeline-contract

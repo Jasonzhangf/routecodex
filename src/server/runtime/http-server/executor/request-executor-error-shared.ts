@@ -124,3 +124,21 @@ export function attachRetryErrorSnapshotToError(error: unknown, retryError: Retr
     target.catalogKey = retryError.catalogKey;
   }
 }
+
+export function attachProviderObservationToError(
+  error: unknown,
+  observation: { providerKey: string; providerModel?: string }
+): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  const target = error as Record<string, unknown>;
+  const providerKey = readString(observation.providerKey);
+  const providerModel = readString(observation.providerModel);
+  if (providerKey && target.providerKey === undefined) {
+    target.providerKey = providerKey;
+  }
+  if (providerModel && target.providerModel === undefined) {
+    target.providerModel = providerModel;
+  }
+}

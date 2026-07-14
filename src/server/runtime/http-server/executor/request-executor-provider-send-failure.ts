@@ -23,6 +23,7 @@ import { isPromptTooLongError } from './retry-engine.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
 import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import {
+  attachProviderObservationToError,
   attachRetryErrorSnapshotToError,
   extractRequestExecutorProviderErrorStage
 } from './request-executor-error-shared.js';
@@ -219,6 +220,10 @@ export async function processProviderSendFailure(
   }
   const retryError = args.extractRetryErrorSnapshot(args.error);
   attachRetryErrorSnapshotToError(args.error, retryError);
+  attachProviderObservationToError(args.error, {
+    providerKey: args.providerKey,
+    providerModel: args.providerModel
+  });
   const resolvedFailureStage =
     extractRequestExecutorProviderErrorStage(args.error)
     ?? (args.phase === 'provider_response_processing' ? 'provider.send' : 'provider.send');
