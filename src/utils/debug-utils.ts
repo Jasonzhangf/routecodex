@@ -104,38 +104,6 @@ export class DebugUtilsImpl implements DebugUtils {
   }
 
   /**
-   * Deep clone data
-   */
-  deepClone<T>(data: T): T {
-    if (data === null || data === undefined) {
-      return data;
-    }
-
-    if (typeof data !== 'object') {
-      return data;
-    }
-
-    if (data instanceof Date) {
-      return new Date(data.getTime()) as T;
-    }
-
-    if (data instanceof RegExp) {
-      return new RegExp(data.source, data.flags) as T;
-    }
-
-    if (Array.isArray(data)) {
-      return data.map(item => this.deepClone(item)) as T;
-    }
-
-    const cloned: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-      cloned[key] = this.deepClone(value);
-    }
-
-    return cloned as unknown as T;
-  }
-
-  /**
    * Generate unique identifier
    */
   generateId(prefix: string = ''): string {
@@ -379,13 +347,6 @@ export class DebugUtilsStatic {
    */
   static calculateDataSize(data: unknown): number {
     return DebugUtilsStatic.getInstance().calculateDataSize(data);
-  }
-
-  /**
-   * Deep clone data
-   */
-  static deepClone<T>(data: T): T {
-    return DebugUtilsStatic.getInstance().deepClone(data);
   }
 
   /**

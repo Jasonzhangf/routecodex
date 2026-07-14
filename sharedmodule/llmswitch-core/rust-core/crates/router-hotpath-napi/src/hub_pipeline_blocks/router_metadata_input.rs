@@ -68,6 +68,35 @@ fn read_continuation_owner(value: Option<&Value>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn read_retry_exclusion_set(row: &Map<String, Value>) -> Result<Option<Value>, String> {
+    let Some(value) = row.get("retryExclusionSet") else {
+        return Ok(None);
+    };
+    let entries = value
+        .as_array()
+        .ok_or_else(|| "router retryExclusionSet must be an array".to_string())?;
+    let mut normalized = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let provider_key = entry
+            .as_str()
+            .map(str::trim)
+            .filter(|provider_key| !provider_key.is_empty())
+            .ok_or_else(|| {
+                "router retryExclusionSet entries must be non-empty strings".to_string()
+            })?;
+        if normalized
+            .iter()
+            .any(|existing: &Value| existing.as_str() == Some(provider_key))
+        {
+            return Err(format!(
+                "router retryExclusionSet contains duplicate provider key: {provider_key}"
+            ));
+        }
+        normalized.push(Value::String(provider_key.to_string()));
+    }
+    Ok((!normalized.is_empty()).then_some(Value::Array(normalized)))
+}
+
 pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
     let row = input
         .as_object()
@@ -179,6 +208,9 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
             Value::String(retry_provider_key),
         );
     }
+    if let Some(retry_exclusion_set) = read_retry_exclusion_set(row)? {
+        out.insert("excludedProviderKeys".to_string(), retry_exclusion_set);
+    }
 
     if let Some(metadata_obj) = metadata_node.as_object() {
         if let Some(route_policy_group) = metadata_obj
@@ -253,22 +285,6 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
                 "__shadowCompareForcedProviderKey".to_string(),
                 Value::String(forced_provider_key),
             );
-        }
-
-        if let Some(excluded_provider_keys) = metadata_obj
-            .get("excludedProviderKeys")
-            .and_then(|v| v.as_array())
-        {
-            let normalized: Vec<Value> = excluded_provider_keys
-                .iter()
-                .filter_map(|entry| entry.as_str())
-                .map(|entry| entry.trim().to_string())
-                .filter(|entry| !entry.is_empty())
-                .map(Value::String)
-                .collect();
-            if !normalized.is_empty() {
-                out.insert("excludedProviderKeys".to_string(), Value::Array(normalized));
-            }
         }
 
         if let Some(disabled_aliases) = metadata_obj

@@ -76,13 +76,15 @@ describe('executor-pipeline stage recorder injection', () => {
       metadata: {}
     });
 
+    const requestBody = { messages: [{ role: 'user', content: 'hi' }] };
+
     await runHubPipeline(
       'mock_hub_pipeline_handle',
       {
         requestId: 'req_stage_recorder_1',
         entryEndpoint: '/v1/chat/completions',
         headers: {},
-        body: { messages: [{ role: 'user', content: 'hi' }] },
+        body: requestBody,
         metadata: {}
       } as any,
       { clientInjectReady: true }
@@ -95,9 +97,110 @@ describe('executor-pipeline stage recorder injection', () => {
       },
       '/v1/chat/completions'
     );
-    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as { metadata?: Record<string, unknown> };
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as {
+      body?: unknown;
+      payload?: unknown;
+      metadata?: Record<string, unknown>;
+    };
+    expect(executeArg).not.toHaveProperty('body');
+    expect(executeArg.payload).toBe(requestBody);
+    expect(executeArg).toMatchObject({ providerProtocol: 'openai-chat' });
     expect(executeArg.metadata?.clientInjectReady).toBe(true);
     expect(executeArg.metadata?.__hubStageRecorder).toBe(recorder);
+  });
+
+  it('transports retry exclusions as the typed native input instead of flat metadata', async () => {
+    createSnapshotRecorderMock.mockResolvedValue({ record: jest.fn() });
+
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.b',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
+
+    const metadata: Record<string, unknown> = {
+      excludedProviderKeys: ['provider.a']
+    };
+    await runHubPipeline(
+      'mock_hub_pipeline_handle',
+      {
+        requestId: 'req_retry_exclusion_transport_1',
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: { input: 'hi' },
+        metadata: {}
+      } as any,
+      metadata
+    );
+
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as {
+      providerProtocol?: unknown;
+      retryExclusionSet?: unknown;
+      metadata?: Record<string, unknown>;
+    };
+    expect(executeArg.providerProtocol).toBe('openai-responses');
+    expect(executeArg.retryExclusionSet).toEqual(['provider.a']);
+    expect(executeArg.metadata).not.toHaveProperty('excludedProviderKeys');
+    expect(metadata.excludedProviderKeys).toEqual(['provider.a']);
+  });
+
+  it('keeps raw entry payload request-scoped while excluding it from Rust-bound metadata', async () => {
+    createSnapshotRecorderMock.mockResolvedValue({ record: jest.fn() });
+
+    const { runHubPipeline } = await import('../../../../../src/server/runtime/http-server/executor-pipeline.js');
+
+    executeHubPipelineNativeMock.mockReturnValue({
+      providerPayload: { ok: true },
+      target: {
+        providerKey: 'provider.a',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses'
+      },
+      processMode: 'chat',
+      metadata: {}
+    });
+
+    const rawRequestBody = {
+      model: 'gpt-5.6',
+      input: [{ role: 'user', content: 'keep request-scoped only' }],
+      tools: [{ type: 'function', name: 'exec_command' }]
+    };
+    const currentHubBody = {
+      model: 'provider-model',
+      input: rawRequestBody.input,
+      tools: rawRequestBody.tools
+    };
+    const metadata: Record<string, unknown> = {
+      __raw_request_body: rawRequestBody,
+      clientInjectReady: true
+    };
+
+    await runHubPipeline(
+      'mock_hub_pipeline_handle',
+      {
+        requestId: 'req_raw_payload_metadata_isolation_1',
+        entryEndpoint: '/v1/responses',
+        headers: {},
+        body: currentHubBody,
+        metadata: {}
+      } as any,
+      metadata
+    );
+
+    const executeArg = executeHubPipelineNativeMock.mock.calls[0]?.[1] as {
+      payload?: unknown;
+      metadata?: Record<string, unknown>;
+    };
+    expect(executeArg.payload).toBe(currentHubBody);
+    expect(executeArg.metadata).not.toHaveProperty('__raw_request_body');
+    expect(metadata.__raw_request_body).toBe(rawRequestBody);
   });
 
   it('uses the entry endpoint as the only protocol truth for stage recorder setup', async () => {

@@ -83,13 +83,18 @@ requireContains(
 );
 requireContains(
   'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts',
-  'if (protocolBoundaryFailure) {',
-  'providerProtocol boundary conflicts must not produce retry/reroute/excludedProviderKeys plans'
+  'protocolBoundaryFailure: isProviderProtocolBoundaryError(args.error, args.retryError),',
+  'providerProtocol boundary conflicts must be passed into the Rust ErrorErr05 owner'
 );
 requireContains(
-  'src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts',
-  'excludedCurrentProvider: false,',
-  'providerProtocol boundary conflicts must keep excludedCurrentProvider=false'
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs',
+  'if input.protocol_boundary_failure {',
+  'Rust ErrorErr05 owner must handle providerProtocol boundary conflicts before retry/reroute planning'
+);
+requireContains(
+  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs',
+  'fn error_err05_protocol_boundary_fails_fast_without_exclusion()',
+  'Rust ErrorErr05 owner needs a regression test proving providerProtocol boundary conflicts do not exclude providers'
 );
 requireContains(
   'tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts',

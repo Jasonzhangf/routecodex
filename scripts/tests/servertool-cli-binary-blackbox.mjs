@@ -123,15 +123,18 @@ const forbiddenStoplessTokens = [
   console.log('  [PASS] missing continuationPrompt stays natural-user');
 }
 
-// RED TEST 3: web_search is NOT ClientExecCliProjection
+// RED TEST 3: web_search is an executable client projection with route hint
 {
-  const stderr = runExpectFailure('web_search', {
+  const raw = run('web_search', {
     continuationPrompt: 'continue with schema',
     repeatCount: 1,
     maxRepeats: 3,
   });
-  assert.ok(stderr.includes('SERVERTOOL_UNSUPPORTED_TOOL: web_search'), stderr);
-  console.log('  [PASS] web_search rejected (not ClientExecCliProjection)');
+  const out = JSON.parse(raw);
+  assert.equal(out.ok, true, 'web_search ok');
+  assert.equal(out.toolName, 'web_search', 'web_search toolName');
+  assert.equal(out.routeHint, 'web_search', 'web_search routeHint');
+  console.log('  [PASS] web_search outputs ordinary exec_command JSON');
 }
 
 // RED TEST 4: servertool_fixture is an executable client projection fixture

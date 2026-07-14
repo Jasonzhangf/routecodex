@@ -4,6 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::req_outbound_stage3_compat::responses::apply_responses_instructions_to_input;
+use crate::shared_json_utils::serialized_json_size;
 
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
@@ -21,16 +22,13 @@ pub struct FormatBuildOutput {
 }
 
 fn validate_payload_size(payload: &Value) -> Result<(), String> {
-    let payload_str = match serde_json::to_string(payload) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("Failed to serialize payload for size check: {}", e)),
-    };
+    let payload_size = serialized_json_size(payload)
+        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
 
-    if payload_str.len() > MAX_PAYLOAD_SIZE_BYTES {
+    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
         return Err(format!(
             "Payload size {} exceeds maximum allowed {} bytes",
-            payload_str.len(),
-            MAX_PAYLOAD_SIZE_BYTES
+            payload_size, MAX_PAYLOAD_SIZE_BYTES
         ));
     }
 

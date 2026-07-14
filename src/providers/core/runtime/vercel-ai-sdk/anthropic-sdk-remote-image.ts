@@ -314,25 +314,22 @@ async function fetchRemoteImageAsBase64(
   }
 }
 
-function deepCloneRecord<T extends UnknownRecord>(value: T): T {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value) as T;
-  }
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
+// feature_id: provider.anthropic_remote_image_payload_copy_budget
 export async function inlineRemoteAnthropicImageUrls(
   providerWireBody: UnknownRecord,
   options: InlineRemoteAnthropicImageOptions = {}
 ): Promise<{ body: UnknownRecord; rewrites: number }> {
-  const nextBody = deepCloneRecord(providerWireBody);
   let rewrites = 0;
+  let nextMessages: unknown[] | undefined;
 
-  const messages = asArray(nextBody.messages);
-  for (const message of messages) {
+  const messages = asArray(providerWireBody.messages);
+  for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+    const message = messages[messageIndex];
     const messageRow = asRecord(message);
     const content = asArray(messageRow.content);
-    for (const block of content) {
+    let nextContent: unknown[] | undefined;
+    for (let blockIndex = 0; blockIndex < content.length; blockIndex += 1) {
+      const block = content[blockIndex];
       const item = asRecord(block);
       const type = pickString(item.type)?.toLowerCase();
       if (type !== 'image') {
@@ -348,16 +345,43 @@ export async function inlineRemoteAnthropicImageUrls(
         continue;
       }
       const { data, mediaType } = await fetchRemoteImageAsBase64(sourceUrl, options);
-      source.type = 'base64';
-      source.data = data;
-      source.media_type = mediaType;
-      delete source.url;
-      delete source.mediaType;
+      const nextSource: UnknownRecord = {
+        ...source,
+        type: 'base64',
+        data,
+        media_type: mediaType
+      };
+      delete nextSource.url;
+      delete nextSource.mediaType;
+
+      nextContent ??= [...content];
+      nextContent[blockIndex] = {
+        ...item,
+        source: nextSource
+      };
       rewrites += 1;
+    }
+
+    if (nextContent) {
+      nextMessages ??= [...messages];
+      nextMessages[messageIndex] = {
+        ...messageRow,
+        content: nextContent
+      };
     }
   }
 
-  return { body: nextBody, rewrites };
+  if (!nextMessages) {
+    return { body: providerWireBody, rewrites: 0 };
+  }
+
+  return {
+    body: {
+      ...providerWireBody,
+      messages: nextMessages
+    },
+    rewrites
+  };
 }
 
 export function hasRemoteAnthropicImageUrls(providerWireBody: UnknownRecord): boolean {

@@ -13,18 +13,32 @@ describe('install-global artifact isolation', () => {
   });
 
   it('installs and snapshots from the isolated build root', () => {
-    expect(script).toContain('npm pack --pack-destination');
-    expect(script).toMatch(/npm install -g "\$packed_path"/);
+    expect(script).toContain('node scripts/pack-mode.mjs --name routecodex --bin routecodex');
+    expect(script).toContain('$INSTALL_BUILD_ROOT/artifacts/pack/routecodex-');
+    expect(script).toMatch(/npm install -g "\$packed_path".*--offline/);
     expect(script).toMatch(/\(cd "\$INSTALL_BUILD_ROOT" && .*install-release-snapshot\.mjs/);
     expect(script).toContain('--skip-install-current');
   });
 
   it('keeps install pack output under the approved artifacts root', () => {
-    expect(script).toContain('$INSTALL_BUILD_ROOT/artifacts/pack/install-global');
+    expect(script).toContain('$INSTALL_BUILD_ROOT/artifacts/pack/routecodex-');
     expect(script).not.toContain('$INSTALL_BUILD_ROOT/.install-pack');
   });
 
-  it('copies servertool followup dispatch contract tests required by the build gate', () => {
-    expect(script).toContain('tests/server/runtime/http-server/executor/servertool-followup-dispatch.spec.ts');
+  it('serializes release writers and removes the release shim immediately before npm owns the bin', () => {
+    expect(script).toContain('source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"');
+    expect(script).toContain('acquire_routecodex_install_lock');
+    expect(script).toMatch(/rm -f "\$NPM_PREFIX\/bin\/routecodex"\s+npm install -g "\$packed_path"/);
+  });
+
+  it('copies tracked governance contracts required by architecture gates', () => {
+    expect(script).toContain('copy_agent_collab_contract');
+    expect(script).toContain('copy_isolated_path ".agent-collab/PROTOCOL.md"');
+    expect(script).toContain('copy_isolated_path ".agent-collab/schema"');
+    expect(script).toContain('copy_isolated_path ".agent-collab/examples"');
+    expect(script).toContain('.gitignore AGENTS.md');
+    expect(script).toContain('copy_isolated_path ".agents/skills/rcc-dev-skills"');
+    expect(script).not.toContain('copy_isolated_path ".agent-collab/runs"');
+    expect(script).not.toContain('copy_isolated_path ".agent-collab/claims"');
   });
 });

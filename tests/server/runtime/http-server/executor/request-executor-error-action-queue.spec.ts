@@ -23,14 +23,14 @@ describe('request-executor-error-action-queue', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  test('uses fixed 1s-3s-5s cycling delays', () => {
+  test('uses fixed 1s-2s-3s cycling delays', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(computeErrorActionBackoffDelayMs)).toEqual([
       1000,
+      2000,
       3000,
-      5000,
       1000,
+      2000,
       3000,
-      5000,
       1000
     ]);
   });
@@ -38,7 +38,7 @@ describe('request-executor-error-action-queue', () => {
   test('describes unified contract for help and architecture map queries', () => {
     expect(describeErrorActionQueueContract()).toEqual({
       featureId: 'feature_id: error.backoff_action_queue',
-      delaySequenceMs: [1000, 3000, 5000],
+      delaySequenceMs: [1000, 2000, 3000],
       blockingWait: true,
       maxWaiters: 64,
       categories: [
@@ -61,7 +61,7 @@ describe('request-executor-error-action-queue', () => {
     expect(recordErrorActionBackoff({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
-    })).toBe(3000);
+    })).toBe(2000);
     expect(peekErrorActionBackoffConsecutiveForTests({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
@@ -69,10 +69,10 @@ describe('request-executor-error-action-queue', () => {
     expect(peekErrorActionBackoffWaitMs({
       category: 'session_storm',
       scopeKey: 'session:storm-1'
-    })).toBe(3000);
+    })).toBe(2000);
     expect(events).toEqual([
       expect.objectContaining({ type: 'record', delayMs: 1000, consecutive: 1 }),
-      expect.objectContaining({ type: 'record', delayMs: 3000, consecutive: 2 })
+      expect.objectContaining({ type: 'record', delayMs: 2000, consecutive: 2 })
     ]);
 
     unregister();

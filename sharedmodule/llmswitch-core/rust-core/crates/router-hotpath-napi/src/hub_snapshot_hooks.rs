@@ -8,7 +8,7 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::OnceLock;
 use std::thread;
@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const DEFAULT_SNAPSHOT_QUEUE_CAPACITY: usize = 10;
+const DEFAULT_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_SNAPSHOT_KEEP_RECENT_FILES: usize = 10;
 const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS: usize = 50;
 const DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES: usize = 50;
@@ -24,7 +25,8 @@ const PAYLOAD_CONTRACT_ERRORSAMPLE_STAGE_PREFIX: &str = "errorsample.payload_con
 const SNAPSHOT_PROVIDER_REQUEST_BODY_DISABLED: &str =
     "[hub_snapshot_hooks] provider-request body snapshots are disabled";
 
-#[derive(Debug, Deserialize, Clone)]
+// feature_id: snapshot.payload_copy_budget
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SnapshotHookOptions {
     endpoint: String,
@@ -55,10 +57,17 @@ struct SnapshotRecorderWriteOptionsInput {
 static SNAPSHOT_WRITER_RUNTIME: OnceLock<Option<SnapshotWriterRuntime>> = OnceLock::new();
 static SNAPSHOT_DROPPED_JOBS: AtomicU64 = AtomicU64::new(0);
 static SNAPSHOT_LAST_DROP_LOG_AT_MS: AtomicI64 = AtomicI64::new(0);
+static SNAPSHOT_QUEUED_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+struct SnapshotWriterJob {
+    options: SnapshotHookOptions,
+    estimated_bytes: usize,
+}
 
 #[derive(Clone)]
 struct SnapshotWriterRuntime {
-    sender: SyncSender<SnapshotHookOptions>,
+    sender: SyncSender<SnapshotWriterJob>,
+    memory_budget_bytes: usize,
 }
 
 fn resolve_snapshot_async_enabled() -> bool {
@@ -79,6 +88,85 @@ fn resolve_snapshot_queue_capacity() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0);
     parsed.unwrap_or(DEFAULT_SNAPSHOT_QUEUE_CAPACITY)
+}
+
+fn resolve_snapshot_queue_memory_budget_bytes() -> usize {
+    let raw = env::var("ROUTECODEX_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES")
+        .ok()
+        .or_else(|| env::var("RCC_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES").ok());
+    raw.as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_SNAPSHOT_QUEUE_MEMORY_BUDGET_BYTES)
+}
+
+fn estimate_json_value_bytes(value: &Value, remaining: usize) -> usize {
+    if remaining == 0 {
+        return 1;
+    }
+    match value {
+        Value::Null => 4,
+        Value::Bool(_) => 5,
+        Value::Number(number) => number.to_string().len(),
+        Value::String(text) => text
+            .len()
+            .saturating_add(2)
+            .min(remaining.saturating_add(1)),
+        Value::Array(items) => {
+            let mut total = 2usize;
+            for item in items {
+                total = total.saturating_add(estimate_json_value_bytes(
+                    item,
+                    remaining.saturating_sub(total),
+                ));
+                if total > remaining {
+                    break;
+                }
+            }
+            total
+        }
+        Value::Object(object) => {
+            let mut total = 2usize;
+            for (key, child) in object {
+                total = total.saturating_add(key.len().saturating_add(3));
+                total = total.saturating_add(estimate_json_value_bytes(
+                    child,
+                    remaining.saturating_sub(total),
+                ));
+                if total > remaining {
+                    break;
+                }
+            }
+            total
+        }
+    }
+}
+
+fn reserve_snapshot_queue_bytes(estimated_bytes: usize, budget: usize) -> bool {
+    let mut current = SNAPSHOT_QUEUED_BYTES.load(Ordering::Relaxed);
+    loop {
+        let Some(next) = current.checked_add(estimated_bytes) else {
+            return false;
+        };
+        if next > budget {
+            return false;
+        }
+        match SNAPSHOT_QUEUED_BYTES.compare_exchange_weak(
+            current,
+            next,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn release_snapshot_queue_bytes(estimated_bytes: usize) {
+    SNAPSHOT_QUEUED_BYTES.fetch_sub(estimated_bytes, Ordering::AcqRel);
 }
 
 fn resolve_snapshot_keep_recent_files() -> usize {
@@ -120,9 +208,10 @@ fn resolve_errorsample_keep_recent_files() -> usize {
     parsed.unwrap_or(DEFAULT_ERRORSAMPLE_KEEP_RECENT_FILES)
 }
 
-fn snapshot_writer_loop(receiver: Receiver<SnapshotHookOptions>) {
-    while let Ok(options) = receiver.recv() {
-        write_snapshot_via_hooks_sync(options);
+fn snapshot_writer_loop(receiver: Receiver<SnapshotWriterJob>) {
+    while let Ok(job) = receiver.recv() {
+        release_snapshot_queue_bytes(job.estimated_bytes);
+        write_snapshot_via_hooks_sync(job.options);
     }
 }
 
@@ -133,12 +222,16 @@ fn snapshot_writer_runtime() -> Option<&'static SnapshotWriterRuntime> {
                 return None;
             }
             let capacity = resolve_snapshot_queue_capacity();
-            let (sender, receiver) = sync_channel::<SnapshotHookOptions>(capacity);
+            let memory_budget_bytes = resolve_snapshot_queue_memory_budget_bytes();
+            let (sender, receiver) = sync_channel::<SnapshotWriterJob>(capacity);
             match thread::Builder::new()
                 .name("rcc-snapshot-writer".to_string())
                 .spawn(move || snapshot_writer_loop(receiver))
             {
-                Ok(_handle) => Some(SnapshotWriterRuntime { sender }),
+                Ok(_handle) => Some(SnapshotWriterRuntime {
+                    sender,
+                    memory_budget_bytes,
+                }),
                 Err(error) => {
                     eprintln!(
                         "[hub_snapshot_hooks] Failed to start snapshot writer thread (capacity={}): {}",
@@ -177,20 +270,36 @@ fn maybe_log_snapshot_drop(stage: &str, request_id: &str, reason: &str) {
 
 fn enqueue_snapshot_job(options: SnapshotHookOptions) {
     if let Some(runtime) = snapshot_writer_runtime() {
-        match runtime.sender.try_send(options.clone()) {
+        let estimated_bytes = estimate_json_value_bytes(&options.data, runtime.memory_budget_bytes)
+            .saturating_add(1024);
+        if !reserve_snapshot_queue_bytes(estimated_bytes, runtime.memory_budget_bytes) {
+            maybe_log_snapshot_drop(
+                options.stage.as_str(),
+                options.request_id.as_str(),
+                "queue_memory_budget",
+            );
+            return;
+        }
+        let job = SnapshotWriterJob {
+            options,
+            estimated_bytes,
+        };
+        match runtime.sender.try_send(job) {
             Ok(()) => return,
-            Err(TrySendError::Full(_)) => {
+            Err(TrySendError::Full(job)) => {
+                release_snapshot_queue_bytes(job.estimated_bytes);
                 maybe_log_snapshot_drop(
-                    options.stage.as_str(),
-                    options.request_id.as_str(),
+                    job.options.stage.as_str(),
+                    job.options.request_id.as_str(),
                     "queue_full",
                 );
                 return;
             }
-            Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Disconnected(job)) => {
+                release_snapshot_queue_bytes(job.estimated_bytes);
                 maybe_log_snapshot_drop(
-                    options.stage.as_str(),
-                    options.request_id.as_str(),
+                    job.options.stage.as_str(),
+                    job.options.request_id.as_str(),
                     "writer_disconnected",
                 );
                 return;
@@ -1147,8 +1256,8 @@ fn write_snapshot_file(
 }
 
 fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
-    let stage = sanitize_token(options.stage.as_str(), "snapshot");
-    let mut normal = options.clone();
+    let mut normal = options;
+    let stage = sanitize_token(normal.stage.as_str(), "snapshot");
     normal.stage = stage.clone();
     if is_payload_contract_errorsample_stage(stage.as_str()) {
         if let Err(e) = write_payload_contract_errorsample(&normal, stage.as_str()) {
@@ -1172,7 +1281,7 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
     }
 
     if is_hub_policy_stage(stage.as_str())
-        && (has_policy_violations(&options.data) || has_policy_enforcement_changes(&options.data))
+        && (has_policy_violations(&normal.data) || has_policy_enforcement_changes(&normal.data))
     {
         let base = resolve_snapshot_root();
         let policy_root = base.join("__policy_violations__");
@@ -1184,7 +1293,7 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
         }
     }
 
-    if is_hub_tool_surface_stage(stage.as_str()) && has_tool_surface_diff(&options.data) {
+    if is_hub_tool_surface_stage(stage.as_str()) && has_tool_surface_diff(&normal.data) {
         let root = resolve_errorsamples_root();
         let dir = root.join(safe_errorsample_name("tool-surface"));
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -1197,18 +1306,18 @@ fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
         let payload = serde_json::json!({
           "kind": "hub_toolsurface_diff",
           "timestamp": chrono::Utc::now().to_rfc3339(),
-          "endpoint": options.endpoint,
+          "endpoint": normal.endpoint,
           "stage": stage,
-          "requestId": options.request_id,
-          "providerKey": options.provider_key,
-          "groupRequestId": options.group_request_id,
+          "requestId": normal.request_id,
+          "providerKey": normal.provider_key,
+          "groupRequestId": normal.group_request_id,
           "runtime": {
             "routecodexVersion": env::var("ROUTECODEX_VERSION").ok(),
             "routecodexBuildTime": env::var("ROUTECODEX_BUILD_TIME").ok(),
             "llmswitchCore": env::var("ROUTECODEX_LLMSWITCH_CORE_VERSION").ok(),
             "node": env::var("NODE_VERSION").ok()
           },
-          "observation": options.data
+          "observation": normal.data
         });
         if let Ok(payload_str) = serde_json::to_string_pretty(&payload) {
             if let Err(e) = write_unique_errorsample_file(
@@ -2080,5 +2189,50 @@ mod tests {
             serde_json::json!("meta")
         );
         assert_eq!(output["providerKey"], serde_json::json!("provider.key1"));
+    }
+
+    #[test]
+    fn snapshot_payload_copy_budget_preserves_complete_diagnostic_data() {
+        let data = serde_json::json!({
+            "input": [{
+                "type": "message",
+                "content": [{"type": "input_text", "text": "semantic-equivalent"}]
+            }],
+            "tools": [{
+                "type": "function",
+                "name": "large_schema",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "payload": {"type": "string"}
+                    }
+                }
+            }]
+        });
+        let input = SnapshotRecorderWriteOptionsInput {
+            endpoint: "/v1/responses".to_string(),
+            stage: "req_inbound".to_string(),
+            request_id: "req_snapshot_copy_budget".to_string(),
+            data: data.clone(),
+            provider_key: None,
+            context: None,
+            metadata_center_snapshot: None,
+        };
+
+        let output = build_snapshot_recorder_write_options(input);
+
+        assert_eq!(output["data"], data);
+    }
+
+    #[test]
+    fn snapshot_payload_copy_budget_rejects_queue_bytes_over_budget() {
+        SNAPSHOT_QUEUED_BYTES.store(0, Ordering::SeqCst);
+        let payload = serde_json::json!({ "body": "x".repeat(2048) });
+        assert!(estimate_json_value_bytes(&payload, 1024) > 1024);
+        assert!(!reserve_snapshot_queue_bytes(2048, 1024));
+        assert!(reserve_snapshot_queue_bytes(512, 1024));
+        assert!(!reserve_snapshot_queue_bytes(513, 1024));
+        release_snapshot_queue_bytes(512);
+        assert_eq!(SNAPSHOT_QUEUED_BYTES.load(Ordering::SeqCst), 0);
     }
 }

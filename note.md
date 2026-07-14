@@ -1,3 +1,11 @@
+# 2026-07-14 16:20 CST: RouteCodex V3 Responses direct Rust MVP implemented
+- Scope: project-level V3 under `v3/`; Rust config/server/runtime/provider/CLI only. Relay, continuation, servertool/stopless, V2 compatibility, global install, and live replacement remain out of scope.
+- Architecture: runtime kernel is sole lifecycle executor; static hook registry stores callable functions and kernel executes every hook; shared Rust helpers own route selection and provider-response projection; server uniquely owns `V3Server11HttpFrame`; provider uniquely owns wire/auth/HTTP/raw response.
+- Runtime: `/v1/responses` direct preserves the current request body, resolves auth through `auth_env` only at transport, returns JSON or semantically equivalent SSE bytes, and sends malformed/missing-content-type/provider failures through typed `V3Error01` -> `V3Error05`.
+- Compile lock: V3 Rust-only/module/static-hook/resource gates plus temporary Rust compile-fail crates prove server/CLI cannot import provider transport.
+- Evidence PASS: rustfmt; clippy `-D warnings`; full V3 workspace tests; CLI controlled-upstream smoke; JSON/SSE/provider-error/wrong-method/path blackboxes; V3 docs/maps gates; existing architecture/resource/mainline/function-map baselines.
+- Maps/wiki moved from `design_pending` to real anchored symbols. Marker: `routecodex-v3-responses-direct-mvp-implemented-20260714`.
+
 # 2026-07-12 23:45 CST: Hub TS orchestration removal goal contract update
 - Jason clarified the execution requirement: every Hub/runtime rustification round must compile/build, global/release install, managed restart, health/version check, log/sample error inspection, then fix discovered errors before reporting round completion.
 - Updated project MEMORY and rcc-dev-skills; appended the current complete TS orchestration removal execution contract to `docs/goals/hubpipeline-full-rust-closeout-plan.md`.
@@ -29646,6 +29654,13 @@ Pure Rust NAPI candidates:
 - Current gates: `verify:function-map-compile-gate` passed; `verify:architecture-thin-wrapper-only` passed; `verify:llmswitch-rustification-audit` passed; `git diff --check` passed.
 - Blocking gate remains identical: `verify:architecture-mainline-call-map` and nested `verify:architecture-review-surface-light` still fail because `error.mainline` edge `err-02` binds `classifyProviderFailure`, while current source has `resolveProviderFailureClassification` / `classifyErrorErr02HostCapturedNative`.
 - This is the third consecutive goal-audit turn seeing the same active error claim map drift blocker. The Hub Pipeline shared-library goal cannot be completed or verified until the active owner claim updates/hands off the error mainline map and architecture review turns green.
+
+# 2026-07-13: Multi-worker repairable blocker rule added
+
+- Jason clarified the collaboration rule: if a blocker prevents the goal and can be fixed by a forward repair, the agent must actively fix it instead of waiting, resetting, or marking blocked.
+- Updated `.agent-collab/PROTOCOL.md` with a `Repairable Blockers` section: refresh source/claims, record evidence, claim if free, handoff plus minimal forward-only repair when an active claim owns a low-risk alignment drift, then run the proving gate.
+- Updated `.agents/skills/rcc-dev-skills/SKILL.md` multi-worker guidance with the same operational rule.
+- Current map blocker check: `npm run verify:architecture-mainline-call-map` now passes in the current tree; `error.mainline err-02` is anchored to `resolveProviderFailureClassification` -> `classify_error_err02_host_captured`.
 # 2026-07-13: apply_patch canonical carrier regression closed
 
 - Root cause: `ed9d94e7c` changed the shared Rust `build_canonical_apply_patch_args` owner to emit both `patch` and `input`, contradicting the active single-freeform-carrier contract and breaking ten response-governance tests.
@@ -29748,6 +29763,57 @@ Pure Rust NAPI candidates:
 - Rust `hub_pipeline_lib/effect_plan.rs` now owns `no_pipe` / `use_pipe`, trims and validates codec/requestId, requires object payload, and owns malformed-shape errors. TS only consumes the returned pipe for Node stream IO and rejects unknown actions.
 - Red/green: residue audit first failed on the missing native planner and live TS codec/requestId/payload checks. Rust focused 1/1, provider-response Jest 261/261, TypeScript, function/resource/mainline/native-reference/rustification/wiki/native/base/release gates passed.
 - Live: installed/global/5555 versions align at `0.90.3932`; relay SSE request `req_1783905286656_132cccdc` returned HTTP 200 with `STREAM_PIPE_OK`, `response.completed`, and `response.done`, no `event:error`; current primary log has no matching error and provider/client samples expose no internal effect keys.
+# 2026-07-13: provider-response continuation record effect executor closed
+
+- Rust `publishResponsesRecordPlanJson` already emitted complete continuation `recordArgs`; TS was rebuilding it and re-owning entry/owner/scope defaults plus truthy omission behavior.
+- Red residue gate locked direct `recordResponsesResponse(plan.recordArgs)` and prohibited TS constants/optional spread. Rust focused 1/1, provider-response Jest 261/261, TypeScript, architecture/native/base/release gates passed.
+- Global version `0.90.3932` matched `routecodex`, `rcc`, install/current, and 5555 health. Live request `req_1783906711085_1c5ea6bc` returned HTTP 200 `RECORD_EFFECT_OK`; canonical sample had no internal continuation/runtime-control leakage and logs had no request-local error.
+# 2026-07-13: provider-response runtimeStateWrite shape validation moved to Rust
+
+- TS `asRecord(runtimeStateWrite) ?? null` silently hid malformed effect arrays/scalars. `publishResponsesRecordPlanJson` now requires object/null and returns explicit Rust errors for invalid JSON or non-object values; TS only projects absent undefined to null for JSON transport.
+- Red residue gate failed on the live `asRecord` coercion, then passed after removal. Rust focused 1/1, Responses history 89/89, provider-response Jest 27/27, TypeScript, architecture/native/base/release gates passed.
+- Global/install/5555 versions align at `0.90.3932`; live request `req_1783907455629_46f0da58` returned HTTP 200 `RUNTIME_STATE_WRITE_OK`, with no internal effect/control leakage or request-local log error.
+# 2026-07-13 provider-response diagnostic alarm effect plan closed
+
+- Rust `planProviderResponseDiagnosticAlarmEffectJson` now owns alarm selection, identifier trimming, details serialization, and the complete `no_op` / `emit` console-message plan. TS only executes `console.warn(message)` and rejects unknown actions.
+- Red/green: residue first failed on the missing native planner; Rust focused 1/1, real native-binding alarm integration 1/1, provider-response Jest 27/27, TypeScript, architecture/native/base/release gates passed.
+- Live: global/install/5555 versions align at `0.90.3932`. Normal request `512965-681` returned HTTP 200 `DIAGNOSTIC_NORMAL_OK`; no-header request `512966-682` returned HTTP 200 `DIAGNOSTIC_ALARM_OK` with runtime-generated request-local session truth, so missing-session cannot naturally occur at the managed HTTP entry. Canonical sample leakage scan and current primary log are clean.
+
+# 2026-07-13 provider-response outbound effect materialization closed
+
+- Rust `materializeProviderResponseOutboundEffectPlanJson` now consumes the total native response plan, validates payload/requestId/diagnostics/effects, and returns `rawPayload`, `diagnosticInput`, and normalized `runtimeEffects`. TS nested reads, effect-array validation, old normalize export, and the dead native-plan context cache were removed.
+- Evidence: Rust positive/negative 2/2; provider-response Jest 27/27; focused residue 2/2; TypeScript; resource/function/host-split/native-reference/rustification/wiki/native/base/release gates; `git diff --check`.
+- Live: installed/global/current/5555 versions align at `0.90.3932`. Request `req_1783911950468_327981fa` selected cross-protocol relay `orangeai.key1.glm-5.2`, returned HTTP 200 `EFFECT_MATERIALIZATION_LIVE_OK` with `requires_action`, and logged `finish_reason=tool_calls`; sample leakage scan found no internal runtime/control/continuation/materialization fields.
+
+# 2026-07-13: direct semantic classification top-down design
+
+- Jason corrected the initial provider/model direct policy proposal: adding mode checks to the current hook would remain patch-shaped. The requirement must become a generic lifecycle classification with config compile, VR real-target resolution, paired request/response projection, and host-only IO.
+- Design-only owner `hub.direct_semantic_classification` and resource `direct.semantic_policy` added. Public config is one closed enum, `routing` or explicit `passthrough`; missing means routing, unknown fails, independent model/thinking/response booleans are forbidden.
+- New side chain: `ConfigDirect01AuthoringPolicy -> ConfigDirect02ValidatedPolicy -> VrDirect03ResolvedSemantics -> DirectReq04ProjectionPlan / DirectResp05ProjectionPlan`. It does not insert a new Hub request-mainline node.
+- Forwarder stays pure selection; policy resolves after real provider/model target selection. Request and response consume the same resolved contract. MetadataCenter is observation-only.
+- Runtime edges remain `binding pending`; no source/runtime implementation or live completion is claimed.
+
+# 2026-07-13: direct semantic classification resource ownership correction
+
+- Config validation and request-scoped classification are separate stages. `ConfigDirect02ValidatedPolicy` writes only `config.provider_profile_projection`; it must not pre-create `direct.semantic_policy`.
+- `VrDirect03ResolvedSemantics` is the sole writer of request-scoped `direct.semantic_policy`, after the final real provider/model target is known.
+- Response projection consumes the same resolved contract directly. It cannot depend on request projector output or infer policy from request mutation results.
+- Pending mainline edges use machine-readable `binding_pending: true`, so generated manifests report all four unresolved runtime edges honestly.
+## 2026-07-13 provider-response stage recorder effect plan
+
+- `hub.provider_response_stage_recorder_effect_plan`：Rust `planProviderResponseStageRecorderEffectJson` 现拥有 stage9/stage10 名称、body/stream protocol 与 debug payload envelope；TS 只执行 recorder IO。
+- 红测先因缺 Rust owner 编译失败；绿测 Rust 2/2、provider-response 21/21、metadata 6/6、residue 234/234。
+- 架构/native/base/release gates 通过；安装/5555 health 版本 `0.90.3932`。live `req_1783914007571_505e44b3` HTTP 200 `STAGE_RECORDER_LIVE_OK`，无目标错误或内部字段泄漏。
+
+## 2026-07-13 route pool standalone names removed from display/config
+
+- Goal: simplify route-pool config/log attention by removing standalone route pool names from authoring display and printed hit/rollup labels.
+- Owner locked: config materialization is Rust `config.user_config_materialization`; hit-log projection is Rust `vr.hit_log_projection`; rollup display has narrow TS projection owner `log.virtual_router_rollup_projection` that consumes telemetry only.
+- Red evidence before fix: config tests expected compiled routing pool `id`; Rust/native hit-log expected `thinking/thinking-primary`; rollup/usage tests expected `route/pool`.
+- Source fix: Rust materialization strips authoring `id` / `poolId` from public routing config; bootstrap no longer derives `routePolicyGroup` from pool ID; hit-log line uses `routeName -> provider.model`; telemetry `pool` equals route classification; rollup key/display ignores `poolId`.
+- Config fix: `~/.rcc/config.toml` route pool `id = "gateway-..."` lines were removed exactly; `routecodex config validate -c ~/.rcc/config.toml --no-reload` passed and remaining pool-id lines were 0.
+- Verified: `npm run build:native-hotpath`; focused Rust config/bootstrap/hit-log tests; focused Jest config/hit-log/log-rollup/usage suites; `npx tsc --noEmit --pretty false --skipLibCheck`; touched Rust `rustfmt --check`; function-map/resource/mainline/rustification/VR gates; generated wiki Markdown/HTML sync; `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`; `git diff --check` on target files.
+- Remaining gap: no global install/restart/live log replay was run in this slice, so source/config gates are green but live runtime has not reloaded the simplified display behavior.
 
 ## 2026-07-13 aggregate server restart definition and live closeout
 
@@ -29757,6 +29823,283 @@ Pure Rust NAPI candidates:
 - Docs/maps/skills: updated lifecycle SSOT, AGENTS, installation docs, function/mainline/verification maps, generated manifests/wiki/HTML, release script, main skill, config SSOT reference, and July lesson L93-141; L93-68 is explicitly superseded.
 - Gates: focused restart/install/native Jest 23/23, TypeScript, runtime lifecycle/function-map/mainline/wiki/browser, native build, base build, and release install passed.
 - Live: before install all 4444/5520/5555/10000 listeners were PID 52949. Install used locator 5520, process lifecycle recorded one restart signal at 2026-07-13T05:30:57.106Z, and new PID 85361 remained under parent 24613. All four ports are ready/pipelineReady at version 0.90.3932.
+
+# 2026-07-13: direct semantic classification runtime and routing live closeout
+
+- Runtime mainline is now anchored end to end: `ConfigDirect01AuthoringPolicy -> ConfigDirect02ValidatedPolicy -> VrDirect03ResolvedSemantics -> DirectReq04ProjectionPlan / DirectResp05ProjectionPlan`; `dsc-01..dsc-04` are all anchored with zero `binding_pending`.
+- Route thinking has one independent truth chain: `RoutePoolTier.thinking -> SelectionResult.route_thinking -> target.routeThinking -> VrDirect03ResolvedSemantics.route_thinking`. It is not part of `routeParams`, and production resolver/projectors do not read `routeParams.thinking`.
+- Module blackbox fixtures must use the real top-level route-tier `thinking` authoring shape. A fixture that puts `thinking` under `routeParams` validates an invalid input and can create a false green result.
+- The old `routeParams.thinking` compatibility path was physically removed rather than retained as a fallback.
+- Current gates passed: direct semantic design/runtime, focused Rust semantic/model-hook/forwarder tests, direct/provider-config Jest blackboxes, dry-run blackbox fixtures, function/resource/mainline/wiki/review gates, TypeScript, native build, base build, and diff check.
+- Managed 5555 routing evidence:
+  - provider-request dry-run selected `cc.key1.gpt-5.5`, projected canonical wire model `gpt-5.5`, and replaced client `low` with route `high`; no internal policy/MetadataCenter leakage.
+  - real JSON response `req_1783919210488_36116dc2` preserved provider response `gpt-5.5-anyint` internally and restored client model `client-visible-live-model`, while keeping reasoning effort `high`.
+  - real SSE response restored `client-visible-sse-model` on response events and projected route `xhigh`; no internal policy/MetadataCenter leakage.
+- Managed-live explicit passthrough remains unproven: no `~/.rcc/provider/*/config.v2.toml` currently contains `semantics = "passthrough"`, and project policy forbids modifying real provider config without Jason authorization. The module HTTP blackbox proves the feature behavior but cannot substitute for this missing live evidence.
+
+# 2026-07-13: direct semantic classification temporary explicit passthrough managed-live probe
+
+- Jason explicitly authorized one bounded real provider-model config probe after the prior blocked audit. Added only `[provider.models."gpt-5.5".direct] semantics = "passthrough"` to `~/.rcc/provider/cc/config.v2.toml` during validation; auth, health, forwarders, and other provider configs were unchanged.
+- `routecodex config validate` passed. One aggregate `routecodex restart --port 5555` resolved 4444/5520/5555/10000; global `routecodex`, `rcc`, install/current, and all four health endpoints remained aligned at `0.90.3932`, ready/pipelineReady.
+- Passthrough request proof: provider-request dry-run `direct-passthrough-dryrun-20260713T055340` selected `cc.key1.gpt-5.5` and preserved client model `client-visible-passthrough-model` plus `reasoning.effort=low` despite route `tools` carrying `xhigh`.
+- JSON proof: `direct-passthrough-json-20260713T055404` returned HTTP 200 `PASSTHROUGH_JSON_OK`; provider and client responses both exposed `model=gpt-5.5-anyint` and `reasoning.effort=low`.
+- SSE proof: `direct-passthrough-sse-20260713T055458` returned created/in_progress/completed and output events with top-level `model=gpt-5.5-anyint`, effort `low`, `PASSTHROUGH_SSE_OK`, and `[DONE]`. Provider/client `bodyText` is byte-equal after removing only the client transport `: keepalive` prefix.
+- Retry/reclassification proof: `direct-passthrough-reroute-20260713T055707` first selected passthrough `cc` and sent the invalid client model unchanged; upstream returned 403 `permission_denied`. ErrorErr reroute selected routing target `asxs.crsa.gpt-5.5`; final raw provider response was `model=gpt-5.5-2026-04-23`, effort `xhigh`, while client response restored the original client model and kept `xhigh`. This proves policy is resolved again from the new real target rather than leaking passthrough state.
+- Leakage scan found no `direct.semantic_policy`, `directSemantic`, `MetadataCenter`, `VrDirect03ResolvedSemantics`, `DirectReq04ProjectionPlan`, or `DirectResp05ProjectionPlan` in provider/client artifacts.
+- Current gates passed: direct design/runtime verifiers; Rust semantic 3/3 and model hooks 6/6; provider/config Jest 42/42; direct HTTP blackbox 9/9; resource/function/mainline/node/manifest/wiki/review gates; TypeScript; `git diff --check`. Architecture review reports 113/113 mainline edges anchored and direct chain 4/4 with zero pending.
+- Jason then clarified that the probe must not become an online config rollout. The temporary direct block was removed, `routecodex config validate` passed, one aggregate restart restored 4444/5520/5555/10000, and a final provider-request dry-run returned canonical `model=gpt-5.5` plus route `reasoningEffort=xhigh`. Current real config therefore remains default routing.
+
+# 2026-07-13: request payload copy budget first slice
+
+- Goal: reduce generic request payload copy amplification without trimming or changing true client/provider payload semantics.
+- Owner locked: `request.payload_copy_budget` writes `request.payload_ownership`; retry seed is TS request-executor ownership boundary, and Rust req_inbound capture remains the Responses context owner.
+- Source fix: retry seed now borrows object payloads during first attempt and materializes a clone only on actual retry/reentry restore. `resolveOriginalRequestForResponseConversion` returns the borrowed source reference for success-path response conversion.
+- Rust fix: Responses req_inbound context capture borrows raw request to collect tool outputs, then moves raw ownership into `normalized_request` instead of cloning raw and normalized full payloads simultaneously.
+- Verified: `npm run verify:request-payload-copy-budget`, `npm run verify:resource-operation-map`, `npm run verify:function-map-compile-gate`, `npm run build:native-hotpath`, `npm run build:base`, and `git diff --check` on task files passed.
+- Remaining gap: no release/global install, managed restart, or live large-payload replay was run in this slice. This is source/native/build evidence only, not live closure.
+
+# 2026-07-13: responses relay continuation writer uniqueness source closeout
+
+- Goal: close §11.16 item 1 so relay continuation canonical save has one writer: Rust `publishResponsesRecordPlanJson` emits ordered `continuationStoreEffects`, and TS only executes store IO.
+- Source fix already present: `responses-handler.ts` no longer performs post-pipeline relay save orchestration; `responses-request-bridge.ts` no longer exports/defines handler-side record/finalize helpers; `provider-response-effects.ts` executes Rust-owned `continuationStoreEffects`.
+- Evidence refreshed: MemoryPalace and maps confirm `ChatProcRespContinuation07CanonicalSaved` is the owner and handler/SSE/outbound are transport/projection only.
+- Verified this pass: architecture mainline call-map, mainline manifest sync, wiki sync, wiki HTML sync, architecture review surface light, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and `git diff --check` passed.
+- Remaining gap: no release/global install, managed restart, or live `/v1/responses` replay was run in this slice because this handoff had no explicit authorization for live/runtime actions. Full §11.16 still has later slices open.
+
+# 2026-07-13: request payload copy budget owned standardizer slice
+
+- Source fix: Hub engine now calls `coerce_standardized_request_from_owned_parts(payload, normalized)` instead of building a temporary `{ payload, normalized }` JSON wrapper and letting standardizer clone `payload` back out of it.
+- Contract preserved: wrapper entrypoint still exists for NAPI/tests; new Rust unit test proves owned path output equals wrapper path output.
+- Map/docs updated: `request.payload_copy_budget` allowed paths and verification gates now include `standardized_request.rs` and `engine.rs`; design doc moves owned standardizer from future work into current contract.
+- Verified: `npm run verify:request-payload-copy-budget`, target-file `rustfmt --check`, `npm run verify:resource-operation-map`, `npm run verify:function-map-compile-gate`, `npm run build:native-hotpath`, `npm run build:base`, and task-file `git diff --check` passed.
+- Remaining gap: no release/global install, managed restart, or live large-payload replay was run; current closure remains source/native/build only.
+
+# 2026-07-13: responses request bridge total-plan shrink first cut
+
+- Goal: start §11.16 item 2 by shrinking `responses-request-bridge.ts` away from local system-prompt apply and MetadataCenter writer selection.
+- Red evidence: new `verify:responses-request-bridge-total-plan-shrink` failed on current source for `applySystemPromptOverride`, local writer constants, `write.family` writer branch, missing Rust writer descriptors, and missing Rust prompt finalize plan. Red-fixture gate accepts valid fixture and rejects those residues.
+- Source fix: Rust `build_responses_pipeline_metadata_for_http` now emits complete `writer` descriptors per MetadataCenter write; TS passes `write.writer` unchanged. Rust `finalizeResponsesHandlerPayloadForHttpJson` now accepts host-read `systemPromptOverride` and owns `/v1/responses.instructions` merge plus stream forcing; TS only calls `getSystemPromptOverride()` as host env/FS IO.
+- Map/docs updated: new test design, package scripts, function/verification map gates, and generated wiki/html sync. The existing `verify:server-function-map-boundary` blocker was fixed by adding exact opaque SSE/body and response projection/conversation facade wording.
+- Verified: new verify/red fixture, focused Rust metadata/finalize tests, request bridge Jest 26/26, TypeScript, native hotpath build, function/native/rustification/server boundary gates, generated wiki/html sync, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and `git diff --check` passed.
+- Remaining gap: this is not full §11.16 item 2 closure. Continuation action total-plan collapse, client-error descriptor totalization, and full live replay still remain; release/install/restart/live were not run without explicit authorization.
+
+# 2026-07-13: responses request bridge errorsample classification Rust plan
+
+- Goal: continue §11.16 item 2 by moving malformed Responses tool-history errorsample classification out of `responses-request-bridge.ts`.
+- Source fix: Rust `planResponsesInboundToolHistoryErrorsampleForHttpJson` now owns `MALFORMED_REQUEST` + `Tool history contract violated` / `details.toolHistoryContractViolation` classification and returns `none` or `write_errorsample` with the complete payload. TS bridge only serializes the thrown error into a plain object, calls the native plan, adds the current timestamp, and executes `writeErrorsampleJson` file IO.
+- Gate/doc fix: `verify:responses-request-bridge-total-plan-shrink` and its red fixtures now reject TS-local `MALFORMED_REQUEST`, `Tool history contract violated`, and `toolHistoryContractViolation` branches; the test design, function map allowed paths, verification map, and native required export list include this source slice.
+- Verified so far: request-bridge total-plan verifier/red fixtures, request bridge Jest 26/26, Rust focused `inbound_tool_history_errorsample_plan`, `npx tsc --noEmit --pretty false --skipLibCheck`, `npm run build:native-hotpath`, `npm run verify:function-map-compile-gate`, `npm run verify:server-function-map-boundary`, `npm run verify:hub-pipeline-native-reference-gate`, `npm run verify:llmswitch-rustification-audit`, `npm run verify:responses-handler-single-bridge-surface`, and `npm run verify:responses-relay-continuation-writer-uniqueness` passed.
+- Remaining gap: this still does not close §11.16 item 2. Continuation action IO effect arguments and resume client-error descriptor/projection are still partly TS-orchestrated; no release/global install/restart/live replay was run.
+
+# 2026-07-13: request payload copy budget Hub engine take/remove slice
+
+- Source fix: Hub engine now takes `HubPipelineOutput.payload/metadata` with `Option::take()` after normalize, so normalize output is moved into request/response paths instead of cloned while the native output object still owns a copy.
+- Source fix: standardized output is now destructured with object `remove("standardizedRequest")` / `remove("rawPayload")`, avoiding a third full payload copy retained inside the temporary standardizer result object.
+- Contract preserved: no payload field trimming, no provider/config changes, no MetadataCenter payload copy. Existing required gates still pass.
+- Verified: `npm run verify:request-payload-copy-budget`, `rustfmt --check sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs`, and `npm run build:native-hotpath` passed.
+- Remaining gap: response-path effect payload duplication and registry consume clones are still only audited, not fixed in this slice; no release/global install or live large-payload RSS replay was run.
+
+# 2026-07-13: payload copy full-pipeline inventory and StreamPipe duplicate body removal
+
+- Goal progress: created `docs/design/payload-copy-hotspot-inventory.md` to classify boundary serialization, normal-path removable copies, and debug/error/snapshot-only copies across request/response/error/retry/continuation/effect/registry paths.
+- Source fix: response `StreamPipe` effect no longer writes duplicate `body` alongside canonical `payload`; effect materializer now ignores legacy `body` and returns only `payload` to TS stream pipe consumers.
+- Red/source lock: source scan previously found `\"body\": stream_decision.payload.clone()` in Hub engine and `output_record.insert(\"body\"...)` in effect materializer; residue test now rejects both patterns.
+- Verified so far: Rust `normalizes_provider_response_effect_plan` and `response_stream_path_returns_stream_pipe_effect_plan`; focused Jest provider-response/residue streamPipe tests; `rustfmt --check` for touched Rust files; `npm run build:native-hotpath`; target `git diff --check`.
+- Remaining gap: RuntimeStateWrite full payload narrowing, registry `Option::take()`, debug snapshot budget, error sample budget, continuation retention, and live RSS replay remain open.
+
+# 2026-07-13T12:47:25Z: stopless repeat counter audit
+
+- 用户截图复现：全局 routecodex 0.90.3932 执行 `routecodex hook run reasoningStop --input-json ... --repeat-count 4 --max-repeats 3` 返回 ok:true，且把 repeatCount 静默钳到 3、triggerHint=budget_exhausted。
+- 根因 1：`sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/cli_contract.rs` 的 `build_stop_message_auto_run_output` 在 `current_repeat_count >= current_max_repeats` 时走 graceful budget_exhausted 输出；这绕过了 `scripts/tests/servertool-cli-binary-blackbox.mjs` 和 `outcome_contract.rs` 中 repeatCount > maxRepeats fail-fast 契约。
+- 根因 2：`stop-message-core/tests/stop_schema_gate_closure.rs` 仍明确断言连续 3 次 no_schema/invalid schema 继续 Followup；与当前项目路由和用户要求的三轮收敛不一致，会允许第三次后投影下一次 CLI。
+- 根因 3：连续性 reset 只在 Hub response 非 stop 路径有 `build_stopless_metadata_center_reset_write_plan` 单测；CLI 纯命令路径没有 session/previous state，不能证明每次遇到非连续 finish_reason 后归零。
+- 修复建议：先改红测，锁 4/3 fail-fast、第三次 no_schema 不再投影第四次、non-stop/progress 后下一次 stop 从 repeatCount=1 开始；再改 Rust owner：`stop-message-core` gate + `servertool-core` CLI contract + stopless metadata reset/write plan。
+
+# 2026-07-13: payload copy registry and RuntimeStateWrite cleanup
+
+- Registry source fix: `responses_reasoning_registry.rs` removed the serialize/parse deep clone helper, ignores the obsolete register clone flag, stores already-parsed owned `Value`s, and consumes one-shot/alias payload fields with `Option::take()` instead of clone-then-clear.
+- RuntimeStateWrite source fix: response effect planning no longer writes duplicate full client response payload or nested `responseRecord`; no runtime-state effect is emitted for responses without usage/submit-retention state, and materialization strips legacy `payload`, `responseRecord`, `requestId`, and `clientProtocol`.
+- Dead semantic removal: `build_response_record_effect_payload` and its only helper were physically removed because `publishResponsesRecordPlanJson` receives canonical `response` separately and consumes only `runtimeStateWrite.usage` plus `keepForSubmitToolOutputs`.
+- Gates passed: registry Jest 3/3; Rust registry tests 5/5; RuntimeStateWrite Rust tests 3/3; StreamPipe Rust test; `normalizes_provider_response_effect_plan`; response-effect Jest suites 265/265; `verify:hub-response-responses-chat-projection`; `verify:hub-response-anthropic-native`; touched Rust `rustfmt --check`; target `git diff --check`; `npm run build:native-hotpath`.
+- Remaining gaps: effect materializer/result-builder clones beyond RuntimeStateWrite, Hub request-stage clones, continuation retention, snapshot/debug/error budgets, full source closeout build/base gates, and live large-payload RSS replay remain open.
+
+# 2026-07-13: responses request bridge resume-error total plan
+
+- Goal: continue §11.16 item 2 by moving `/v1/responses` resume-error projection/defaults out of TS request bridge.
+- Red evidence: `npm run verify:responses-request-bridge-total-plan-shrink` failed on split `buildResponsesResumeClientErrorForHttp*` / `shouldProjectResponsesResumeClientErrorForHttp*`, TS-local `responses_resume_failed` / `Unable to resume Responses conversation`, and missing Rust `plan_responses_resume_error_for_http`.
+- Source fix: Rust `plan_responses_resume_error_for_http` now emits `rethrow` for non-client/malformed errors and complete `client_error` `{status, body.error}` for client-origin resume errors. TS serializes the thrown error, calls one native total plan, returns exact `client_error`, or rethrows the original error.
+- Deleted split native/helper exports from `native-hotpath-required-exports`, request handler host, native wrapper, request bridge, and affected mocks. Residue gates now reject split helper revival and TS-local resume error defaults.
+- Verified: Rust `responses_resume_error_plan` 2/2, request bridge Jest 28/28, total-plan verifier/red fixtures, response handler single-bridge surface, submit_tool_outputs handler spec 5/5 after mock alignment, TypeScript, native hotpath build, build:base, function/server-boundary/native-reference/rustification/architecture-review-light gates, native binding smoke, and target diff check.
+- Remaining gap: §11.16 item 2 still not fully closed; continuation action execution effect arguments remain. No release/global install/restart/live replay was run without explicit authorization.
+
+# 2026-07-13: response outbound effect materializer owned path
+
+- Source fix: `materialize_provider_response_outbound_effect_plan_json` now passes the parsed owned `Value` into `materialize_provider_response_outbound_effect_plan_owned(value)` instead of borrowing `&value` and cloning the plan back into the output.
+- Ownership fix: response `payload`, `diagnostics`, `effectPlan`, stream-pipe payload, runtime-state usage, and stopless metadata write payload are consumed with `remove()` / owned normalizers. The borrowed compatibility function remains only as a thin wrapper for tests/internal callers.
+- Red evidence: focused residue gate failed on missing `materialize_provider_response_outbound_effect_plan_owned` and on the borrowed wrapper call. Green evidence: the same residue gate passed after the owned path.
+- Verified: Rust `materializes_provider_response_outbound_effect_plan` 1/1, `normalizes_provider_response_effect_plan` 1/1, malformed materialization 1/1, provider-response Jest/residue suites 262/262, `rustfmt --check`, `npm run build:native-hotpath`, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and target `git diff --check` passed.
+- Remaining goal gaps: Hub request-stage clones, continuation retention, snapshot/debug/error budgets, full closeout gates, and live large-payload RSS replay remain open.
+
+# 2026-07-13: request-stage result builders owned path
+
+- Source fix: `build_request_stage_native_result_plan_json` and `build_request_stage_hub_pipeline_result_json` now consume parsed owned `Value`s through owned variants instead of borrowing `&value`.
+- Ownership fix: provider payload, diagnostics, complete metadata, error details, and standardized request move with `remove()` into the host-facing result. Borrowed functions remain thin compatibility wrappers for Rust tests/internal callers.
+- Contract boundary: the final result still projects `target`, `routingDecision`, and `routingDiagnostics` both top-level and inside complete metadata because that duplication is part of the current host result contract; it no longer duplicates the complete metadata or provider payload.
+- Red/green: focused residue gate first failed on missing owned builders; after the fix, request-stage source gate passed and Rust request-stage result tests passed 2/2 for each focused filter.
+- Verified: request-stage Rust result tests passed 2/2 for each focused filter, request-stage source gate passed, full Hub residue audit passed 234/234, `npm run verify:request-payload-copy-budget`, `rustfmt --check`, and `npm run build:native-hotpath` passed.
+- Remaining verification for this slice: target diff check; full goal closeout still requires the final base build after all remaining slices.
+
+# 2026-07-13T14:06:16Z: stopless global install and managed live closeout
+
+- Release install initially failed before installation because `request.payload_copy_budget.allowed_paths` referenced `note.md` and `MEMORY.md`, which are intentionally absent from the isolated release surface. Removed those two false source bindings; `verify:resource-source-bindings` and `verify:function-map-compile-gate` passed.
+- `ROUTECODEX_INSTALL_VERIFY_PORT=5555 ROUTECODEX_SKIP_AUTO_BUMP=1 npm run install:release` then passed. Lifecycle evidence records exactly one aggregate `SIGUSR2 restart_signal_received` at `2026-07-13T13:58:56Z`; the replacement process started release `0.90.3934`.
+- Installation truth is aligned: `routecodex --version`, `rcc --version`, and `~/.rcc/install/current/package.json` all report `0.90.3934`. Aggregate members 4444/5520/5555/10000 all return HTTP 200, `ready=true`, `pipelineReady=true`, `version=0.90.3934`.
+- The standalone `stopless-5555-live-probe.mjs` request was not accepted as stopless evidence: its naked Responses request routed to `cc.key1.gpt-5.5` without stopless runtime control and returned the requested schema as ordinary text. This is `invalid_direct_or_no_stopless_path`, not a stopless regression.
+- Managed evidence comes from the real Codex session `019f5b73-8285-7e20-8174-a3df8f608c9f`. Old `0.90.3932` samples projected `reasoningStop/exec_command` at `repeatCount=3` and even recorded `repeatCount=4`. After restart, `req_1783951138541_630f931a` on `0.90.3934` had `stopless.active=true`, `repeatCount=3`, provider `orangeai.key1.glm-5.2`, completed with the original response, and exposed no `reasoningStop`, no `exec_command`, no synthetic budget-exhausted payload, and no fourth CLI.
+
+# 2026-07-13T13:38:14Z: stopless consecutive-stop root fix and gate closeout
+
+- Correct contract: consecutive missing/invalid-schema stop rounds 1 and 2 are intercepted and projected as CLI with `repeatCount=1/2`. Round 3 reaches the configured limit and must pass the original provider `finish_reason=stop` through to the client without another CLI or a synthetic budget-exhausted terminal payload.
+- Reset contract: non-stop progress, ordinary tool calls, valid terminal schema, `simple_question=true`, and session changes clear the streak. The next missing/invalid stop starts again at `repeatCount=1`.
+- Root fix: `stop-message-core` now returns `AllowStop` with `stop_schema_loop_guard_passthrough` at the third consecutive stop. `servertool-core` physically removed the dead budget-exhausted output builder and rejects CLI/manual `repeatCount >= maxRepeats`.
+- Continuation root cause: repeated `/v1/responses.submit_tool_outputs` initially lost `model` because request-executor capture preferred raw HTTP `{tool_outputs}` over the already materialized Chat Process body. Capture now selects the current materialized payload when `MetadataCenter.continuation_context.responsesResume` exists; non-continuation entry capture still uses raw entry evidence.
+- Gate lock: Rust stop-schema tests 22/22, servertool CLI contract 51/51, router-hotpath stopless 81/81, focused request-executor Jest 16/16, servertool CLI binary blackbox, stopless HTTP blackbox, rust-only/function/resource/mainline/wiki gates, TypeScript, target rustfmt, `build:base`, and `git diff --check` passed.
+- Blackbox evidence: exactly three upstream requests; rounds 1 and 2 returned CLI projections; round 3 returned `status=completed`, retained `第三轮仍然 plain stop，必须直接透传给客户端`, and emitted no fourth CLI.
+- Remaining gap: no release/global install, aggregate restart, or managed live replay was run in this closeout. Global `cargo fmt --check` is also blocked by unrelated dirty Rust files; all stopless task Rust files pass direct `rustfmt --check`.
+
+# 2026-07-13: snapshot payload copy budget first slice
+
+- Red evidence: `tests/sharedmodule/snapshot-payload-copy-budget.spec.ts` failed on `SnapshotHookOptions: Clone`, `try_send(options.clone())`, and `let mut normal = options.clone()`.
+- Source fix: Rust snapshot queue now moves the owned diagnostic payload into `SyncSender`; full/disconnected errors recover the original value only for bounded drop logging. The synchronous writer mutates the owned stage field and reuses the same payload for snapshot and errorsample checks.
+- Disabled trace payload capture remains allocation-safe at the host: `JSON.stringify(payload)` is reachable only under explicit trace-payload enablement.
+- Green evidence: focused source gate 2/2, focused Rust budget test 1/1, full `verify:snapshot-payload-copy-budget` 3/3, resource map 114 resources / 143 feature bindings, mainline map 20 chains / 113 edges, target rustfmt and diff checks passed.
+- Remaining snapshot gap: enabled snapshot recording still serializes the same diagnostic payload across normalization, write-option planning, and persistence N-API calls; per-stage errorsample classification can also serialize a full payload more than once. Inventory remains partial and the total goal stays active.
+
+# 2026-07-13: errorsample payload copy budget writer slice
+
+- Red evidence: `verify:errorsample-payload-copy-budget` failed because runtime tests import tracked JS mirrors; `sensitive-redaction.js` lacked `stringifyRedactedJson`, `errorsamples.js` still imported `redactSensitiveData`, and the TS catch branch still used the old three-argument `JSON.stringify` arity.
+- Source fix: `writeErrorsampleJson` now passes the original diagnostic object to `serializePayloadForWrite`, which uses `stringifyRedactedJson` to redact during serialization; normal mode no longer creates a full redacted object graph or both pretty and compact full JSON strings. TS, JS, and d.ts mirrors are aligned.
+- Redaction fix: debug-only free-text `sk-` masking now covers hyphen/underscore token bodies in both TS and JS; this only affects errorsample/debug serialization, not live payload truth.
+- Green evidence so far: `npm run verify:errorsample-payload-copy-budget` passed 14/14 and `npx tsc --noEmit --pretty false --skipLibCheck` passed.
+- Remaining gap: callers can still construct observations that contain provider request, normalized response, and converted response simultaneously; that is tracked as `Error/contract observations` in the hotspot inventory and remains open.
+
+# 2026-07-13: contract observation payload copy budget slice
+
+- Red evidence: new `verify:contract-observation-payload-copy-budget` initially failed because `request-executor-runtime-blocks.ts` had no `summarizePayloadContractObservationForErrorsample` owner and `queueRequestExecutorPayloadContractErrorsample` passed `args.observation` directly into the errorsample payload.
+- Source fix: payload-contract errorsamples now summarize observations before serialization, keeping status/header/key/count/short identifier evidence while representing large strings by length and preventing circular recursion. The live ErrorErr path and forced provider contract snapshot persistence are unchanged.
+- Gate wiring: added `debug.contract_observation_payload_budget` feature/resource/verification entries plus `docs/goals/full-pipeline-contract-observation-payload-copy-budget-test-design.md`.
+- Green evidence: `verify:contract-observation-payload-copy-budget` passed 3/3, related response-contract snapshot/provider-response tests passed 9/9, `verify:resource-operation-map` passed with 116 resources / 145 feature bindings, `verify:function-map-compile-gate` passed with 158 features / 382 canonical builders, TypeScript passed, and target diff check passed.
+- Remaining gap: forced provider contract snapshots and enabled snapshot recorder still intentionally persist full diagnostics; those remain tracked under snapshot/debug budget and not as live payload trimming.
+
+# 2026-07-13: continuation payload release audit
+
+- Source audit: `responses-conversation-store-host.ts` exposes `releaseResponsesConversationRequestPayload`, backed by Rust `plan_responses_release_request_payload` / store operation `release_request_payload`.
+- Evidence: focused `tests/sharedmodule/responses-continuation-store.spec.ts` release filter passed 6/6. Covered: request payload release keeps scope lookup, clears retained input items to 0, strips historical image data, records successful relay response with image stripping, and still materializes full input after release.
+- Inventory update: continuation store moves from open to partial release-gated. Remaining gap is pending immutable-interval retention and JSON boundary/store operation duplication before claiming full continuation memory closure.
+
+# 2026-07-13: responses request bridge continuation effect total plan source closeout
+
+- Goal: close §11.16 item 2 by moving continuation execution effect arguments/results out of `responses-request-bridge.ts`.
+- Source fix: Rust `plan_responses_continuation_request_action` now owns `execute_effect|complete` for lookup, direct provider-owned submit materialization, relay resume, scope materialization, final ok/client-error/expired results, missing/not-found/unknown-owner descriptors, malformed effect result, and operation-token mismatch fail-fast.
+- TS bridge now only executes exact Rust effect args and round-trips opaque `resultPlanInput`; removed the dead relay-specific TS context reconstruction helper and aligned `responses.continuation.mainline` rct-03 to `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson`.
+- E2E fixtures were updated to explicit continuation owners and to assert no handler/request-bridge second writer. `handler-request-executor.unified-semantics.e2e.spec.ts` passed 17/17.
+- Verified: `cargo test -p router-hotpath-napi continuation_request_action --lib` 7/7, bridge Jest 28/28, submit_tool_outputs handler Jest 5/5, total-plan verifier/red fixtures, TypeScript, function-map compile gate, handler/native/rustification gates, architecture review/light after wiki/html render, `npm run build:native-hotpath`, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, target `rustfmt --check`, and `git diff --check` passed.
+- Browser visual review gap: in-app browser runtime reported `No browser is available` and `agent.browsers.list()` returned `[]`; HTML wiki sync is covered by deterministic render/sync gates only.
+- Remaining gap: no release/global install, aggregate restart, or live `/v1/responses` replay was run without explicit Jason authorization. Next §11.16 item is provider-response ErrorErr TS bypass.
+
+# 2026-07-13: provider-response ErrorErr TS bypass source slice 1
+
+- Red evidence: `verify:provider-response-errorerr-bypass-closeout` failed on 16 TS residues in `provider-response-converter.ts`: rate-limit/provider-configured/bridge-SSE/context/network classifiers, recoverability branch, normalized error writes, stage writes, and message-based predicates. Negative fixtures passed for representative revivals.
+- Source fix: converter now stores SSE wrapper raw message/code/status/upstream object only under `response/details`, throws without normalized `code/status/statusCode/retryable/upstreamCode`, and bridge catch only records raw diagnostics before rethrow. Provider runtime `errorMapping` is no longer executed in this host.
+- Green evidence: dedicated positive/red gates passed; provider-response converter Jest 25/25; TypeScript passed; `verify:error-pipeline-contract`, `verify:function-map-compile-gate`, host-split gate, and target diff check passed.
+- Remaining owner violation: `request-executor-provider-send-failure.ts` still calls `remapBridgeSseErrorToHttp` and decides provider-response retry from stage/status/retryable/code in TS. Item 3 remains open until that path is replaced by Rust ErrorErr decisions.
+- Independent blocker: `verify:architecture-review-surface-light` failed because servertool mainline edge `sth-req-03` references missing `inject_reasoning_stop_tool` in `orchestrator.rs`; no out-of-claim fix was made. No install/restart/live replay was run.
+
+# 2026-07-13: request-stage route/outbound payload ownership cleanup
+
+- Red gate first rejected `route_decision.clone()`, `vr_route_04.clone().into_decision()`, selected-target clone assertions, and object-cloning typed builders.
+- Hub route selection now removes target/decision/diagnostics from its owned result; the typed VR, provider-semantic, and provider-wire nodes consume owned objects instead of cloning their complete trees.
+- Request outbound context merge now derives patches from borrowed payload/snapshot references. A Rust equivalence test proves the borrowed API matches the owned compatibility wrapper.
+- `verify:request-payload-copy-budget`, focused residue gate, typed-node tests, and borrowed context merge equivalence test passed. Remaining request hotspots are standardizedRequest contract retention, Responses context capture, and MetadataCenter snapshot residency.
+- `build:native-hotpath` passed. `build:base` reached `verify:responses-history-protocol-contract` but was blocked by five concurrently edited stopless guidance expectations (`expected "继续执行"` versus current detailed guidance); this slice does not own or modify that active stopless claim.
+
+# 2026-07-13: response typed-node payload ownership cleanup
+
+- Source fix: Rust Hub response mainline now moves `canonical_payload` into `HubRespInbound02Parsed`, then consumes response payload ownership through adjacent `FnOnce(Value) -> Result<Value, E>` transforms into `HubRespChatProcess03Governed` and `HubRespOutbound04ClientSemantic`; the final client payload leaves through `into_payload()`.
+- Removed/locked residues: `run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())`, `resp_chatprocess_03.payload().clone()`, `project_normal_response_payload`, and response object clone helper functions are rejected by the stage residue audit.
+- Docs: `docs/design/payload-copy-hotspot-inventory.md` now records this hotspot as `done: source/Rust gated`; `docs/goals/full-pipeline-payload-copy-cleanup-plan.md` documents response typed-node owned transition requirements.
+- Verified: focused response typed source gate passed, full `hub-pipeline-stage-residue-audit` passed 243/243, response typed Rust tests passed (`response_typed_entrypoints` 2/2, `hub_resp_outbound_04_client_semantic` 2/2, `hub_resp_chatprocess_03_governed` 1/1), `verify:hub-response-responses-chat-projection` passed, target `rustfmt --check` passed, `build:native-hotpath` passed, and target `git diff --check` passed.
+- Remaining full-goal gaps: StreamPipe still intentionally clones `stream_decision.payload` for the stream effect while returning final payload under its own active owner; continuation immutable interval retention, snapshot enabled-path serialization, forced provider contract snapshots, provider-response ErrorErr bypass, Responses context capture, and JS/Rust JSON boundary copies remain open in the full inventory.
+
+# 2026-07-13: JS/Rust JSON boundary payload copy inventory
+
+- Source audit: `src/modules/llmswitch/bridge/native-exports.ts` still has 38 `JSON.stringify` and 28 `JSON.parse` occurrences. These include full payload/body/requestSemantics/snapshot arguments and remain copies at the JS/Rust contract boundary.
+- Existing owner: `src/modules/llmswitch/bridge/native-json-invoker.ts` owns shared JSON call mechanics for monitored narrow hosts; `verify:hub-bridge-native-json-invoker-singleton` passed and proves no duplicate local invoker mechanics in that monitored surface.
+- Inventory decision: this is `open: contract limit inventoried`, not a normal-path clone removal. Do not claim zero-copy or RSS improvement from source cleanup while the N-API contract is JSON strings.
+- Required future path: if this remains dominant after source/native closeout, design one versioned bridge migration to Rust-owned handles, external buffers, binary encoding, or streaming transfer; no fallback/dual bridge contract.
+- Verified: source counts, docs inventory/plan update, `verify:hub-bridge-native-json-invoker-singleton`, and target `git diff --check` passed.
+
+# 2026-07-13T15:23Z: provider-response ErrorErr dead TS remapper cleanup
+
+- Source cleanup: physically deleted `src/server/runtime/http-server/executor/provider-response-sse-error-normalizer.ts` and `tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts`; canonical function/verification maps and server SSE wiki now point to Rust/provider-response gates instead of the old TS remap test.
+- Residue lock: `verify:provider-response-errorerr-bypass-closeout` now fails if the old module or old Jest test reappears; red fixtures cover dead module/test revival in addition to normalized error writes and TS classifiers.
+- Verification passed: provider-response ErrorErr positive gate, red fixtures, function-map compile gate, ErrorErr contract, provider-response host-split, TypeScript, converter Jest 25/25, raw SSE focused Jest 2/2, provider failure stage regression 3/3, resource-operation-map, architecture manifest sync, mainline manifest sync, wiki HTML sync, native hotpath build, and target diff check.
+- Known blockers remain: `verify:architecture-review-surface-light`, `verify:architecture-wiki-sync`, and `build:base` all fail at the independent servertool call-map drift `servertool.hook_skeleton.mainline sth-req-03 -> inject_reasoning_stop_tool`; Rust `failure_policy.rs` 403/quota classification is still owned by active `gate_id:default_pool_last_provider_no_remove` claim. No release/global install/restart/live replay was run.
+
+# 2026-07-13T15:44Z: servertool hook skeleton symbol drift unblock
+
+- Source truth: `servertool.hook_skeleton.mainline` edge `sth-req-03` no longer maps to deleted `inject_reasoning_stop_tool`; current request-side servertool injection owner is `req_process_stage1_tool_governance_blocks/servertool_injection.rs::maybe_apply_servertool_orchestration`. Stopless schema guidance remains a separate `stopless.session.mainline` edge `stl-07 -> inject_stopless_system_instruction`.
+- Docs/generated fix from prior handoff was verified in this run: `npm run verify:architecture-wiki-html-sync` passed, `npm run verify:architecture-review-surface-light` passed, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed after a transient concurrent stopless compile window.
+- Transient evidence: first `build:base` failed inside `verify:responses-history-protocol-contract` because tests could not resolve `STOPLESS_TRANSPARENT_CONTINUATION_PROMPT`; active `gate_id:stopless_transparent_user_guidance` owns that Rust source directory, so this run made no source edit. Focused retry `npm run verify:responses-history-protocol-contract` passed 96/96 after current source included the import.
+- Remaining gap: provider-response item 3 still cannot be fully closed while active `gate_id:default_pool_last_provider_no_remove` owns `failure_policy.rs`; no release/global install/restart/live replay was authorized or run in this continuation.
+
+# 2026-07-13: payload copy hotspot inventory completeness gate
+
+- Red evidence: a source check failed because `docs/design/payload-copy-hotspot-inventory.md` did not expose `Class / lifecycle` or `Release / gate evidence` columns, so the final goal could not prove every hotspot had classification, release point, and gate evidence.
+- Inventory fix: expanded every hotspot row with class/lifecycle and release/gate evidence. This also corrected StreamPipe status to `partial: body duplicate source gated`, because the legacy `body` duplicate is removed but the remaining stream effect/output payload dual ownership still belongs to the active stream-pipe owner.
+- Gate fix: added `tests/sharedmodule/payload-copy-hotspot-inventory.spec.ts` to require every hotspot row to include area, class/lifecycle, owner, current state, required action, release/gate evidence, and status, and to keep objective-required lifecycle areas represented.
+- Verified: `npm run jest:run -- --runTestsByPath tests/sharedmodule/payload-copy-hotspot-inventory.spec.ts --runInBand` passed 2/2 and target `git diff --check` passed.
+- Remaining full-goal gaps are unchanged: this is a closeout/audit gate, not runtime RSS evidence or live payload-copy removal.
+
+# 2026-07-13: server handler/executor payload residency added to inventory
+
+- Source audit confirmed `responses-handler.ts` still constructs one pipeline input containing `body: req.body`, `hubBody: pipelineBody`, and `metadata: pipelineMetadata`; the Responses request context separately keeps normalized payload/context reachable for response conversion.
+- This lifecycle was missing from the payload-copy inventory, so the prior completeness gate could pass while omitting a known request-residency hotspot.
+- Added `Server handler/executor residency` as an explicit open hotspot and made the inventory gate require it. No runtime owner was changed because `server.responses_request_handler_bridge_surface` is actively claimed.
+- Runtime closeout requires one authoritative handoff plus request/response dry-run, continuation, and error-projection equivalence evidence before removing any origin reference.
+
+# 2026-07-13: handler request metadata deep copy removed
+
+- `readRequestBodyMetadata` previously performed `JSON.parse(JSON.stringify(raw))` before `buildHandlerPipelineMetadata` immediately copied only whitelisted fields into a new carrier.
+- Red gate failed on the JSON round-trip while the independent whitelist-carrier behavior already passed. The owner now returns the validated metadata record by reference; no downstream code mutates it.
+- Focused handler metadata tests passed 21/21, `verify:server-function-map-boundary` passed, and the new gate is bound to `server.responses_handler_family` in function/verification maps.
+- The larger Responses `body` plus `hubBody` plus request-context residency remains open and is not claimed solved by this slice.
+
+# 2026-07-13T15:55Z: default pool last-provider exclusion closeout
+
+- Rust `vr.route_availability_floor` now treats configured targets of the `default` route as available independently of request-local exclusions and emits `defaultPoolSingletonProvider`; `failure_policy.rs` consumes that fact by clearing the current provider from exclusions and retrying the same configured singleton without client projection.
+- TS `RequestExecutor` clears `excludedProviderKeys` after the singleton pool blocking wait before replay. The fixed error-action queue contract and help text are aligned to `1s -> 2s -> 3s -> repeat`.
+- Focused evidence: Rust ErrorErr05 15/15, focused Jest 40/40, executor singleton replay 1/1, installed `0.90.3934` native availability result `defaultPoolAvailable=true/defaultPoolSingletonProvider=true/policyExhausted=false/mayProject=false`, and installed execution decision `shouldRetry=true/excludedCurrentProvider=false/excludedProviderKeys=[]`.
+- Managed 5555 replay `default-pool-live-20260713-01` returned HTTP 200 with `DEFAULT_POOL_LIVE_OK`; canonical samples are under `~/.rcc/codex-samples/openai-chat/ports/5555/`. All aggregate members 4444/5520/5555/10000 and CLI/install/current report `0.90.3934`.
+- Live limitation: current 5555 default route has nine provider targets, so it cannot naturally prove the configured-default-singleton failure/replay branch without an unauthorized real-config mutation. VR selection dry-run with all nine targets excluded correctly returned `PROVIDER_NOT_AVAILABLE`; that probe tests initial selection exhaustion, not ErrorErr05 post-failure availability.
+- Unrelated live warning observed during the successful replay: provider snapshot writer logged non-blocking `entryPort required` for provider-request/provider-response. It did not affect the response and is outside this claim.
+
+# 2026-07-13T16:01Z: provider-response dead legacy host surface source/build closeout
+
+- Red evidence: the pre-fix provider-response host-split verifier found all four residues: host `HubRespChatProcess03Governed` result branching, effects stage-result union, the zero-caller metadata projection wrapper, and the root native wrapper with malformed `{}` fallback. Eight negative fixtures lock their revival.
+- Source cleanup: servertool retirement host execution is now `Promise<void>` and fail-fast for malformed/non-empty retired actions; body and stream consume the Rust materialized `rawPayload` and `streamPipe.payload` without stage branching. Both zero-production-caller projection wrappers and the malformed fallback were physically removed.
+- Green evidence: provider-response host-split positive/red gates, focused provider-response Jest 249/249, Rust-plan Jest 22/22, TypeScript, native JSON invoker singleton, function-map compile, thin-wrapper, rustification, architecture-review-light, native hotpath build, full `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and target diff check passed.
+- Boundary: Rust metadata projector and direct-native contract tests remain the semantic owner. No release/global install/restart/live replay was authorized or run for this item.
+
+# 2026-07-13T16:14Z: StreamPipe duplicate full response ownership removed
+
+- Red evidence: `tests/sharedmodule/stream-pipe-payload-ownership.spec.ts` failed on `stream_decision.payload.clone()` and the Rust planner's requirement that StreamPipe own a full payload.
+- Source fix: `HubRespOutbound04ClientSemantic/rawPayload` is now the sole full client-response owner. StreamPipe effects carry only `codec/requestId`; Rust rejects legacy effect-owned `payload/body`, and TS reuses the existing top-level response reference for SSE encoding.
+- Architecture fix: function/mainline/verification maps and the hotspot inventory now bind the metadata-only effect contract; the inventory marks StreamPipe `done: source/Rust/Jest gated`.
+- Gate repair: `verify:hub-pipeline-native-reference-gate` previously threw `ENOENT` for an intentionally deleted tracked TS remapper because `git ls-files` includes worktree deletions. The scanner now skips absent tracked paths; its positive gate and all six red fixtures pass.
+- Evidence: focused provider-response Jest 273/273, StreamPipe source test 2/2, Rust planner/normalizer/materializer 3/3, TypeScript, function/resource/mainline maps, inventory gate, target rustfmt/diff checks, native-reference/rustification/host-split gates, and `build:native-hotpath` passed.
+- Remaining full-goal gaps: handler/executor full-body residency, request-stage retained snapshots, continuation immutable-interval copies, enabled snapshot serialization, forced provider contract snapshots, the JSON-string N-API boundary, final base build, and authorized live RSS replay remain open.
+
 # 2026-07-13T16:21Z: stopless transparent continuation provider-request dry-run lock
 
 - Root cause: relay `submit_tool_outputs` is materialized before request Chat Process, so the internal entry endpoint can already be `/v1/responses`. Endpoint-string checks for `submit_tool_outputs` therefore missed the current CLI stdout in `MetadataCenter.continuation_context.responsesResume.toolOutputsDetailed`, and the next missing/invalid stop restarted at `repeatCount=1`.
@@ -29766,6 +30109,17 @@ Pure Rust NAPI candidates:
 - Sequence gate: invalid-schema blackbox restored `repeatCount 1 -> 2`; the third consecutive stop passed the original provider `finish_reason=stop` through and projected no fourth CLI. New user turn and non-stop/progress/terminal cases reset the streak.
 - Source/build verification passed: Rust stopless 86/86, pipeline dry-run fixtures, invalid-schema blackbox, servertool Rust-only, function/mainline/manifest/wiki gates, architecture review light, rustfmt, target diff check, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`.
 - Remaining closeout: global install, one aggregate restart, all configured member health/version checks, and rerun the final-provider-body dry-run against the installed artifact.
+
+# 2026-07-13T16:36Z: Hub native request argument body/payload duplicate removed
+
+- Handler residency audit found an independent bridge duplicate before changing `__raw_request_body`: `runHubPipeline()` spread `PipelineExecutionInput.body` into the Rust request object and also added the same request as `payload`.
+- Rust `HubPipelineRequest` consumes `payload` and has no `body` field, so top-level `body` had no semantic consumer but was serialized by the JSON N-API boundary.
+- Red evidence: focused executor-pipeline Jest observed `body` on the native argument; source residue gate found no explicit body omission.
+- Source fix: `executor-pipeline.ts` removes `body` before building the object passed to `executeHubPipelineNative()` and keeps the original request object only under `payload`.
+- Representative 10 MB replay: native request argument fell from about 30 MB (`body` + `payload` + `metadata.__raw_request_body`) to about 20 MB (`payload` + raw mirror). This is serialized-byte evidence, not live RSS evidence.
+- Green evidence: executor-pipeline Jest 6/6, focused source gate, `verify:request-payload-copy-budget`, TypeScript, inventory 2/2, function/resource/mainline map gates, `build:native-hotpath`, and target diff check passed.
+- Remaining handler gap: `buildHubPipelineInput()` still injects the original full request as `metadata.__raw_request_body`. RequestExecutor uses it for Responses conversation capture; response projection uses the separately prepared request context; servertool route-hint extraction reads the current body directly. Removing the mirror requires a typed data-plane owner or capture-before-Hub design, plus continuation/client-model/error positive and negative tests.
+
 # 2026-07-13T16:40Z: stopless installed-artifact dry-run and global install closeout
 
 - Global install blocker root cause: `scripts/install-global.sh` did not copy the tracked governance source required by isolated architecture gates, although `scripts/install-release.sh` already carried the correct allowlist. The global installer now copies `AGENTS.md`, `.gitignore`, `.agents/skills/rcc-dev-skills`, and only `.agent-collab/PROTOCOL.md`, `schema`, and `examples`; runtime `runs/claims` are not copied.
@@ -29774,9 +30128,381 @@ Pure Rust NAPI candidates:
 - Running that packaged script from the repo fixture root passed `no_schema`, `invalid_schema`, and `next_step`. The final dry-run `providerRequest.body` contained the complete system stop schema and only the expected ordinary user continuation prompt/exact `next_step`, rejected all internal stopless markers, and stopped before a second provider send.
 - Release/live evidence: one aggregate `routecodex restart --port 5555` was used. CLI, install/current, and all configured member health endpoints `4444/5520/5555/10000` report ready `0.90.3934`.
 
+# 2026-07-13T16:39Z: provider-response ErrorErr provider-origin recoverability closeout
+
+- Root fix: Rust `failure_policy.rs` no longer treats provider-origin HTTP 401/402/403/404, auth/quota/account messages, or auth/quota/account/model codes as unrecoverable. Those failures are classified recoverable and are governed by ErrorErr05 route/default pool exhaustion.
+- Terminal rule: provider-origin auth/quota/account/model errors may project to the client only when the route pool and default pool are both exhausted. Default-pool availability keeps the error reroutable.
+- Negative boundaries remain: local contract failures such as `MALFORMED_REQUEST`, `CLIENT_TOOL_ARGS_INVALID`, provider runtime request contract, and local response contract remain unrecoverable; `client_disconnect` remains health-neutral.
+- TS alignment: provider-response converter and executor path do not remap SSE/message/status into normalized `code/status/statusCode/retryable/upstreamCode`; focused TS/Jest expectations now assert provider-origin auth/quota/model recoverability and terminal projection only after pool exhaustion.
+- Verification passed: red Rust provider-origin tests failed before the source fix; Rust failure policy suite 47/47 passed; provider-origin focused 2/2, local-contract negative 1/1, client-disconnect 1/1, focused executor/Jest gates, provider-response ErrorErr positive/red gates, ErrorErr contract, function-map compile, architecture-light, TypeScript, native hotpath, provider-failure blackbox 401/403/quota backup 200, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed.
+- Remaining gap: no release/global install, aggregate restart, production config change, or live replay was authorized or run. `tests/server/runtime/http-server/request-executor.spec.ts` still has unrelated native-handle fixture drift for two broad HTTP 401 integration cases; focused owner and blackbox gates cover this item.
+# 2026-07-13T16:49Z: Rust-bound raw request metadata mirror removed
+
+- Root cause: after removing the duplicate native top-level `body`, `runHubPipeline()` still shallow-copied `metadata.__raw_request_body` into the JSON object sent to Rust. Rust Hub request code has no consumer for this field, so a representative 10 MB request still serialized a second full request.
+- Source fix: `buildHubPipelineMetadata()` deletes `__raw_request_body` only from the Rust-bound metadata projection. The source `metadataForAttempt` retains the exact same raw-entry object reference, and `finalizeRequestExecutorAttemptMetadata()` merges that source first for Responses conversation capture and client restoration after Hub returns.
+- Positive evidence: executor-pipeline 7/7, RequestExecutor metadata contract 16/16, submit_tool_outputs handler 5/5, unified Responses E2E 9/9, provider-response metadata propagation 3/3, request payload budget, focused source residue gate, inventory 2/2, and TypeScript passed.
+- Independent dirty-worktree gaps: `responses-handler.gpt53-codex-stream-model-regression.spec.ts` is a tracked-clean but syntactically invalid existing test file; the full continuation-store suite has one stopless assertion expecting retired repeat-count guidance while current source emits the transparent continuation contract. Neither failure is caused by this slice and neither owner was modified.
+- Byte evidence: the representative native argument is now about 10 MB (`payload` only), down from about 30 MB (`body` + `payload` + raw mirror). This is serialized-byte evidence, not live RSS evidence.
+
+# 2026-07-13T16:57Z: Responses provider submit payload deep clone removed
+
+- Full-pipeline scan found an inventory gap in `responses-provider-helpers.ts`: every native `submit_tool_outputs` request deep-cloned the complete provider wire object with `JSON.parse(JSON.stringify(record))` only to delete two top-level endpoint-routing ids.
+- Red evidence: focused Jest failed on nested object identity and the JSON round-trip source residue.
+- Source fix: the projector now creates one shallow top-level object, deletes only `response_id` / `responseId`, and preserves exact nested tool-output/tool/metadata/extension references. Caller-owned top-level input remains unchanged.
+- Focused payload-copy test passed 2/2 and TypeScript passed. The broader existing helper suite still has two unrelated stale provider-failure-policy assertions; its submit-tool-output regression remains independent of this ownership slice.
+
+# 2026-07-13T16:50Z: Hub Pipeline engine fail-fast item 5 audit and test design
+
+- Resource/function/mainline/verification/wiki audit binds request identity to `metadata.request_truth`, entry protocol to `request.protocol_context`, provider protocol to `metadata.runtime_control`, and stopless state to the MetadataCenter/stopless resource family.
+- Verified current residues in Rust source: blank request id becomes `hub_pipeline_rust_lib_request`; client protocol can be inferred from endpoint; provider protocol can come from request/flat metadata/center; `excludedProviderKeys` is mirrored from flat metadata into router input and MetadataCenter snapshot; stopless activation recursively reads flat/requestTruth/`__rt`/nested sources; terminal output falls back from handler `chatResponse` to runtime output then original payload; clock failure becomes `0`.
+- Added `docs/goals/hub-pipeline-engine-failfast-closeout-test-design.md` with lifecycle, positive/negative white-box pairs, module/project blackbox, resource-map prerequisite, and required gates. The main closeout plan links the design and keeps item 5 open.
+- Collaboration boundary: `engine.rs` remains under the payload-copy claim and router-hotpath source remains under stopless claims. Their heartbeats are source-complete/stale but owner files are not released; protocol forbids automatic takeover. Created `feature_id:hub.pipeline_engine_failfast_closeout` plus a checked handoff request. No runtime source was edited.
+
+# 2026-07-14T00:28Z: OpenAI request filter nested copy cleanup
+
+- Root cause: `run_openai_openai_request_codec_json` parsed one owned request, serialized a temporary `{payload,preserveStreamField}` wrapper, called the N-API JSON filter, parsed the result again, while the filter cloned the complete top-level object, messages, and tool calls.
+- Source fix: `prune_chat_request_payload_owned(Value, bool)` is the single Rust owner. The codec moves the parsed request into it; the filter consumes owned objects/arrays and mutates them in place. The external N-API helper remains a thin parse -> owned transform -> serialize contract.
+- Architecture: added `protocol.openai_chat_request_filter_projection` and feature/verification bindings. An attempted new Stage A edge failed the locked six-edge budget and was physically removed because this is an internal provider-wire codec block, not a new pipeline node.
+- Evidence: red source gate first failed while semantic fixture passed; Rust filter 4/4, native build, direct-native Jest 2/2, inventory 2/2, resource/function/mainline gates, rustfmt/diff checks, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed.
+- Boundary: no provider config, `config.toml`, `~/.rcc`, global install, restart, or live RSS replay changed. The outer JSON-string N-API boundary remains open under the parent payload-copy goal.
+
+# 2026-07-14T00:09Z: Hub Pipeline engine fail-fast contract wiring
+
+- Added package scripts for the source verifier and revival fixtures. The verifier remains intentionally red on all 13 audited residues; the revival suite passes 13/13.
+- Registered `route.retry_exclusion_set` as the ErrorErr05-owned request-local side-channel. ErrorErr05 is the only writer; retry restore and VR selection are readers; flat metadata, MetadataCenter, provider wire, and client response are forbidden writers.
+- Added `hub.pipeline_engine_failfast_closeout` to function/verification maps and bound ErrorErr05 resource flow in resource/mainline maps.
+- Verified resource operation map 118 resources / 108 flows / 146 feature bindings, function-map compile 160 features / 384 canonical builders, mainline map 20 chains / 113 edges, and target diff check.
+- Third consecutive handoff refresh still found the payload-copy and stopless claims unreleased with no checked handoff. Runtime source remains untouched and item 5 is blocked at the source-edit boundary.
+
+# 2026-07-14T00:37Z: Anthropic remote-image provider-wire copy-on-write cleanup
+
+- Root cause: remote image inlining eagerly deep-cloned the complete Anthropic provider wire body with `structuredClone`, or a JSON stringify/parse fallback, before changing only image-source paths.
+- Source fix: the provider runtime now applies path-local copy-on-write. A rewritten image copies only body/messages/message/content/image/source ancestors; unaffected messages, blocks, tools, metadata, extensions, and source subfields retain their original references. A no-rewrite request returns the exact input body reference, and later fetch failure cannot partially mutate caller state.
+- Architecture: added `provider.anthropic_remote_image_payload_copy_budget` and `provider.anthropic_remote_image_wire_projection` owner/resource bindings. No Hub/VR/provider-config, retry/error policy, or MetadataCenter path changed.
+- Evidence: red 3/3 before implementation; focused green 4/4; existing Anthropic transport 17/17; inventory 2/2; TypeScript; resource/function/mainline gates; native/base build; residue scan; rust-independent exact diff check all passed.
+- Boundary: this source slice removes one eager provider-wire deep clone. No global install, restart, live-runtime mutation, or concurrent large-payload RSS replay was authorized or run.
+
+# 2026-07-14T00:52Z: LLMS engine shadow comparison copy cleanup
+
+- Root cause: every sampled shadow comparison JSON-cloned both complete baseline and candidate outputs only to delete ignored paths. When serialization failed, `cloneJsonSafe` returned the caller object and `deletePath` mutated live caller-owned debug values.
+- Source fix: recursive comparison now skips configured paths directly while borrowing both payloads. No comparison clone or destructive path deletion remains. A real non-excluded difference still persists the complete original baseline and candidate outputs.
+- Architecture: added `debug.llms_engine_shadow_payload_copy_budget` and `debug.llms_engine_shadow_diff_projection`; the projection is diagnostic-only and forbidden from provider/client payload and MetadataCenter truth.
+- Evidence: red 2/2 before implementation; focused green 3/3; TypeScript; resource/function/source-binding/mainline/architecture gates; inventory; residue scan; full base build; and target diff check passed.
+- Boundary: this removes two debug-only object graph clones per sampled comparison. It is source/build evidence, not installed-runtime RSS evidence; no provider config, global install, restart, or live runtime was changed.
+
+# 2026-07-14T00:58Z: Vision debug pre-writer payload clone cleanup
+
+- Root cause: vision debug built a full JSON clone of payload and extras before `writeProviderSnapshot`, even though the unified writer first checks stage enablement and then synchronously creates the independent redacted graph needed by its asynchronous queue.
+- Source fix: the vision projection now borrows payload/extras in a small wrapper. Disabled stages allocate no pre-writer object graph; enabled stages create exactly one writer-owned redacted graph. Circular values are represented by the redactor instead of being silently replaced by `payloadError`.
+- Architecture: added `debug.vision_snapshot_payload_copy_budget` and `debug.vision_snapshot_projection`; the resource is diagnostic-only and cannot become provider/client payload or routing truth.
+- Evidence: red 2/2 before implementation; focused copy-budget/entry-port green 3/3; TypeScript; resource/function/source-binding/inventory gates; residue scan; full base build; and target diff check passed.
+- Boundary: unified snapshot redaction, queue-size serialization, and persistence copies remain under the separate snapshot budget. No provider config, install, restart, or live runtime was changed.
+
+# 2026-07-14T01:17Z: Provider debug hooks payload-copy budget closeout
+
+- Root cause: debug hooks created full payload copies for diagnostics only: example hooks stringified the complete request for header-size estimation, bidirectional hook size metrics stringified the full current object, dataFlow snapshots used JSON deep clone, oversized previews serialized the full payload, and change-detail logging serialized complete `newValue` subtrees.
+- Source fix: added borrowed traversal and bounded diagnostic projection in `src/debug/hooks/payload-budget.ts`; hook callbacks still receive the original full current object, while debug size, snapshot, preview, and change-detail output no longer materialize full request/response graphs. Circular values render as `[CIRCULAR]`; BigInt renders as a typed debug projection.
+- Architecture: added `provider.debug_example_hooks_payload_copy_budget` and `provider.debug_hook_payload_copy_budget`; the resource is debug-only and forbidden from provider/client payload, routing truth, or MetadataCenter storage.
+- Evidence: red focused Jest exposed request stringify, dataFlow clone, circular/BigInt preview failures, and change-detail serialization; final focused suite passed 10/10. TypeScript, resource/function/source-binding/mainline/architecture gates, base build, and target diff check passed.
+- Boundary: this is source/build evidence for diagnostic copy removal only. No provider config, `config.toml`, `~/.rcc`, install, restart, live runtime mutation, or RSS replay was run.
+
+# 2026-07-14T01:39Z: Debug harness replay necessary-copy classification
+
+- Ownership result: `ProviderPreprocessHarness` must retain exactly one independent execution graph because its public input is caller-owned and provider `createContext` / `preprocessRequest` / `postprocessResponse` may mutate it. `SnapshotStore` does not provide a universal unique-ownership transfer contract.
+- Source cleanup: replaced the `deepClone` compatibility helper with one explicit `cloneProviderReplayInput -> structuredClone` call under the Node.js `>=20 <26` runtime contract. The JSON stringify/parse fallback is physically removed because it changes circular, BigInt, undefined, and typed-value replay semantics.
+- Architecture: added `debug.harness_replay_payload_copy_budget`, `debug.harness_replay_execution_copy`, function/mainline/verification bindings, generated wiki review surfaces, inventory classification, and a dedicated test design.
+- Evidence: source red failed only on the legacy fallback while isolation already passed; final focused Jest passed preprocess, postprocess/context, and source contract 3/3. Inventory 2/2, TypeScript, resource/function/source-binding/mainline/debug-surface/architecture/wiki/html gates, base build, and target diff check passed.
+- Boundary: this classifies one necessary debug replay copy; it does not remove normal request/response copies or prove RSS improvement. No provider config, `config.toml`, `~/.rcc`, install, restart, or live runtime mutation occurred.
+
+# 2026-07-14T01:48Z: Legacy DebugUtils deepClone physically deleted
+
+- Root cause: `src/utils/debug-utils.ts` still exposed a generic recursive `DebugUtilsImpl.deepClone` / `DebugUtilsStatic.deepClone` API even though no production or test caller used it. `src/utils/logger.ts` only consumes `DebugUtilsStatic.sanitizeData`, so the file itself cannot be deleted in this slice.
+- Source fix: physically removed the instance method, static method, and `DebugUtils` interface declaration from `src/types/debug-types.ts`; no replacement clone helper, `structuredClone`, or JSON round-trip path was added.
+- Architecture: added `tests/debug/debug-utils-deepclone-removal.spec.ts`, test design, function/verification map bindings, and inventory row under `debug.unified_surface`. Also fixed stale `unified-surface.owner.spec.ts` to assert `readDebugErrorDiagArtifact` from the debug facade/export instead of requiring the verifier script to read artifacts.
+- Evidence: red focused test failed on the live deepClone API; final focused debug tests 4/4, inventory 2/2, `verify:debug-unified-surface`, function-map compile, TypeScript, architecture-review-light, base build, source residue scan, and target diff check passed.
+- Boundary: this removes a dead debug-only clone API. It does not migrate remaining sanitizer/logger utility ownership, alter provider/client payload semantics, or prove RSS improvement. No provider config, `config.toml`, `~/.rcc`, install, restart, or live runtime mutation occurred.
+
+# 2026-07-14T01:49Z: Hub Pipeline engine fail-fast source/native/build closeout
+
+- Source/native replay gap closed for §11.16 item 5. Added `tests/sharedmodule/hub-pipeline-engine-failfast-direct-native.spec.ts` using compiled `.node` handle-mode `DirectNativeHubPipelineTestWrapper`.
+- Positive native evidence: explicit top-level `providerProtocol="openai-responses"` plus `retryExclusionSet=["openai.key1.gpt-5.5"]` selected backup `openai.key2.gpt-5.5`.
+- Negative native evidence: legacy flat `metadata.excludedProviderKeys=["openai.key1.gpt-5.5"]` alone did not become retry exclusion truth and selected primary `openai.key1.gpt-5.5`.
+- Map/design sync: verification map now binds the focused native replay gate; fail-fast test design lists compiled `.node` positive and negative assertions.
+- Gates passed: source verifier, 13/13 revival fixtures, native replay 2/2, Rust `hub_pipeline_engine_failfast` 11/11, TS executor focused 8/8, resource/function/mainline/review gates, `build:native-hotpath`, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and target diff check.
+- Boundary: no global install, release, aggregate restart, live production replay, provider config, `config.toml`, or `~/.rcc` mutation occurred. This is source/native/build closeout only.
+
+# 2026-07-14T02:00Z: Unified Hub shadow compare script clone removed
+
+- Root cause: `scripts/unified-hub-shadow-compare.mjs` cloned complete baseline and candidate debug wrappers through `cloneJsonSafe -> JSON.parse(JSON.stringify(...))` immediately before recursive `diffPayloads`, even though `diffPayloads` only reads objects and does not mutate them.
+- Source fix: physically removed `cloneJsonSafe` and changed the compare call to `diffPayloads(baselineOut, candidateOut)`. Real diffs still write complete baseline/candidate debug outputs via `writeCompareErrorSample` and still render through `stableStringify` only after a diff exists.
+- Architecture: added `debug.unified_hub_shadow_compare_payload_copy_budget`, `debug.unified_hub_shadow_compare_diff_projection`, focused source-residue Jest, test design, function/verification/resource map bindings, and inventory classification. This does not add a runtime mainline node.
+- Evidence: pre-fix focused Jest was red on `JSON.parse(JSON.stringify(...))` and `cloneJsonSafe`; final focused Jest 1/1, inventory 2/2, resource map, function-map compile, TypeScript, resource-source-bindings, architecture-review-light, source residue scan, target diff check, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed.
+- Boundary: debug script only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live runtime mutation, external provider call, or RSS replay occurred.
+
+# 2026-07-14T02:27Z: Hub bridge action transient payload clones removed
+
+- Root cause: `run_bridge_action_pipeline` cloned complete raw request, raw response, captured tool results, and metadata for individual configured actions even though read-only actions only inspect payloads and mutating actions already return the updated state.
+- Source fix: read-only instruction/reasoning/capture/placeholder action cores accept borrowed raw payloads; mutating tool-id, metadata, and system actions use `Option::take()` and return ownership to the same state slot before the next action. Request-outbound history no longer clones raw `tools`, which its current builder does not consume.
+- Semantic preservation: `Some([])`, non-object metadata, and unmatched captured tool results retain their prior state. Internal `retained_tool_outputs` is serde-skipped and the N-API JSON wrapper does not expose it.
+- Architecture: added `hub.bridge_action_payload_copy_budget` with `run_bridge_action_pipeline` as the unique owner, existing request/response truth as read bindings, no new payload resource, focused test design, verification map, and inventory release contract.
+- Evidence: source red/green Jest; ordered pipeline tests 6/6; Hub bridge action suite 101/101; tool-session suite 9/9; request payload budget; Responses chat projection; function/mainline/resource/source-binding/architecture gates; native hotpath build; base build; rustfmt and target diff checks all passed.
+- Boundary: this removes repeated in-process Rust object-graph clones. The outer JSON-string N-API boundary and installed-runtime RSS measurement remain open under the parent goal. No provider config, `config.toml`, `~/.rcc`, install, restart, or live runtime was changed.
+
+# 2026-07-14T02:53Z: GLM tool-schema sanitizer branch clones removed
+
+- Root cause: `compat_tool_schema.rs` parsed one owned provider-wire JSON value, then cloned the top-level payload object plus full tool/message/tool_call/tool_choice branches before editing only small GLM compatibility fields.
+- Red evidence: added a source-residue Rust test first; it failed on `payload_obj.clone()` and related full-branch clone patterns.
+- Source fix: the sanitizer now consumes owned `Value` branches with `remove()` and `into_iter()`, mutates shell parameters, `tool_choice`, messages, and tool calls in place, and serializes the same owned graph back through the existing N-API wrapper. No second semantic path or provider/runtime/config path was added.
+- Architecture: added `conversion.glm_tool_schema_payload_copy_budget`, `protocol.glm_tool_schema_projection`, verification mapping, and the dedicated test design. Inventory now records the GLM provider-wire release point.
+- Evidence: `cargo test -p router-hotpath-napi compat_tool_schema --lib` passed 4/4; `npm run verify:resource-operation-map`, `npm run verify:function-map-compile-gate`, `npm run verify:architecture-mainline-call-map`, `npm run build:native-hotpath`, target `rustfmt --check`, target `git diff --check`, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed.
+- Boundary: source/native/build copy cleanup only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live runtime mutation, external provider call, or RSS replay occurred.
+
+# 2026-07-14T03:02Z: GLM tool-schema post-review verification blocked
+
+- Architecture review found an owned-rewrite regression: a message with non-array `tool_calls` could skip normalization of the same message's `name`.
+- Source now preserves the non-array `tool_calls` value and continues message-name normalization; a fifth Rust regression test locks both semantics.
+- `cargo test -p router-hotpath-napi compat_tool_schema --lib` still cannot execute. The earlier `standardized_request.rs` missing helper blocker changed, but current Rust crate compile now fails on unrelated stopless/servertool missing symbols: `is_stopless_runtime_active`, `require_terminal_stopless_chat_response`, `timestamp_ms_from_system_time`, `build_stop_hook_guidance_text_from_output`, and `collapse_auto_stop_hook_pairs_in_history`.
+- The GLM claim is therefore still `blocked_verification`, not completed. Handoffs exist at `.agent-collab/handoff/20260714T025700Z-glm-tool-copy-blocked-by-standardized-request.json` and `.agent-collab/handoff/20260714T031800Z-glm-tool-copy-blocked-by-stopless-symbol-drift.json`; the request/stopless owner files were not modified.
+
+# 2026-07-14T03:10Z: Responses provider replay script JSON clone removed
+
+- Root cause: `scripts/tools/responses-provider-replay.mjs` used `deepClone -> JSON.parse(JSON.stringify(...))` for captured chat payloads and again before `buildResponsesRequestFromChat`, even though the script only needs top-level ownership for `model` defaulting and system-message replacement.
+- Source fix: removed the generic `deepClone` helper. `createReplayChatOwner` now creates one shallow top-level owner; `ensureReplayChatModel` defaults only that owner; `replaceSystemMessages` builds a new top-level object and message array while preserving unaffected nested message references. Importing the script no longer triggers CLI provider IO.
+- Architecture: added `debug.responses_provider_replay_payload_copy_budget`, `debug.responses_provider_replay_projection`, verification mapping, mainline shared function binding, focused test design, and inventory row. This is a debug-only projection and cannot write provider/client payloads, route truth, or MetadataCenter.
+- Evidence: pre-fix focused Jest failed as expected on missing helper exports and source clone residue; final focused Jest passed 4/4; replay-codex + replay-copy focused suite passed 10/10; inventory gate passed 2/2; `verify:resource-operation-map`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, TypeScript, target diff check, MemoryPalace mine, and MemoryPalace search passed.
+- Recovered gate: `verify:architecture-mainline-call-map` initially failed on unrelated servertool/stopless symbol drift, then recovered and passed. The temporary handoff at `.agent-collab/handoff/20260714T031000Z-responses-provider-replay-blocked-by-mainline-symbol-drift.json` is marked recovered.
+- Boundary: no provider config, `config.toml`, `~/.rcc`, global install, restart, live provider replay, or RSS replay occurred.
+# 2026-07-14T03:36Z: Responses FAI capture probe variants are lazy
+
+- Root cause: `scripts/responses-fai-capture.mjs` built six compatibility probe variants with `JSON.parse(JSON.stringify(payload))`, so one debug capture attempt could eagerly materialize six complete request graphs before the first provider attempt. Explicit invalid sample input also fell back to generated variants instead of failing fast.
+- Source fix: `buildResponseProbeVariants` is the named owner builder and returns a lazy generator. Variants 1-4 shallow-copy only the top-level request owner; tool-shape variants allocate only replacement `tools` arrays/wrappers and keep parameter schema references borrowed. `readExplicitSampleBody` now fails fast for missing or invalid sample bodies. Importing the script for tests does not execute provider IO.
+- Architecture: added `debug.responses_fai_capture_payload_copy_budget`, `debug.responses_fai_capture_variant_projection`, focused test design, verification/resource/function map bindings, mainline shared function binding, inventory row, and regenerated mainline wiki render. No runtime mainline node was added.
+- Evidence: pre-fix focused Jest was red on missing `buildResponseProbeVariants`, JSON round-trip clones, and invalid-sample fallback. Final focused Jest passed 3/3; `verify:resource-operation-map`, `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-fallback-denylist`, `node scripts/architecture/verify-no-fallback-diff.mjs --files scripts/responses-fai-capture.mjs`, TypeScript, mainline render/sync gates, wiki node-id gate, and target diff check passed.
+- Boundary: debug capture script only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live provider call, or installed-runtime RSS measurement occurred. Existing workspace contains unrelated stopless/servertool/generated dirty changes; they were not treated as this slice's semantic owner.
+# 2026-07-14T03:51Z: Responses SSE capture request deep clone removed
+
+- Root cause: `scripts/responses-sse-capture.mjs` JSON-cloned the complete loaded/converted request before changing only top-level capture fields (`model`, `tool_choice`, `instructions`, and `stream`). Large `input`, `tools`, parameter schemas, metadata, and extension branches were copied without mutation need.
+- Source fix: `createResponsesCaptureRequestOwner` creates one shallow top-level owner. Capture-only top-level writes/deletes cannot mutate the source request, while nested request branches keep exact reference identity. The script now has a direct CLI entry guard, so test imports do not read provider config, initialize provider clients, call the network, or write artifacts.
+- Architecture: added `debug.responses_sse_capture_payload_copy_budget`, `debug.responses_sse_capture_request_projection`, verification/resource/function bindings, mainline shared function binding, test design, inventory row, and regenerated wiki render. No runtime mainline node was added.
+- Evidence: pre-fix focused Jest failed on the missing owner builder; final focused Jest passed 3/3. Resource/function/mainline maps, no-fallback diff, TypeScript, mainline render/sync, manifest sync, wiki node-id, and target diff gates passed.
+- Boundary: source/debug capture only. No provider config, `config.toml`, `~/.rcc`, global install, restart, provider capture/replay, or installed-runtime RSS measurement occurred.
+
+# 2026-07-14T04:02Z: Outbound regression clone fallback removed
+
+- Root cause: `scripts/outbound-regression-codex-samples.mjs` needs one independent execution graph because provider converters/runtimes may mutate request payloads, but its clone helper fell back from `structuredClone` to JSON cloning and finally to the caller-owned original object. The JSON path changed circular/BigInt/undefined semantics; returning the original silently removed mutation isolation.
+- Source fix: `cloneOutboundRegressionExecutionPayload` is the only copy owner and uses Node `structuredClone` once per provider attempt. Clone failure now propagates. The old JSON and original-object fallback paths were physically deleted. A direct CLI guard prevents test imports from scanning configs/samples, initializing providers, rate-waiting, or performing network IO.
+- Architecture: added `debug.outbound_regression_payload_copy_budget`, `debug.outbound_regression_execution_copy`, focused test design, verification/resource/function bindings, mainline shared function binding, inventory classification, and regenerated wiki render.
+- Evidence: pre-fix focused Jest failed on the missing owner export; final focused Jest passed 3/3, including circular/BigInt/undefined and provider-mutation isolation. Resource/function/mainline maps, no-fallback diff, TypeScript, wiki/manifest sync, and target diff checks passed.
+- Boundary: one copy remains intentionally necessary until provider conversion/send accepts verified unique ownership. No provider config, `config.toml`, `~/.rcc`, global install, restart, live provider regression/replay, or installed-runtime RSS measurement occurred.
+
+# 2026-07-14T04:42Z: RouteCodex V3 Responses direct Rust-only architecture docs
+
+- Scope: V3 is project-level RouteCodex architecture under `v3/`, not llmswitch-core V3. MVP is `/v1/responses` direct only.
+- Docs added: Rust module boundaries, runtime resource contract, test design, V3 resource map, V3 mainline call map, V3 verification map, and V3 wiki review page.
+- Contract: config/server/runtime/provider/CLI are Rust-owned; hooks are static; runtime kernel is the only full lifecycle executor; flow modules are registered hook slices only; shared functions own small pure logic and modules only orchestrate node/hook transitions.
+- Direct invariant: Responses direct keeps current request semantics as provider wire and forbids provider-wire preflight, sanitize, repair, raw replay, forced relay, and independent server/CLI/provider shortcuts.
+- Evidence: MemoryPalace searches returned and source-opened existing Rust config and Responses direct passthrough rules; `npm run verify:v3-architecture-docs`, `node -e JSON.parse(package.json)`, `npm run verify:architecture`, `npm run verify:agent-collab-protocol`, `npm run verify:architecture-wiki-sync`, `npm run verify:architecture-manifest-sync`, `npm run verify:resource-operation-map`, `npm run verify:architecture-mainline-call-map`, `npm run verify:architecture-mainline-binding-pending-gate`, `npm run verify:function-map-compile-gate`, and target `git diff --check` passed.
+- Boundary: docs/map/gate only. No V3 Rust source crate, no runtime code, no provider config, no `~/.rcc`, no global install, no restart, and no live `/v1/responses` execution was changed.
+# 2026-07-14T05:20Z: Responses SSE utils completed-response clone removed
+
+- Root cause: debug golden-roundtrip utility cloned full `response.completed.response` objects with `JSON.parse(JSON.stringify(...))` even though the consumer immediately feeds the completed response into JSON-to-SSE encoding and does not mutate it.
+- Red evidence: `tests/scripts/responses-sse-utils-payload-copy-budget.spec.ts` failed on source residue and object identity before the fix.
+- Source fix: `extractResponseFromEvents` now returns the completed event response by reference. The duplicate completed-response branch inside `aggregateResponsesFromEvents` was physically deleted because aggregation only runs when no completed response exists.
+- Architecture: added `debug.responses_sse_utils_payload_copy_budget`, `debug.responses_sse_completed_response_projection`, verification/mainline/resource bindings, generated wiki/html surfaces, and inventory classification.
+- Evidence: focused Jest 3/3, resource map, function-map compile, mainline call map, mainline manifest/mermaid/wiki/html sync, TypeScript marker `TSC_OK`, and target `DIFF_CHECK_OK` passed.
+- Boundary: debug golden-roundtrip only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live provider replay, or RSS claim.
+# 2026-07-14T05:05Z: Codex sample replay request clone removed
+
+- Root cause: `scripts/replay-codex-sample.mjs` JSON-cloned complete request bodies in two debug replay preparation helpers: `stripReplayOnlyClientHeadersFromBody` cloned just to delete replay-only metadata keys, and `buildReplayInputFromProviderRequest` cloned provider requests before read-only projection into a Responses client replay body.
+- Red evidence: focused Jest failed on `JSON.parse(JSON.stringify(body))` residue and nested identity breakage for request `input/tools/content/metadata`.
+- Source fix: replay metadata stripping now uses path-local shallow owners only when metadata is rewritten; provider-request replay conversion reads the captured body directly and returns a new client envelope borrowing typed content blocks, tools, metadata, and stream intent. Non-Responses provider replay returns the original object because no script-local mutation is needed.
+- Architecture: added `debug.replay_codex_sample_payload_copy_budget`, `debug.replay_codex_sample_request_projection`, resource/function/verification/mainline bindings, generated wiki/html surfaces, and inventory/test-design coverage.
+- Evidence: focused replay-codex-sample Jest 9/9, resource map, function-map compile, mainline call map, mainline manifest/mermaid/wiki/html sync, TypeScript marker `TSC_OK`, target `DIFF_CHECK_OK`, and no-fallback diff passed.
+- Boundary: debug replay source/Jest only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live replay, or RSS claim.
+
+# 2026-07-14T05:34Z: Cross-protocol matrix canonicalizer deep clone removed
+
+- Root cause: `canonicalizeChat` JSON-cloned complete chat samples and then JSON-cloned function tool `parameters` even though the parity utility only normalizes provider-specific top-level fields, metadata, content strings, tool-call ids, and arguments.
+- Red evidence: focused Jest first failed on importability, then locked source clone residue and source-isolation/nested-identity expectations after the CLI script was made import-safe.
+- Source fix: `canonicalizeChat` now creates path-local owners for top-level, metadata, message objects, tool-call wrappers/functions, and function-tool wrappers only. Unchanged parameter schemas keep exact reference identity and the source chat graph remains untouched.
+- Architecture: added `debug.cross_protocol_matrix_payload_copy_budget`, `debug.cross_protocol_matrix_chat_projection`, focused test design, resource/function/verification/mainline bindings, and inventory classification.
+- Evidence: focused cross-protocol Jest 2/2, resource map, function-map compile, mainline call map, mainline manifest/mermaid/wiki/html sync, TypeScript, no-fallback diff, target diff check, MemoryPalace mine, and MemoryPalace search passed.
+- Boundary: debug parity source/Jest only. No provider config, `config.toml`, `~/.rcc`, global install, restart, live provider replay, or RSS claim.
+
+# 2026-07-14T05:33Z: Hub standardized coverage helper comparison clone removed
+
+- Root cause: `coverage-hub-chat-envelope-to-standardized-native.mjs` compared TS/native standardized outputs by running both complete outputs through `JSON.parse(JSON.stringify(value))`, creating two extra debug comparison object graphs.
+- Red evidence: focused source-residue Jest failed on `JSON.parse(JSON.stringify(value))` and the `stableJson(` helper.
+- Source fix: removed `stableJson`; the helper now uses `assert.deepEqual(nativeResult, tsResult)` directly. Native invocation still uses the existing JS/Rust JSON-string boundary and remains classified under the boundary contract row.
+- Architecture: added `debug.coverage_hub_standardized_payload_copy_budget`, `debug.coverage_hub_standardized_parity_projection`, test design, resource/function/verification/mainline bindings, and inventory row.
+- Evidence: focused coverage Jest 1/1, resource map, function-map compile, mainline call map, wiki/html/manifest sync, TypeScript, no-fallback diff, inventory spec, and target diff check passed.
+- Boundary: debug coverage source/Jest only. Direct CLI blackbox was attempted but current sharedmodule dist lacks `dist/conversion/hub/standardized-bridge.js`; no live runtime/RSS claim, provider config, `config.toml`, `~/.rcc`, install, restart, or provider replay.
+
+# 2026-07-14T05:56Z: V2 consistency summary clone cleanup
+
+- Root cause: `comprehensive-consistency-test.mjs` repeatedly serialized/parsed `this.testResults.summary` before assignment, report persistence, and display. The assignment expression did not update the authoritative summary slot.
+- Red/source evidence: the script contained nested `JSON.parse(JSON.stringify(...))` chains at summary assignment, report write, and display.
+- Source fix: `runAllTests` assigns `this.testResults.summary = await this.generateSummary()` once; report writing and display borrow that same object. The report retains one required `JSON.stringify` IO serialization.
+- Architecture: added `debug.v2_consistency_payload_copy_budget`, `debug.v2_consistency_summary_projection`, focused test design, resource/function/verification/mainline bindings, and inventory classification.
+- Evidence: focused Jest 2/2, `node --check`, resource map, function-map compile, mainline call map, wiki/html/manifest sync, TypeScript, no-fallback diff, inventory spec, target diff check, MemoryPalace mine, and MemoryPalace search passed.
+- Boundary: debug reporting only. No live payload semantics, provider config, `config.toml`, `~/.rcc`, global install, restart, provider replay, or RSS claim.
+
+# 2026-07-14T06:06Z: Responses split custom tool output live closeout
+
+- Root cause: `/v1/responses` req-inbound converted consecutive split `custom_tool_call_output` chunks with the same `call_id` as two tool results; the first consumed the pending call and the second tripped `orphan_tool_result`.
+- Source fix: Rust req-inbound context capture merges only consecutive `custom_tool_call_output` rows with identical `call_id` before bridge conversion. True orphan/already-consumed results still fail fast.
+- Immutable-boundary fix: removed `capturedChatRequest` from Responses continuation `usageArgs`; after `resp_chatprocess save` and before next `req_chatprocess restore`, handler/outbound/store transport no longer uses saved request truth for context/history repair.
+- Installed runtime: `npm run install:release` completed and installed snapshot `routecodex-0.90.3934-2026-07-14T055610Z`; `routecodex --version` and `rcc --version` both returned `0.90.3934`.
+- Config truth: `/Volumes/extension/.rcc/config.toml` declares active members 5520, 10000, 5555, and 4444 under `[[httpserver.ports]]`; all four `/health` endpoints returned `status=ok ready=true pipelineReady=true version=0.90.3934`.
+- Live positive replay: exact `diag.requestBody` from `/Volumes/extension/.rcc/diag/error-openai-responses-router-gpt-5.6-sol-20260714T124247513-524573-3922.json` replayed to 5520 with split items 24/25/26 for `call_f7bdbbaec1f947d485d9d0787179c887`; response was HTTP 200 SSE and stream started.
+- Live negative control: non-consecutive second output for `call_routecodex_control_consumed_20260714T1403` returned client 502 and server log showed `captureReqInboundResponsesContextSnapshotJson native error: orphan_tool_result ... unknown or already-consumed call_id`.
+- Post-release log check: after the `RouteCodex version: 0.90.3934` marker, `server-5520.log` had 76 new `/v1/responses` starts, zero original `call_f7bdbbaec1f947d485d9d0787179c887` hits, and no `orphan_tool_result` except the intentional control.
+
+# 2026-07-14T09:12Z: Non-adjacent async custom tool output closeout
+
+- New root cause: exact request `openai-responses-router-gpt-5.6-sol-20260714T165507733-527078-6427` has output chunks for custom exec call `call_4ebd40eace164e189aa4705ce403379f` at input 81-84 and 89, with an unrelated `wait` function call/output at 87-88. Consecutive-only normalization left chunk 89 as already consumed.
+- Unique Rust owner fix: `normalize_responses_input_items` merges `custom_tool_call_output` chunks into the latest output owned by the same custom `call_id`, including across unrelated function tool turns. No handler, outbound, continuation store, provider, TS bridge, or fallback path was added.
+- Positive gates: focused Rust adjacent/non-adjacent tests passed; immutable continuation boundary, function-map compile gate, native hotpath build, release build/install, and all four aggregate health checks passed.
+- Exact local native replay normalized 92 raw input items to 88, produced one custom output row for the failing call, retained the final `running build-native-hotpath` chunk, and produced one matching chat tool row.
+- Installed snapshot `routecodex-0.90.3934-2026-07-14T090918Z`; exact live request replay on 5520 returned HTTP 200. Server request `openai-responses-router-gpt-5.6-sol-20260714T171142337-527317-6666` completed with usage and no new `orphan_tool_result`.
+- Negative boundary remains: only custom output chunks with a known matching custom call are merged; unmatched tool results still fail in native capture, and ordinary function output semantics are unchanged.
+- Boundary: no TS fallback, provider/config/direct-path compensation, or resp_outbound/handler continuation repair was added.
+# 2026-07-14T06:08Z: Provider golden capture temporary config clone cleanup
+
+- Root cause: `buildDerivedConfig` JSON-cloned the complete base config and selected provider config even though it rewrote only provider id/map, default routing, and temporary HTTP host/port.
+- Red evidence: focused Jest failed on both clone residues and missing import-safe exported owner before the source fix.
+- Source fix: `buildDerivedConfig` now path-locally owns top-level, virtual-router, providers, provider wrapper, routing, and HTTP-server objects; unchanged model/auth/header/extension and unrelated config branches remain borrowed until temporary config serialization. A direct CLI guard prevents import-time capture execution.
+- Architecture: added `debug.provider_golden_capture_payload_copy_budget`, `debug.provider_golden_capture_config_projection`, test design, resource/function/verification/mainline bindings, inventory row, and generated wiki/html surfaces.
+- Evidence: focused Jest 2/2, `node --check`, resource map, function-map compile, mainline map, wiki/html/manifest sync, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Boundary: no provider capture, config write, `config.toml`, `~/.rcc`, global install, restart, live provider IO, or RSS claim.
+# 2026-07-14T06:20Z: Standardized-to-chat coverage comparison clones removed
+
+- Root cause: `coverage-hub-standardized-to-chat-native.mjs` retained the reverse-direction version of the already removed parity anti-pattern, JSON serializing/parsing complete TS/native outputs for both full and minimal fixtures before equality.
+- Red evidence: focused Jest failed on missing direct assertions and existing `stableJson`/JSON round-trip residue.
+- Source fix: deleted `stableJson`; both fixtures now compare materialized TS/native outputs directly with `assert.deepEqual`.
+- Architecture: added `debug.coverage_hub_chat_projection_payload_copy_budget`, `debug.coverage_hub_chat_projection_parity`, focused test design, resource/function/verification/mainline bindings, inventory row, and generated wiki/html surfaces.
+- Evidence: focused Jest 1/1, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Gap: direct CLI parity could not run because `sharedmodule/llmswitch-core/dist/conversion/hub/standardized-bridge.js` is absent. This is not runtime/RSS evidence and no provider config/install/restart was changed.
+# 2026-07-14T06:42Z: Hub chain equivalence sanitizer clone removed
+
+- Root cause: `hub-chain-equivalence.mjs::sanitizePayload` JSON-cloned complete protocol payloads just to remove debug-only comparison fields under `metadata.__rcc_*` and OpenAI-chat top-level `__rcc_*`.
+- Red evidence: focused Jest failed because `sanitizePayload` was not exportable/import-safe and source still contained `JSON.parse(JSON.stringify(payload))`.
+- Source fix: `sanitizePayload` is exported and uses path-local owners only for top-level and metadata changes. Unchanged `messages`, `tools`, content/schema, extension, and unrelated branches stay borrowed. Hub dist imports are lazy and the CLI runs only under a direct script guard.
+- Architecture: added `debug.hub_chain_equivalence_payload_copy_budget`, `debug.hub_chain_equivalence_sanitized_payload`, focused test design, resource/function/verification/mainline bindings, inventory row, and generated wiki/html surfaces.
+- Evidence: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Gap: direct chain CLI reached execution but failed with `Missing sample for openai-chat`; no runtime/RSS or live provider claim. No provider config, `config.toml`, `~/.rcc`, install, restart, or provider request changed.
+# 2026-07-14T07:08Z: LM Studio compatibility debug request clone removed
+
+- Root cause: `lmstudio-compatibility-tools-test.mjs::applyLMStudioCompatibility` JSON-cloned complete requests before creating a `parameters` projection and rewriting only tool choice, max-token alias, and tool wrappers.
+- Red evidence: focused Jest failed because the helper was not exported and source still contained `JSON.parse(JSON.stringify(request))`.
+- Source fix: the helper now shallow-owns the top-level request and parameters projection and allocates only normalized tool/function wrappers. Unchanged messages, top-level tools, schemas, content, and extension branches remain borrowed; the source request is unchanged.
+- Architecture: added `debug.lmstudio_compat_tools_payload_copy_budget`, `debug.lmstudio_compat_tools_projection`, test design, resource/function/verification/mainline bindings, inventory row, and generated wiki/html surfaces.
+- Evidence: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Boundary: no localhost LM Studio request, provider config, `config.toml`, `~/.rcc`, install, restart, live provider IO, or RSS claim.
+# 2026-07-14T07:18Z: Anthropic response regression binds native owner without sample clone
+
+- Root cause: `anthropic-response-regression.mjs` still imported the physically deleted TS response runtime and `structuredClone`d the complete tracked Anthropic sample before a read-only projection check.
+- Red evidence: focused Jest failed on missing Rust native owner binding, deleted TS runtime import, import-time execution, and direct CLI inability to replay the sample.
+- Source fix: added `buildAnthropicRegressionProjectionWithNative`, which points the debug script at the local compiled native artifact, serializes the sample only once at the mandatory JS/Rust boundary, calls `buildOpenAIChatFromAnthropicMessageFullWithNative`, and fail-fast parses the native envelope/result. Importing the module no longer runs the regression.
+- Architecture: added `debug.anthropic_response_regression_payload_copy_budget`, `debug.anthropic_response_regression_projection`, focused test design, resource/function/verification/mainline bindings, inventory row, and regenerated wiki/html/manifest surfaces.
+- Evidence: focused Jest 3/3, `node --check`, direct local native CLI replay, resource map, function-map compile, mainline map, wiki/html/manifest sync, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Gap: `mempalace mine . --wing routecodex --agent codex` started but kept the palace lock under PID 32267; follow-up search did not yet surface the new memory block. This is a memory-indexing gap, not a source/test failure.
+- Boundary: this is local compiled-native blackbox evidence only. No provider config, `config.toml`, `~/.rcc`, install, restart, live provider IO, concurrency replay, RSS claim, or TS semantic rebuild was added.
+# 2026-07-14T07:32Z: Mainline manifest generator JSON clone removed
+
+- Root cause: `generate-mainline-chain-manifests.mjs` built a complete manifest and then JSON serialized/parsed it into `manifestClean` before YAML serialization. The graph contained JSON-safe values and the round trip did not implement the stated null stripping because JSON preserves null.
+- Red evidence: focused Jest failed on missing `buildMainlineChainManifest`, existing `JSON.parse(JSON.stringify(manifest))`, redundant `manifestClean`, and lack of an import-safe builder.
+- Source fix: `buildMainlineChainManifest` now creates one authoritative per-chain projection; `generateMainlineChainManifests` passes that same object directly to `YAML.stringify`. The module is import-safe and repository writes occur only through direct CLI execution.
+- Architecture: added `architecture.mainline_chain_manifest_payload_copy_budget`, `architecture.mainline_chain_manifest_projection`, focused test design, resource/function/verification/mainline bindings, inventory row, and regenerated wiki/html/manifest surfaces.
+- Evidence: focused Jest 2/2, `node --check`, direct 20-manifest generation, mainline manifest sync, resource/function/mainline maps, wiki/html sync, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Boundary: this removes an architecture artifact clone only. It does not prove request/response runtime memory or RSS reduction and does not touch provider config, `config.toml`, `~/.rcc`, install, restart, or live provider IO.
+# 2026-07-14T07:43Z: Full-pipeline payload copy completion audit
+
+- Current-source audit confirms source-gated completion for response typed ownership/StreamPipe, narrowed RuntimeStateWrite, registry `Option::take`, and owned effect materialization.
+- Parent goal remains incomplete because current source still has complete `input_array`/`raw_tools` clones in Responses context capture, complete input/tools/messages projection clones in standardized request, simultaneous handler/executor origin references, pending continuation retention, and enabled snapshot serialization/persistence budget gaps.
+- These sources are owned by existing active claims. Per `.agent-collab/PROTOCOL.md`, no stale takeover occurred. Handoff requests were written for `request.payload_copy_budget`, `snapshot.payload_copy_budget`, `handler_executor_payload_residency_audit`, and continuation canonical scope state.
+- Canonical audit table was added to `docs/goals/full-pipeline-payload-copy-cleanup-plan.md`; inventory gate 2/2 and target diff check passed.
+- MemoryPalace full `routecodex` mine completed, but searches for `buildAnthropicRegressionProjectionWithNative` and `manifestClean YAML.stringify` still returned only older memory chunks. Retrieval remains unproven and is recorded as a tooling/index gap.
+
+# 2026-07-14T07:46Z: Retry restore JSON compensation removed
+
+- Root cause: `restoreRequestPayloadFromRetrySeed()` borrowed first-attempt payloads correctly, but when `structuredClone` failed it still serialized and parsed the full payload as compensation. Snapshot seeds also used a shallow-spread backup after clone failure.
+- Red evidence: focused retry Jest failed when `structuredClone` was forced to return `undefined`; restore still returned a JSON-parsed payload and called `JSON.stringify`.
+- Source fix: removed the dead `serialized` seed variant, `serializeRequestPayloadForRetry`, `restoreRequestPayloadFromRetrySnapshot`, borrowed-path JSON compensation, and snapshot shallow-spread compensation. Retry restore now returns an owned clone or explicit `undefined`.
+- Evidence: focused retry Jest 4/4, `npm run verify:request-payload-copy-budget`, TypeScript, no-fallback diff, inventory Jest 2/2, and target diff check passed.
+- Boundary: no provider config, `config.toml`, `~/.rcc`, live payload trimming, install, restart, or live provider IO.
+
+# 2026-07-14T08:05Z: V3 system definition and implementation order locked
+
+- Defined unique Config IO, aggregate multi-listener Server, sole Runtime lifecycle, one-hit Virtual Router, recursive Target Interpreter, global Error actions, Provider-owned three-scope health, and global Debug/log/snapshot/dry-run.
+- Ordered P0-P7: contract/gates -> full Config -> Server -> Debug -> Error/Provider health -> Router/Target -> Responses direct -> later protocols/relay.
+- Corrected status: early direct code is a prototype; unbound Server/Router/Target/Pipeline edges remain `binding_pending`.
+- Evidence: V3 architecture docs, resource map, module boundary, and targeted diff checks passed. No runtime/config/install/restart/live claim.
+
+# 2026-07-14T07:55Z: V3 P0-P2 foundation closed with live CLI evidence
+
+- P1 Config now covers servers, providers, auth entries, canonical models/aliases/capabilities, recursive forwarders, route groups/pools, selection policies, features, debug, and error declarations.
+- Removed Manifest compatibility projections: no single server, routing default tier, provider auth-env shortcut, selected provider/model, or expanded forwarder.
+- P2 adds Rust Debug/Error placeholder crates and aggregate multi-listener Server/CLI. Pending endpoints traverse Server request -> Debug event -> six-node Error projection -> Server frame.
+- All mapped gates passed. The actual V3 CLI started ports 45444 and 45445 from v3/fixtures/config.p2.toml; both health probes passed; responses/messages pending probes returned structured not_implemented with Debug/Error nodes; the exact process stopped and both ports closed.
+- P3 persistent Debug, P4 full Error/health runtime, P5 Router/Target runtime, and P6 Responses Provider execution remain pending. No real ~/.rcc config, global install, V2 runtime, restart, or provider request was changed.
+
+# 2026-07-14T08:24Z: Full-pipeline aggregate gate and snapshot-budget re-audit
+
+- Current worktree passed request and snapshot payload-copy budget gates, resource/function/mainline gates, native hotpath build, and base build.
+- MemoryPalace returned the canonical cleanup plan, inventory, request copy-budget memory, and current source anchors for the cleanup query.
+- Enabled snapshot retention is not fully byte-bounded: the Rust queue is count-bounded at 10 jobs but accepts full provider/forced-full diagnostic payloads without a byte ceiling. The separate provider host queue is bounded at 32 items/8 MiB, and ordinary non-provider persistence defaults to a 256 KiB summary threshold.
+- Parent goal remains active because request context/standardized projections, handler residency, continuation retention, and the Rust snapshot queue byte budget still have active owners or incomplete proof. No provider config, install, restart, or live runtime was changed.
+
+# 2026-07-14T08:42Z: Rust snapshot queue byte budget closed
+
+- Red gate proved the Rust snapshot queue was count-bounded only.
+- Added an 8 MiB default queue memory budget with env override, borrowed `serde_json::Value` byte estimation, atomic reservation, pre-retention `queue_memory_budget` drop, and accounting release on receive/full/disconnect.
+- Queue ownership remains move-only; no live provider/client payload is trimmed. The budget applies only to debug snapshots, including provider/forced-full diagnostics.
+- Focused Jest 4/4, Rust positive/negative tests 2/2, rustfmt, target diff check, and native hotpath build passed. Remaining host JSON crossings are a documented N-API boundary redesign backlog, not unbounded queue retention.
+
+# 2026-07-14T09:26Z: V3 P3/P4 Debug/Error/Provider Health closed
+
+- Completion audit found three remaining gaps: Runtime ignored Debug write failures, Dry Run used `expect`/HTTP defaults for malformed or disabled fixtures, and Provider health mutation types were publicly importable by a future Target.
+- Runtime now explicitly projects Debug sink/capture/event/snapshot/fixture failures through the global Error01-Error06 chain. Dry Run requires a complete fixture, returns transient snapshots, releases the session, and cannot call Provider transport.
+- Provider health storage remains publicly readable through the availability trait, while mutation methods are crate-private. A temporary external Rust crate proves the mutation method is inaccessible.
+- Architecture gates now reject duplicate Error structs, Server-local Error builders, Error-owned health mutation, Target/Router health mutation imports, Router availability imports, and Dry Run Provider/P6 calls.
+- Full mapped gate stack passed. The actual CLI started 45444/45445; real HTTP probes proved shared Debug state, secret redaction, six-node pending Error, six-snapshot no-network Dry Run, malformed fixture Error chain, snapshot release, exact Ctrl-C shutdown, and both ports closed.
+- Scope stayed inside V3 P3/P4. No V2, `~/.rcc`, global install, real upstream request, P5 selection, or P7 relay change was made.
+
+# 2026-07-14T09:30Z: Responses context and standardizer bridge-input clones removed
+
+- Root cause: req-inbound context capture and Responses standardization cloned complete `input` / `tools` owners solely to call the bridge-input chat projector; the projector also cloned complete content/tool-call arrays before read-mostly traversal.
+- Source fix: added one internal borrowed `BridgeInputToChatBorrowedInput<'a>` core. The existing owned converter remains the sole external/JSON-facing wrapper and delegates to that core. Context capture and standardization borrow slices; only independently owned output projections copy individual values.
+- Evidence: focused bridge-borrow residue Jest 1/1, request payload copy budget gate, resource/function/mainline gates, inventory Jest 2/2, target rustfmt/diff check, native hotpath build, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` passed.
+- Architecture: no fallback, provider/config change, payload trimming, MetadataCenter payload mirror, or second semantic converter was added. The current JSON-string N-API boundary remains unchanged.
+- Boundary: this proves source/native/build copy cleanup only. Handler/executor residency, continuation retention, and installed-runtime concurrent RSS/heap measurement remain parent-goal gaps.
+
+# 2026-07-14T10:40Z: V3 P5 Virtual Router and Target Interpreter closed
+
+- Added Rust-only `routecodex-v3-virtual-router` and `routecodex-v3-target` owners. The Router resolves listener route group plus explicit `default` pool and consumes a non-Clone pool token to publish exactly one opaque target. Target recursively expands direct/nested Forwarders and owns deterministic priority/weighted/round-robin ordering, read-only availability checks, internal invalid-member skip, reselection, and full exhaustion.
+- Removed the early Runtime route prototype that collapsed Provider/base URL/auth/model selection into `V3Route05SelectedTarget`. Server now carries one immutable compiled Manifest into Runtime; it does not reread config or select routes.
+- Architecture review found and removed a Server03 -> Router05 shortcut plus duplicate Server-local `V3Server03HttpRequestRaw`. The final real path uses the single Runtime contract `V3Server03HttpRequestRaw -> V3Req04StandardizedResponses -> V3Router05..07 -> V3Target08..10`.
+- Provider owns configured-disabled availability initialization behind `V3ProviderAvailabilityRegistry`; Target consumes only `V3ProviderAvailabilityReader`, Router imports no Provider health/availability, and mutation methods remain Provider-private.
+- Source/compile gates lock Router opacity, Server no-selection, Target no Router re-entry, Target no health mutation, one-shot pool consumption, no P5 Provider send, one Error/Debug owner, and no duplicate Server03 type.
+- Full P3/P4/P5 focused gates, V3 docs/resource/source/compile gates, fmt, Clippy, workspace tests, CLI build, and `git diff --check` passed.
+- Final actual CLI replay used `v3/fixtures/config.p5.toml`: `45454` hit Router once, skipped disabled `cc`, reselected `asxs` on attempt 2, and returned no-network P5 success; `45455` exhausted one disabled candidate and returned full Error01-Error06. Exact PTY Ctrl-C stopped the process and both ports closed.
+- Boundary: P6 Provider network execution, real upstream availability, P7 relay/additional protocols, V2 compatibility, `~/.rcc`, global install, and production runtime were not changed or claimed.
 # 2026-07-14T11:20Z: terminal provider errors lacked selected target observation in request failure logs
 
 - Trace: the request log formatter already rendered `providerKey`, but final provider-send errors only received retry status/code fields; selected provider/model remained local executor variables and were lost before handler logging.
 - Unique fix: attach the final attempt's actual `providerKey` and provider wire `providerModel` to the original error as diagnostic observation fields, then render `model` beside the existing provider field. Existing values are never overwritten; blank values are omitted.
 - Boundary: no message/status/code rewrite, client payload change, provider payload change, retry/reroute policy change, fallback, or Responses continuation mutation.
 - Red/green: focused request-error test failed because `model=gpt-5.6-sol` was absent; focused positive/negative suites now pass.
+# 2026-07-14T11:24Z: V3 P6 contract calibration corrected prototype overclaim
+
+- P0-P5 verified stop is `V3Target10ConcreteProviderSelected`; P6 adjacent edges `v3-rd-09..14` and P6 payload/transport resources remain `binding_pending` without invented source symbols.
+- Corrected implementation/test/system/wiki text that treated early Responses direct prototype and controlled-upstream tests as P6 implementation evidence.
+- Locked `routecodex-v3-provider-responses` as a generic Rust Responses protocol Provider. Production source gate now rejects deployment provider identities and provider-family branches.
+- Added source red-fixture gate with five mutations: transport owner shortcut, duplicate request owner, Server route shortcut, provider-ID special case, and repair/fallback semantics. All five were rejected; compile-fail gate passed.
+- P0-P5 regression passed: Rust-only, static-hook, resource, fmt, Clippy, Debug/Error/health/foundation/Server/P5 focused tests, full workspace, and CLI build. No relay, continuation, servertool, V2, global install, `~/.rcc`, restart, or live provider change.
+
+# 2026-07-14T11:33Z: Parallel contract work must not wait for runtime worker
+
+- Correction: an active Provider runtime claim blocks overlapping runtime edits, not independent P6 contract/map/gate work.
+- Continue document calibration, machine-query gates, red mutation fixtures, evidence, and exact-scope commit in parallel; use handoff for shared surfaces. Defer only current-state gates that directly compile or format actively changing runtime files.

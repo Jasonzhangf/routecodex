@@ -86,6 +86,7 @@ function listTrackedOrFixtureFiles() {
     .filter(Boolean)
     .filter((relPath) => !isGeneratedOrExternal(relPath))
     .filter((relPath) => /\.(ts|tsx|js|mjs|cjs|md|yml|yaml|json)$/u.test(relPath))
+    .filter((relPath) => fs.existsSync(path.join(root, relPath)))
     .map((relPath) => ({ relPath, absPath: path.join(root, relPath) }));
 }
 

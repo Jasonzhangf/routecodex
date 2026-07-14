@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   consumeResponsesPayloadSnapshotByAliasesWithNative as consumeResponsesPayloadSnapshotByAliases,
   consumeResponsesPassthroughWithNative as consumeResponsesPassthrough,
@@ -8,6 +10,20 @@ import {
 } from './helpers/resp-semantics-direct-native.js';
 
 describe('responses registry pruning', () => {
+  it('moves owned registry values instead of deep-cloning before clear', () => {
+    const source = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_reasoning_registry.rs',
+    ), 'utf8');
+
+    expect(source).not.toContain('fn clone_value');
+    expect(source).not.toContain('serde_json::to_string(v)');
+    expect(source).not.toContain('payload_snapshot.clone()');
+    expect(source).not.toContain('passthrough_payload.clone()');
+    expect(source).toContain('entry.payload_snapshot.take()');
+    expect(source).toContain('entry.passthrough_payload.take()');
+  });
+
   it('registers and consumes payload snapshots through native registry', () => {
     registerResponsesPayloadSnapshot('resp-roundtrip', {
       id: 'resp-roundtrip',

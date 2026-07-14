@@ -72,36 +72,127 @@ const createResponsesRequestHandlerHostMock = () => ({
       },
     };
   }),
-  planResponsesContinuationRequestAction: jest.fn((input: {
-    responseId?: string;
-    continuation?: Record<string, unknown> | null;
-  }) => {
-    const continuation = input.continuation && typeof input.continuation === 'object'
-      ? input.continuation
-      : {};
-    const responseId = input.responseId;
-    if (continuation.continuationOwner === 'direct') {
+  planResponsesContinuationRequestAction: jest.fn((input: any) => {
+    if (!input.effectResult) {
+      const plannedEntry = input.plannedEntry ?? {};
+      const responseId = plannedEntry.responseId;
+      if (!responseId) {
+        return {
+          action: 'complete',
+          result: {
+            kind: 'ok',
+            payload: plannedEntry.payload ?? {},
+            pipelineEntryEndpoint: input.entryEndpoint,
+            plannedEntryMode: plannedEntry.mode ?? 'none',
+            isSubmitToolOutputs: plannedEntry.mode === 'submit_tool_outputs',
+          },
+        };
+      }
       return {
-        action: 'direct_submit',
-        responseId,
-        pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
-        materializeProviderOwnedSubmitContext: true,
-        resumeMeta: {
-          providerKey: continuation.providerKey,
-          continuationOwner: 'direct',
-          responseId,
-          restored: false,
+        action: 'execute_effect',
+        effect: {
+          operation: 'lookup_continuation',
+          args: {
+            responseId,
+            options: {
+              entryKind: 'responses',
+              ...(typeof input.matchedPort === 'number' ? { matchedPort: input.matchedPort } : {}),
+              ...(typeof input.routingPolicyGroup === 'string' ? { routingPolicyGroup: input.routingPolicyGroup } : {}),
+            },
+          },
+        },
+        resultPlanInput: {
+          stage: 'lookup_continuation',
+          plannedEntry,
+          entryEndpoint: input.entryEndpoint,
+          requestId: input.requestId,
+          matchedPort: input.matchedPort,
+          routingPolicyGroup: input.routingPolicyGroup,
         },
       };
     }
-    if (continuation.continuationOwner === 'relay') {
+    const { operation, result, resultPlanInput } = input.effectResult;
+    if (operation === 'lookup_continuation') {
+      const plannedEntry = resultPlanInput.plannedEntry;
+      const responseId = plannedEntry.responseId;
+      if (result?.continuationOwner === 'direct') {
+        const payload = {
+          ...plannedEntry.payload,
+          previous_response_id: responseId,
+        };
+        return {
+          action: 'execute_effect',
+          effect: {
+            operation: 'materialize_provider_owned_submit',
+            args: { payload },
+          },
+          resultPlanInput: {
+            stage: 'materialize_provider_owned_submit',
+            payload,
+            resumeMeta: {
+              providerKey: result.providerKey,
+              continuationOwner: 'direct',
+              responseId,
+              restored: false,
+            },
+          },
+        };
+      }
       return {
-        action: 'relay_submit',
-        responseId,
-        pipelineEntryEndpoint: '/v1/responses',
+        action: 'execute_effect',
+        effect: {
+          operation: 'resume_relay',
+          args: {
+            responseId,
+            payload: plannedEntry.payload,
+            options: {
+              requestId: resultPlanInput.requestId,
+              entryKind: 'responses',
+              ...(typeof resultPlanInput.matchedPort === 'number'
+                ? { matchedPort: resultPlanInput.matchedPort }
+                : {}),
+              ...(typeof resultPlanInput.routingPolicyGroup === 'string'
+                ? { routingPolicyGroup: resultPlanInput.routingPolicyGroup }
+                : {}),
+            },
+          },
+        },
+        resultPlanInput: {
+          stage: 'resume_relay',
+          plannedEntryMode: 'submit_tool_outputs',
+        },
       };
     }
-    return { action: 'none' };
+    if (operation === 'materialize_provider_owned_submit') {
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: {
+            ...resultPlanInput.payload,
+            input: result.payload.input,
+          },
+          pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
+          plannedEntryMode: 'submit_tool_outputs',
+          isSubmitToolOutputs: true,
+          resumeMeta: resultPlanInput.resumeMeta,
+        },
+      };
+    }
+    if (operation === 'resume_relay') {
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: result.payload,
+          pipelineEntryEndpoint: '/v1/responses',
+          plannedEntryMode: 'submit_tool_outputs',
+          isSubmitToolOutputs: true,
+          resumeMeta: result.meta,
+        },
+      };
+    }
+    throw new Error(`unexpected continuation effect ${String(operation)}`);
   }),
   planResponsesRequestBodyForHttpNative: jest.fn(planResponsesRequestBodyForHttpMock),
   shouldManageResponsesConversationForHttpNative: jest.fn((entryEndpoint?: string) =>
@@ -114,34 +205,81 @@ const createResponsesRequestHandlerHostMock = () => ({
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  } = {}) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message: typeof args.message === 'string' && args.message.trim()
-          ? args.message
-          : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code: typeof args.code === 'string' && args.code.trim()
-          ? args.code
-          : 'responses_resume_failed',
-        origin: typeof args.origin === 'string' && args.origin.trim()
-          ? args.origin
-          : 'client',
-      },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
-    typeof origin === 'string' && origin.trim() === 'client'
+  planResponsesResumeErrorForHttpNative: jest.fn((error: Record<string, unknown>) =>
+    error.origin === 'client'
+      ? {
+          action: 'client_error',
+          status: typeof error.status === 'number' ? error.status : 422,
+          body: {
+            error: {
+              message: typeof error.message === 'string' ? error.message : 'resume failed',
+              type: 'invalid_request_error',
+              code: typeof error.code === 'string' ? error.code : 'resume_failed',
+              origin: 'client',
+            },
+          },
+        }
+      : { action: 'rethrow' }
   ),
+  planResponsesInboundToolHistoryErrorsampleForHttpNative: jest.fn(() => ({ action: 'none' })),
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
+  buildResponsesPipelineMetadataForHttpNative: jest.fn((args: {
+    clientRequestId?: string;
+    resumeMeta?: Record<string, unknown>;
+    streamPlan?: { inboundStream?: boolean; outboundStream?: boolean };
+  }) => {
+    const responsesResume = args.resumeMeta
+      ? buildResponsesResumeControlForContinuationContextForHttpFake(args.resumeMeta)
+      : undefined;
+    const writer = (family: string) => ({
+      module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+      symbol: 'buildResponsesPipelineMetadataForHttp',
+      stage: family === 'continuation_context'
+        ? 'MetaReq03ContinuationAttached'
+        : 'MetaReq04RuntimeControlBound',
+    });
+    const metadataCenterWrites = [
+      {
+        family: 'runtime_control',
+        key: 'streamIntent',
+        value: args.streamPlan?.inboundStream === true || args.streamPlan?.outboundStream === true
+          ? 'stream'
+          : 'non_stream',
+        writer: writer('runtime_control'),
+      },
+      {
+        family: 'runtime_control',
+        key: 'providerProtocol',
+        value: 'openai-responses',
+        writer: writer('runtime_control'),
+      },
+      ...(responsesResume
+        ? [{
+            family: 'continuation_context',
+            key: 'responsesResume',
+            value: responsesResume,
+            writer: writer('continuation_context'),
+          }]
+        : []),
+      ...(responsesResume?.continuationOwner === 'direct' && typeof responsesResume.providerKey === 'string'
+        ? [{
+            family: 'runtime_control',
+            key: 'retryProviderKey',
+            value: responsesResume.providerKey,
+            writer: writer('runtime_control'),
+          }]
+        : []),
+    ];
+    return {
+      metadata: {
+        ...(args.clientRequestId ? { clientRequestId: args.clientRequestId } : {}),
+        ...(responsesResume ? { responsesResume } : {}),
+      },
+      metadataCenterWrites,
+    };
+  }),
   finalizeResponsesHandlerPayloadForHttpNative: jest.fn(finalizeResponsesHandlerPayloadForHttpFake),
   buildResponsesConversationPortScopeForHttpNative: jest.fn(() => ({})),
   planResponsesHandlerStreamForHttpNative: jest.fn((args: {
@@ -306,6 +444,7 @@ jest.unstable_mockModule(
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
+  getSystemPromptOverride: jest.fn(() => null),
 }));
 
 jest.unstable_mockModule('../../../src/utils/errorsamples.js', () => ({
@@ -648,13 +787,6 @@ describe('responses-handler submit_tool_outputs same-protocol responses routing'
       },
     );
 
-    expect(mockCaptureResponsesRequestContextForRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: expect.any(String),
-        entryKind: 'responses',
-        providerKey: 'dibittai.crsa.gpt-5.4',
-      }),
-    );
     const pipelineInput = executePipeline.mock.calls[0]?.[0];
     expect(MetadataCenter.read(pipelineInput.metadata)?.readContinuationContext().responsesResume).toMatchObject({
       restoredFromResponseId: 'resp_submit_same_provider_pin_1',

@@ -103,6 +103,13 @@ function loadResponsesSample() {
   return { payload: body, meta: { path: fullPath } };
 }
 
+export function createResponsesCaptureRequestOwner(rawRequest) {
+  if (!rawRequest || typeof rawRequest !== 'object' || Array.isArray(rawRequest)) {
+    throw new Error('Responses capture request must be an object');
+  }
+  return { ...rawRequest };
+}
+
 async function main() {
   const providerId = process.env.RCC_RESP_PROV || 'fc';
   const cfgDoc = findProviderConfig(providerId);
@@ -121,7 +128,7 @@ async function main() {
   const responsesSample = loadResponsesSample();
   const chatBody = responsesSample ? null : pickChatSample();
   const rawReq = responsesSample ? responsesSample.payload : (buildResponsesRequestFromChatNative(chatBody)?.request || {});
-  let respReq = JSON.parse(JSON.stringify(rawReq));
+  let respReq = createResponsesCaptureRequestOwner(rawReq);
   if (!responsesSample) {
     // override model with provider config's modelId/defaultModel
     try {
@@ -231,4 +238,6 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}

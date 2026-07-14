@@ -197,8 +197,7 @@
         <p>Owner kind: <code>rust_helper</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code> Owner scope: VR shared helper placement for exact duplicate string/list mechanics and tool-detection constant reuse only; no route-selection, availability, forwarder, provider, or payload semantic movement</p>
         <p>Canonical types:</p>
         <ul>
-          <li><code>Value</code></li>
-          <li><code>HashSet</code></li>
+          <li><code>serde_json::Value</code></li>
         </ul>
         <p>Canonical builders:</p>
         <ul>
@@ -405,6 +404,7 @@
         <p>Notes:</p>
         <ul>
           <li>Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy.</li>
+          <li>Human-visible hit-log route labels and telemetry <code>pool</code> projection must show the route classification only (<code>routeName</code>); standalone authoring/runtime pool names must not appear in the emitted line or telemetry event.</li>
           <li>Retired TS <code>runtime/virtual-router-hit-log.ts</code> facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports.</li>
           <li>Runtime route host-effects planning/finalization is Rust-owned; <code>routing-integrations.ts</code> may only call <code>planVirtualRouterRouteHostEffectsJson</code> / <code>finalizeVirtualRouterRouteHostEffectsJson</code>, apply returned <code>cleanedRequest</code>, and emit returned log lines.</li>
           <li>Session log color helpers must reach Rust through <code>src/modules/llmswitch/bridge/session-log-color-host.ts</code>; TS may not keep local color hashing or broad bridge ownership.</li>

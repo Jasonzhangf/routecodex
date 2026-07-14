@@ -21,7 +21,6 @@ import {
 } from './request-retry-helpers.js';
 import { isPromptTooLongError } from './retry-engine.js';
 import { isClientDisconnectAbortError } from '../executor-provider.js';
-import { remapBridgeSseErrorToHttp } from './provider-response-sse-error-normalizer.js';
 import {
   attachProviderObservationToError,
   attachRetryErrorSnapshotToError,
@@ -123,70 +122,6 @@ export type RequestExecutorProviderSendFailureResult = {
   retryExecutionPlan?: ProviderRetryExecutionPlan;
 };
 
-function isRetryableProviderResponseProcessingFailure(args: {
-  error: unknown;
-  retryError: RetryErrorSnapshot;
-}): boolean {
-  if (!args.error || typeof args.error !== 'object') {
-    return false;
-  }
-  const errorObject =
-    args.error instanceof Error
-      ? args.error as Error & Record<string, unknown>
-      : args.error as Record<string, unknown>;
-  const record = args.error as {
-    code?: unknown;
-    upstreamCode?: unknown;
-    retryable?: unknown;
-    status?: unknown;
-    statusCode?: unknown;
-    requestExecutorProviderErrorStage?: unknown;
-  };
-  if (typeof record.requestExecutorProviderErrorStage !== 'string') {
-    const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
-    remapBridgeSseErrorToHttp(errorObject, message);
-  }
-  const statusCode = typeof record.statusCode === 'number'
-    ? record.statusCode
-    : (typeof record.status === 'number' ? record.status : args.retryError.statusCode);
-  if (
-    record.requestExecutorProviderErrorStage === 'provider.http'
-    && typeof statusCode === 'number'
-    && (
-      statusCode === 401
-      || statusCode === 402
-      || statusCode === 403
-      || statusCode === 408
-      || statusCode === 425
-      || statusCode === 429
-      || statusCode >= 500
-    )
-  ) {
-    return true;
-  }
-  if (record.requestExecutorProviderErrorStage === 'provider.responses') {
-    return true;
-  }
-  if (
-    record.retryable === true
-    && record.requestExecutorProviderErrorStage === 'host.response_contract'
-    && (
-      args.retryError.errorCode === 'EMPTY_ASSISTANT_RESPONSE'
-      || args.retryError.errorCode === 'MISSING_REQUIRED_TOOL_CALL'
-    )
-  ) {
-    return true;
-  }
-  return record.retryable === true
-    && record.requestExecutorProviderErrorStage === 'provider.sse_decode'
-    && (
-      args.retryError.errorCode === 'SSE_DECODE_ERROR'
-      || record.code === 'SSE_DECODE_ERROR'
-      || args.retryError.upstreamCode === 'UPSTREAM_STREAM_TERMINATED'
-      || record.upstreamCode === 'UPSTREAM_STREAM_TERMINATED'
-    );
-}
-
 async function observeFailedTrafficOutcome(args: {
   runtimeKey: string;
   providerKey: string;
@@ -226,16 +161,7 @@ export async function processProviderSendFailure(
   });
   const resolvedFailureStage =
     extractRequestExecutorProviderErrorStage(args.error)
-    ?? (args.phase === 'provider_response_processing' ? 'provider.send' : 'provider.send');
-  if (
-    args.phase !== 'provider_send'
-    && !isRetryableProviderResponseProcessingFailure({
-      error: args.error,
-      retryError
-    })
-  ) {
-    throw args.error;
-  }
+    ?? 'provider.send';
   let cumulativeExternalLatencyMs = args.cumulativeExternalLatencyMs;
   if (args.providerSendStartedAtMs > 0 && args.providerSendElapsedMs <= 0) {
     const failedSendElapsedMs = Math.max(0, Date.now() - args.providerSendStartedAtMs);

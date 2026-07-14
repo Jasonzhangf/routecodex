@@ -61,6 +61,19 @@ interface RecordResponseArgs {
   routeHint?: string;
 }
 
+export type ResponsesContinuationStoreEffect =
+  | {
+      operation: 'record_response';
+      payload: RecordResponseArgs;
+    }
+  | {
+      operation: 'finalize_retention';
+      payload: {
+        requestId: string;
+        options: { keepForSubmitToolOutputs: boolean };
+      };
+    };
+
 interface ResumeOptions {
   requestId?: string;
   entryKind?: ResponsesContinuationEntryKind;
@@ -259,6 +272,14 @@ export function recordResponsesResponse(args: RecordResponseArgs): void {
     console.log('[responses-store] record', args.requestId, (args.response as AnyRecord)?.id);
   }
   recordResponsesResponseNative(args);
+}
+
+export function executeResponsesContinuationStoreEffects(
+  effects: ResponsesContinuationStoreEffect[]
+): void {
+  for (const effect of effects) {
+    executeStoreOperation<unknown>(effect.operation, effect.payload);
+  }
 }
 
 export function resumeResponsesConversation(

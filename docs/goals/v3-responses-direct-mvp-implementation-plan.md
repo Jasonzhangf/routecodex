@@ -10,9 +10,17 @@ This plan implements `feature_id: v3.responses_direct_mvp_architecture`.
 
 ## Implementation Status
 
-The Rust workspace, config compiler, static hook registry, runtime kernel, Responses provider, Rust server, CLI, source gates, unit tests, CLI smoke, and controlled-upstream JSON/SSE blackboxes are implemented under `v3/`.
+P0-P5 are the current verified foundation. The authoritative P5 request path stops at
+`V3Target10ConcreteProviderSelected` before provider send. The first P6 Provider slice now binds
+the generic Rust Responses Provider nodes `12-14` and adjacent edges `10-12` to real source and
+controlled-upstream tests. Direct policy creation, client projection, and Server framing remain
+separate completion boundaries unless their own maps and gates are updated.
 
-Completion remains conditional on the current-worktree verification stack, architecture baseline gates, documentation/map sync, collaboration evidence, and MemoryPalace indexing listed below.
+Early Responses direct Rust code under `v3/` is not completion evidence by itself. Only source
+symbols that are bound in the maps and covered by current gates may be treated as implemented. The
+generic Provider slice is source-bound through `V3Provider12ResponsesWirePayload`,
+`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`; full `/v1/responses` Server
+usability is still pending.
 
 ## Acceptance Criteria
 
@@ -39,7 +47,7 @@ Completion remains conditional on the current-worktree verification stack, archi
 - Static hook registry.
 - V3 source/compile gates.
 - Controlled-upstream `/v1/responses` direct blackbox.
-- V3 map/wiki/doc sync from `design_pending` toward anchored symbols as implementation lands.
+- V3 map/wiki/doc sync from `binding_pending` toward anchored symbols only after source verification.
 
 ### Out of Scope
 
@@ -72,9 +80,9 @@ Completion remains conditional on the current-worktree verification stack, archi
 - Confirm no same-semantic claim conflict.
 - Do not edit old runtime paths under `sharedmodule/llmswitch-core/` for this V3 slice.
 
-### 2. Create Rust Workspace Skeleton
+### 2. Reuse the P0-P5 Rust Workspace
 
-Create:
+Current foundation crates:
 
 ```text
 v3/
@@ -87,7 +95,9 @@ v3/
     routecodex-v3-cli/
 ```
 
-Each crate starts with minimal compiling Rust modules and explicit public entrypoints. No runtime behavior is claimed until tests prove it.
+Do not recreate Config, Server, Runtime, CLI, Debug, Error, Virtual Router, or Target owners. P6
+adds only the generic Responses protocol Provider boundary and Runtime-owned adjacent orchestration.
+Existing prototype symbols are candidates for review, not architectural truth.
 
 ### 3. Add V3 Boundary Gates First
 
@@ -95,6 +105,7 @@ Add package scripts and verifier scripts for:
 
 - `verify:v3-rust-only`
 - `verify:v3-module-boundaries`
+- `test:v3-source-gate-red-fixtures`
 - `verify:v3-static-hook-registry`
 - `verify:v3-resource-map`
 - `test:v3-compile-fail`
@@ -114,25 +125,13 @@ Required gate rules:
 - no secret values in manifest/debug/error/client payload
 - no direct preflight/sanitize/repair/raw replay/forced relay/fallback
 
-### 4. Implement Config Manifest Compiler
+### 4. Consume the P1-P5 Contracts
 
-Implement `V3Config01AuthoringSurface -> V3Config02ValidatedManifest`.
-
-Minimum config fields:
-
-- server bind/port
-- default route group
-- default tier
-- Responses provider id/type/base_url/model/auth_env
-
-Fail fast for:
-
-- unknown fields
-- missing default tier
-- empty provider pool
-- missing `auth_env`
-- secret-like literal in manifest path
-- legacy config fallback attempt
+- Consume `V3Config05ManifestPublished`; do not reopen or reinterpret `config.v3.toml`.
+- Consume `V3Target10ConcreteProviderSelected`; do not rerun Virtual Router or Target selection.
+- Treat provider identity, endpoint, canonical model, and auth handle as typed selected-target data.
+- Resolve the auth secret only in Provider transport.
+- Fail fast on missing or malformed selected-target fields. No legacy config path or default synthesis.
 
 ### 5. Implement Runtime Node Types
 
@@ -141,15 +140,21 @@ Implement typed nodes:
 ```text
 V3Server03HttpRequestRaw
 V3Req04StandardizedResponses
-V3Route05SelectedTarget
-V3ResponsesDirect06Policy
-V3Provider07ResponsesWirePayload
-V3Transport08ResponsesHttpRequest
-V3ProviderResp09Raw
-V3Resp10ClientPayload
-V3Server11HttpFrame
+V3Router05RequestClassified
+V3Router06RoutePoolResolved
+V3Router07OpaqueTargetHitOnce
+V3Target08KindClassified
+V3Target09CandidateSetExpanded
+V3Target10ConcreteProviderSelected
+V3ResponsesDirect11Policy
+V3Provider12ResponsesWirePayload
+V3Transport13ResponsesHttpRequest
+V3ProviderResp14Raw
+V3Resp15ClientPayload
+V3Server16HttpFrame
 ```
 
+P0-P5 own nodes `03-10`; P6 owns only adjacent transitions `10->11->12->13->14->15->16`.
 Only adjacent builders are allowed. Do not add cross-node `From` conversions or duplicate DTO shapes.
 
 ### 6. Implement Static Hook Registry
@@ -181,6 +186,8 @@ Implement provider wire/transport/raw response split:
 
 Provider rules:
 
+- `routecodex-v3-provider-responses` is a generic Rust Responses protocol Provider; it must not
+  contain hard-coded deployment provider IDs, route groups, fixture identities, or provider-family branches
 - current request semantics remain provider wire
 - auth secret is resolved only at transport point from `auth_env`
 - provider returns raw status/headers/body/stream or source error
@@ -194,7 +201,8 @@ Implement a single runtime lifecycle executor for Responses direct:
 manifest
   -> server raw
   -> req standardized
-  -> route selected
+  -> router classify/pool/one opaque hit
+  -> target classify/expand/select
   -> direct policy
   -> provider wire
   -> transport request
@@ -252,9 +260,10 @@ Capture:
 
 ### 12. Documentation and Map Sync
 
-After symbols exist:
+After final symbols exist and the required gates pass:
 
-- update `docs/architecture/v3-mainline-call-map.yml` from `design_pending` toward anchored real symbols
+- update `docs/architecture/v3-mainline-call-map.yml` from `binding_pending` toward anchored real symbols
+- update P6 resource `binding_status` only with the corresponding verified adjacent source edge
 - update `docs/architecture/v3-verification-map.yml` planned gates to actual gates
 - update wiki checklist
 - update `note.md`
@@ -282,6 +291,7 @@ After symbols exist:
 | Rust workspace | `cargo test --manifest-path v3/Cargo.toml --workspace` |
 | Rust-only | `npm run verify:v3-rust-only` |
 | Module boundary | `npm run verify:v3-module-boundaries` |
+| Source red fixtures | `npm run test:v3-source-gate-red-fixtures` |
 | Static hooks | `npm run verify:v3-static-hook-registry` |
 | Resource map | `npm run verify:v3-resource-map` |
 | Compile-fail | `npm run test:v3-compile-fail` |
@@ -298,5 +308,17 @@ After symbols exist:
 - Provider-facing wire capture and client-facing response capture are recorded.
 - No TypeScript V3 MVP source exists.
 - No fallback/repair/sanitize/forced relay exists in Responses direct.
+- No deployment provider ID or provider-specific branch exists in the generic Responses Provider.
+- Every P6 edge `10->11->12->13->14->15->16` and its resource is machine-queryable; unverified
+  edges remain `binding_pending` without caller/callee symbols or source paths.
 - V3 docs/maps/wiki reflect real symbols and gates.
 - `note.md`, `MEMORY.md`, and MemoryPalace search are updated.
+
+## General Rust Responses Provider implementation slice
+
+The first P6 implementation slice ends at `V3ProviderResp14Raw`. It replaces the obsolete `07/08/09` Provider
+prototype with the canonical `12/13/14` contracts and leaves the client projection and Server framing nodes
+pending. The Provider wire owner moves the existing request value, changes only the selected upstream `model`,
+and preserves all other standard and extension fields. The transport request carries only an auth handle; the
+secret is resolved at the Reqwest call boundary. JSON bodies remain raw bytes, while SSE uses a validated raw
+event stream whose transport, malformed framing, and client-disconnect failures are explicit typed errors.

@@ -27,8 +27,25 @@ for (const path of all) {
   const isTest = path.includes('/tests/');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
+  const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
+    || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
+  if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {
+    fail('obsolete Provider prototype node name is forbidden in V3 source: ' + path);
+  }
   if (!isTest && !path.includes('routecodex-v3-provider-responses') && /reqwest::Client|\.send\(\)/.test(text)) {
     fail('provider transport outside provider crate: ' + path);
+  }
+  if (!isTest && isProviderOwner && !isProviderTransportSurface && /\breqwest::/.test(productionText)) {
+    fail('Reqwest usage in generic Responses Provider is restricted to transport/shared surfaces: ' + path);
+  }
+  if (!isTest && isProviderOwner
+      && /routecodex_v3_virtual_router|routecodex_v3_target|V3VirtualRouter|V3TargetInterpreter|route_groups|forwarders/i.test(productionText)) {
+    fail('generic Responses Provider cannot import or interpret Router/Target/Forwarder resources: ' + path);
+  }
+  if (!isTest && isProviderOwner
+      && /(?:api_key|secret|token|bearer)[a-z_]*\s*:\s*String/i.test(productionText)
+      && !/V3ProviderAuthSecretHandle|Environment\(String\)|TokenFile\(String\)/.test(productionText)) {
+    fail('wire/raw/error Provider DTOs must not store resolved secret values: ' + path);
   }
   if (!path.includes('routecodex-v3-server') && /axum::serve|TcpListener::bind/.test(text) && !isTest) {
     fail('HTTP listener outside server crate: ' + path);

@@ -81,14 +81,23 @@ if (fs.existsSync(path.join(root, deletedNativeBridgePath))) {
 
 for (const [ownerPath, requiredMarkers] of [
   ['src/modules/llmswitch/bridge/provider-response-converter-host.ts', [
-    'getRouterHotpathJsonBindingSync',
-    'buildSseFramesFromJsonJson',
+    'buildSseFramesFromJsonWithNative',
     'buildReadableFromSseFrames',
   ]],
+  ['src/modules/llmswitch/bridge/provider-response-native-host.ts', [
+    'getRouterHotpathJsonBindingSync',
+  ]],
+  ['src/modules/llmswitch/bridge/provider-response-native-calls.ts', [
+    'getProviderResponseNativeBindingSync',
+    'buildSseFramesFromJsonJson',
+  ]],
   ['src/modules/llmswitch/bridge/runtime-integrations.ts', [
+    'buildJsonFromSseWithNative',
+    'collectSseBodyText',
+  ]],
+  ['src/modules/llmswitch/bridge/sse-runtime-host.ts', [
     'getRouterHotpathJsonBindingSync',
     'buildJsonFromSseJson',
-    'collectSseBodyText',
   ]],
   ['scripts/helpers/sse-direct-native.mjs', [
     'router_hotpath_napi.node',

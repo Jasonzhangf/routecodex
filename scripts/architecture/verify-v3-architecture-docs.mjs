@@ -47,13 +47,16 @@ const yaml = (file) => {
   catch (error) { fail(`${file}: YAML parse failed: ${error.message}`); return {}; }
 };
 const array = (value) => Array.isArray(value) ? value : [];
-const p6PendingStepIds = new Set(['v3-rd-09', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14']);
+const p6PendingStepIds = new Set(['v3-rd-09', 'v3-rd-13', 'v3-rd-14']);
+const p6ProviderAnchoredStepIds = new Set(['v3-rd-10', 'v3-rd-11', 'v3-rd-12']);
 const p6PendingResourceIds = new Set([
   'v3.responses_direct.policy',
+  'v3.response.client_payload',
+]);
+const p6ProviderAnchoredResourceIds = new Set([
   'v3.provider.responses_wire_payload',
   'v3.provider.transport_request',
   'v3.response.provider_raw',
-  'v3.response.client_payload',
 ]);
 
 for (const file of requiredFiles) if (!fs.existsSync(abs(file))) fail(`${file}: missing`);
@@ -78,7 +81,7 @@ for (const phrase of [
   'binding_pending',
   'generic',
   'routecodex-v3-provider-responses',
-  'prototype',
+  'controlled-upstream',
   'Runtime kernel is the only full lifecycle executor',
 ]) if (!p6ContractDocs.includes(phrase)) fail(`P6 contract docs: missing calibration phrase ${phrase}`);
 if (/\b(?:cc|asxs)\b/.test(p6ContractDocs)) {
@@ -118,6 +121,9 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
   if (p6PendingResourceIds.has(resource.resource_id) && resource.binding_status !== 'binding_pending') {
     fail(`${where}: P6 resource must remain binding_pending before implementation source binding`);
   }
+  if (p6ProviderAnchoredResourceIds.has(resource.resource_id) && resource.binding_status !== 'anchored') {
+    fail(`${where}: Provider slice resource must be anchored after controlled-upstream source binding`);
+  }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
   if (resource.resource_id !== 'v3.response.client_payload' && resource.may_enter_client_body === true) {
@@ -156,8 +162,17 @@ for (const [index, edge] of allEdges.entries()) {
       fail(`${where}: ${edge.step_id} must use P6 feature owner`);
     }
   }
+  if (p6ProviderAnchoredStepIds.has(edge.step_id)) {
+    if (edge.status !== 'anchored') fail(`${where}: ${edge.step_id} must be anchored by the Provider runtime slice`);
+    for (const field of ['caller_file', 'callee_file', 'caller_symbol', 'callee_symbol']) {
+      if (!edge[field]) fail(`${where}: ${edge.step_id} anchored Provider edge missing ${field}`);
+    }
+    if (edge.owner_feature_id !== 'v3.responses_provider_runtime') {
+      fail(`${where}: ${edge.step_id} must use v3.responses_provider_runtime owner`);
+    }
+  }
 }
-for (const stepId of p6PendingStepIds) {
+for (const stepId of [...p6PendingStepIds, ...p6ProviderAnchoredStepIds]) {
   if (!allEdges.some((edge) => edge.step_id === stepId)) fail(`mainline: missing P6 edge ${stepId}`);
 }
 
@@ -165,7 +180,7 @@ const reviewSurface = read('docs/architecture/wiki/v3-responses-direct-mainline.
   + read('docs/design/v3-routecodex-runtime-resource-contract.md');
 for (const node of requiredNodes) if (!reviewSurface.includes(node)) fail(`review surface: missing node ${node}`);
 
-for (const featureId of ['v3.responses_direct_mvp_architecture', 'v3.debug_error_foundation']) {
+for (const featureId of ['v3.responses_direct_mvp_architecture', 'v3.responses_provider_runtime', 'v3.debug_error_foundation']) {
   const feature = array(verificationMap.features).find((entry) => entry.feature_id === featureId);
   if (!feature) fail(`verification map: missing ${featureId}`);
   for (const gate of array(feature?.required_gates)) {
@@ -179,8 +194,18 @@ for (const gate of [
   'npm run verify:v3-module-boundaries',
   'npm run test:v3-source-gate-red-fixtures',
   'npm run test:v3-compile-fail',
+  'npm run test:v3-provider-responses',
   'npm run test:v3-workspace',
 ]) if (!array(p6Feature?.required_gates).includes(gate)) fail(`verification map: P6 missing required gate ${gate}`);
+
+const providerFeature = array(verificationMap.features)
+  .find((entry) => entry.feature_id === 'v3.responses_provider_runtime');
+for (const gate of [
+  'npm run test:v3-provider-responses',
+  'npm run verify:v3-module-boundaries',
+  'npm run test:v3-source-gate-red-fixtures',
+  'npm run test:v3-compile-fail',
+]) if (!array(providerFeature?.required_gates).includes(gate)) fail(`verification map: Provider feature missing required gate ${gate}`);
 
 if (failures.length) {
   console.error('[verify:v3-architecture-docs] failed');

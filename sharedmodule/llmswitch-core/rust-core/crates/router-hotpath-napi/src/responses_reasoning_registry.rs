@@ -6,7 +6,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -182,12 +182,6 @@ fn collapse_reasoning_segments(segments: &[String]) -> Vec<String> {
     merged
 }
 
-fn clone_value(v: &Value) -> Value {
-    // Use serde_json to deep clone
-    let s = serde_json::to_string(v).unwrap_or_default();
-    serde_json::from_str(&s).unwrap_or_else(|_| v.clone())
-}
-
 // ============================================================
 // NAPI exported functions
 // ============================================================
@@ -275,15 +269,7 @@ pub fn consume_responses_reasoning_json(id: String) -> NapiResult<Option<String>
         .lock()
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
-    let entry = reg.entry_mut(&id);
-    let reasoning = match entry {
-        Some(e) if e.reasoning.is_some() => {
-            let v = e.reasoning.clone();
-            e.reasoning = None;
-            v
-        }
-        _ => None,
-    };
+    let reasoning = reg.entry_mut(&id).and_then(|entry| entry.reasoning.take());
 
     // prune entry if empty
     if let Some(e) = reg.entry_mut(&id) {
@@ -325,14 +311,9 @@ pub fn consume_responses_output_text_meta_json(id: String) -> NapiResult<Option<
         .lock()
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
-    let value = match reg.entry_mut(&id) {
-        Some(e) if e.output_text.is_some() => {
-            let v = e.output_text.clone();
-            e.output_text = None;
-            v
-        }
-        _ => None,
-    };
+    let value = reg
+        .entry_mut(&id)
+        .and_then(|entry| entry.output_text.take());
     if let Some(e) = reg.entry_mut(&id) {
         if e.reasoning.is_none()
             && e.output_text.is_none()
@@ -356,7 +337,7 @@ pub fn consume_responses_output_text_meta_json(id: String) -> NapiResult<Option<
 pub fn register_responses_payload_snapshot_json(
     id: String,
     snapshot_json: String,
-    clone: Option<bool>,
+    _clone: Option<bool>,
 ) -> NapiResult<()> {
     let snapshot: Value = serde_json::from_str(&snapshot_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -366,11 +347,7 @@ pub fn register_responses_payload_snapshot_json(
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
-        entry.payload_snapshot = Some(if clone.unwrap_or(true) {
-            clone_value(&snapshot)
-        } else {
-            snapshot
-        });
+        entry.payload_snapshot = Some(snapshot);
     }
     Ok(())
 }
@@ -381,14 +358,9 @@ pub fn consume_responses_payload_snapshot_json(id: String) -> NapiResult<Option<
         .lock()
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
-    let value = match reg.entry_mut(&id) {
-        Some(e) if e.payload_snapshot.is_some() => {
-            let v = e.payload_snapshot.clone();
-            e.payload_snapshot = None;
-            v
-        }
-        _ => None,
-    };
+    let value = reg
+        .entry_mut(&id)
+        .and_then(|entry| entry.payload_snapshot.take());
     if let Some(e) = reg.entry_mut(&id) {
         if e.reasoning.is_none()
             && e.output_text.is_none()
@@ -423,19 +395,20 @@ pub fn consume_responses_payload_snapshot_by_aliases_json(
     let mut matched: Option<Value> = None;
     for alias in &aliases {
         if let Some(entry) = reg.entry_mut(alias) {
-            if let Some(ref snap) = entry.payload_snapshot {
-                if !snap.is_null() && !snap.as_object().is_none() {
-                    matched = Some(clone_value(snap));
-                    entry.payload_snapshot = None;
-                    break;
-                }
+            if entry
+                .payload_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.is_object())
+            {
+                matched = entry.payload_snapshot.take();
+                break;
             }
         }
     }
 
     for alias in &aliases {
         if let Some(ref mut entry) = reg.entry_mut(alias) {
-            entry.payload_snapshot = None;
+            entry.payload_snapshot.take();
         }
     }
 
@@ -469,7 +442,7 @@ pub fn consume_responses_payload_snapshot_by_aliases_json(
 pub fn register_responses_passthrough_json(
     id: String,
     payload_json: String,
-    clone: Option<bool>,
+    _clone: Option<bool>,
 ) -> NapiResult<()> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -479,11 +452,7 @@ pub fn register_responses_passthrough_json(
     let now = Instant::now();
     let _entry = reg.ensure_entry(&id, now);
     if let Some(ref mut entry) = reg.entry_mut(&id) {
-        entry.passthrough_payload = Some(if clone.unwrap_or(true) {
-            clone_value(&payload)
-        } else {
-            payload
-        });
+        entry.passthrough_payload = Some(payload);
     }
     Ok(())
 }
@@ -494,14 +463,9 @@ pub fn consume_responses_passthrough_json(id: String) -> NapiResult<Option<Strin
         .lock()
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     reg.prune(Instant::now());
-    let value = match reg.entry_mut(&id) {
-        Some(e) if e.passthrough_payload.is_some() => {
-            let v = e.passthrough_payload.clone();
-            e.passthrough_payload = None;
-            v
-        }
-        _ => None,
-    };
+    let value = reg
+        .entry_mut(&id)
+        .and_then(|entry| entry.passthrough_payload.take());
     if let Some(e) = reg.entry_mut(&id) {
         if e.reasoning.is_none()
             && e.output_text.is_none()
@@ -536,19 +500,20 @@ pub fn consume_responses_passthrough_by_aliases_json(
     let mut matched: Option<Value> = None;
     for alias in &aliases {
         if let Some(entry) = reg.entry_mut(alias) {
-            if let Some(ref passthrough) = entry.passthrough_payload {
-                if !passthrough.is_null() && !passthrough.as_object().is_none() {
-                    matched = Some(clone_value(passthrough));
-                    entry.passthrough_payload = None;
-                    break;
-                }
+            if entry
+                .passthrough_payload
+                .as_ref()
+                .is_some_and(|passthrough| passthrough.is_object())
+            {
+                matched = entry.passthrough_payload.take();
+                break;
             }
         }
     }
 
     for alias in &aliases {
         if let Some(ref mut entry) = reg.entry_mut(alias) {
-            entry.passthrough_payload = None;
+            entry.passthrough_payload.take();
         }
     }
 

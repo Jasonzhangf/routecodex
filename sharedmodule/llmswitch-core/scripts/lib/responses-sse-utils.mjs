@@ -113,7 +113,7 @@ function extractResponseFromEvents(events, fallbackModel) {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
     if (event?.type === 'response.completed' && event.response) {
-      return JSON.parse(JSON.stringify(event.response));
+      return event.response;
     }
   }
   return aggregateResponsesFromEvents(events, fallbackModel);
@@ -139,16 +139,6 @@ function aggregateResponsesFromEvents(events, fallbackModel) {
       state.status = data.response.status || state.status;
       continue;
     }
-    if (ev.type === 'response.completed' && data.response) {
-      const resp = data.response;
-      if (!state.model) state.model = resp.model;
-      if (!state.usage) state.usage = resp.usage;
-      state.status = resp.status || 'completed';
-      if (Array.isArray(resp.output) && resp.output.length) {
-        return JSON.parse(JSON.stringify(resp));
-      }
-      continue;
-    }
     if (ev.type === 'response.output_text.delta') {
       const delta = data.delta;
       if (typeof delta === 'string') {
@@ -166,9 +156,6 @@ function aggregateResponsesFromEvents(events, fallbackModel) {
         }
       });
       continue;
-    }
-    if (ev.type === 'response.completed' && data.response?.usage) {
-      state.usage = data.response.usage;
     }
   }
 

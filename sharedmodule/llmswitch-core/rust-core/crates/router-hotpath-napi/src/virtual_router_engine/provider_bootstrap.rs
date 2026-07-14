@@ -3,9 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use crate::direct_semantic_classification::{
-    validate_config_direct_02, DirectSemanticClass,
-};
+use crate::direct_semantic_classification::{validate_config_direct_02, DirectSemanticClass};
 use crate::shared_json_utils::read_trimmed_string as read_optional_string;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::profile_utils::{
@@ -733,8 +731,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                             canonical_model_id
                         ));
                     } else {
-                        direct_semantics
-                            .insert(canonical_model_id.clone(), "routing".to_string());
+                        direct_semantics.insert(canonical_model_id.clone(), "routing".to_string());
                     }
                 }
             }
@@ -767,11 +764,13 @@ fn normalize_model_direct_semantic(
             ));
         }
     }
-    Ok(match validate_config_direct_02(model_id, model.get("direct"))?.semantic_class {
-        DirectSemanticClass::Routing => "routing",
-        DirectSemanticClass::Passthrough => "passthrough",
-    }
-    .to_string())
+    Ok(
+        match validate_config_direct_02(model_id, model.get("direct"))?.semantic_class {
+            DirectSemanticClass::Routing => "routing",
+            DirectSemanticClass::Passthrough => "passthrough",
+        }
+        .to_string(),
+    )
 }
 
 fn push_model_alias(

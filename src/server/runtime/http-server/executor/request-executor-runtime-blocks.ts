@@ -400,7 +400,7 @@ export function queueRequestExecutorPayloadContractErrorsample(args: {
       endpoint: args.entryEndpoint,
       providerKey: args.providerKey,
       providerId: args.providerId,
-      observation: args.observation
+      observation: summarizePayloadContractObservationForErrorsample(args.observation)
     }
   }).catch((error) => {
     args.onNonBlockingError('payload_contract_errorsample.write', error, {
@@ -410,6 +410,84 @@ export function queueRequestExecutorPayloadContractErrorsample(args: {
       phase: args.phase
     });
   });
+}
+
+const CONTRACT_OBSERVATION_MAX_DEPTH = 4;
+const CONTRACT_OBSERVATION_MAX_OBJECT_KEYS = 32;
+const CONTRACT_OBSERVATION_MAX_ARRAY_ITEMS = 8;
+const CONTRACT_OBSERVATION_INLINE_STRING_KEYS = new Set([
+  'id',
+  'model',
+  'object',
+  'role',
+  'status',
+  'finish_reason',
+  'type',
+  'code',
+  'marker',
+  'reason',
+]);
+
+function shouldInlineContractObservationString(key: string, value: string): boolean {
+  return value.length <= 160 && CONTRACT_OBSERVATION_INLINE_STRING_KEYS.has(key.trim().toLowerCase());
+}
+
+function summarizeContractObservationValue(
+  value: unknown,
+  state: WeakSet<object>,
+  depth: number,
+  keyHint = ''
+): unknown {
+  if (depth > CONTRACT_OBSERVATION_MAX_DEPTH) {
+    return { kind: 'truncated_depth' };
+  }
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'bigint') {
+    return { kind: 'bigint', value: value.toString() };
+  }
+  if (typeof value === 'string') {
+    if (shouldInlineContractObservationString(keyHint, value)) {
+      return value;
+    }
+    return {
+      kind: 'string',
+      stringLength: value.length
+    };
+  }
+  if (typeof value !== 'object') {
+    return { kind: typeof value };
+  }
+  if (state.has(value as object)) {
+    return '[CIRCULAR]';
+  }
+  state.add(value as object);
+  if (Array.isArray(value)) {
+    return {
+      kind: 'array',
+      length: value.length,
+      items: value
+        .slice(0, CONTRACT_OBSERVATION_MAX_ARRAY_ITEMS)
+        .map((item) => summarizeContractObservationValue(item, state, depth + 1, keyHint))
+    };
+  }
+  const record = value as Record<string, unknown>;
+  const entries = Object.entries(record);
+  const summary: Record<string, unknown> = {
+    kind: 'object',
+    keyCount: entries.length,
+    keys: entries.slice(0, CONTRACT_OBSERVATION_MAX_OBJECT_KEYS).map(([key]) => key)
+  };
+  for (const [key, child] of entries.slice(0, CONTRACT_OBSERVATION_MAX_OBJECT_KEYS)) {
+    summary[key] = summarizeContractObservationValue(child, state, depth + 1, key);
+  }
+  return summary;
+}
+
+// feature_id: debug.contract_observation_payload_budget
+export function summarizePayloadContractObservationForErrorsample(observation: unknown): unknown {
+  return summarizeContractObservationValue(observation, new WeakSet<object>(), 0);
 }
 
 export function createRequestExecutorPayloadContractErrorsampleWriter(

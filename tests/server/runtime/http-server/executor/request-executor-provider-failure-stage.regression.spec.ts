@@ -51,7 +51,7 @@ describe('request executor provider failure stage regression', () => {
     });
   });
 
-  it('still upgrades provider.send SSE decode failures into explicit provider.sse_decode stage', () => {
+  it('preserves provider.send source stage and leaves SSE classification to Rust', () => {
     const plan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
       error: Object.assign(
         new Error('Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'),
@@ -74,7 +74,7 @@ describe('request executor provider failure stage regression', () => {
       errorCode: 'SSE_DECODE_ERROR',
       upstreamCode: 'ANTHROPIC_SSE_TO_JSON_FAILED',
       statusCode: 429,
-      stageHint: 'provider.sse_decode'
+      stageHint: 'provider.send'
     });
   });
 });

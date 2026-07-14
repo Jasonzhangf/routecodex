@@ -2,56 +2,42 @@
  * /v1/responses request-side handler bridge surface.
  *
  * Single handler-facing bridge entry for request preparation and
- * request/response conversation store writes on the handler side.
+ * request-side conversation store lookups on the handler side.
  */
 
 // feature_id: server.responses_request_handler_bridge_surface
 // feature_id: hub.chat_process_responses_continuation
-// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, finalizeResponsesPipelineResultForHttp, captureResponsesRequestContextForHttp, recordResponsesResponseForHttp, seedResponsesToolCallResponseForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp, readResponsesResponseIdFromHttp
+// canonical_builders: buildResponsesConversationPortScopeForHttp, planResponsesHandlerStreamForHttp, prepareResponsesHandlerRuntimeForHttp, buildResponsesPipelineMetadataForHttp, prepareResponsesHandlerEntryForHttp, finalizeResponsesHandlerPayloadForHttp, shouldManageResponsesConversationForHttp, buildResponsesRequestContextForHttp, clearResponsesConversationByRequestIdForHttp, clearResponsesConversationOnHandlerFailureForHttp, captureResponsesInboundToolHistoryErrorsampleForHttp
 
-import { applySystemPromptOverride } from '../../../utils/system-prompt-loader.js';
+import { getSystemPromptOverride } from '../../../utils/system-prompt-loader.js';
 import {
-  captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId,
   lookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope,
-  recordResponsesResponseForRequest,
   resumeResponsesConversation,
 } from './runtime-integrations.js';
 import {
   captureReqInboundResponsesContextSnapshotJson,
   buildResponsesConversationPortScopeForHttpNative,
   buildResponsesPipelineMetadataForHttpNative,
-  buildResponsesResumeClientErrorForHttpNative,
   buildResponsesScopeContinuationExpiredErrorForHttpNative,
   extractSessionIdentifiersFromMetadataNative,
   finalizeResponsesHandlerPayloadForHttpNative,
   materializeProviderOwnedSubmitContext,
+  planResponsesInboundToolHistoryErrorsampleForHttpNative,
+  planResponsesResumeErrorForHttpNative,
   planResponsesHandlerStreamForHttpNative,
   planResponsesRequestBodyForHttpNative,
   planResponsesRequestContext,
   planResponsesContinuationRequestAction,
   planResponsesHandlerEntry,
   shouldManageResponsesConversationForHttpNative,
-  shouldProjectResponsesResumeClientErrorForHttpNative,
 } from './responses-request-handler-host.js';
-import { deriveFinishReason } from '../../../server/utils/finish-reason.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { MetadataCenter } from '../../../server/runtime/http-server/metadata-center/metadata-center.js';
 import { writeMetadataCenterSlot } from '../../../server/runtime/http-server/metadata-center/dualwrite-api.js';
 
 type AnyRecord = Record<string, unknown>;
-const RESPONSES_PIPELINE_METADATA_WRITER = {
-  module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-  symbol: 'buildResponsesPipelineMetadataForHttp',
-  stage: 'MetaReq04RuntimeControlBound'
-} as const;
-
-const RESPONSES_PIPELINE_CONTINUATION_WRITER = {
-  module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
-  symbol: 'buildResponsesPipelineMetadataForHttp',
-  stage: 'MetaReq03ContinuationAttached'
-} as const;
 
 export type ResponsesRequestContextForHttp = {
   payload: AnyRecord;
@@ -154,17 +140,12 @@ export function buildResponsesPipelineMetadataForHttp(args: {
   };
   MetadataCenter.attach(metadata);
   for (const write of plan.metadataCenterWrites) {
-    if (write.family !== 'runtime_control' && write.family !== 'continuation_context') {
-      throw new Error(`Unsupported responses pipeline metadata write family: ${String(write.family)}`);
-    }
     writeMetadataCenterSlot({
       target: metadata,
       family: write.family,
       key: write.key,
       value: write.value,
-      writer: write.family === 'continuation_context'
-        ? RESPONSES_PIPELINE_CONTINUATION_WRITER
-        : RESPONSES_PIPELINE_METADATA_WRITER,
+      writer: write.writer,
       ...(typeof write.reason === 'string' ? { reason: write.reason } : {})
     });
   }
@@ -215,18 +196,6 @@ function readClientAbortSignalForHttp(clientConnectionState: unknown): AbortSign
   return undefined;
 }
 
-function readResponsesResponseIdFromHttp(body: unknown): string | undefined {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
-  const record = body as Record<string, unknown>;
-  const nested = record.response && typeof record.response === 'object' && !Array.isArray(record.response)
-    ? (record.response as Record<string, unknown>)
-    : undefined;
-  for (const candidate of [record.id, record.response_id, nested?.id]) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-  }
-  return undefined;
-}
-
 type PrepareResponsesHandlerEntryForHttpResult =
   | {
       kind: 'ok';
@@ -238,6 +207,18 @@ type PrepareResponsesHandlerEntryForHttpResult =
     }
   | {
       kind: 'scope_continuation_expired';
+    }
+  | {
+      kind: 'client_error';
+      status: number;
+      body: {
+        error: {
+          message: string;
+          type: 'invalid_request_error';
+          code: string;
+          origin: 'client';
+        };
+      };
     };
 
 function finalizeResponsesHandlerPayloadForHttp(args: {
@@ -246,11 +227,15 @@ function finalizeResponsesHandlerPayloadForHttp(args: {
   isSubmitToolOutputs: boolean;
   outboundStream: boolean;
 }): AnyRecord {
-  const payload = finalizeResponsesHandlerPayloadForHttpNative(args);
-  if (!args.isSubmitToolOutputs && args.entryEndpoint === '/v1/responses') {
-    applySystemPromptOverride(args.entryEndpoint, payload);
-  }
-  return payload;
+  const systemPromptOverride = args.entryEndpoint === '/v1/responses'
+    ? getSystemPromptOverride()
+    : null;
+  return finalizeResponsesHandlerPayloadForHttpNative({
+    payload: args.payload,
+    isSubmitToolOutputs: args.isSubmitToolOutputs,
+    outboundStream: args.outboundStream,
+    systemPromptOverride,
+  });
 }
 
 function shouldManageResponsesConversationForHttp(entryEndpoint?: string): boolean {
@@ -267,67 +252,39 @@ function buildResponsesScopeContinuationExpiredErrorForHttp(): {
   return buildResponsesScopeContinuationExpiredErrorForHttpNative();
 }
 
-function buildResponsesResumeClientErrorForHttp(args: {
-  status?: number;
-  code?: string;
-  origin?: string;
-  message?: string;
+function serializeResponsesResumeErrorForHttp(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') {
+    return { message: String(error ?? '') };
+  }
+  const source = error as Record<string, unknown>;
+  return {
+    name: source.name,
+    message: source.message,
+    status: source.status,
+    code: source.code,
+    origin: source.origin,
+    details: source.details,
+  };
+}
+
+function planResponsesResumeErrorForHttp(error: unknown): ReturnType<typeof planResponsesResumeErrorForHttpNative> {
+  return planResponsesResumeErrorForHttpNative(serializeResponsesResumeErrorForHttp(error));
+}
+
+function planResponsesInboundToolHistoryErrorsampleForHttp(args: {
+  requestId: string;
+  entryEndpoint: string;
+  body: unknown;
+  error: unknown;
 }): {
-  status: number;
-  body: {
-    error: {
-      message: string;
-      type: 'invalid_request_error';
-      code: string;
-      origin: string;
-    };
+  action: 'none' | 'write_errorsample';
+  write?: {
+    group: string;
+    kind: string;
+    payload: Record<string, unknown>;
   };
 } {
-  return buildResponsesResumeClientErrorForHttpNative(args);
-}
-
-function shouldProjectResponsesResumeClientErrorForHttp(args: {
-  origin?: string;
-}): boolean {
-  return shouldProjectResponsesResumeClientErrorForHttpNative(args.origin);
-}
-
-async function buildCapturedRelayResumeRequestContextForHttp(args: {
-  payload: AnyRecord;
-  requestId?: string;
-  metadata?: Record<string, unknown>;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-}): Promise<ResponsesRequestContextForHttp> {
-  const payloadMetadata =
-    args.payload.metadata && typeof args.payload.metadata === 'object' && !Array.isArray(args.payload.metadata)
-      ? (args.payload.metadata as Record<string, unknown>)
-      : undefined;
-  const captured = captureReqInboundResponsesContextSnapshotJson({
-    rawRequest: args.payload,
-    requestId: args.requestId,
-    toolCallIdStyle: args.payload.toolCallIdStyle ?? payloadMetadata?.toolCallIdStyle,
-  });
-  const capturedInput = Array.isArray(captured.input) ? captured.input : [];
-  const capturedToolsRaw = Array.isArray(captured.toolsRaw) ? captured.toolsRaw : [];
-  const normalizedPayload: AnyRecord = {
-    ...args.payload,
-    input: capturedInput,
-  };
-  if (capturedToolsRaw.length) {
-    normalizedPayload.tools = capturedToolsRaw;
-  }
-  return {
-    payload: normalizedPayload,
-    context: {
-      input: capturedInput,
-      toolsRaw: capturedToolsRaw,
-    },
-    sessionId: readResponsesSessionIdFromHttp(args.metadata),
-    conversationId: readResponsesConversationIdFromHttp(args.metadata),
-    ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
-    ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
-  };
+  return planResponsesInboundToolHistoryErrorsampleForHttpNative(args);
 }
 
 export async function buildResponsesRequestContextForHttp(args: {
@@ -421,164 +378,53 @@ export async function prepareResponsesHandlerEntryForHttp(
     args.entryEndpoint,
     args.responseIdFromPath
   );
-  const payload = (plannedEntry.payload ?? {}) as AnyRecord;
-  const isSubmitToolOutputs = plannedEntry.mode === 'submit_tool_outputs';
-  let resumeMeta: Record<string, unknown> | undefined;
-  let pipelineEntryEndpoint = args.entryEndpoint;
-
-  if (args.responseIdFromPath && !payload.response_id) {
-    payload.response_id = args.responseIdFromPath;
-  }
-
-  const responseId = plannedEntry.responseId || args.responseIdFromPath;
-  const previousResponseId =
-    typeof payload.previous_response_id === 'string' && payload.previous_response_id.trim()
-      ? payload.previous_response_id.trim()
-      : undefined;
-  const continuationLookupId = isSubmitToolOutputs ? responseId : previousResponseId;
-  const continuation = continuationLookupId
-    ? await lookupResponsesContinuationByResponseId(continuationLookupId, {
-        entryKind: 'responses',
-        matchedPort: args.matchedPort,
-        routingPolicyGroup: args.routingPolicyGroup,
-      })
-    : undefined;
-  const continuationAction = await planResponsesContinuationRequestAction({
-    plannedEntryMode: plannedEntry.mode,
+  let continuationPlan = await planResponsesContinuationRequestAction({
+    plannedEntry,
     entryEndpoint: args.entryEndpoint,
-    ...(responseId ? { responseId } : {}),
-    ...(previousResponseId ? { previousResponseId } : {}),
-    continuation: continuation || null,
+    requestId: args.requestId,
+    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.conversationId ? { conversationId: args.conversationId } : {}),
+    ...(typeof args.matchedPort === 'number' ? { matchedPort: args.matchedPort } : {}),
+    ...(args.routingPolicyGroup ? { routingPolicyGroup: args.routingPolicyGroup } : {}),
   });
 
-  switch (continuationAction.action) {
-    case 'client_error': {
-      throw Object.assign(
-        new Error(
-          typeof continuationAction.message === 'string'
-            ? continuationAction.message
-            : 'Unable to prepare Responses continuation request'
-        ),
-        {
-          status: typeof continuationAction.status === 'number' ? continuationAction.status : 400,
-          code: typeof continuationAction.code === 'string' ? continuationAction.code : 'bad_request',
-          origin: typeof continuationAction.origin === 'string' ? continuationAction.origin : 'client',
-        }
-      );
-    }
-    case 'direct_submit': {
-      const plannedResponseId =
-        typeof continuationAction.responseId === 'string' && continuationAction.responseId.trim()
-          ? continuationAction.responseId.trim()
-          : responseId;
-      if (plannedResponseId && (typeof payload.previous_response_id !== 'string' || !payload.previous_response_id.trim())) {
-        payload.previous_response_id = plannedResponseId;
-      }
-      if (continuationAction.materializeProviderOwnedSubmitContext === true && (!Array.isArray(payload.input) || payload.input.length === 0)) {
-        const materialized = await materializeProviderOwnedSubmitContext({ payload });
-        if (materialized?.payload.input) {
-          payload.input = materialized.payload.input;
-        }
-      }
-      resumeMeta =
-        continuationAction.resumeMeta && typeof continuationAction.resumeMeta === 'object' && !Array.isArray(continuationAction.resumeMeta)
-          ? (continuationAction.resumeMeta as Record<string, unknown>)
-          : undefined;
-      pipelineEntryEndpoint =
-        typeof continuationAction.pipelineEntryEndpoint === 'string'
-          ? continuationAction.pipelineEntryEndpoint
-          : args.entryEndpoint;
-      return {
-        kind: 'ok',
-        payload,
-        pipelineEntryEndpoint,
-        plannedEntryMode: plannedEntry.mode,
-        isSubmitToolOutputs,
-        resumeMeta,
-      };
-    }
-    case 'relay_submit': {
-      const plannedResponseId =
-        typeof continuationAction.responseId === 'string' && continuationAction.responseId.trim()
-          ? continuationAction.responseId.trim()
-          : responseId;
-      if (!plannedResponseId) {
-        throw Object.assign(new Error('response_id is required for submit_tool_outputs'), {
-          status: 400,
-          code: 'bad_request',
-          origin: 'client',
+  while (continuationPlan.action === 'execute_effect') {
+    let effectResult: unknown;
+    switch (continuationPlan.effect.operation) {
+      case 'lookup_continuation':
+        effectResult = await lookupResponsesContinuationByResponseId(
+          continuationPlan.effect.args.responseId,
+          continuationPlan.effect.args.options
+        );
+        break;
+      case 'materialize_provider_owned_submit':
+        effectResult = await materializeProviderOwnedSubmitContext({
+          payload: continuationPlan.effect.args.payload,
         });
-      }
-      const resumeResult = await resumeResponsesConversation(plannedResponseId, payload, {
-        requestId: args.requestId,
-        entryKind: 'responses',
-        matchedPort: args.matchedPort,
-        routingPolicyGroup: args.routingPolicyGroup,
-      });
-      pipelineEntryEndpoint =
-        typeof continuationAction.pipelineEntryEndpoint === 'string'
-          ? continuationAction.pipelineEntryEndpoint
-          : '/v1/responses';
-      return {
-        kind: 'ok',
-        payload: (resumeResult.payload ?? {}) as AnyRecord,
-        pipelineEntryEndpoint,
-        plannedEntryMode: plannedEntry.mode,
-        isSubmitToolOutputs,
-        resumeMeta: resumeResult.meta,
-      };
+        break;
+      case 'resume_relay':
+        effectResult = await resumeResponsesConversation(
+          continuationPlan.effect.args.responseId,
+          continuationPlan.effect.args.payload,
+          continuationPlan.effect.args.options
+        );
+        break;
+      case 'materialize_scope':
+        effectResult = await materializeLatestResponsesContinuationByScope(
+          continuationPlan.effect.args
+        );
+        break;
     }
-    case 'relay_scope_materialize':
-    case 'scope_materialize': {
-      const materialized = await materializeLatestResponsesContinuationByScope({
-        payload,
-        requestId: args.requestId,
-        sessionId: args.sessionId,
-        conversationId: args.conversationId,
-        entryKind: 'responses',
-        ...(continuationAction.continuationOwner === 'relay' ? { continuationOwner: 'relay' as const } : {}),
-        matchedPort: args.matchedPort,
-        routingPolicyGroup: args.routingPolicyGroup,
-      });
-      if (!materialized) {
-        return { kind: 'scope_continuation_expired' };
-      }
-      return {
-        kind: 'ok',
-        payload: (materialized.payload ?? {}) as AnyRecord,
-        pipelineEntryEndpoint:
-          typeof continuationAction.pipelineEntryEndpoint === 'string'
-            ? continuationAction.pipelineEntryEndpoint
-            : pipelineEntryEndpoint,
-        plannedEntryMode: plannedEntry.mode,
-        isSubmitToolOutputs,
-        resumeMeta: materialized.meta,
-      };
-    }
-    case 'attach_resume_meta': {
-      resumeMeta =
-        continuationAction.resumeMeta && typeof continuationAction.resumeMeta === 'object' && !Array.isArray(continuationAction.resumeMeta)
-          ? (continuationAction.resumeMeta as Record<string, unknown>)
-          : undefined;
-      break;
-    }
-    case 'none':
-      break;
-    default: {
-      throw new Error(
-        `[responses] unsupported continuation request action: ${String(continuationAction.action ?? 'unknown')}`
-      );
-    }
+    continuationPlan = await planResponsesContinuationRequestAction({
+      effectResult: {
+        operation: continuationPlan.effect.operation,
+        result: effectResult,
+        resultPlanInput: continuationPlan.resultPlanInput,
+      },
+    });
   }
 
-  return {
-    kind: 'ok',
-    payload,
-    pipelineEntryEndpoint,
-    plannedEntryMode: plannedEntry.mode,
-    isSubmitToolOutputs,
-    resumeMeta,
-  };
+  return continuationPlan.result;
 }
 
 export async function prepareResponsesHandlerRuntimeForHttp(
@@ -608,6 +454,15 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       matchedPort: args.portScope?.matchedPort,
       routingPolicyGroup: args.portScope?.routingPolicyGroup,
     });
+    if (preparedEntry.kind === 'client_error') {
+      return {
+        kind: 'client_error',
+        status: preparedEntry.status,
+        body: preparedEntry.body,
+        requestBodyMetadata,
+        streamPlan,
+      };
+    }
     if (preparedEntry.kind === 'scope_continuation_expired') {
       const clientError = buildResponsesScopeContinuationExpiredErrorForHttp();
       return {
@@ -644,142 +499,21 @@ export async function prepareResponsesHandlerRuntimeForHttp(
       streamPlan,
     };
   } catch (error: unknown) {
-    const structured = error as { status?: number; code?: string; origin?: string };
-    const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
-    if (!shouldProjectResponsesResumeClientErrorForHttp({ origin })) {
+    const errorPlan = planResponsesResumeErrorForHttp(error);
+    if (errorPlan.action === 'rethrow') {
       throw error;
     }
-    const status = typeof structured?.status === 'number' ? structured.status : undefined;
-    const code = typeof structured?.code === 'string' ? structured.code : 'responses_resume_failed';
-    const message = error instanceof Error ? error.message : 'Unable to resume Responses conversation';
-    const clientError = buildResponsesResumeClientErrorForHttp({
-      status,
-      code,
-      origin,
-      message,
-    });
+    if (errorPlan.action !== 'client_error' || errorPlan.status === undefined || !errorPlan.body) {
+      throw new Error('[responses] invalid resume error plan');
+    }
     return {
       kind: 'client_error',
-      status: clientError.status,
-      body: clientError.body as unknown as Record<string, unknown>,
+      status: errorPlan.status,
+      body: errorPlan.body as unknown as Record<string, unknown>,
       requestBodyMetadata,
       streamPlan,
     };
   }
-}
-
-async function captureResponsesRequestContextForHttp(args: {
-  requestId: string;
-  payload: AnyRecord;
-  context: AnyRecord;
-  sessionId?: string;
-  conversationId?: string;
-  providerKey?: string;
-  entryKind?: 'responses' | 'chat' | 'messages';
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-}): Promise<void> {
-  await captureResponsesRequestContextForRequest({
-    ...args,
-    entryKind: args.entryKind ?? 'responses',
-  });
-}
-
-async function recordResponsesResponseForHttp(args: {
-  requestId: string;
-  response: AnyRecord;
-  providerKey?: string;
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-  sessionId?: string;
-  conversationId?: string;
-  entryKind?: 'responses' | 'chat' | 'messages';
-  routeHint?: string;
-}): Promise<void> {
-  await recordResponsesResponseForRequest({
-    ...args,
-    entryKind: args.entryKind ?? 'responses',
-  });
-}
-
-async function seedResponsesToolCallResponseForHttp(args: {
-  requestId?: string;
-  body: unknown;
-  requestContext?: {
-    payload?: Record<string, unknown>;
-    context?: Record<string, unknown>;
-    sessionId?: string;
-    conversationId?: string;
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-  };
-  providerKey?: string;
-  routeHint?: string;
-}): Promise<void> {
-  const responseId = readResponsesResponseIdFromHttp(args.body);
-  const finishReason = deriveFinishReason(args.body);
-  if (!responseId || finishReason !== 'tool_calls') {
-    return;
-  }
-  const requestContext = args.requestContext;
-  if (!requestContext?.payload || !requestContext?.context) {
-    return;
-  }
-  const requestId = typeof args.requestId === 'string' && args.requestId.trim()
-    ? args.requestId.trim()
-    : undefined;
-  if (!requestId) {
-    throw new Error('Responses tool-call persistence requires request id');
-  }
-  await captureResponsesRequestContextForHttp({
-    requestId,
-    payload: requestContext.payload,
-    context: requestContext.context,
-    sessionId: requestContext.sessionId,
-    conversationId: requestContext.conversationId,
-    matchedPort: requestContext.matchedPort,
-    routingPolicyGroup: requestContext.routingPolicyGroup,
-    providerKey: args.providerKey
-  });
-  if (args.body && typeof args.body === 'object' && !Array.isArray(args.body)) {
-    await recordResponsesResponseForHttp({
-      requestId,
-      response: args.body as Record<string, unknown>,
-      providerKey: args.providerKey,
-      matchedPort: requestContext.matchedPort,
-      routingPolicyGroup: requestContext.routingPolicyGroup,
-      sessionId: requestContext.sessionId,
-      conversationId: requestContext.conversationId,
-      ...(typeof args.routeHint === 'string' ? { routeHint: args.routeHint } : {})
-    });
-  }
-}
-
-export async function finalizeResponsesPipelineResultForHttp(args: {
-  entryEndpoint?: string;
-  requestId?: string;
-  body: unknown;
-  resultMetadata: Record<string, unknown> | undefined;
-  requestContext: ResponsesRequestContextForHttp;
-  providerKey?: string;
-  routeHint?: string;
-  continuationOwner?: 'direct' | 'relay';
-}): Promise<Record<string, unknown> | undefined> {
-  const nextMetadata = args.resultMetadata;
-  if (!shouldManageResponsesConversationForHttp(args.entryEndpoint)) {
-    return nextMetadata;
-  }
-  if (args.continuationOwner === 'direct') {
-    return nextMetadata;
-  }
-  await seedResponsesToolCallResponseForHttp({
-    requestId: args.requestId,
-    body: args.body,
-    requestContext: args.requestContext,
-    providerKey: args.providerKey,
-    ...(typeof args.routeHint === 'string' ? { routeHint: args.routeHint } : {})
-  });
-  return nextMetadata;
 }
 
 async function clearResponsesConversationByRequestIdForHttp(
@@ -804,41 +538,29 @@ export async function captureResponsesInboundToolHistoryErrorsampleForHttp(args:
   body: unknown;
   error: unknown;
 }): Promise<void> {
-  const errorRecord = args.error && typeof args.error === 'object'
-    ? (args.error as Record<string, unknown>)
-    : undefined;
-  const code = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
-  if (code !== 'MALFORMED_REQUEST') {
-    return;
-  }
-  const message = args.error instanceof Error ? args.error.message : String(args.error ?? '');
-  const details = errorRecord && typeof errorRecord.details === 'object'
-    ? (errorRecord.details as Record<string, unknown>)
-    : undefined;
-  if (
-    !message.includes('Tool history contract violated')
-    && !Boolean(details?.toolHistoryContractViolation)
-  ) {
+  const error = args.error && typeof args.error === 'object'
+    ? {
+        name: (args.error as { name?: unknown }).name,
+        message: (args.error as { message?: unknown }).message,
+        code: (args.error as { code?: unknown }).code,
+        details: (args.error as { details?: unknown }).details,
+      }
+    : { message: String(args.error ?? 'unknown_error') };
+  const plan = planResponsesInboundToolHistoryErrorsampleForHttp({
+    requestId: args.requestId,
+    entryEndpoint: args.entryEndpoint,
+    body: args.body,
+    error,
+  });
+  if (plan.action !== 'write_errorsample' || !plan.write) {
     return;
   }
   await writeErrorsampleJson({
-    group: 'payload-contract-error',
-    kind: 'responses.inbound_tool_history_contract',
+    group: plan.write.group,
+    kind: plan.write.kind,
     payload: {
-      kind: 'responses.inbound_tool_history_contract',
+      ...plan.write.payload,
       timestamp: new Date().toISOString(),
-      requestId: args.requestId,
-      entryEndpoint: args.entryEndpoint,
-      body: args.body,
-      error:
-        args.error && typeof args.error === 'object'
-          ? {
-              name: (args.error as { name?: unknown }).name,
-              message: (args.error as { message?: unknown }).message,
-              code: (args.error as { code?: unknown }).code,
-              details: (args.error as { details?: unknown }).details
-            }
-          : { message: String(args.error ?? 'unknown_error') }
-    }
+    },
   });
 }

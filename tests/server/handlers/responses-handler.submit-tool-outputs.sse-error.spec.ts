@@ -133,6 +133,7 @@ jest.unstable_mockModule('../../../src/debug/diag/index.js', () => ({
 
 jest.unstable_mockModule('../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
+  getSystemPromptOverride: jest.fn(() => null),
 }));
 
 jest.unstable_mockModule('../../../src/utils/errorsamples.js', () => ({
@@ -158,9 +159,6 @@ jest.unstable_mockModule('../../../src/server/utils/finish-reason.js', () => ({
 }));
 
 const createResponsesRequestBridgeMock = () => ({
-  buildResponsesResumeClientErrorForHttp: jest.fn(() => ({
-    error: { message: 'resume failed', code: 'resume_failed' },
-  })),
   buildResponsesScopeContinuationExpiredErrorForHttp: jest.fn(() => ({
     error: { message: 'continuation expired', code: 'continuation_expired' },
   })),
@@ -172,12 +170,10 @@ const createResponsesRequestBridgeMock = () => ({
     stream: args.streamPlan?.outboundStream === true,
     responsesRequestContext: args.requestContext,
   })),
-  captureResponsesRequestContextForHttp: mockCaptureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestIdForHttp: mockClearResponsesConversationByRequestId,
   captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
   clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
   finalizeResponsesHandlerPayloadForHttp: jest.fn((args: { payload?: Record<string, unknown> }) => args.payload ?? {}),
-  finalizeResponsesPipelineResultForHttp: jest.fn(async (args: { resultMetadata?: Record<string, unknown> }) => args.resultMetadata ?? {}),
   planResponsesHandlerStreamForHttp: jest.fn((args: {
     payload?: Record<string, unknown>;
     forceStream?: boolean;
@@ -233,8 +229,6 @@ const createResponsesRequestBridgeMock = () => ({
     },
     responseId: args.responseIdFromPath,
   })),
-  recordResponsesResponseForHttp: mockRecordResponsesResponseForRequest,
-  shouldProjectResponsesResumeClientErrorForHttp: jest.fn(() => false),
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-request-bridge.js', createResponsesRequestBridgeMock);

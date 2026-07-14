@@ -50,14 +50,17 @@ pub(super) fn assert_no_inline_metadata(value: &Value, node_name: &str) -> Resul
     Ok(())
 }
 
-pub(super) fn clone_object_payload(
-    value: &Value,
+pub(super) fn into_object_payload(
+    value: Value,
     node_name: &str,
 ) -> Result<Map<String, Value>, String> {
     value
         .as_object()
-        .cloned()
-        .ok_or_else(|| format!("{node_name} payload must be an object"))
+        .ok_or_else(|| format!("{node_name} payload must be an object"))?;
+    match value {
+        Value::Object(object) => Ok(object),
+        _ => unreachable!("object shape checked above"),
+    }
 }
 
 #[cfg(test)]

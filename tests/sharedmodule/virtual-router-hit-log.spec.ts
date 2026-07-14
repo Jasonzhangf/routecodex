@@ -56,7 +56,8 @@ describe('virtual-router hit log', () => {
     });
 
     expect(line).toContain('[virtual-router-hit]');
-    expect(line).toContain('longcontext/gateway-priority-5555-priority-longcontext -> XLC[key2]');
+    expect(line).toContain('longcontext -> XLC[key2]');
+    expect(line).not.toContain('gateway-priority-5555-priority-longcontext');
     expect(line).not.toContain('req=req-verbose-1');
     expect(line).not.toContain('sid=tmux-noisy-1');
     expect(line).not.toContain('.deepseek-v4-pro');
@@ -96,7 +97,7 @@ describe('virtual-router hit log', () => {
     });
 
     expect(event.routeName).toBe('tools');
-    expect(event.pool).toBe('tools-primary');
+    expect(event.pool).toBe('tools');
     expect(event.reason).toBe('tools:last-tool-other');
     expect(event.selectionPenalty).toBe(2);
     expect(event.requestTokens).toBe(777);
@@ -150,9 +151,9 @@ describe('virtual-router hit log', () => {
     expect(lineB).toContain('sid=tmux-alpha-01');
     expect(lineC).toContain('sid=tmux-zeta-99');
 
-    const colorPrefixA = lineA.match(/(\x1b\[[0-9;]*m)thinking\/thinking-primary/)?.[1];
-    const colorPrefixB = lineB.match(/(\x1b\[[0-9;]*m)tools\/tools-primary/)?.[1];
-    const colorPrefixC = lineC.match(/(\x1b\[[0-9;]*m)thinking\/thinking-primary/)?.[1];
+    const colorPrefixA = lineA.match(/(\x1b\[[0-9;]*m)thinking ->/)?.[1];
+    const colorPrefixB = lineB.match(/(\x1b\[[0-9;]*m)tools ->/)?.[1];
+    const colorPrefixC = lineC.match(/(\x1b\[[0-9;]*m)thinking ->/)?.[1];
 
     expect(colorPrefixA).toBeTruthy();
     expect(colorPrefixB).toBeTruthy();
@@ -175,7 +176,7 @@ describe('virtual-router hit log', () => {
 
     expect(sessionColor).toBeDefined();
     expect(line).toContain(`${sessionColor}[virtual-router-hit]\x1b[0m`);
-    expect(line).toContain(`sid=${sessionId} ${sessionColor}thinking/thinking-primary`);
+    expect(line).toContain(`sid=${sessionId} ${sessionColor}thinking ->`);
   });
 
   it('does not reuse the same visible color for adjacent active sessions', () => {

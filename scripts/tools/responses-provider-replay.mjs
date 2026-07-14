@@ -142,8 +142,24 @@ async function loadCoreModules() {
   };
 }
 
-function deepClone(value) {
-  return value ? JSON.parse(JSON.stringify(value)) : value;
+export function createReplayChatOwner(chat) {
+  if (!chat || typeof chat !== 'object' || Array.isArray(chat)) return chat;
+  return { ...chat };
+}
+
+export function ensureReplayChatModel(chat, defaultModel) {
+  const replayChat = createReplayChatOwner(chat);
+  if (
+    replayChat
+    && typeof replayChat === 'object'
+    && !Array.isArray(replayChat)
+    && !replayChat.model
+    && typeof defaultModel === 'string'
+    && defaultModel.trim()
+  ) {
+    replayChat.model = defaultModel;
+  }
+  return replayChat;
 }
 
 function extractSystemMessages(chat) {
@@ -154,7 +170,7 @@ function extractSystemMessages(chat) {
     .filter(Boolean);
 }
 
-function replaceSystemMessages(chat, replacements) {
+export function replaceSystemMessages(chat, replacements) {
   const rest = (Array.isArray(chat?.messages) ? chat.messages : []).filter((m) => m.role !== 'system');
   const systemEntries = replacements.map((text) => ({ role: 'system', content: text }));
   return { ...chat, messages: [...systemEntries, ...rest] };
@@ -184,7 +200,7 @@ async function convertSampleToChat(samplePath, modules) {
     }).request;
     return { chat: request, entryEndpoint, payloadKind: 'responses' };
   }
-  return { chat: deepClone(info.payload), entryEndpoint, payloadKind: 'chat' };
+  return { chat: createReplayChatOwner(info.payload), entryEndpoint, payloadKind: 'chat' };
 }
 
 function resolveProviderRuntime(configPath, target) {
@@ -257,7 +273,7 @@ async function main() {
   const runtime = resolveProviderRuntime(options.config, options.target).runtime;
   try {
     const subject = await convertSampleToChat(options.sample, modules);
-    let replayChat = deepClone(subject.chat);
+    let replayChat = createReplayChatOwner(subject.chat);
     console.log(`[replay] loaded sample ${options.sample}`);
     console.log(` - entryEndpoint: ${options.entryEndpoint || subject.entryEndpoint}`);
     console.log(` - payload kind: ${subject.payloadKind}`);
@@ -271,9 +287,9 @@ async function main() {
       console.log(` - replaced system prompts using ${options.systemSource} (${replacementSystems.length} blocks)`);
     }
 
-    if (!replayChat.model) replayChat.model = runtime.defaultModel;
+    replayChat = ensureReplayChatModel(replayChat, runtime.defaultModel);
 
-    const { request: responsesRequest } = await modules.buildResponsesRequestFromChat(deepClone(replayChat));
+    const { request: responsesRequest } = await modules.buildResponsesRequestFromChat(replayChat);
     if (!responsesRequest || typeof responsesRequest !== 'object') throw new Error('buildResponsesRequestFromChat failed');
     if (!responsesRequest.model) responsesRequest.model = runtime.defaultModel;
 
@@ -330,7 +346,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[responses-provider-replay] failed:', error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error('[responses-provider-replay] failed:', error);
+    process.exit(1);
+  });
+}

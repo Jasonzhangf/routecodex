@@ -25,13 +25,13 @@ mod config_file_codec;
 mod config_provider_codec;
 mod config_toml_codec;
 mod direct_decision;
+mod direct_route_audit_projection;
+mod direct_route_eligibility;
+mod direct_route_model_hooks;
+mod direct_route_response_action;
+mod direct_route_response_error;
 mod direct_runtime_metadata_projection;
 mod direct_semantic_classification;
-mod direct_route_model_hooks;
-mod direct_route_response_error;
-mod direct_route_eligibility;
-mod direct_route_audit_projection;
-mod direct_route_response_action;
 mod failure_policy;
 mod followup_mainline_blocks;
 mod gemini_openai_codec;
@@ -94,8 +94,11 @@ mod runtime_lifecycle;
 mod server_contracts;
 mod servertool_core_blocks;
 mod servertool_followup_delta;
+mod servertool_hook_registry;
+mod servertool_hook_runtime;
 mod servertool_skeleton;
 mod servertool_skeleton_config;
+mod servertool_stopless_hook;
 mod shared_args_mapping;
 mod shared_bridge_instructions;
 mod shared_chat_output_normalizer;
@@ -881,7 +884,9 @@ pub fn run_hub_pipeline_lib_json(input_json: String) -> NapiResult<String> {
 pub fn materialize_provider_response_outbound_effect_plan_json(
     input_json: String,
 ) -> NapiResult<String> {
-    hub_pipeline_lib::effect_plan::materialize_provider_response_outbound_effect_plan_json(input_json)
+    hub_pipeline_lib::effect_plan::materialize_provider_response_outbound_effect_plan_json(
+        input_json,
+    )
 }
 
 #[napi(js_name = "planProviderResponseDiagnosticAlarmEffectJson")]
@@ -910,16 +915,12 @@ pub fn plan_provider_response_stopless_runtime_control_effect_json(
 }
 
 #[napi(js_name = "planProviderResponseStreamPipeEffectJson")]
-pub fn plan_provider_response_stream_pipe_effect_json(
-    input_json: String,
-) -> NapiResult<String> {
+pub fn plan_provider_response_stream_pipe_effect_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_lib::effect_plan::plan_provider_response_stream_pipe_effect_json(input_json)
 }
 
 #[napi(js_name = "planProviderResponseStageRecorderEffectJson")]
-pub fn plan_provider_response_stage_recorder_effect_json(
-    input_json: String,
-) -> NapiResult<String> {
+pub fn plan_provider_response_stage_recorder_effect_json(input_json: String) -> NapiResult<String> {
     hub_pipeline_lib::effect_plan::plan_provider_response_stage_recorder_effect_json(input_json)
 }
 
@@ -3681,7 +3682,9 @@ pub fn classify_error_err02_host_captured_json(input_json: String) -> NapiResult
 #[napi(js_name = "resolveErrorErr05ExecutionDecisionJson")]
 pub fn resolve_error_err05_execution_decision_json(input_json: String) -> NapiResult<String> {
     let input: failure_policy::ErrorErr05ExecutionDecisionInput = parse_napi_json(&input_json)?;
-    stringify_napi_json(&failure_policy::resolve_error_err05_execution_decision(input))
+    stringify_napi_json(&failure_policy::resolve_error_err05_execution_decision(
+        input,
+    ))
 }
 
 pub use responses_reasoning_registry::{

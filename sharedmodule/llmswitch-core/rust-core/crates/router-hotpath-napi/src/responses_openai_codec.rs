@@ -5,7 +5,6 @@ use serde_json::{Map, Value};
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_responses_conversation_utils::normalize_responses_request_input_for_chat_codec;
-use crate::stopless_current_turn::is_stopless_internal_tool_name;
 
 // feature_id: conversion.shared.responses_openai
 // canonical_builder: stage_a_conversion_shared_responses_openai_owner_boundary
@@ -94,20 +93,6 @@ fn input_contains_tool_continuation_signals(input: &[Value]) -> bool {
     })
 }
 
-fn tool_definition_name(tool: &Value) -> Option<&str> {
-    let row = tool.as_object()?;
-    row.get("name")
-        .and_then(Value::as_str)
-        .or_else(|| row.get("function")?.as_object()?.get("name")?.as_str())
-}
-
-fn strip_stopless_internal_tool_definitions(tools: Vec<Value>) -> Vec<Value> {
-    tools
-        .into_iter()
-        .filter(|tool| !tool_definition_name(tool).is_some_and(is_stopless_internal_tool_name))
-        .collect()
-}
-
 fn build_request_from_responses_payload(
     payload_row: &Map<String, Value>,
     context: &Value,
@@ -131,8 +116,7 @@ fn build_request_from_responses_payload(
     let tools = context_row
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
-        .cloned()
-        .map(strip_stopless_internal_tool_definitions);
+        .cloned();
     let prefer_chat_messages_shortcut = !has_tool_continuation_signals;
     let messages = if prefer_chat_messages_shortcut {
         if let Some(messages) = chat_messages {
@@ -617,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn request_codec_collapses_stopless_cli_result_to_latest_guidance() {
+    fn request_codec_preserves_stopless_cli_result_as_data_before_chatprocess_hook() {
         let raw = run_responses_openai_request_codec_json(
             json!({
                 "model": "gpt-5.5",
@@ -672,27 +656,16 @@ mod tests {
 
         assert_eq!(messages[0]["role"], json!("user"));
         let serialized = serde_json::to_string(messages).expect("messages json");
-        assert!(!serialized.contains("reasoningStop"));
-        assert!(!serialized.contains("tool_calls"));
-        assert!(!serialized.contains("\"role\":\"tool\""));
-        let guidance_message = messages
-            .iter()
-            .filter(|message| message["role"] == json!("user"))
-            .find(|message| {
-                message["content"]
-                    .as_str()
-                    .is_some_and(|text| text == STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
-            })
-            .expect("latest stopless guidance message");
-        let guidance = guidance_message["content"].as_str().expect("guidance text");
-        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(!guidance.contains("repeatCount"));
-        assert!(!guidance.contains("stopreason"));
-        assert!(!guidance.contains("stop_message_auto"));
+        assert!(serialized.contains("reasoningStop"));
+        assert!(serialized.contains("tool_calls"));
+        assert!(serialized.contains("\"role\":\"tool\""));
+        assert!(serialized.contains("stop_message_flow"));
+        assert!(serialized.contains("repeatCount"));
+        assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
     }
 
     #[test]
-    fn request_codec_prefers_embedded_responses_context_for_live_stopless_tool_message_shape() {
+    fn request_codec_preserves_embedded_tool_catalog_before_chatprocess_governance() {
         let live_input = json!([
             {
                 "content": [],
@@ -829,11 +802,11 @@ mod tests {
         let value: Value = serde_json::from_str(&raw).unwrap();
         let messages = value["request"]["messages"].as_array().expect("messages");
         let serialized = serde_json::to_string(messages).expect("messages json");
-        assert!(!serialized.contains("tool_calls"));
-        assert!(!serialized.contains("\"role\":\"tool\""));
-        assert!(!serialized.contains("stop_message_auto"));
-        assert!(!serialized.contains("repeatCount"));
-        assert!(!serialized.contains("reasoningStop"));
+        assert!(serialized.contains("tool_calls"));
+        assert!(serialized.contains("\"role\":\"tool\""));
+        assert!(serialized.contains("stop_message_flow"));
+        assert!(serialized.contains("repeatCount"));
+        assert!(serialized.contains("reasoningStop"));
         assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
         let latest_user = messages
             .iter()
@@ -843,10 +816,17 @@ mod tests {
             .expect("real user turn after stopless pair");
         assert_eq!(latest_user, "继续修正 stop schema 并继续执行");
         let tools = value["request"]["tools"].as_array().expect("request tools");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], json!("exec_command"));
-        let tools = serde_json::to_string(tools).expect("tools json");
-        assert!(!tools.contains("reasoningStop"));
+        assert_eq!(tools.len(), 2);
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool["name"] == json!("exec_command"))
+        );
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool["name"] == json!("reasoningStop"))
+        );
     }
 
     #[test]

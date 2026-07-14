@@ -103,18 +103,33 @@ export function buildResponsesPipelineMetadataForHttpFake(args: {
       family: 'runtime_control',
       key: 'streamIntent',
       value: streamPlan.inboundStream === true || streamPlan.outboundStream === true ? 'stream' : 'non_stream',
+      writer: {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'MetaReq04RuntimeControlBound',
+      },
       reason: 'responses handler stream intent',
     },
     {
       family: 'runtime_control',
       key: 'providerProtocol',
       value: 'openai-responses',
+      writer: {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'MetaReq04RuntimeControlBound',
+      },
       reason: 'responses handler provider protocol',
     },
     {
       family: 'runtime_control',
       key: 'clientAbort',
       value: args.clientAbort === true,
+      writer: {
+        module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+        symbol: 'buildResponsesPipelineMetadataForHttp',
+        stage: 'MetaReq04RuntimeControlBound',
+      },
       reason: 'responses handler client abort state',
     },
   ];
@@ -123,12 +138,17 @@ export function buildResponsesPipelineMetadataForHttpFake(args: {
     && typeof responsesResume.providerKey === 'string'
     && responsesResume.providerKey.trim()
   ) {
-    runtimeControlWrites.push({
-      family: 'runtime_control',
-      key: 'retryProviderKey',
-      value: responsesResume.providerKey.trim(),
-      reason: 'direct responses continuation provider pin',
-    });
+      runtimeControlWrites.push({
+        family: 'runtime_control',
+        key: 'retryProviderKey',
+        value: responsesResume.providerKey.trim(),
+        writer: {
+          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+          symbol: 'buildResponsesPipelineMetadataForHttp',
+          stage: 'MetaReq04RuntimeControlBound',
+        },
+        reason: 'direct responses continuation provider pin',
+      });
   }
   return {
     metadata: {
@@ -143,6 +163,11 @@ export function buildResponsesPipelineMetadataForHttpFake(args: {
         family: 'continuation_context',
         key: 'responsesResume',
         value: responsesResume,
+        writer: {
+          module: 'src/modules/llmswitch/bridge/responses-request-bridge.ts',
+          symbol: 'buildResponsesPipelineMetadataForHttp',
+          stage: 'MetaReq03ContinuationAttached',
+        },
       }] : []),
     ],
   };
@@ -152,10 +177,20 @@ export function finalizeResponsesHandlerPayloadForHttpFake(args: {
   payload?: AnyRecord;
   isSubmitToolOutputs?: boolean;
   outboundStream?: boolean;
+  systemPromptOverride?: { source?: string; prompt?: string } | null;
 }): AnyRecord {
   const payload = { ...(args.payload ?? {}) };
   if (args.isSubmitToolOutputs !== true && args.outboundStream === true && payload.stream !== true) {
     payload.stream = true;
+  }
+  const prompt = typeof args.systemPromptOverride?.prompt === 'string'
+    ? args.systemPromptOverride.prompt.trim()
+    : '';
+  if (args.isSubmitToolOutputs !== true && prompt) {
+    const existing = typeof payload.instructions === 'string' ? payload.instructions.trim() : '';
+    payload.instructions = existing
+      ? (existing.includes(prompt) ? existing : `${prompt}\n\n${existing}`)
+      : prompt;
   }
   return payload;
 }

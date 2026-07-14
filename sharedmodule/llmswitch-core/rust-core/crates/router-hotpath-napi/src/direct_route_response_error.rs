@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 // feature_id: hub.router_direct_response_error_projection
 fn plan_response_error(status: Option<i64>) -> Value {
-    let should_raise = matches!(status, Some(401 | 402 | 403 | 429))
-        || status.is_some_and(|value| value >= 500);
+    let should_raise =
+        matches!(status, Some(401 | 402 | 403 | 429)) || status.is_some_and(|value| value >= 500);
     let Some(status) = status.filter(|_| should_raise) else {
         return json!({ "shouldRaise": false });
     };
@@ -20,11 +20,15 @@ fn plan_response_error(status: Option<i64>) -> Value {
 
 #[napi(js_name = "planDirectRouteResponseErrorJson")]
 pub fn plan_direct_route_response_error_json(input_json: String) -> NapiResult<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|error| napi::Error::from_reason(format!("direct response error input parse failed: {error}")))?;
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!("direct response error input parse failed: {error}"))
+    })?;
     let status = input.get("status").and_then(Value::as_i64);
-    serde_json::to_string(&plan_response_error(status))
-        .map_err(|error| napi::Error::from_reason(format!("direct response error output serialize failed: {error}")))
+    serde_json::to_string(&plan_response_error(status)).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "direct response error output serialize failed: {error}"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -43,7 +47,11 @@ mod tests {
     #[test]
     fn keeps_success_client_and_non_status_values_non_error() {
         for status in [None, Some(0), Some(200), Some(400), Some(404), Some(499)] {
-            assert_eq!(plan_response_error(status)["shouldRaise"], false, "status={status:?}");
+            assert_eq!(
+                plan_response_error(status)["shouldRaise"],
+                false,
+                "status={status:?}"
+            );
         }
     }
 }

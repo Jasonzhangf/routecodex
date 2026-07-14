@@ -67,7 +67,7 @@ class ComprehensiveConsistencyTest {
 
       // 5. 生成综合报告
       console.log('\n📊 生成综合报告...');
-      JSON.parse(JSON.stringify(this.testResults.summary || {})) = await this.generateSummary();
+      this.testResults.summary = await this.generateSummary();
       
       // 6. 保存报告
       await this.saveComprehensiveReport();
@@ -317,7 +317,7 @@ class ComprehensiveConsistencyTest {
     await fs.mkdir(outputDir, { recursive: true });
     
     const reportPath = path.join(outputDir, `comprehensive-consistency-report-${Date.now()}.json`);
-    await fs.writeFile(reportPath, JSON.stringify(JSON.parse(JSON.stringify(JSON.parse(JSON.stringify(this.testResults.summary || {})) || {})) ? JSON.parse(JSON.stringify(JSON.parse(JSON.stringify(this.testResults.summary || {})))) : {}, null, 2));
+    await fs.writeFile(reportPath, JSON.stringify(this.testResults.summary || {}, null, 2));
     
     console.log(`📄 综合报告已保存到: ${reportPath}`);
   }
@@ -326,7 +326,7 @@ class ComprehensiveConsistencyTest {
    * 显示摘要
    */
   displaySummary() {
-    const summary = JSON.parse(JSON.stringify(JSON.parse(JSON.stringify(this.testResults.summary || {})) || {}));
+    const summary = this.testResults.summary || {};
     
     console.log('\n📊 综合一致性测试摘要');
     console.log('========================');

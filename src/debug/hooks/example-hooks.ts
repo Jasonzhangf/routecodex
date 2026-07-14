@@ -6,6 +6,7 @@
 
 import type { BidirectionalHook, HookExecutionContext, HookDataPacket, DataChange } from './bidirectional.js';
 import { HookStage, BidirectionalHookManager } from './bidirectional.js';
+import { estimateDebugPayloadSize } from './payload-budget.js';
 import type { UnknownObject } from '../../types/common-types.js';
 
 function ensureRecord(value: unknown): UnknownObject {
@@ -264,8 +265,8 @@ export const httpRequestMonitoringHook: BidirectionalHook = {
       metrics.maxTokens = maxTokens;
     }
 
-    // 记录请求头大小估算
-    metrics.estimatedHeadersSize = JSON.stringify(request).length * 0.1; // 粗略估算
+    // 记录请求头大小估算，不为 debug 指标构造完整 JSON 字符串。
+    metrics.estimatedHeadersSize = estimateDebugPayloadSize(request) * 0.1;
 
     return { observations, metrics };
   },

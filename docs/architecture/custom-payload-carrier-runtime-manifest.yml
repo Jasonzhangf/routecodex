@@ -98,6 +98,13 @@ carrier_runtime_surfaces:
         owner_queryability: unique-owner
         verification_state: present
         note: "local-only provider-request dry-run carrier; forbidden from provider/client payload by dry-run black-box fixtures and function-map owner."
+      - path: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
+        owner_feature_id: hub.direct_runtime_metadata_projection
+        category: local_runtime_marker
+        semantic_family: provider_debug_observation
+        owner_queryability: unique-owner
+        verification_state: present
+        note: "Rust projects the local provider-request dry-run control into direct runtime metadata; the carrier remains forbidden from provider/client normal payload."
   - carrier_id: response_metadata
     description: "response.metadata runtime residues still present before full response projection cleanup."
     files:

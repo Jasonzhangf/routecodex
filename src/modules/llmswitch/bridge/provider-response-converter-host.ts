@@ -254,8 +254,7 @@ export async function convertProviderResponse(
   });
 
   // Step 4: Reject retired server-side tool runtime actions.
-  const respProcessEffect = await executeProviderResponseNativeServertoolEffects({
-    payload: outboundEffect.rawPayload,
+  await executeProviderResponseNativeServertoolEffects({
     runtimeEffects: outboundEffect.runtimeEffects,
     context: options.context,
     requestId,
@@ -263,10 +262,7 @@ export async function convertProviderResponse(
     providerProtocol,
     stageRecorder: options.stageRecorder
   });
-  let hubRespOutbound04ClientSemantic: JsonObject;
-  hubRespOutbound04ClientSemantic = respProcessEffect.stage === 'HubRespChatProcess03Governed'
-    ? respProcessEffect.payload
-    : outboundEffect.rawPayload;
+  const hubRespOutbound04ClientSemantic = outboundEffect.rawPayload;
 
   // Step 5: Apply metadata write plan
   executeProviderResponseNativeRuntimeStateEffect({
@@ -289,27 +285,23 @@ export async function convertProviderResponse(
     });
     return { body: hubRespOutbound04ClientSemantic };
   }
-  const streamClientSemantic =
-    respProcessEffect.stage === 'HubRespChatProcess03Governed'
-      ? hubRespOutbound04ClientSemantic
-      : streamPipe.payload;
-  hubRespOutbound04ClientSemantic = streamClientSemantic;
+  const streamClientSemantic = hubRespOutbound04ClientSemantic;
   const sseCodec = streamPipe.codec;
   const frameResult = buildSseFramesFromJsonWithNative({
     protocol: sseCodec,
-    response: hubRespOutbound04ClientSemantic,
+    response: streamClientSemantic,
     requestId,
     model: "",
   });
   const stream = buildReadableFromSseFrames(frameResult.frames);
   recordProviderResponseStages({
     recorder: options.stageRecorder,
-    clientSemantic: hubRespOutbound04ClientSemantic,
+    clientSemantic: streamClientSemantic,
     streamPipe
   });
   return {
     sseStream: stream as Readable,
-    body: hubRespOutbound04ClientSemantic,
+    body: streamClientSemantic,
     format: streamPipe.codec
   };
 }

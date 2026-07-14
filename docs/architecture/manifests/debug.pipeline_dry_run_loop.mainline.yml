@@ -37,6 +37,13 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_loop
     binding_pending: null
     split_binding_id: null
+  - step_id: ddr-02b
+    from_node: ProviderReqOutbound07TransportRequest
+    to_node: HubRespOutbound04ClientSemantic
+    status: anchored
+    owner_feature_id: debug.pipeline_dry_run_terminal_action_plan
+    binding_pending: null
+    split_binding_id: null
   - step_id: ddr-04
     from_node: DebugDryRun04CapturedProviderResponse
     to_node: HubRespOutbound04ClientSemantic

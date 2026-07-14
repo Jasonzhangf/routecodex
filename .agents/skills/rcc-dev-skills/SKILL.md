@@ -43,6 +43,8 @@ description: RouteCodex 调试与架构路由入口
 - 写入前 claim 语义 owner，不 claim 裸文件路径；优先 `feature_id`、`resource_id`、`mainline_node_id`、`gate_id`，用 `mkdir .agent-collab/claims/<semantic_id>` 作为本地原子占用。
 - 保留并行 worker 的无关 dirty worktree；禁止用 checkout/reset/broad cleanup 清理他人改动。
 - 心跳 stale 不等于接管授权；生产写入、删除、迁移、发布、鉴权、密钥、global install、live runtime 变更仍需明确授权或 checked handoff。
+- 可修复 blocker 不等于等待：如果目标被 map/source anchor、gate wiring、review surface drift、窄测试 fixture drift 等非破坏性问题挡住，且当前 source truth 可验证，应主动做 forward fix。先记录 evidence；有空 claim 就 claim 后修；若 active claim 正占用同语义，先写 handoff，再对低风险 forward-only 一致性修复做最小 patch，不用 reset/checkout/blocked 代替修复。
+- 其他 worker 的无关 claim / handoff / dirty diff 不是当前任务的 blanket blocker。只要目标修改能用定向 patch 保留现有 diff，且没有真实同一语义冲突，就继续自己的 feature/gate；只在同一代码区域出现无法安全合并的直接冲突时停。
 - 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
 
 ## Debug 首选顺序（强制）
@@ -187,6 +189,7 @@ description: RouteCodex 调试与架构路由入口
 - Provider-response `choices array` bridge debug details 属于 Rust owner：`provider-response-converter.ts` 只能调用 `buildChoicesArrayBridgeDebugDetailsJson` 的 native shell，禁止在 TS 重新写 `choices array` message 判断、bridge seed/payload key probe 或 `bridgePayloadHasDataChoices` 本地投影。
 - Provider-response timing breakdown projection 属于 Rust owner：`provider-response-converter.ts` 只能调用 `buildProviderResponseTimingBreakdownJson` 的 native shell，禁止在 TS 重新写 `clientInjectWaitMs` / `hubResponseExcludedMs` 投影。若响应对象含 live `sseStream`，TS wrapper 必须先从 native JSON 入参剥离并在返回后按原引用恢复，禁止把 stream 对象送进 native JSON serialization。
 - Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
+- Thin-wrapper closeout 不能以空扫描为证据：`verify:architecture-thin-wrapper-only` 必须覆盖根仓 bridge/handler/converter/executor host 面并在 `rootHostCheckedFiles=0` 时失败；red fixture 要分别锁 second writer、TS ErrorErr 分类、flat metadata fallback、semantic payload fallback、malformed Rust plan downgrade 和 broad/dead facade 复活。
 
 ## 快查命令
 - 查 owner：
@@ -219,6 +222,7 @@ description: RouteCodex 调试与架构路由入口
 - lesson 用 card，不写流水账
 
 ## 相关规则
+- RouteCodex V3 Rust Responses direct MVP：`references/94-v3-rust-responses-direct-mvp.md`
 - note.md append-only：顶部 consolidation index，正文不删 raw
 - MEMORY.md append-only：只追加 dated correction
 - 同主题冲突：最新已验证时间戳胜出

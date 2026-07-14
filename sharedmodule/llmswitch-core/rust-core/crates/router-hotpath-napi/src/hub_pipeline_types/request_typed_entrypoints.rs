@@ -21,10 +21,10 @@ pub(crate) fn run_hub_req_chatprocess_03_governed_entrypoint(
 }
 
 pub(crate) fn run_vr_route_04_selected_target_entrypoint(
-    governed: HubReqChatProcess03Governed,
+    governed: &HubReqChatProcess03Governed,
     route_decision: Value,
 ) -> Result<VrRoute04SelectedTarget, String> {
-    build_vr_route_04_from_hub_req_chatprocess_03(&governed, route_decision)
+    build_vr_route_04_from_hub_req_chatprocess_03(governed, route_decision)
 }
 
 pub(crate) fn run_hub_req_outbound_05_provider_semantic_entrypoint(
@@ -51,7 +51,7 @@ mod tests {
         let governed =
             run_hub_req_chatprocess_03_governed_entrypoint(inbound, payload.clone()).unwrap();
         let selected = run_vr_route_04_selected_target_entrypoint(
-            governed.clone(),
+            &governed,
             json!({"providerKey":"p.key","modelId":"m2","routeName":"default"}),
         )
         .unwrap();

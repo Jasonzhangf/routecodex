@@ -6,24 +6,10 @@ use std::collections::HashSet;
 
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_tooling::{strip_provider_tool_sentinel_residue, value_to_string};
-use crate::stopless_current_turn::{
-    is_stopless_internal_tool_name, is_stopless_transparent_continuation_prompt,
-    scan_stopless_current_turn_slice, StoplessCurrentTurnScan,
-    STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
-};
 
 fn normalize_shell_like_output_text(raw: &str) -> String {
     raw.to_string()
 }
-
-const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
-    "routecodex hook run stop_message_auto",
-    "routecodex servertool run stop_message_auto",
-    "routecodex hook run reasoningStop",
-    "routecodex servertool run reasoningStop",
-    "routecodex hook run reasoning_stop",
-    "routecodex servertool run reasoning_stop",
-];
 
 pub(crate) fn normalize_apply_patch_output_text(raw: &str) -> String {
     const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
@@ -330,106 +316,6 @@ fn extract_embedded_apply_patch_from_shell_command(cmd: &str) -> Option<String> 
     None
 }
 
-fn is_stop_hook_history_function_call(row: &Map<String, Value>) -> bool {
-    let item_type = read_trimmed_string(row.get("type"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if item_type != "function_call" && item_type != "tool_call" {
-        return false;
-    }
-    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
-    if is_stopless_internal_tool_name(&name) {
-        return true;
-    }
-    if !is_shell_like_tool_name(name.as_str()) {
-        return false;
-    }
-    let Some(cmd) = read_exec_command_cmd(row.get("arguments")) else {
-        return false;
-    };
-    STOP_HOOK_COMMAND_MARKERS
-        .iter()
-        .any(|marker| cmd.contains(marker))
-}
-
-pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if let Ok(Value::Object(row)) = serde_json::from_str::<Value>(trimmed) {
-        if let Some(prompt) = read_continue_next_step_prompt(&row) {
-            return prompt;
-        }
-    }
-    STOPLESS_TRANSPARENT_CONTINUATION_PROMPT.to_string()
-}
-
-fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
-    let feedback = row
-        .get("schemaFeedback")
-        .or_else(|| row.get("schema_feedback"))?
-        .as_object()?;
-    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
-        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
-    if reason_code != "stop_schema_continue_next_step" {
-        return None;
-    }
-    read_trimmed_string(row.get("continuationPrompt"))
-        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
-}
-
-fn build_responses_text_guidance_input_item(text: String) -> Value {
-    serde_json::json!({
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": text
-            }
-        ]
-    })
-}
-
-fn build_chat_text_guidance_message(text: String) -> Value {
-    serde_json::json!({
-        "role": "user",
-        "content": text
-    })
-}
-
-fn extract_text_from_message_content(content: Option<&Value>) -> Option<String> {
-    match content? {
-        Value::String(text) => Some(text.clone()),
-        Value::Array(parts) if parts.len() == 1 => parts[0]
-            .get("text")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        _ => None,
-    }
-}
-
-fn is_stopless_guidance_message_value(item: &Value) -> bool {
-    let Some(row) = item.as_object() else {
-        return false;
-    };
-    if row
-        .get("role")
-        .and_then(Value::as_str)
-        .is_none_or(|role| !role.trim().eq_ignore_ascii_case("user"))
-    {
-        return false;
-    }
-    let Some(text) = extract_text_from_message_content(row.get("content")) else {
-        return false;
-    };
-    is_stopless_transparent_continuation_prompt(&text)
-        || text.contains("上一轮执行结果：repeatCount=")
-        || text.contains("STOPLESS_CLI_RESULT_MALFORMED")
-        || (text.contains("stopreason")
-            && (text.contains("finished")
-                || text.contains("blocked")
-                || text.contains("continue_needed")
-                || text.contains("收尾时至少带上这些字段")))
-}
-
 fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
     let input = args.get("input");
     let direct = read_nested_command_from_object(args);
@@ -677,8 +563,6 @@ fn normalize_message_tool_calls(
 
     let mut shell_tool_call_ids = HashSet::<String>::new();
     let mut apply_patch_tool_call_ids = HashSet::<String>::new();
-    let mut auto_stop_hook_call_ids = HashSet::<String>::new();
-
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
             continue;
@@ -745,19 +629,6 @@ fn normalize_message_tool_calls(
             let Some(raw_name) = read_trimmed_string(fn_row.get("name")) else {
                 continue;
             };
-            let auto_stop_candidate = serde_json::json!({
-                "type": "function_call",
-                "name": raw_name,
-                "arguments": fn_row.get("arguments").cloned().unwrap_or(Value::Null),
-            });
-            if auto_stop_candidate
-                .as_object()
-                .is_some_and(is_stop_hook_history_function_call)
-            {
-                if let Some(call_id) = call_id_hint.as_ref() {
-                    auto_stop_hook_call_ids.insert(call_id.clone());
-                }
-            }
             if is_apply_patch_tool_name(raw_name.as_str()) {
                 if let Some(call_id) = call_id_hint.as_ref() {
                     apply_patch_tool_call_ids.insert(call_id.clone());
@@ -794,77 +665,13 @@ fn normalize_message_tool_calls(
         }
     }
 
-    let has_current_stopless_cli_output = matches!(
-        scan_stopless_current_turn_slice(messages, |row| {
-            let is_paired_output = read_trimmed_string(row.get("role"))
-                .is_some_and(|role| role.eq_ignore_ascii_case("tool"))
-                && read_trimmed_string(row.get("tool_call_id"))
-                    .or_else(|| read_trimmed_string(row.get("call_id")))
-                    .is_some_and(|call_id| auto_stop_hook_call_ids.contains(call_id.as_str()));
-            is_paired_output.then_some(())
-        }),
-        StoplessCurrentTurnScan::Evidence(())
-    );
-
-    for message in messages.iter_mut() {
-        let Some(message_row) = message.as_object_mut() else {
-            continue;
-        };
-        if read_trimmed_string(message_row.get("role"))
-            .unwrap_or_default()
-            .eq_ignore_ascii_case("assistant")
-        {
-            if let Some(tool_calls) = message_row
-                .get_mut("tool_calls")
-                .and_then(Value::as_array_mut)
-            {
-                tool_calls.retain(|call| {
-                    call.as_object()
-                        .and_then(|row| {
-                            read_trimmed_string(row.get("id"))
-                                .or_else(|| read_trimmed_string(row.get("call_id")))
-                        })
-                        .map(|call_id| !auto_stop_hook_call_ids.contains(call_id.as_str()))
-                        .unwrap_or(true)
-                });
-                if tool_calls.is_empty() {
-                    message_row.remove("tool_calls");
-                }
-            }
-        }
-    }
-
     let mut normalized_messages = Vec::<Value>::with_capacity(messages.len());
     for message in std::mem::take(messages) {
-        if has_current_stopless_cli_output && is_stopless_guidance_message_value(&message) {
-            continue;
-        }
         let message_row = message.as_object();
         let role = message_row
             .and_then(|row| read_trimmed_string(row.get("role")))
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if role == "tool" {
-            let call_id = message_row.and_then(|row| {
-                read_trimmed_string(row.get("tool_call_id"))
-                    .or_else(|| read_trimmed_string(row.get("call_id")))
-            });
-            if call_id
-                .as_ref()
-                .is_some_and(|call_id| auto_stop_hook_call_ids.contains(call_id.as_str()))
-            {
-                if has_current_stopless_cli_output {
-                    let content = message_row
-                        .and_then(|row| row.get("content"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    normalized_messages.push(build_chat_text_guidance_message(
-                        build_stop_hook_guidance_text_from_output(content),
-                    ));
-                }
-                continue;
-            }
-        }
         let empty_assistant = role == "assistant"
             && message_row
                 .and_then(|row| read_trimmed_string(row.get("content")))
@@ -892,46 +699,17 @@ fn normalize_responses_input_function_calls(
         return Ok(());
     };
 
-    let preexisting_stop_hook_call_ids: HashSet<String> = input_items
-        .iter()
-        .filter_map(Value::as_object)
-        .filter(|row| is_stop_hook_history_function_call(row))
-        .filter_map(read_function_call_id)
-        .collect();
-    let has_current_stopless_cli_output = matches!(
-        scan_stopless_current_turn_slice(input_items, |row| {
-            let item_type = read_trimmed_string(row.get("type"))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let is_paired_output = item_type == "function_call_output"
-                && read_function_call_id(row).is_some_and(|call_id| {
-                    preexisting_stop_hook_call_ids.contains(call_id.as_str())
-                });
-            is_paired_output.then_some(())
-        }),
-        StoplessCurrentTurnScan::Evidence(())
-    );
     let mut dropped_call_ids: HashSet<String> = HashSet::new();
     let mut shell_like_call_ids: HashSet<String> = HashSet::new();
     let mut apply_patch_call_ids: HashSet<String> = HashSet::new();
-    let mut auto_stop_hook_call_ids: HashSet<String> = preexisting_stop_hook_call_ids;
     let mut normalized_items = Vec::<Value>::with_capacity(input_items.len());
 
     for mut item in std::mem::take(input_items) {
-        if has_current_stopless_cli_output && is_stopless_guidance_message_value(&item) {
-            continue;
-        }
         if let Some(item_row) = item.as_object_mut() {
             let item_type = read_trimmed_string(item_row.get("type"))
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             if item_type == "function_call" {
-                if is_stop_hook_history_function_call(item_row) {
-                    if let Some(call_id) = read_function_call_id(item_row) {
-                        auto_stop_hook_call_ids.insert(call_id);
-                    }
-                    continue;
-                }
                 if let Some(raw_name) = read_trimmed_string(item_row.get("name")) {
                     if is_apply_patch_tool_name(raw_name.as_str()) {
                         let call_id = read_trimmed_string(item_row.get("call_id"))
@@ -992,17 +770,6 @@ fn normalize_responses_input_function_calls(
                 let call_id = read_trimmed_string(item_row.get("call_id"))
                     .or_else(|| read_trimmed_string(item_row.get("tool_call_id")));
                 if let Some(call_id) = call_id {
-                    if auto_stop_hook_call_ids.contains(call_id.as_str()) {
-                        if has_current_stopless_cli_output {
-                            if let Some(raw_output) = item_row.get("output").and_then(Value::as_str)
-                            {
-                                normalized_items.push(build_responses_text_guidance_input_item(
-                                    build_stop_hook_guidance_text_from_output(raw_output),
-                                ));
-                            }
-                        }
-                        continue;
-                    }
                     if dropped_call_ids.contains(call_id.as_str()) {
                         // Keep request chain coherent: remove orphan output for a dropped malformed call.
                         continue;
@@ -1055,11 +822,12 @@ pub fn normalize_shell_like_tool_calls_before_governance_json(
 mod tests {
     use super::normalize_responses_input_function_calls;
     use super::{
-        build_stop_hook_guidance_text_from_output, normalize_apply_patch_output_text,
-        normalize_shell_like_tool_calls_before_governance,
+        normalize_apply_patch_output_text, normalize_shell_like_tool_calls_before_governance,
     };
     use crate::hashline::compute_line_hash;
-    use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
+    use crate::stopless_current_turn::{
+        build_stop_hook_guidance_text_from_output, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
+    };
     use serde_json::{json, Value};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1687,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_real_user_continue_after_stopless_pair_wins_over_auto_guidance() {
+    fn responses_real_user_continue_after_stopless_pair_stays_data_before_chatprocess_hook() {
         let mut payload = json!({
           "input": [
             {
@@ -1711,10 +1479,10 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let input = payload["input"].as_array().expect("input");
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[0]["content"][0]["text"], "继续执行");
-        assert!(!payload
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"][0]["text"], "继续执行");
+        assert!(payload
             .to_string()
             .contains("call_stopless_before_real_user"));
         assert!(!payload
@@ -1723,7 +1491,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_real_user_continue_after_stopless_pair_wins_over_auto_guidance() {
+    fn chat_real_user_continue_after_stopless_pair_stays_data_before_chatprocess_hook() {
         let mut payload = json!({
           "messages": [
             {
@@ -1752,10 +1520,10 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let messages = payload["messages"].as_array().expect("messages");
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0]["role"], "user");
-        assert_eq!(messages[0]["content"], "继续执行");
-        assert!(!payload
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"], "继续执行");
+        assert!(payload
             .to_string()
             .contains("call_stopless_chat_before_real_user"));
         assert!(!payload
@@ -2002,7 +1770,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let out = payload["input"][1]["output"].as_str().expect("output text");
         assert_eq!(
             out,
@@ -2032,7 +1800,7 @@ mod tests {
           "input": input
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let items = payload["input"].as_array().expect("input array");
         let function_calls = items
             .iter()
@@ -2085,7 +1853,7 @@ mod tests {
           "messages": messages
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let entries = payload["messages"].as_array().expect("messages array");
         let assistant_with_tool_calls = entries
             .iter()
@@ -2164,7 +1932,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let entries = payload["messages"].as_array().expect("messages array");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["tool_calls"][0]["id"], "call_good");
@@ -2219,7 +1987,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let entries = payload["messages"].as_array().expect("messages array");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["tool_calls"][0]["id"], "call_good_write");
@@ -2240,7 +2008,7 @@ mod tests {
           ]
         });
 
-        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        normalize_shell_like_tool_calls_before_governance(&mut payload).expect("normalize ok");
         let args_text = payload["input"][0]["arguments"]
             .as_str()
             .expect("arguments text");

@@ -10,64 +10,64 @@ struct PruneChatRequestPayloadInput {
 }
 
 fn strip_sentinel_keys(record: &mut Map<String, Value>) {
-    let keys: Vec<String> = record
-        .keys()
-        .filter(|key| key.starts_with("__rcc_"))
-        .cloned()
-        .collect();
-    for key in keys {
-        record.remove(&key);
-    }
+    record.retain(|key, _| !key.starts_with("__rcc_"));
 }
 
-fn sanitize_tool_call_entry(call: &Value) -> Value {
-    let Some(call_obj) = call.as_object() else {
-        return call.clone();
+fn sanitize_tool_call_entry_owned(call: Value) -> Value {
+    let Value::Object(mut call_obj) = call else {
+        return call;
     };
-    let mut clone = call_obj.clone();
-    clone.remove("call_id");
-    clone.remove("tool_call_id");
-    if let Some(Value::Object(fn_obj)) = clone.get("function") {
-        clone.insert("function".to_string(), Value::Object(fn_obj.clone()));
-    }
-    Value::Object(clone)
+    call_obj.remove("call_id");
+    call_obj.remove("tool_call_id");
+    Value::Object(call_obj)
 }
 
-fn sanitize_message_entry(message: &Value) -> Value {
-    let Some(msg_obj) = message.as_object() else {
-        return message.clone();
+fn sanitize_message_entry_owned(message: Value) -> Value {
+    let Value::Object(mut msg_obj) = message else {
+        return message;
     };
-    let mut clone = msg_obj.clone();
-    if let Some(Value::Array(tool_calls)) = clone.get("tool_calls") {
-        let next_calls: Vec<Value> = tool_calls.iter().map(sanitize_tool_call_entry).collect();
-        clone.insert("tool_calls".to_string(), Value::Array(next_calls));
+    if let Some(tool_calls) = msg_obj.remove("tool_calls") {
+        let next_calls = match tool_calls {
+            Value::Array(calls) => Value::Array(
+                calls
+                    .into_iter()
+                    .map(sanitize_tool_call_entry_owned)
+                    .collect(),
+            ),
+            other => other,
+        };
+        msg_obj.insert("tool_calls".to_string(), next_calls);
     }
-    let role = clone.get("role").and_then(Value::as_str).unwrap_or("");
-    if role == "tool" {
-        let tool_call_id = clone
+
+    let role_is_tool = msg_obj.get("role").and_then(Value::as_str) == Some("tool");
+    if role_is_tool {
+        let tool_call_id = msg_obj
             .get("tool_call_id")
             .and_then(Value::as_str)
             .map(|v| v.to_string());
-        let call_id = clone
+        let call_id = msg_obj
             .get("call_id")
             .and_then(Value::as_str)
             .map(|v| v.to_string());
         if tool_call_id.is_none() {
             if let Some(value) = call_id {
-                clone.insert("tool_call_id".to_string(), Value::String(value));
+                msg_obj.insert("tool_call_id".to_string(), Value::String(value));
             }
         }
-        clone.remove("id");
+        msg_obj.remove("id");
     }
-    clone.remove("call_id");
-    Value::Object(clone)
+    msg_obj.remove("call_id");
+    Value::Object(msg_obj)
 }
 
-fn prune_chat_request_payload_impl(payload: &Value, preserve_stream_field: bool) -> Value {
-    let Some(obj) = payload.as_object() else {
-        return payload.clone();
+// feature_id: conversion.openai_request_filter_payload_copy_budget
+pub(crate) fn prune_chat_request_payload_owned(
+    payload: Value,
+    preserve_stream_field: bool,
+) -> Value {
+    let Value::Object(mut stripped) = payload else {
+        return payload;
     };
-    let mut stripped = obj.clone();
     strip_sentinel_keys(&mut stripped);
 
     stripped.remove("originalStream");
@@ -82,9 +82,17 @@ fn prune_chat_request_payload_impl(payload: &Value, preserve_stream_field: bool)
         }
     }
 
-    if let Some(Value::Array(messages)) = stripped.get("messages") {
-        let next_messages: Vec<Value> = messages.iter().map(sanitize_message_entry).collect();
-        stripped.insert("messages".to_string(), Value::Array(next_messages));
+    if let Some(messages) = stripped.remove("messages") {
+        let next_messages = match messages {
+            Value::Array(messages) => Value::Array(
+                messages
+                    .into_iter()
+                    .map(sanitize_message_entry_owned)
+                    .collect(),
+            ),
+            other => other,
+        };
+        stripped.insert("messages".to_string(), next_messages);
     }
 
     Value::Object(stripped)
@@ -95,7 +103,7 @@ pub fn prune_chat_request_payload_json(input_json: String) -> NapiResult<String>
     let input: PruneChatRequestPayloadInput =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let preserve_stream = input.preserve_stream_field.unwrap_or(false);
-    let output = prune_chat_request_payload_impl(&input.payload, preserve_stream);
+    let output = prune_chat_request_payload_owned(input.payload, preserve_stream);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 

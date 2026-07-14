@@ -70,25 +70,6 @@ fn read_route_policy_group(route_params: &Option<Map<String, Value>>) -> Option<
         .map(ToString::to_string)
 }
 
-fn resolve_pool_strategy(pool: &NormalizedRoutePoolConfig) -> String {
-    pool.load_balancing
-        .as_ref()
-        .and_then(|lb| lb.strategy.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .or(pool.mode.as_deref())
-        .unwrap_or("priority")
-        .to_string()
-}
-
-fn display_pool_id(pool: &NormalizedRoutePoolConfig, route_name: &str) -> String {
-    let Some(group) = read_route_policy_group(&pool.route_params) else {
-        return pool.id.clone();
-    };
-    let strategy = resolve_pool_strategy(pool).replace('_', "-");
-    format!("{}-{}-{}", group.replace('_', "-"), strategy, route_name)
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RoutingBootstrapOutput {
@@ -379,24 +360,11 @@ pub(crate) fn expand_routing_table_impl(
                 }
             }
 
-            // routePolicyGroup is the routing isolation source of truth. Pool id is display-only.
+            // routePolicyGroup is the routing isolation source of truth.
             let mut enriched_params = pool.route_params.clone();
             let route_policy_group = read_route_policy_group(&enriched_params);
-            if route_policy_group.is_none() {
-                if let Some(last_dash) = pool.id.rfind('-') {
-                    let group_prefix = &pool.id[..last_dash];
-                    let group_underscore = group_prefix.replace('-', "_");
-                    if !group_underscore.is_empty() {
-                        enriched_params.get_or_insert_with(|| Map::new()).insert(
-                            "routePolicyGroup".to_string(),
-                            Value::String(group_underscore),
-                        );
-                    }
-                }
-            }
-            let route_policy_group = read_route_policy_group(&enriched_params);
             expanded_pools.push(RoutePoolTier {
-                id: display_pool_id(pool, route_name),
+                id: pool.id.clone(),
                 priority: pool.priority,
                 targets: sorted_targets,
                 mode: pool.mode.clone(),
@@ -962,7 +930,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn weighted_pool_display_id_uses_strategy_not_priority() {
+    fn route_pool_id_is_internal_and_not_rewritten_for_display() {
         let mut route_params = Map::new();
         route_params.insert(
             "routePolicyGroup".to_string(),
@@ -985,10 +953,7 @@ mod tests {
             thinking: None,
         };
 
-        assert_eq!(
-            display_pool_id(&pool, "search"),
-            "gateway-priority-5555-weighted-search"
-        );
+        assert_eq!(pool.id, "gateway-priority-5555-search");
     }
 
     #[test]
@@ -1088,7 +1053,7 @@ mod tests {
         assert!(routing.contains_key("gateway_priority_5555:search"));
         assert_eq!(
             routing["gateway_priority_5555:search"][0].id,
-            "gateway-priority-5555-weighted-search"
+            "gateway-priority-5555-search"
         );
     }
 

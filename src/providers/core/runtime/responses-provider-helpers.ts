@@ -137,6 +137,7 @@ export function extractResponsesDirectPassthroughFlag(source: unknown): boolean 
   return false;
 }
 
+// feature_id: provider.responses_submit_payload_copy_budget
 export function extractSubmitToolOutputsPayload(request: UnknownObject): SubmitToolOutputsPayload | null {
   if (!request || typeof request !== 'object') {
     return null;
@@ -156,7 +157,7 @@ export function extractSubmitToolOutputsPayload(request: UnknownObject): SubmitT
   if (!toolOutputs || !toolOutputs.length) {
     return null;
   }
-  const submitBody = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
+  const submitBody = { ...record };
   delete submitBody.response_id;
   delete submitBody.responseId;
   return {

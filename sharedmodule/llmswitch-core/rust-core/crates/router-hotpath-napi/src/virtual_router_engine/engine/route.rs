@@ -304,6 +304,7 @@ impl VirtualRouterEngineCore {
         let session_scope = resolve_session_scope(&metadata_center_snapshot_value);
         let stop_message_scope = resolve_stop_message_scope(&metadata_center_snapshot_value);
         let meta_route_03 = build_meta_route_03_from_metadata(&metadata_center_snapshot_value);
+        let retry_exclusion_set = metadata.get("excludedProviderKeys").cloned();
         let routing_state_key = session_scope.clone().unwrap_or_else(|| {
             if is_continuation {
                 request_routing_state_key.clone()
@@ -410,6 +411,9 @@ impl VirtualRouterEngineCore {
             has_only_routing_state_mutation_instructions(&core_instructions)
                 && features.user_text_sample.trim().is_empty();
         let mut metadata_for_selection = meta_route_03.to_metadata_value();
+        if let Some(retry_exclusion_set) = retry_exclusion_set {
+            metadata_for_selection["excludedProviderKeys"] = retry_exclusion_set;
+        }
         if routing_instruction_mutation_only {
             if let Some(map) = metadata_for_selection.as_object_mut() {
                 map.insert(
@@ -1081,9 +1085,7 @@ mod tests {
             )
             .expect("normal route should remain available");
 
-        let reasoning = result["decision"]["reasoning"]
-            .as_str()
-            .unwrap_or_default();
+        let reasoning = result["decision"]["reasoning"].as_str().unwrap_or_default();
         assert_ne!(reasoning, "forced");
         assert!(!reasoning.split('|').any(|part| part == "forced"));
     }

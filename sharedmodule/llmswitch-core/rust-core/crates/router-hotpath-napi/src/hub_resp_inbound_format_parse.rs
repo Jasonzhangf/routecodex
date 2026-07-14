@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::hub_resp_outbound_client_semantics::build_openai_chat_response_from_anthropic_message;
+use crate::shared_json_utils::serialized_json_size;
 
 // feature_id: hub.response_provider_sse_materialization
 
@@ -62,16 +63,13 @@ pub struct ProviderResponseSseStreamReadErrorOutput {
 }
 
 fn validate_payload_size(payload: &Value) -> Result<(), String> {
-    let payload_str = match serde_json::to_string(payload) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("Failed to serialize payload for size check: {}", e)),
-    };
+    let payload_size = serialized_json_size(payload)
+        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
 
-    if payload_str.len() > MAX_PAYLOAD_SIZE_BYTES {
+    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
         return Err(format!(
             "Payload size {} exceeds maximum allowed {} bytes",
-            payload_str.len(),
-            MAX_PAYLOAD_SIZE_BYTES
+            payload_size, MAX_PAYLOAD_SIZE_BYTES
         ));
     }
 

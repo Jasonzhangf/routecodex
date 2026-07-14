@@ -7,9 +7,13 @@ import {
   buildResponsesResumeControlForContinuationContextForHttpFake,
   finalizeResponsesHandlerPayloadForHttpFake,
 } from '../../providers/helpers/responses-handler-host-fakes.js';
+import {
+  buildResponsesPipelineMetadataForHttpFake,
+} from '../../modules/llmswitch/bridge/responses-request-handler-host-fake.js';
 
 const mockCaptureResponsesRequestContext = jest.fn(async () => undefined);
 const mockRecordResponsesResponseForRequest = jest.fn(async () => undefined);
+const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
 const mockResumeLatestResponsesContinuationByScope = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
@@ -69,6 +73,261 @@ function buildResponsesRequestContextFixture(payload: Record<string, any>): Reco
       input: Array.isArray(payload.input) ? payload.input : [],
       toolsRaw: Array.isArray(payload.tools) ? payload.tools : []
     }
+  };
+}
+
+function planResponsesContinuationRequestActionFixture(input: Record<string, any>): Record<string, any> {
+  const effectResult = asPlainRecord(input.effectResult);
+  if (effectResult) {
+    const state = asPlainRecord(effectResult.resultPlanInput) ?? {};
+    const result = effectResult.result;
+    if (effectResult.operation === 'lookup_continuation') {
+      if (result === null || result === undefined) {
+        return {
+          action: 'complete',
+          result: {
+            kind: 'client_error',
+            status: 400,
+            body: {
+              error: {
+                message: 'Responses continuation was not found for the supplied response id',
+                type: 'invalid_request_error',
+                code: 'responses_continuation_not_found',
+                origin: 'client',
+              },
+            },
+          },
+        };
+      }
+      const continuation = asPlainRecord(result);
+      if (!continuation) {
+        throw new Error('Responses continuation lookup returned malformed continuation');
+      }
+      const owner = continuation.continuationOwner;
+      if (owner !== 'direct' && owner !== 'relay') {
+        return {
+          action: 'complete',
+          result: {
+            kind: 'client_error',
+            status: 400,
+            body: {
+              error: {
+                message: 'Responses continuation owner is missing or invalid',
+                type: 'invalid_request_error',
+                code: 'responses_continuation_owner_invalid',
+                origin: 'client',
+              },
+            },
+          },
+        };
+      }
+      const payload = state.payload ?? {};
+      if (state.plannedEntryMode === 'submit_tool_outputs' && owner === 'direct') {
+        const directPayload = {
+          ...payload,
+          previous_response_id: state.responseId,
+        };
+        return {
+          action: 'execute_effect',
+          effect: {
+            operation: 'materialize_provider_owned_submit',
+            args: { payload: directPayload },
+          },
+          resultPlanInput: {
+            stage: 'materialize_provider_owned_submit',
+            plannedEntryMode: state.plannedEntryMode,
+            entryEndpoint: state.entryEndpoint,
+            payload: directPayload,
+            resumeMeta: {
+              responseId: state.responseId,
+              continuationOwner: 'direct',
+              providerKey: continuation.providerKey,
+              restored: false,
+            },
+          },
+        };
+      }
+      if (state.plannedEntryMode === 'submit_tool_outputs' && owner === 'relay') {
+        return {
+          action: 'execute_effect',
+          effect: {
+            operation: 'resume_relay',
+            args: {
+              responseId: state.responseId,
+              payload,
+              options: {
+                requestId: state.requestId,
+                entryKind: 'responses',
+              },
+            },
+          },
+          resultPlanInput: {
+            stage: 'resume_relay',
+            plannedEntryMode: state.plannedEntryMode,
+            entryEndpoint: '/v1/responses',
+            payload,
+          },
+        };
+      }
+      if (state.plannedEntryMode === 'scope_materialize' && owner === 'relay') {
+        return {
+          action: 'execute_effect',
+          effect: {
+            operation: 'materialize_scope',
+            args: {
+              payload,
+              requestId: state.requestId,
+              entryKind: 'responses',
+              continuationOwner: 'relay',
+            },
+          },
+          resultPlanInput: {
+            stage: 'materialize_scope',
+            plannedEntryMode: state.plannedEntryMode,
+            entryEndpoint: state.entryEndpoint,
+            payload,
+          },
+        };
+      }
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload,
+          pipelineEntryEndpoint: state.entryEndpoint,
+          plannedEntryMode: state.plannedEntryMode,
+          isSubmitToolOutputs: state.plannedEntryMode === 'submit_tool_outputs',
+          resumeMeta: {
+            responseId: state.responseId,
+            continuationOwner: owner,
+            providerKey: continuation.providerKey,
+            restored: false,
+          },
+        },
+      };
+    }
+    if (effectResult.operation === 'materialize_provider_owned_submit') {
+      const materializedInput = asPlainRecord(result)?.payload?.input;
+      if (!Array.isArray(materializedInput)) {
+        throw new Error('Responses provider-owned submit materialization missing payload.input');
+      }
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: {
+            ...state.payload,
+            input: materializedInput,
+          },
+          pipelineEntryEndpoint: state.entryEndpoint,
+          plannedEntryMode: state.plannedEntryMode,
+          isSubmitToolOutputs: true,
+          resumeMeta: state.resumeMeta,
+        },
+      };
+    }
+    if (effectResult.operation === 'resume_relay') {
+      const completed = asPlainRecord(result);
+      if (!completed || !asPlainRecord(completed.payload) || !asPlainRecord(completed.meta)) {
+        throw new Error('Responses relay resume returned malformed result');
+      }
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: completed.payload,
+          pipelineEntryEndpoint: state.entryEndpoint,
+          plannedEntryMode: state.plannedEntryMode,
+          isSubmitToolOutputs: state.plannedEntryMode === 'submit_tool_outputs',
+          resumeMeta: completed.meta,
+        },
+      };
+    }
+    if (effectResult.operation === 'materialize_scope') {
+      if (result === null || result === undefined) {
+        return {
+          action: 'complete',
+          result: { kind: 'scope_continuation_expired' },
+        };
+      }
+      const completed = asPlainRecord(result);
+      if (!completed || !asPlainRecord(completed.payload) || !asPlainRecord(completed.meta)) {
+        throw new Error('Responses scope materialization returned malformed result');
+      }
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: completed.payload ?? {},
+          pipelineEntryEndpoint: state.entryEndpoint,
+          plannedEntryMode: state.plannedEntryMode,
+          isSubmitToolOutputs: state.plannedEntryMode === 'submit_tool_outputs',
+          resumeMeta: completed.meta ?? {},
+        },
+      };
+    }
+    throw new Error(`unexpected continuation effect ${String(effectResult.operation)}`);
+  }
+
+  const plannedEntry = asPlainRecord(input.plannedEntry) ?? {};
+  const payload = asPlainRecord(plannedEntry.payload) ?? {};
+  const responseId = plannedEntry.responseId ?? payload.previous_response_id;
+  if (typeof responseId === 'string' && responseId) {
+    return {
+      action: 'execute_effect',
+      effect: {
+        operation: 'lookup_continuation',
+        args: {
+          responseId,
+          options: { entryKind: 'responses' },
+        },
+      },
+      resultPlanInput: {
+        stage: 'lookup_continuation',
+        responseId,
+        plannedEntryMode: plannedEntry.mode,
+        entryEndpoint: input.entryEndpoint,
+        payload,
+        requestId: input.requestId,
+        sessionId: input.sessionId,
+        conversationId: input.conversationId,
+        matchedPort: input.matchedPort,
+        routingPolicyGroup: input.routingPolicyGroup,
+      },
+    };
+  }
+  if (plannedEntry.mode === 'scope_materialize') {
+    return {
+      action: 'execute_effect',
+      effect: {
+        operation: 'materialize_scope',
+        args: {
+          payload,
+          requestId: input.requestId,
+          sessionId: input.sessionId,
+          conversationId: input.conversationId,
+          matchedPort: input.matchedPort,
+          routingPolicyGroup: input.routingPolicyGroup,
+          entryKind: 'responses',
+        },
+      },
+      resultPlanInput: {
+        stage: 'materialize_scope',
+        plannedEntryMode: plannedEntry.mode,
+        entryEndpoint: input.entryEndpoint,
+        payload,
+      },
+    };
+  }
+  return {
+    action: 'complete',
+    result: {
+      kind: 'ok',
+      payload,
+      pipelineEntryEndpoint: input.entryEndpoint,
+      plannedEntryMode: plannedEntry.mode ?? 'none',
+      isSubmitToolOutputs: plannedEntry.mode === 'submit_tool_outputs',
+    },
   };
 }
 
@@ -373,7 +632,7 @@ const mockRuntimeIntegrationsModule = () => ({
   captureResponsesRequestContextForRequest: mockCaptureResponsesRequestContext,
   clearResponsesConversationByRequestId: jest.fn(async () => undefined),
   finalizeResponsesConversationRequestRetention: jest.fn(async () => undefined),
-  lookupResponsesContinuationByResponseId: jest.fn(async () => undefined),
+  lookupResponsesContinuationByResponseId: mockLookupResponsesContinuationByResponseId,
   materializeLatestResponsesContinuationByScope: mockMaterializeLatestResponsesContinuationByScope,
   recordResponsesResponseForRequest: mockRecordResponsesResponseForRequest,
   resumeLatestResponsesContinuationByScope: mockResumeLatestResponsesContinuationByScope,
@@ -510,44 +769,27 @@ const createBridgeNativeFixtures = () => ({
     kind: 'capture_request',
     payload: payload ?? {}
   })),
-  planResponsesContinuationRequestAction: jest.fn(async (input: any) => ({
-    ...(input?.plannedEntryMode === 'submit_tool_outputs'
+  buildResponsesPipelineMetadataForHttpNative: jest.fn(buildResponsesPipelineMetadataForHttpFake),
+  planResponsesInboundToolHistoryErrorsampleForHttpNative: jest.fn(() => ({ action: 'none' })),
+  planResponsesResumeErrorForHttpNative: jest.fn((error: Record<string, unknown>) =>
+    error.origin === 'client'
       ? {
-          action: 'relay_submit',
-          responseId: input?.responseId ?? input?.previousResponseId,
-          pipelineEntryEndpoint: '/v1/responses'
+          action: 'client_error',
+          status: typeof error.status === 'number' ? error.status : 400,
+          body: {
+            error: {
+              message: typeof error.message === 'string' ? error.message : 'resume failed',
+              type: 'invalid_request_error',
+              code: typeof error.code === 'string' ? error.code : 'resume_failed',
+              origin: 'client',
+            },
+          },
         }
-      : input?.plannedEntryMode === 'scope_materialize'
-        ? {
-            action: input?.continuation?.continuationOwner === 'relay' ? 'relay_scope_materialize' : 'scope_materialize',
-            responseId: input?.responseId ?? input?.previousResponseId,
-            continuationOwner: input?.continuation?.continuationOwner
-          }
-        : input?.previousResponseId && input?.continuation?.continuationOwner === 'direct'
-          ? {
-              action: 'attach_resume_meta',
-              responseId: input.previousResponseId,
-              resumeMeta: {
-                responseId: input.previousResponseId,
-                previousResponseId: input.previousResponseId,
-                continuationOwner: 'direct',
-                providerKey: input.continuation.providerKey,
-                restored: false
-              }
-            }
-          : input?.previousResponseId && input?.continuation?.continuationOwner === 'relay'
-            ? {
-                action: 'relay_scope_materialize',
-                responseId: input.previousResponseId,
-                continuationOwner: 'relay',
-                pipelineEntryEndpoint: '/v1/responses'
-              }
-            : {
-                action: 'none',
-                responseId: input?.responseId ?? input?.previousResponseId,
-                payload: {}
-              })
-  })),
+      : { action: 'rethrow' }
+  ),
+  planResponsesContinuationRequestAction: jest.fn(
+    async (input: Record<string, any>) => planResponsesContinuationRequestActionFixture(input)
+  ),
   planResponsesHandlerEntry: mockPlanResponsesHandlerEntry,
   captureReqInboundResponsesContextSnapshotJson: jest.fn((args: any) => ({
     input: Array.isArray(args?.rawRequest?.input) ? args.rawRequest.input : [],
@@ -632,30 +874,21 @@ const createBridgeNativeFixtures = () => ({
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  } = {}) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message: typeof args.message === 'string' && args.message.trim()
-          ? args.message
-          : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code: typeof args.code === 'string' && args.code.trim()
-          ? args.code
-          : 'responses_resume_failed',
-        origin: typeof args.origin === 'string' && args.origin.trim()
-          ? args.origin
-          : 'client',
-      },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn((origin?: string) =>
-    typeof origin === 'string' && origin.trim() === 'client'
+  planResponsesResumeErrorForHttpNative: jest.fn((error: Record<string, unknown>) =>
+    error.origin === 'client'
+      ? {
+          action: 'client_error',
+          status: typeof error.status === 'number' ? error.status : 422,
+          body: {
+            error: {
+              message: typeof error.message === 'string' ? error.message : 'resume failed',
+              type: 'invalid_request_error',
+              code: typeof error.code === 'string' ? error.code : 'resume_failed',
+              origin: 'client',
+            },
+          },
+        }
+      : { action: 'rethrow' }
   ),
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
@@ -841,7 +1074,7 @@ mockLlmswitchBridgeHostExports('responses-client-projection-host', [
 ]);
 mockLlmswitchBridgeHostExports('responses-request-handler-host', [
   'buildResponsesConversationPortScopeForHttpNative',
-  'buildResponsesResumeClientErrorForHttpNative',
+  'buildResponsesPipelineMetadataForHttpNative',
   'buildResponsesResumeControlForContinuationContextForHttpNative',
   'buildResponsesScopeContinuationExpiredErrorForHttpNative',
   'captureReqInboundResponsesContextSnapshotJson',
@@ -850,11 +1083,12 @@ mockLlmswitchBridgeHostExports('responses-request-handler-host', [
   'materializeProviderOwnedSubmitContext',
   'planResponsesContinuationRequestAction',
   'planResponsesHandlerEntry',
+  'planResponsesInboundToolHistoryErrorsampleForHttpNative',
   'planResponsesHandlerStreamForHttpNative',
   'planResponsesRequestBodyForHttpNative',
   'planResponsesRequestContext',
+  'planResponsesResumeErrorForHttpNative',
   'shouldManageResponsesConversationForHttpNative',
-  'shouldProjectResponsesResumeClientErrorForHttpNative',
 ]);
 mockLlmswitchBridgeHostExports('responses-to-chat-host', ['convertResponsesRequestToChatNative']);
 mockLlmswitchBridgeHostExports('route-availability-host', [
@@ -1159,13 +1393,6 @@ function createSingleHandleRuntimeManager(handle: ReturnType<typeof createProvid
   };
 }
 
-async function waitForMockCalls(mock: { mock: { calls: unknown[] } }, minCalls: number): Promise<void> {
-  const deadline = Date.now() + 1000;
-  while (mock.mock.calls.length < minCalls && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 async function fetchText(baseUrl: string, routePath: string, options: {
   body: string;
   headers: Record<string, string>;
@@ -1272,6 +1499,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     mockCaptureResponsesRequestContext.mockClear();
     mockRecordResponsesResponseForRequest.mockClear();
+    mockLookupResponsesContinuationByResponseId.mockReset();
     mockResumeResponsesConversation.mockReset();
     mockResumeLatestResponsesContinuationByScope.mockReset();
     mockMaterializeLatestResponsesContinuationByScope.mockReset();
@@ -1286,6 +1514,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('keeps responses endpoint inbound payload intact and restores previous_response_id at final HTTP response', async () => {
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_prev_http_responses_1',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_chain_http_responses_1',
+    });
     const pipelineExecute = jest.fn((input: any) => ({
       providerPayload: {
         model: 'claude-sonnet-4-5',
@@ -1960,6 +2194,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('keeps /v1/responses.submit_tool_outputs as a resumed synthetic pipeline request and preserves response continuity', async () => {
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_submit_prev_1',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_chain_submit_1',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'claude-sonnet-4-5',
@@ -2089,7 +2329,6 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       expect(mockResumeResponsesConversation).toHaveBeenCalledWith(
         'resp_submit_prev_1',
         {
-          response_id: 'resp_submit_prev_1',
           stream: false,
           tool_outputs: [{ tool_call_id: 'call_submit_1', output: 'ok' }]
         },
@@ -2133,6 +2372,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
   });
 
   it('preserves resumed relay session scope and provider pin through request executor before hub pipeline', async () => {
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_submit_truth_1',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_chain_submit_truth_1',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'gpt-5.5',
@@ -2266,7 +2511,7 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
-  it('captures /v1/responses request context before returning tool_calls so submit_tool_outputs can resume', async () => {
+  it('keeps request context at the handler boundary without a second continuation writer', async () => {
     const pipelineExecute = jest.fn((_input: any) => ({
       status: 200,
       body: {
@@ -2318,28 +2563,26 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
       expect(result.status).toBe(200);
       expect(result.payload).toMatchObject({ id: 'resp_capture_tool_1', status: 'requires_action' });
-      await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
-      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: expect.stringContaining('openai-responses-router-gpt-5.3-codex-'),
-        payload: expect.objectContaining({ model: 'gpt-5.3-codex' }),
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(readResponsesRequestContext(pipelineInput.metadata)).toMatchObject({
+        payload: expect.objectContaining({
+          model: 'gpt-5.3-codex',
+          input: payload.input,
+          tools: payload.tools,
+        }),
         context: expect.objectContaining({
           input: payload.input,
           toolsRaw: payload.tools
         }),
-        sessionId: 'rcc-routecodex-capture'
-      }));
-      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: expect.stringContaining('openai-responses-router-gpt-5.3-codex-'),
-        response: expect.objectContaining({ id: 'resp_capture_tool_1' }),
-        sessionId: 'rcc-routecodex-capture',
-        routeHint: 'thinking/gateway-priority-5520-thinking'
-      }));
+      });
+      expect(mockCaptureResponsesRequestContext).not.toHaveBeenCalled();
+      expect(mockRecordResponsesResponseForRequest).not.toHaveBeenCalled();
     } finally {
       await closeServer(server);
     }
   });
 
-  it('blackbox keeps streamed tool_call continuation context under response id without missing request context', async () => {
+  it('keeps streamed request context at the handler boundary without a second continuation writer', async () => {
     const pipelineExecute = jest.fn((_input: any) => ({
       status: 200,
       body: {
@@ -2398,20 +2641,21 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
       expect(response.status).toBe(200);
       expect(text).toContain('resp_stream_capture_tool_1');
-      await waitForMockCalls(mockCaptureResponsesRequestContext, 1);
-      await waitForMockCalls(mockRecordResponsesResponseForRequest, 1);
-      expect(mockCaptureResponsesRequestContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: expect.stringContaining('openai-responses-router-gpt-5.4-'),
-        payload: expect.objectContaining({ model: 'gpt-5.4', store: true }),
-        sessionId: 'rcc-zterm',
-        providerKey: 'mimo.pool.mimo-v2.5-pro'
-      }));
-      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: expect.stringContaining('openai-responses-router-gpt-5.4-'),
-        response: expect.objectContaining({ id: 'resp_stream_capture_tool_1' }),
-        sessionId: 'rcc-zterm',
-        providerKey: 'mimo.pool.mimo-v2.5-pro'
-      }));
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(readResponsesRequestContext(pipelineInput.metadata)).toMatchObject({
+        payload: expect.objectContaining({
+          model: 'gpt-5.4',
+          store: true,
+          input: payload.input,
+          tools: payload.tools,
+        }),
+        context: expect.objectContaining({
+          input: payload.input,
+          toolsRaw: payload.tools,
+        }),
+      });
+      expect(mockCaptureResponsesRequestContext).not.toHaveBeenCalled();
+      expect(mockRecordResponsesResponseForRequest).not.toHaveBeenCalled();
     } finally {
       await closeServer(server);
     }
@@ -2424,6 +2668,12 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
       responseId: 'resp_submit_prev_auto_1',
       payload
     }));
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_submit_prev_auto_1',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_chain_submit_auto_1',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'claude-sonnet-4-5',
@@ -3209,7 +3459,13 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
     }
   });
 
-  it('captures resumed submit_tool_outputs request context before returning another tool_call', async () => {
+  it('keeps resumed submit_tool_outputs context without a handler-side continuation writer', async () => {
+    mockLookupResponsesContinuationByResponseId.mockResolvedValueOnce({
+      responseId: 'resp_submit_prev_capture_1',
+      continuationOwner: 'relay',
+      entryKind: 'responses',
+      requestId: 'req_chain_submit_capture_1',
+    });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         model: 'gpt-5.3-codex',
@@ -3276,12 +3532,8 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
 
       expect(result.status).toBe(200);
       expect(result.payload).toMatchObject({ id: 'resp_submit_capture_next_1', status: 'requires_action' });
-      await waitForMockCalls(mockCaptureResponsesRequestContext, 3);
-      const resumedCaptureCall = mockCaptureResponsesRequestContext.mock.calls
-        .map(([arg]) => arg)
-        .find((arg) => arg?.payload?.previous_response_id === 'resp_submit_prev_capture_1');
-      expect(resumedCaptureCall).toEqual(expect.objectContaining({
-        requestId: expect.any(String),
+      const pipelineInput = pipelineExecute.mock.calls[0]?.[0] as Record<string, any>;
+      expect(readResponsesRequestContext(pipelineInput.metadata)).toMatchObject({
         payload: expect.objectContaining({ previous_response_id: 'resp_submit_prev_capture_1' }),
         context: expect.objectContaining({
           input: expect.arrayContaining([
@@ -3289,13 +3541,9 @@ function buildComputerUseNamespaceTools(): Array<Record<string, unknown>> {
           ]),
           toolsRaw: [{ type: 'function', name: 'shell_command', parameters: { type: 'object' } }]
         }),
-        sessionId: undefined
-      }));
-      expect(mockRecordResponsesResponseForRequest).toHaveBeenCalledWith(expect.objectContaining({
-        requestId: expect.stringContaining('openai-responses-router-request-'),
-        response: expect.objectContaining({ id: 'resp_submit_capture_next_1' }),
-        routeHint: 'thinking/gateway-priority-5520-thinking'
-      }));
+      });
+      expect(mockCaptureResponsesRequestContext).not.toHaveBeenCalled();
+      expect(mockRecordResponsesResponseForRequest).not.toHaveBeenCalled();
     } finally {
       await closeServer(server);
     }

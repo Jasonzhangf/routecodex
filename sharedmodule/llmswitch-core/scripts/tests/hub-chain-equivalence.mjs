@@ -10,9 +10,22 @@ const distRoot = path.join(projectRoot, 'dist', 'conversion');
 const hubRoot = path.join(distRoot, 'hub');
 const samplesBase = process.env.CODEX_SAMPLES_DIR || path.join(os.homedir(), '.routecodex', 'codex-samples');
 
-const { createProtocolPlans } = await import(pathToFileURL(path.join(hubRoot, 'registry.js')).href);
-const { runInboundPipeline } = await import(pathToFileURL(path.join(hubRoot, 'pipelines', 'inbound.js')).href);
-const { runOutboundPipeline } = await import(pathToFileURL(path.join(hubRoot, 'pipelines', 'outbound.js')).href);
+let hubModulesPromise;
+
+async function loadHubModules() {
+  if (!hubModulesPromise) {
+    hubModulesPromise = Promise.all([
+      import(pathToFileURL(path.join(hubRoot, 'registry.js')).href),
+      import(pathToFileURL(path.join(hubRoot, 'pipelines', 'inbound.js')).href),
+      import(pathToFileURL(path.join(hubRoot, 'pipelines', 'outbound.js')).href)
+    ]).then(([registry, inbound, outbound]) => ({
+      createProtocolPlans: registry.createProtocolPlans,
+      runInboundPipeline: inbound.runInboundPipeline,
+      runOutboundPipeline: outbound.runOutboundPipeline
+    }));
+  }
+  return hubModulesPromise;
+}
 
 const geminiFixture = path.join(projectRoot, 'tests', 'hub', 'fixtures', 'gemini-request.json');
 
@@ -32,22 +45,35 @@ const CHAINS = [
   ['gemini-chat', 'openai-responses', 'anthropic-messages', 'openai-chat', 'gemini-chat']
 ];
 
-function sanitizePayload(protocol, payload) {
+export function sanitizePayload(protocol, payload) {
   if (!payload || typeof payload !== 'object') return payload;
   if (protocol === 'openai-responses' || protocol === 'anthropic-messages' || protocol === 'openai-chat' || protocol === 'gemini-chat') {
-    const clone = JSON.parse(JSON.stringify(payload));
-    if (clone.metadata && typeof clone.metadata === 'object') {
-      delete clone.metadata.__rcc_tools_field_present;
-      delete clone.metadata.__rcc_raw_system;
-      if (Object.keys(clone.metadata).length === 0) {
-        delete clone.metadata;
+    let next = payload;
+    if (payload.metadata && typeof payload.metadata === 'object') {
+      const metadata = { ...payload.metadata };
+      const hadToolsMarker = Object.prototype.hasOwnProperty.call(metadata, '__rcc_tools_field_present');
+      const hadRawSystem = Object.prototype.hasOwnProperty.call(metadata, '__rcc_raw_system');
+      delete metadata.__rcc_tools_field_present;
+      delete metadata.__rcc_raw_system;
+      if (hadToolsMarker || hadRawSystem) {
+        next = { ...next };
+        if (Object.keys(metadata).length === 0) {
+          delete next.metadata;
+        } else {
+          next.metadata = metadata;
+        }
       }
     }
     if (protocol === 'openai-chat') {
-      delete clone.__rcc_raw_system;
-      delete clone.__rcc_provider_metadata;
+      const hadRawSystem = Object.prototype.hasOwnProperty.call(next, '__rcc_raw_system');
+      const hadProviderMetadata = Object.prototype.hasOwnProperty.call(next, '__rcc_provider_metadata');
+      if (hadRawSystem || hadProviderMetadata) {
+        next = next === payload ? { ...payload } : { ...next };
+        delete next.__rcc_raw_system;
+        delete next.__rcc_provider_metadata;
+      }
     }
-    return clone;
+    return next;
   }
   return payload;
 }
@@ -103,6 +129,7 @@ async function runChain(chain) {
 }
 
 async function convertInbound(payload, protocol) {
+  const { createProtocolPlans, runInboundPipeline } = await loadHubModules();
   const plan = createProtocolPlans(protocol).inbound;
   const context = {
     requestId: `chain-${protocol}-in-${Date.now()}`,
@@ -113,6 +140,7 @@ async function convertInbound(payload, protocol) {
 }
 
 async function convertOutbound(chat, protocol) {
+  const { createProtocolPlans, runOutboundPipeline } = await loadHubModules();
   const plan = createProtocolPlans(protocol).outbound;
   const context = {
     requestId: `chain-${protocol}-out-${Date.now()}`,
@@ -158,9 +186,11 @@ async function main() {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(error);
-  process.exit(1);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
 }

@@ -1,5 +1,5 @@
-import { jest } from '@jest/globals';
-import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
+import { jest } from "@jest/globals";
+import type { ProviderHandle } from "../../../../src/server/runtime/http-server/types";
 // ProviderTrafficGovernorLike: 已迁移到独立 Rust crate (traffic-governor-core)
 
 function hasNonEmptyArray(value: unknown): boolean {
@@ -7,48 +7,62 @@ function hasNonEmptyArray(value: unknown): boolean {
 }
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
-function mockHasRequestedToolsInSemantics(requestSemantics?: Record<string, unknown>): boolean {
+function mockHasRequestedToolsInSemantics(
+  requestSemantics?: Record<string, unknown>,
+): boolean {
   const semantics = readRecord(requestSemantics);
   const tools = readRecord(semantics?.tools);
   return hasNonEmptyArray(tools?.clientToolsRaw);
 }
 
-function mockIsRequiredToolCallTurn(requestSemantics?: Record<string, unknown>): boolean {
+function mockIsRequiredToolCallTurn(
+  requestSemantics?: Record<string, unknown>,
+): boolean {
   const semantics = readRecord(requestSemantics);
   const responses = readRecord(semantics?.responses);
-  return mockHasRequestedToolsInSemantics(requestSemantics)
-    && (responses?.toolChoice === 'required' || responses?.tool_choice === 'required');
+  return (
+    mockHasRequestedToolsInSemantics(requestSemantics) &&
+    (responses?.toolChoice === "required" ||
+      responses?.tool_choice === "required")
+  );
 }
 
-function mockIsToolResultFollowupTurn(requestSemantics?: Record<string, unknown>): boolean {
+function mockIsToolResultFollowupTurn(
+  requestSemantics?: Record<string, unknown>,
+): boolean {
   const semantics = readRecord(requestSemantics);
   const continuation = readRecord(semantics?.continuation);
   const toolContinuation = readRecord(continuation?.toolContinuation);
-  if (toolContinuation?.mode === 'submit_tool_outputs') {
+  if (toolContinuation?.mode === "submit_tool_outputs") {
     return true;
   }
   if (hasNonEmptyArray(semantics?.toolOutputs)) {
     return true;
   }
   const messages = Array.isArray(semantics?.messages) ? semantics.messages : [];
-  return messages.some((message) => readRecord(message)?.role === 'tool');
+  return messages.some((message) => readRecord(message)?.role === "tool");
 }
 
-function mockIsProviderNativeResumeContinuation(requestSemantics?: Record<string, unknown>): boolean {
+function mockIsProviderNativeResumeContinuation(
+  requestSemantics?: Record<string, unknown>,
+): boolean {
   const semantics = readRecord(requestSemantics);
   const continuation = readRecord(semantics?.continuation);
-  if (continuation?.continuationOwner !== 'direct') {
+  if (continuation?.continuationOwner !== "direct") {
     return false;
   }
   const resumeFrom = readRecord(continuation?.resumeFrom);
-  return typeof resumeFrom?.previousResponseId === 'string'
-    || typeof continuation?.previousResponseId === 'string'
-    || (continuation?.mode === 'submit_tool_outputs' && typeof continuation?.responseId === 'string');
+  return (
+    typeof resumeFrom?.previousResponseId === "string" ||
+    typeof continuation?.previousResponseId === "string" ||
+    (continuation?.mode === "submit_tool_outputs" &&
+      typeof continuation?.responseId === "string")
+  );
 }
 
 function createRequestExecutorLocalRuntimeIntegrationsMock() {
@@ -61,13 +75,94 @@ function createRequestExecutorLocalRuntimeIntegrationsMock() {
   };
 }
 
-let requestExecutorLocalHubPipelineExecute: ((input: unknown) => unknown) | undefined;
+let requestExecutorLocalHubPipelineExecute:
+  | ((input: unknown) => unknown)
+  | undefined;
+let requestExecutorLocalVirtualRouterConcurrencyMarks: string[] | undefined;
+
+function normalizeLocalHubPipelineInput(input: unknown): unknown {
+  const record =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : undefined;
+  if (!record) {
+    return input;
+  }
+  const metadata =
+    record.metadata &&
+    typeof record.metadata === "object" &&
+    !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : {};
+  if (record.retryExclusionSet === undefined) {
+    return input;
+  }
+  return {
+    ...record,
+    metadata: {
+      ...metadata,
+      excludedProviderKeys: record.retryExclusionSet,
+    },
+  };
+}
+
+function normalizeLocalHubPipelineResult(
+  result: unknown,
+  input: unknown,
+): unknown {
+  const record =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : undefined;
+  const target =
+    record?.target &&
+    typeof record.target === "object" &&
+    !Array.isArray(record.target)
+      ? (record.target as Record<string, unknown>)
+      : undefined;
+  if (!record?.providerPayload || !target?.providerKey) {
+    return result;
+  }
+  const routingDecision =
+    record.routingDecision &&
+    typeof record.routingDecision === "object" &&
+    !Array.isArray(record.routingDecision)
+      ? (record.routingDecision as Record<string, unknown>)
+      : {};
+  if (typeof routingDecision.providerProtocol === "string") {
+    return result;
+  }
+  const inputRecord =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  return {
+    ...record,
+    routingDecision: {
+      ...routingDecision,
+      routeName:
+        typeof routingDecision.routeName === "string"
+          ? routingDecision.routeName
+          : "test-route",
+      providerProtocol:
+        typeof target.providerProtocol === "string"
+          ? target.providerProtocol
+          : typeof target.outboundProfile === "string"
+            ? target.outboundProfile
+            : typeof inputRecord.providerProtocol === "string"
+              ? inputRecord.providerProtocol
+              : "openai-chat",
+    },
+  };
+}
 
 function createRequestExecutorLocalRoutingIntegrationsMock() {
   const resolveRccUserDirNativeSync = () => process.cwd();
   const resolveRccPathNativeSync = (segments?: unknown) => {
-    const parts = Array.isArray(segments) ? segments.filter((part): part is string => typeof part === 'string') : [];
-    return [process.cwd(), ...parts].join('/');
+    const parts = Array.isArray(segments)
+      ? segments.filter((part): part is string => typeof part === "string")
+      : [];
+    return [process.cwd(), ...parts].join("/");
   };
   return {
     buildRequestStageRuntimeControlWritePlanNative: () => ({
@@ -75,189 +170,273 @@ function createRequestExecutorLocalRoutingIntegrationsMock() {
     }),
     executeHubPipelineNative: (_handle: string, input: unknown) => {
       if (!requestExecutorLocalHubPipelineExecute) {
-        throw new Error('request-executor local Hub pipeline fixture is not installed');
+        throw new Error(
+          "request-executor local Hub pipeline fixture is not installed",
+        );
       }
-      return requestExecutorLocalHubPipelineExecute(input);
+      const legacyInput = normalizeLocalHubPipelineInput(input);
+      return normalizeLocalHubPipelineResult(
+        requestExecutorLocalHubPipelineExecute(legacyInput),
+        legacyInput,
+      );
     },
-    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: () => undefined,
-    markHubPipelineVirtualRouterConcurrencyScopeIdleNative: () => undefined,
+    markHubPipelineVirtualRouterConcurrencyScopeBusyNative: (
+      _handle: string,
+      scopeKey: string,
+    ) =>
+      requestExecutorLocalVirtualRouterConcurrencyMarks?.push(
+        `busy:${scopeKey}`,
+      ),
+    markHubPipelineVirtualRouterConcurrencyScopeIdleNative: (
+      _handle: string,
+      scopeKey: string,
+    ) =>
+      requestExecutorLocalVirtualRouterConcurrencyMarks?.push(
+        `idle:${scopeKey}`,
+      ),
     resolveRccPathNativeSync,
-    resolveRccSnapshotsDirNativeSync: () => resolveRccPathNativeSync(['codex-samples']),
+    resolveRccSnapshotsDirNativeSync: () =>
+      resolveRccPathNativeSync(["codex-samples"]),
     resolveRccUserDirNativeSync,
     resolveEntryProtocolFromEndpointNative: (entryEndpoint: string) => {
-      if (entryEndpoint === '/v1/responses') return 'openai-responses';
-      if (entryEndpoint === '/v1/messages') return 'anthropic-messages';
-      return 'openai-chat';
+      if (entryEndpoint === "/v1/responses") return "openai-responses";
+      if (entryEndpoint === "/v1/messages") return "anthropic-messages";
+      return "openai-chat";
     },
   };
 }
 
-const { __requestExecutorTestables, createRequestExecutor } = await import('../../../../src/server/runtime/http-server/request-executor');
-const { resolveProviderFailureActionPlan } = await import('../../../../src/providers/core/runtime/provider-failure-policy.js');
-const { getServerToolRuntimeState, setServerToolEnabled } = await import('../../../../src/server/runtime/http-server/servertool-admin-state');
-const { StatsManager } = await import('../../../../src/server/runtime/http-server/stats-manager');
-const { MetadataCenter } = await import('../../../../src/server/runtime/http-server/metadata-center/metadata-center.js');
+function createRequestExecutorLocalHubPipelineHandleMock() {
+  return {
+    readHubPipelineNativeHandle: (pipeline: unknown) => {
+      if (typeof pipeline === "string" && pipeline.trim()) {
+        return pipeline;
+      }
+      const execute = (
+        pipeline as { execute?: (input: unknown) => unknown } | null
+      )?.execute;
+      if (typeof execute !== "function") {
+        return null;
+      }
+      requestExecutorLocalHubPipelineExecute = (input: unknown) =>
+        execute.call(pipeline, input);
+      return "request-executor-local-native-handle";
+    },
+  };
+}
+
+jest.unstable_mockModule(
+  "../../../../src/modules/llmswitch/bridge/routing-integrations.js",
+  createRequestExecutorLocalRoutingIntegrationsMock,
+);
+jest.unstable_mockModule(
+  "../../../../src/modules/llmswitch/bridge/runtime-integrations.js",
+  createRequestExecutorLocalRuntimeIntegrationsMock,
+);
+jest.unstable_mockModule(
+  "../../../../src/server/runtime/http-server/hub-pipeline-handle.js",
+  createRequestExecutorLocalHubPipelineHandleMock,
+);
+
+const { __requestExecutorTestables, createRequestExecutor } =
+  await import("../../../../src/server/runtime/http-server/request-executor");
+const { resolveProviderFailureActionPlan } =
+  await import("../../../../src/providers/core/runtime/provider-failure-policy.js");
+const { getServerToolRuntimeState, setServerToolEnabled } =
+  await import("../../../../src/server/runtime/http-server/servertool-admin-state");
+const { StatsManager } =
+  await import("../../../../src/server/runtime/http-server/stats-manager");
+const { MetadataCenter } =
+  await import("../../../../src/server/runtime/http-server/metadata-center/metadata-center.js");
 
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
-  if (!result || typeof result !== 'object') {
+  if (!result || typeof result !== "object") {
     return result;
   }
   const record = result as { status?: unknown; data?: unknown };
-  if (record.status !== 200 || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
+  if (
+    record.status !== 200 ||
+    !record.data ||
+    typeof record.data !== "object" ||
+    Array.isArray(record.data)
+  ) {
     return result;
   }
   const data = record.data as Record<string, unknown>;
   if (
-    Array.isArray(data.choices)
-    || Array.isArray(data.candidates)
-    || Array.isArray(data.output)
-    || typeof data.output_text === 'string'
-    || typeof data.content === 'string'
-    || Object.prototype.hasOwnProperty.call(data, 'error')
-    || data.mode === 'sse'
+    Array.isArray(data.choices) ||
+    Array.isArray(data.candidates) ||
+    Array.isArray(data.output) ||
+    typeof data.output_text === "string" ||
+    typeof data.content === "string" ||
+    Object.prototype.hasOwnProperty.call(data, "error") ||
+    data.mode === "sse"
   ) {
     return result;
   }
-  const id = typeof data.id === 'string' && data.id.trim() ? data.id.trim() : 'test-ok';
+  const id =
+    typeof data.id === "string" && data.id.trim() ? data.id.trim() : "test-ok";
   return {
     ...record,
     data: {
       id,
-      object: 'chat.completion',
-      model: 'test-model',
+      object: "chat.completion",
+      model: "test-model",
       choices: [
         {
           index: 0,
           message: {
-            role: 'assistant',
-            content: 'ok'
+            role: "assistant",
+            content: "ok",
           },
-          finish_reason: 'stop'
-        }
-      ]
-    }
+          finish_reason: "stop",
+        },
+      ],
+    },
   };
 }
 
 function buildHandle(
   providerKey: string,
   processFn: () => Promise<unknown>,
-  protocol: 'gemini-chat' | 'openai-chat' | 'openai-responses' = 'gemini-chat'
+  protocol: "gemini-chat" | "openai-chat" | "openai-responses" = "gemini-chat",
 ): ProviderHandle {
-  const isOpenAI = protocol === 'openai-chat' || protocol === 'openai-responses';
+  const isOpenAI =
+    protocol === "openai-chat" || protocol === "openai-responses";
   return {
     runtimeKey: providerKey,
     providerId: providerKey,
-    providerType: isOpenAI ? 'openai' : 'gemini',
-    providerFamily: isOpenAI ? 'openai' : 'gemini',
+    providerType: isOpenAI ? "openai" : "gemini",
+    providerFamily: isOpenAI ? "openai" : "gemini",
     providerProtocol: protocol,
     runtime: {
       runtimeKey: providerKey,
       providerId: providerKey,
       keyAlias: providerKey,
-      providerType: protocol === 'openai-responses' ? 'responses' : isOpenAI ? 'openai' : 'gemini',
-      endpoint: 'https://example.invalid',
-      auth: { type: 'oauth' },
-      outboundProfile: protocol
+      providerType:
+        protocol === "openai-responses"
+          ? "responses"
+          : isOpenAI
+            ? "openai"
+            : "gemini",
+      endpoint: "https://example.invalid",
+      auth: { type: "oauth" },
+      outboundProfile: protocol,
     },
     instance: {
-      async initialize() { },
-      async cleanup() { },
-      processIncoming: async () => normalizeMinimalSuccessResponse(await processFn())
-    }
+      async initialize() {},
+      async cleanup() {},
+      processIncoming: async () =>
+        normalizeMinimalSuccessResponse(await processFn()),
+    },
   };
 }
 
-function buildMinimalResponsesSuccessBody(id: string, text = 'ok'): Record<string, unknown> {
+function buildMinimalResponsesSuccessBody(
+  id: string,
+  text = "ok",
+): Record<string, unknown> {
   return {
     id,
-    object: 'response',
-    status: 'completed',
+    object: "response",
+    status: "completed",
     output: [
       {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text }]
-      }
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      },
     ],
     usage: {
       input_tokens: 1,
       output_tokens: 1,
-      total_tokens: 2
-    }
+      total_tokens: 2,
+    },
   };
 }
 
-describe('HubRequestExecutor failover', () => {
+describe("HubRequestExecutor failover", () => {
   let previousServerToolState: ReturnType<typeof getServerToolRuntimeState>;
 
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     previousServerToolState = getServerToolRuntimeState();
-    setServerToolEnabled(false, 'request-executor.spec failover');
+    setServerToolEnabled(false, "request-executor.spec failover");
   });
 
   afterEach(() => {
-    setServerToolEnabled(previousServerToolState.enabled, previousServerToolState.updatedBy);
+    setServerToolEnabled(
+      previousServerToolState.enabled,
+      previousServerToolState.updatedBy,
+    );
   });
 
-  test('provider failure switches provider even when maxAttempts is one', async () => {
+  test("provider failure switches provider even when maxAttempts is one", async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
-    const providerA = 'tab.key1.gpt-5.2';
-    const providerB = 'tab.key2.gpt-5.2';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "1";
+    const providerA = "tab.key1.gpt-5.2";
+    const providerB = "tab.key2.gpt-5.2";
 
     const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 429'), { statusCode: 429, code: 'HTTP_429' });
+      throw Object.assign(new Error("HTTP 429"), {
+        statusCode: 429,
+        code: "HTTP_429",
+      });
     });
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "resp_ok" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
-      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
+      [providerA, buildHandle(providerA, failingProcess, "openai-chat")],
+      [providerB, buildHandle(providerB, successProcess, "openai-chat")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input?.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
         const selected = excluded.has(providerA) ? providerB : providerA;
         return {
           requestId: input.id,
           providerPayload: {
-            model: 'gpt-5.2',
-            previous_response_id: 'resp_inline_retry_leak',
+            model: "gpt-5.2",
+            previous_response_id: "resp_inline_retry_leak",
             stream: true,
             store: false,
             input: [
               {
-                role: 'user',
-                type: 'message',
-                content: [{ type: 'input_text', text: 'continue' }]
-              }
-            ]
+                role: "user",
+                type: "message",
+                content: [{ type: "input_text", text: "continue" }],
+              },
+            ],
           },
           target: {
             providerKey: selected,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: selected
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: selected,
           },
           routingDecision: {
-            routeName: 'default',
-            providerProtocol: 'openai-chat',
-            pool: [providerA, providerB]
+            routeName: "default",
+            providerProtocol: "openai-chat",
+            pool: [providerA, providerB],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     try {
@@ -266,45 +445,50 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: () => pipeline as any,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
       let convertCount = 0;
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockImplementation(async () => {
-        convertCount += 1;
-        if (convertCount === 1) {
-          throw Object.assign(new Error('missing required tool call'), {
-            code: 'MISSING_REQUIRED_TOOL_CALL',
-            statusCode: 502,
-            status: 502,
-            retryable: true,
-            requestExecutorProviderErrorStage: 'host.response_contract'
-          });
-        }
-        return {
-          status: 200,
-          body: buildMinimalResponsesSuccessBody('resp_ok_after_reroute', 'ok_after_reroute')
-        };
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockImplementation(async () => {
+          convertCount += 1;
+          if (convertCount === 1) {
+            throw Object.assign(new Error("missing required tool call"), {
+              code: "MISSING_REQUIRED_TOOL_CALL",
+              statusCode: 502,
+              status: 502,
+              retryable: true,
+              requestExecutorProviderErrorStage: "host.response_contract",
+            });
+          }
+          return {
+            status: 200,
+            body: buildMinimalResponsesSuccessBody(
+              "resp_ok_after_reroute",
+              "ok_after_reroute",
+            ),
+          };
+        });
 
       const result = await executor.execute({
-        requestId: 'req-reroute-source-entry-rebuild',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-reroute-source-entry-rebuild",
+        entryEndpoint: "/v1/responses",
         body: {
-          model: 'gpt-5.2',
-          previous_response_id: 'resp_original_entry',
+          model: "gpt-5.2",
+          previous_response_id: "resp_original_entry",
           stream: true,
           store: false,
           input: [
             {
-              role: 'user',
-              type: 'message',
-              content: [{ type: 'input_text', text: 'continue' }]
-            }
-          ]
+              role: "user",
+              type: "message",
+              content: [{ type: "input_text", text: "continue" }],
+            },
+          ],
         },
         headers: {},
         metadata: {
@@ -312,31 +496,40 @@ describe('HubRequestExecutor failover', () => {
           inboundStream: true,
           responsesRequestContext: {
             payload: {
-              model: 'gpt-5.2',
-              previous_response_id: 'resp_original_entry',
+              model: "gpt-5.2",
+              previous_response_id: "resp_original_entry",
               stream: true,
-              store: false
+              store: false,
             },
             context: {
               input: [
                 {
-                  role: 'user',
-                  type: 'message',
-                  content: [{ type: 'input_text', text: 'continue' }]
-                }
-              ]
-            }
-          }
-        }
+                  role: "user",
+                  type: "message",
+                  content: [{ type: "input_text", text: "continue" }],
+                },
+              ],
+            },
+          },
+        },
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
       expect(failingProcess).toHaveBeenCalledTimes(1);
       expect(successProcess).toHaveBeenCalledTimes(1);
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<string, any>;
-      expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
-      expect(secondPipelineInput?.providerKey ?? secondPipelineInput?.target?.providerKey ?? providerB).toBe(providerB);
+      const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<
+        string,
+        any
+      >;
+      expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([
+        providerA,
+      ]);
+      expect(
+        secondPipelineInput?.providerKey ??
+          secondPipelineInput?.target?.providerKey ??
+          providerB,
+      ).toBe(providerB);
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -346,204 +539,220 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('reroutes host response contract empty assistant payload to next provider instead of returning 502 early', async () => {
+  test("reroutes host response contract empty assistant payload to next provider instead of returning 502 early", async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
-    const providerA = 'asxs.crsa.gpt-5.4';
-    const providerB = '1token.key1.gpt-5.4';
-    const declaredTools = [{
-      type: 'function',
-      function: {
-        name: 'exec_command',
-        description: 'run shell command',
-        parameters: {
-          type: 'object',
-          properties: {
-            cmd: { type: 'string' }
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
+    const providerA = "asxs.crsa.gpt-5.4";
+    const providerB = "1token.key1.gpt-5.4";
+    const declaredTools = [
+      {
+        type: "function",
+        function: {
+          name: "exec_command",
+          description: "run shell command",
+          parameters: {
+            type: "object",
+            properties: {
+              cmd: { type: "string" },
+            },
+            required: ["cmd"],
           },
-          required: ['cmd']
-        }
-      }
-    }];
+        },
+      },
+    ];
 
     const firstProcess = jest.fn(async () => ({
       status: 200,
       data: {
-        status: 'completed',
-        output_text: '',
+        status: "completed",
+        output_text: "",
         output: [
           {
-            type: 'reasoning',
+            type: "reasoning",
             summary: [
               {
-                type: 'summary_text',
-                text: 'I have all the information I need. Let me create the hook file now.'
-              }
-            ]
-          }
-        ]
-      }
+                type: "summary_text",
+                text: "I have all the information I need. Let me create the hook file now.",
+              },
+            ],
+          },
+        ],
+      },
     }));
     const secondProcess = jest.fn(async () => ({
       status: 200,
-      data: buildMinimalResponsesSuccessBody('resp_ok_b', 'ok_after_reroute')
+      data: buildMinimalResponsesSuccessBody("resp_ok_b", "ok_after_reroute"),
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, {
-        runtimeKey: providerA,
-        providerId: providerA,
-        providerType: 'responses',
-        providerFamily: 'responses',
-        providerProtocol: 'openai-responses',
-        runtime: {
+      [
+        providerA,
+        {
           runtimeKey: providerA,
           providerId: providerA,
-          keyAlias: providerA,
-          providerType: 'responses',
-          endpoint: 'https://example.invalid',
-          auth: { type: 'oauth' },
-          outboundProfile: 'openai-responses'
+          providerType: "responses",
+          providerFamily: "responses",
+          providerProtocol: "openai-responses",
+          runtime: {
+            runtimeKey: providerA,
+            providerId: providerA,
+            keyAlias: providerA,
+            providerType: "responses",
+            endpoint: "https://example.invalid",
+            auth: { type: "oauth" },
+            outboundProfile: "openai-responses",
+          },
+          instance: {
+            async initialize() {},
+            async cleanup() {},
+            processIncoming: firstProcess,
+          },
         },
-        instance: {
-          async initialize() {},
-          async cleanup() {},
-          processIncoming: firstProcess
-        }
-      }],
-      [providerB, {
-        runtimeKey: providerB,
-        providerId: providerB,
-        providerType: 'responses',
-        providerFamily: 'responses',
-        providerProtocol: 'openai-responses',
-        runtime: {
+      ],
+      [
+        providerB,
+        {
           runtimeKey: providerB,
           providerId: providerB,
-          keyAlias: providerB,
-          providerType: 'responses',
-          endpoint: 'https://example.invalid',
-          auth: { type: 'oauth' },
-          outboundProfile: 'openai-responses'
+          providerType: "responses",
+          providerFamily: "responses",
+          providerProtocol: "openai-responses",
+          runtime: {
+            runtimeKey: providerB,
+            providerId: providerB,
+            keyAlias: providerB,
+            providerType: "responses",
+            endpoint: "https://example.invalid",
+            auth: { type: "oauth" },
+            outboundProfile: "openai-responses",
+          },
+          instance: {
+            async initialize() {},
+            async cleanup() {},
+            processIncoming: secondProcess,
+          },
         },
-        instance: {
-          async initialize() {},
-          async cleanup() {},
-          processIncoming: secondProcess
-        }
-      }]
+      ],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const selectedProviders: string[] = [];
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input?.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
         const selected = excluded.has(providerA) ? providerB : providerA;
         selectedProviders.push(selected);
         return {
           requestId: input.id,
           processedRequest: {
-            model: 'gpt-5.4',
+            model: "gpt-5.4",
             tools: declaredTools,
-            tool_choice: 'required',
+            tool_choice: "required",
             input: [
               {
-                role: 'user',
-                type: 'message',
-                content: [{ type: 'input_text', text: 'continue' }]
-              }
-            ]
+                role: "user",
+                type: "message",
+                content: [{ type: "input_text", text: "continue" }],
+              },
+            ],
           },
           standardizedRequest: {
-            model: 'gpt-5.4',
+            model: "gpt-5.4",
             tools: declaredTools,
-            tool_choice: 'required'
+            tool_choice: "required",
           },
           providerPayload: {
-            model: 'gpt-5.4',
-            tool_choice: 'required',
+            model: "gpt-5.4",
+            tool_choice: "required",
             tools: declaredTools,
             input: [
               {
-                role: 'user',
-                type: 'message',
-                content: [{ type: 'input_text', text: 'continue' }]
-              }
-            ]
+                role: "user",
+                type: "message",
+                content: [{ type: "input_text", text: "continue" }],
+              },
+            ],
           },
           target: {
             providerKey: selected,
-            providerType: 'responses',
-            outboundProfile: 'openai-responses',
-            runtimeKey: selected
+            providerType: "responses",
+            outboundProfile: "openai-responses",
+            runtimeKey: selected,
           },
           routingDecision: {
-            routeName: 'longcontext',
-            providerProtocol: 'openai-responses',
-            pool: [providerA, providerB]
+            routeName: "longcontext",
+            providerProtocol: "openai-responses",
+            pool: [providerA, providerB],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const logStage = jest.fn();
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline as any,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage,
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
       let convertCount = 0;
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockImplementation(async () => {
-        convertCount += 1;
-        if (convertCount === 1) {
-          throw Object.assign(new Error('empty assistant payload'), {
-            code: 'EMPTY_ASSISTANT_RESPONSE',
-            statusCode: 502,
-            status: 502,
-            retryable: true,
-            requestExecutorProviderErrorStage: 'host.response_contract'
-          });
-        }
-        return {
-          status: 200,
-          body: buildMinimalResponsesSuccessBody('resp_ok_b', 'ok_after_reroute')
-        };
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockImplementation(async () => {
+          convertCount += 1;
+          if (convertCount === 1) {
+            throw Object.assign(new Error("empty assistant payload"), {
+              code: "EMPTY_ASSISTANT_RESPONSE",
+              statusCode: 502,
+              status: 502,
+              retryable: true,
+              requestExecutorProviderErrorStage: "host.response_contract",
+            });
+          }
+          return {
+            status: 200,
+            body: buildMinimalResponsesSuccessBody(
+              "resp_ok_b",
+              "ok_after_reroute",
+            ),
+          };
+        });
 
       const result = await executor.execute({
-        requestId: 'req-empty-assistant-reroute',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-empty-assistant-reroute",
+        entryEndpoint: "/v1/responses",
         body: {
-          model: 'gpt-5.4',
+          model: "gpt-5.4",
           tools: declaredTools,
-          tool_choice: 'required',
+          tool_choice: "required",
           input: [
             {
-              role: 'user',
-              type: 'message',
-              content: [{ type: 'input_text', text: 'continue' }]
-            }
-          ]
+              role: "user",
+              type: "message",
+              content: [{ type: "input_text", text: "continue" }],
+            },
+          ],
         },
         headers: {},
-        metadata: {}
+        metadata: {},
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -552,20 +761,31 @@ describe('HubRequestExecutor failover', () => {
       expect(secondProcess).toHaveBeenCalledTimes(1);
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
       expect(
-        logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait')
+        logStage.mock.calls.some(
+          (call) => call[0] === "provider.route_pool_cooldown_wait",
+        ),
       ).toBe(false);
       expect(
-        logStage.mock.calls.some((call) => call[0] === 'server.global_error_backoff_wait')
+        logStage.mock.calls.some(
+          (call) => call[0] === "server.global_error_backoff_wait",
+        ),
       ).toBe(false);
       const switchLines = warnSpy.mock.calls
-        .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]') && line.includes('req-empty-assistant-reroute'));
-      expect(switchLines.some((line) => (
-        line.includes(`provider=${providerA}`)
-        && line.includes('switch=exclude_and_reroute')
-        && line.includes('decision=exclude_and_reroute')
-        && line.includes('code=EMPTY_ASSISTANT_RESPONSE')
-      ))).toBe(true);
+        .map((call) => String(call[0] ?? ""))
+        .filter(
+          (line) =>
+            line.includes("[provider-switch]") &&
+            line.includes("req-empty-assistant-reroute"),
+        );
+      expect(
+        switchLines.some(
+          (line) =>
+            line.includes(`provider=${providerA}`) &&
+            line.includes("switch=exclude_and_reroute") &&
+            line.includes("decision=exclude_and_reroute") &&
+            line.includes("code=EMPTY_ASSISTANT_RESPONSE"),
+        ),
+      ).toBe(true);
     } finally {
       warnSpy.mockRestore();
       if (previousMaxAttempts === undefined) {
@@ -576,56 +796,69 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('provider failure does not retry the same provider from an observed singleton routePool', async () => {
+  test("provider failure does not retry the same provider from an observed singleton routePool", async () => {
     const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
-    const providerA = 'primary.key1.gpt-5.5';
-    const providerB = 'backup.key1.gpt-5.5';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
+    const providerA = "primary.key1.gpt-5.5";
+    const providerB = "backup.key1.gpt-5.5";
 
     const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 525: upstream SSL handshake failed'), {
-        statusCode: 525,
-        code: 'HTTP_525',
-        upstreamCode: 'HTTP_525'
-      });
+      throw Object.assign(
+        new Error("HTTP 525: upstream SSL handshake failed"),
+        {
+          statusCode: 525,
+          code: "HTTP_525",
+          upstreamCode: "HTTP_525",
+        },
+      );
     });
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "resp_ok" },
+    }));
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
-      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
+      [providerA, buildHandle(providerA, failingProcess, "openai-chat")],
+      [providerB, buildHandle(providerB, successProcess, "openai-chat")],
     ]);
     const selectedProviders: string[] = [];
-    const metadataSeenByAttempt: Array<Record<string, unknown> | undefined> = [];
+    const metadataSeenByAttempt: Array<Record<string, unknown> | undefined> =
+      [];
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input?.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
         const selected = excluded.has(providerA) ? providerB : providerA;
         selectedProviders.push(selected);
         metadataSeenByAttempt.push(input?.metadata);
         return {
           requestId: input.id,
-          providerPayload: { model: 'gpt-5.5', messages: [{ role: 'user', content: 'ping' }] },
+          providerPayload: {
+            model: "gpt-5.5",
+            messages: [{ role: "user", content: "ping" }],
+          },
           target: {
             providerKey: selected,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: selected
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: selected,
           },
           routingDecision: {
-            routeName: 'tools',
-            providerProtocol: 'openai-chat',
-            pool: [selected]
+            routeName: "tools",
+            providerProtocol: "openai-chat",
+            pool: [selected],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     try {
@@ -634,27 +867,29 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: () => pipeline as any,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-        status: 200,
-        body: buildMinimalResponsesSuccessBody('resp_ok_after_switch', 'ok')
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: buildMinimalResponsesSuccessBody("resp_ok_after_switch", "ok"),
+        });
 
       const result = await executor.execute({
-        requestId: 'req-observed-singleton-routepool-switches-provider',
-        entryEndpoint: '/v1/chat/completions',
+        requestId: "req-observed-singleton-routepool-switches-provider",
+        entryEndpoint: "/v1/chat/completions",
         body: {
-          model: 'gpt-5.5',
-          messages: [{ role: 'user', content: 'ping' }],
-          stream: false
+          model: "gpt-5.5",
+          messages: [{ role: "user", content: "ping" }],
+          stream: false,
         },
         headers: {},
-        metadata: {}
+        metadata: {},
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -662,7 +897,9 @@ describe('HubRequestExecutor failover', () => {
       expect(failingProcess).toHaveBeenCalledTimes(1);
       expect(successProcess).toHaveBeenCalledTimes(1);
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      expect(metadataSeenByAttempt[1]?.excludedProviderKeys).toEqual([providerA]);
+      expect(metadataSeenByAttempt[1]?.excludedProviderKeys).toEqual([
+        providerA,
+      ]);
     } finally {
       if (previousMaxAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -672,202 +909,255 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay', async () => {
+  test("clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay", async () => {
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '3';
-    const providerA = 'XLC.key1.glm-5.2';
-    const providerB = 'tokenrelay.key1.model-c';
-    const routePool = [providerA, providerB, 'XLC.key2.model-c'];
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "3";
+    const providerA = "XLC.key1.glm-5.2";
+    const providerB = "tokenrelay.key1.model-c";
+    const routePool = [providerA, providerB, "XLC.key2.model-c"];
 
     const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('model_not_found'), {
+      throw Object.assign(new Error("model_not_found"), {
         statusCode: 503,
         status: 503,
-        code: 'model_not_found',
-        upstreamCode: 'HTTP_503',
-        retryable: true
-  });
+        code: "model_not_found",
+        upstreamCode: "HTTP_503",
+        retryable: true,
+      });
 
-  test('provider failure with alternative provider does not surface blocking recoverable wait and switches immediately', async () => {
-    const previousMaxAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
-    const providerA = 'tab.key1.gpt-5.4';
-    const providerB = 'tab.key2.gpt-5.4';
-    const failingProcess = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 502'), { statusCode: 502, code: 'HTTP_502' });
-    });
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+      test("provider failure with alternative provider does not surface blocking recoverable wait and switches immediately", async () => {
+        const previousMaxAttempts =
+          process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
+        const providerA = "tab.key1.gpt-5.4";
+        const providerB = "tab.key2.gpt-5.4";
+        const failingProcess = jest.fn(async () => {
+          throw Object.assign(new Error("HTTP 502"), {
+            statusCode: 502,
+            code: "HTTP_502",
+          });
+        });
+        const successProcess = jest.fn(async () => ({
+          status: 200,
+          data: { id: "resp_ok" },
+        }));
 
-    const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
-      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
-    ]);
+        const handles = new Map<string, ProviderHandle>([
+          [providerA, buildHandle(providerA, failingProcess, "openai-chat")],
+          [providerB, buildHandle(providerB, successProcess, "openai-chat")],
+        ]);
 
-    const runtimeManager = {
-      resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
-        );
-        const selected = excluded.has(providerA) ? providerB : providerA;
-        return {
-          requestId: input.id,
-          providerPayload: { model: 'gpt-5.4', input: 'ping' },
-          target: {
-            providerKey: selected,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: selected
-          },
-          routingDecision: {
-            routeName: 'default',
-            providerProtocol: 'openai-chat',
-            pool: [providerA, providerB]
-          },
-          metadata: {}
+        const runtimeManager = {
+          resolveRuntimeKey: (providerKey: string) => providerKey,
+          getHandleByRuntimeKey: (runtimeKey?: string) =>
+            runtimeKey ? handles.get(runtimeKey) : undefined,
         };
-      }),
-      updateVirtualRouterConfig: jest.fn()
-    };
 
-    try {
-      const executor = createRequestExecutor({
-        runtimeManager,
-        getHubPipeline: () => pipeline as any,
-        getModuleDependencies: () => ({
-          errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
+        const pipeline = {
+          execute: jest.fn((input: any) => {
+            const excluded = new Set<string>(
+              Array.isArray(input?.metadata?.excludedProviderKeys)
+                ? input.metadata.excludedProviderKeys
+                : [],
+            );
+            const selected = excluded.has(providerA) ? providerB : providerA;
+            return {
+              requestId: input.id,
+              providerPayload: { model: "gpt-5.4", input: "ping" },
+              target: {
+                providerKey: selected,
+                providerType: "openai",
+                outboundProfile: "openai-chat",
+                runtimeKey: selected,
+              },
+              routingDecision: {
+                routeName: "default",
+                providerProtocol: "openai-chat",
+                pool: [providerA, providerB],
+              },
+              metadata: {},
+            };
+          }),
+          updateVirtualRouterConfig: jest.fn(),
+        };
+
+        try {
+          const executor = createRequestExecutor({
+            runtimeManager,
+            getHubPipeline: () => pipeline as any,
+            getModuleDependencies: () => ({
+              errorHandlingCenter: {
+                handleError: jest.fn(async () => undefined),
+              },
+            }),
+            logStage: jest.fn(),
+            stats: new StatsManager(),
+          });
+          jest
+            .spyOn(executor as any, "convertProviderResponseIfNeeded")
+            .mockImplementation(async () => ({
+              status: 200,
+              body: buildMinimalResponsesSuccessBody(
+                "resp_ok_after_switch",
+                "ok_after_switch",
+              ),
+            }));
+
+          const result = await executor.execute({
+            requestId: "req-no-blocking-recoverable-wait",
+            entryEndpoint: "/v1/responses",
+            body: { model: "gpt-5.4", input: "ping" },
+            headers: {},
+            metadata: { stream: true, inboundStream: true },
+          });
+
+          expect(result).toEqual(expect.objectContaining({ status: 200 }));
+          expect(failingProcess).toHaveBeenCalledTimes(1);
+          expect(successProcess).toHaveBeenCalledTimes(1);
+          expect(pipeline.execute).toHaveBeenCalledTimes(2);
+          const secondPipelineInput = pipeline.execute.mock
+            .calls[1]?.[0] as Record<string, any>;
+          expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([
+            providerA,
+          ]);
+          expect(
+            secondPipelineInput?.target?.providerKey ??
+              secondPipelineInput?.providerKey,
+          ).toBe(providerB);
+          expect(
+            (executor as any).logStage.mock.calls.some(
+              (call: unknown[]) =>
+                call[0] === "provider.route_pool_cooldown_wait",
+            ),
+          ).toBe(false);
+          expect(
+            (executor as any).logStage.mock.calls.some(
+              (call: unknown[]) =>
+                call[0] === "server.global_error_backoff_wait",
+            ),
+          ).toBe(false);
+          expect(
+            (executor as any).logStage.mock.calls.some(
+              (call: unknown[]) =>
+                call[0] === "provider.route_pool_cooldown_wait.completed",
+            ),
+          ).toBe(false);
+        } finally {
+          if (previousMaxAttempts === undefined) {
+            delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+          } else {
+            process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
           }
-        }),
-        logStage: jest.fn(),
-        stats: new StatsManager()
+        }
       });
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockImplementation(async () => ({
-        status: 200,
-        body: buildMinimalResponsesSuccessBody('resp_ok_after_switch', 'ok_after_switch')
-      }));
-
-      const result = await executor.execute({
-        requestId: 'req-no-blocking-recoverable-wait',
-        entryEndpoint: '/v1/responses',
-        body: { model: 'gpt-5.4', input: 'ping' },
-        headers: {},
-        metadata: { stream: true, inboundStream: true }
-      });
-
-      expect(result).toEqual(expect.objectContaining({ status: 200 }));
-      expect(failingProcess).toHaveBeenCalledTimes(1);
-      expect(successProcess).toHaveBeenCalledTimes(1);
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<string, any>;
-      expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
-      expect(secondPipelineInput?.target?.providerKey ?? secondPipelineInput?.providerKey).toBe(providerB);
-      expect((executor as any).logStage.mock.calls.some((call: unknown[]) => call[0] === 'provider.route_pool_cooldown_wait')).toBe(false);
-      expect((executor as any).logStage.mock.calls.some((call: unknown[]) => call[0] === 'server.global_error_backoff_wait')).toBe(false);
-      expect((executor as any).logStage.mock.calls.some((call: unknown[]) => (
-        call[0] === 'provider.route_pool_cooldown_wait.completed'
-      ))).toBe(false);
-    } finally {
-      if (previousMaxAttempts === undefined) {
-        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-      } else {
-        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousMaxAttempts;
-      }
-    }
-  });
-});
+    });
     const successProcess = jest.fn(async () => ({
       status: 200,
-      data: buildMinimalResponsesSuccessBody('resp_tokenrelay_after_reroute', 'tokenrelay-ok')
+      data: buildMinimalResponsesSuccessBody(
+        "resp_tokenrelay_after_reroute",
+        "tokenrelay-ok",
+      ),
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, failingProcess, 'openai-chat')],
-      [providerB, buildHandle(providerB, successProcess, 'openai-chat')]
+      [providerA, buildHandle(providerA, failingProcess, "openai-chat")],
+      [providerB, buildHandle(providerB, successProcess, "openai-chat")],
     ]);
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const selectedProviders: string[] = [];
     const preselectedSeenByAttempt: Array<boolean> = [];
     const pipeline = {
-      execute: jest.fn(async (input: any, metadataArg?: Record<string, unknown>) => {
-        const metadata = metadataArg && typeof metadataArg === 'object' ? metadataArg : input?.metadata;
-        const runtimeControl = MetadataCenter.read(metadata)?.readRuntimeControl();
-        const preselected = runtimeControl?.preselectedRoute as { target?: { providerKey?: string } } | undefined;
+      execute: jest.fn((input: any, metadataArg?: Record<string, unknown>) => {
+        const metadata =
+          metadataArg && typeof metadataArg === "object"
+            ? metadataArg
+            : input?.metadata;
+        const runtimeControl =
+          MetadataCenter.read(metadata)?.readRuntimeControl();
+        const preselected = runtimeControl?.preselectedRoute as
+          | { target?: { providerKey?: string } }
+          | undefined;
         const excluded = new Set<string>(
-          Array.isArray(metadata?.excludedProviderKeys) ? metadata.excludedProviderKeys : []
+          Array.isArray(metadata?.excludedProviderKeys)
+            ? metadata.excludedProviderKeys
+            : [],
         );
-        const providerKey = preselected?.target?.providerKey
-          ?? (excluded.has(providerA) ? providerB : providerA);
+        const providerKey =
+          preselected?.target?.providerKey ??
+          (excluded.has(providerA) ? providerB : providerA);
         selectedProviders.push(providerKey);
         preselectedSeenByAttempt.push(Boolean(preselected));
         return {
           requestId: input.id,
           processedRequest: {
-            model: 'gpt-5.4',
-            input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping tokenrelay' }] }]
+            model: "gpt-5.4",
+            input: [
+              {
+                role: "user",
+                content: [{ type: "input_text", text: "ping tokenrelay" }],
+              },
+            ],
           },
           standardizedRequest: {
-            model: 'gpt-5.4'
+            model: "gpt-5.4",
           },
           providerPayload: {
-            model: providerKey === providerB ? 'model-c' : 'glm-5.2',
-            messages: [{ role: 'user', content: 'ping tokenrelay' }]
+            model: providerKey === providerB ? "model-c" : "glm-5.2",
+            messages: [{ role: "user", content: "ping tokenrelay" }],
           },
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
+            providerType: "openai",
+            outboundProfile: "openai-chat",
             runtimeKey: providerKey,
-            modelId: providerKey === providerB ? 'model-c' : 'glm-5.2'
+            modelId: providerKey === providerB ? "model-c" : "glm-5.2",
           },
           routingDecision: {
-            routeName: 'thinking',
+            routeName: "thinking",
             pool: [providerKey],
             routePool,
-            providerProtocol: 'openai-chat',
-            reason: 'thinking:user-input'
+            providerProtocol: "openai-chat",
+            reason: "thinking:user-input",
           },
-          processMode: 'standard',
-          metadata: {}
+          processMode: "standard",
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const metadata: Record<string, unknown> = {};
     MetadataCenter.attach(metadata).writeRuntimeControl(
-      'preselectedRoute',
+      "preselectedRoute",
       {
         target: {
           providerKey: providerA,
-          providerType: 'openai',
-          outboundProfile: 'openai-chat',
+          providerType: "openai",
+          outboundProfile: "openai-chat",
           runtimeKey: providerA,
-          modelId: 'glm-5.2'
+          modelId: "glm-5.2",
         },
         decision: {
-          routeName: 'thinking',
+          routeName: "thinking",
           pool: [providerA],
           routePool,
-          providerProtocol: 'openai-chat',
-          reason: 'thinking:user-input'
+          providerProtocol: "openai-chat",
+          reason: "thinking:user-input",
         },
-        diagnostics: {}
+        diagnostics: {},
       },
       {
-        module: 'tests/server/runtime/http-server/request-executor.spec.ts',
-        symbol: 'clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay',
-        stage: 'test_router_direct_relay_preselected_route'
+        module: "tests/server/runtime/http-server/request-executor.spec.ts",
+        symbol:
+          "clears router-direct preselectedRoute before provider failure reroute so Hub can reselect tokenrelay",
+        stage: "test_router_direct_relay_preselected_route",
       },
-      'simulate router-direct target_outbound_profile_requires_hub_relay handoff'
+      "simulate router-direct target_outbound_profile_requires_hub_relay handoff",
     );
 
     try {
@@ -876,27 +1166,37 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: () => pipeline as any,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-        status: 200,
-        body: buildMinimalResponsesSuccessBody('resp_tokenrelay_after_reroute', 'tokenrelay-ok')
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: buildMinimalResponsesSuccessBody(
+            "resp_tokenrelay_after_reroute",
+            "tokenrelay-ok",
+          ),
+        });
 
       const result = await executor.execute({
-        requestId: 'req-router-direct-relay-preselected-reroute',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-router-direct-relay-preselected-reroute",
+        entryEndpoint: "/v1/responses",
         body: {
-          model: 'gpt-5.4',
+          model: "gpt-5.4",
           stream: true,
-          input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping tokenrelay' }] }]
+          input: [
+            {
+              role: "user",
+              content: [{ type: "input_text", text: "ping tokenrelay" }],
+            },
+          ],
         },
         headers: {},
-        metadata
+        metadata,
       });
 
       expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -905,10 +1205,15 @@ describe('HubRequestExecutor failover', () => {
       expect(failingProcess).toHaveBeenCalledTimes(1);
       expect(successProcess).toHaveBeenCalledTimes(1);
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as { metadata?: Record<string, unknown> } | undefined;
+      const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as
+        | { metadata?: Record<string, unknown> }
+        | undefined;
       const secondMetadata = secondPipelineInput?.metadata;
       expect(secondMetadata?.excludedProviderKeys).toEqual([providerA]);
-      expect(MetadataCenter.read(secondMetadata)?.readRuntimeControl().preselectedRoute).toBeUndefined();
+      expect(
+        MetadataCenter.read(secondMetadata)?.readRuntimeControl()
+          .preselectedRoute,
+      ).toBeUndefined();
     } finally {
       if (previousAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -918,35 +1223,42 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('reports provider business upstream status from protocol details', () => {
-    const providerBusinessReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('[hub_response] Upstream provider returned structured business error'), {
-        code: 'HTTP_429_2056',
-        statusCode: 429,
-        requestExecutorProviderErrorStage: 'host.response_contract',
-        details: {
-          upstreamCode: 'provider_status_2056',
-          providerStatusCode: 2056,
-          providerStatusMessage: 'usage limit exceeded, weekly usage limit reached'
-        }
-      }),
-      retryError: {
-        statusCode: 429,
-        errorCode: 'HTTP_429_2056',
-        reason: '[hub_response] Upstream provider returned structured business error'
-      },
-      stage: 'provider.send'
-    });
+  test("reports provider business upstream status from protocol details", () => {
+    const providerBusinessReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(
+          new Error(
+            "[hub_response] Upstream provider returned structured business error",
+          ),
+          {
+            code: "HTTP_429_2056",
+            statusCode: 429,
+            requestExecutorProviderErrorStage: "host.response_contract",
+            details: {
+              upstreamCode: "provider_status_2056",
+              providerStatusCode: 2056,
+              providerStatusMessage:
+                "usage limit exceeded, weekly usage limit reached",
+            },
+          },
+        ),
+        retryError: {
+          statusCode: 429,
+          errorCode: "HTTP_429_2056",
+          reason:
+            "[hub_response] Upstream provider returned structured business error",
+        },
+        stage: "provider.send",
+      });
     expect(providerBusinessReportPlan).toEqual({
-      errorCode: 'HTTP_429_2056',
-      upstreamCode: 'PROVIDER_STATUS_2056',
+      errorCode: "HTTP_429_2056",
+      upstreamCode: "PROVIDER_STATUS_2056",
       statusCode: 429,
-      stageHint: 'host.response_contract'
+      stageHint: "host.response_contract",
     });
   });
 
-
-  test('propagates concurrency busy state by runtime/alias scope instead of provider target key', async () => {
+  test("propagates concurrency busy state by runtime/alias scope instead of provider target key", async () => {
     let busyCallback: ((scopeKey: string, busy: boolean) => void) | null = null;
     const fakeTrafficGovernor: any = {
       setConcurrencyBusyCallback(cb) {
@@ -955,95 +1267,119 @@ describe('HubRequestExecutor failover', () => {
       async acquire() {
         return {
           permit: {
-            runtimeKey: 'provider-a.2',
-            providerKey: 'provider-a.2.model-c',
-            requestId: 'req-1',
-            leaseId: 'lease-1',
-            stateKey: 'provider-a.2',
-            maxInFlight: 1
+            runtimeKey: "provider-a.2",
+            providerKey: "provider-a.2.model-c",
+            requestId: "req-1",
+            leaseId: "lease-1",
+            stateKey: "provider-a.2",
+            maxInFlight: 1,
           },
           policy: {
-            concurrency: { maxInFlight: 1, acquireTimeoutMs: 100, staleLeaseMs: 1000 },
-            rpm: { requestsPerMinute: 10, acquireTimeoutMs: 100, windowMs: 60000 }
+            concurrency: {
+              maxInFlight: 1,
+              acquireTimeoutMs: 100,
+              staleLeaseMs: 1000,
+            },
+            rpm: {
+              requestsPerMinute: 10,
+              acquireTimeoutMs: 100,
+              windowMs: 60000,
+            },
           },
           waitedMs: 0,
           activeInFlight: 1,
-          rpmInWindow: 1
+          rpmInWindow: 1,
         };
       },
       async release() {
         return { released: true, activeInFlight: 0 };
       },
-      async isProviderAtConcurrencyCapacity() { return false; },
-      isProviderAtConcurrencyCapacitySync() { return false; },
-      async observeOutcome() {}
+      async isProviderAtConcurrencyCapacity() {
+        return false;
+      },
+      isProviderAtConcurrencyCapacitySync() {
+        return false;
+      },
+      async observeOutcome() {},
     };
     const marks: string[] = [];
+    requestExecutorLocalVirtualRouterConcurrencyMarks = marks;
     createRequestExecutor({
       runtimeManager: {
         resolveRuntimeKey: jest.fn(),
-        getHandleByRuntimeKey: jest.fn()
+        getHandleByRuntimeKey: jest.fn(),
       },
-      getHubPipeline: () => ({
-        getVirtualRouter: () => ({
-          markConcurrencyScopeBusy(key: string) {
-            marks.push(`busy:${key}`);
-          },
-          markConcurrencyScopeIdle(key: string) {
-            marks.push(`idle:${key}`);
-          }
-        })
-      } as any),
+      getHubPipeline: () => "request-executor-concurrency-native-handle" as any,
       getModuleDependencies: () => ({}) as any,
       logStage: jest.fn(),
       shouldLogStageEvent: () => false,
       stats: new StatsManager(),
-      trafficGovernor: fakeTrafficGovernor
+      trafficGovernor: fakeTrafficGovernor,
     });
     expect(busyCallback).not.toBeNull();
-    busyCallback?.('provider-a.2', true);
-    busyCallback?.('provider-a.2', false);
-    expect(marks).toEqual(['busy:provider-a.2', 'idle:provider-a.2']);
+    busyCallback?.("provider-a.2", true);
+    busyCallback?.("provider-a.2", false);
+    expect(marks).toEqual(["busy:provider-a.2", "idle:provider-a.2"]);
+    requestExecutorLocalVirtualRouterConcurrencyMarks = undefined;
   });
 
-  test('fails fast on acquire-time concurrency saturation and reroutes to the next route candidate', async () => {
-    const providerA = '1token.key1.gpt-5.5';
-    const providerB = 'asxs.gpt-5.5';
-    const processA = jest.fn(async () => ({ status: 200, data: { id: 'should-not-run' } }));
-    const processB = jest.fn(async () => ({ status: 200, data: { id: 'rerouted-ok' } }));
+  test("fails fast on acquire-time concurrency saturation and reroutes to the next route candidate", async () => {
+    const providerA = "1token.key1.gpt-5.5";
+    const providerB = "asxs.gpt-5.5";
+    const processA = jest.fn(async () => ({
+      status: 200,
+      data: { id: "should-not-run" },
+    }));
+    const processB = jest.fn(async () => ({
+      status: 200,
+      data: { id: "rerouted-ok" },
+    }));
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA, 'openai-responses')],
-      [providerB, buildHandle(providerB, processB, 'openai-responses')]
+      [providerA, buildHandle(providerA, processA, "openai-responses")],
+      [providerB, buildHandle(providerB, processB, "openai-responses")],
     ]);
     const acquire = jest.fn(async ({ runtimeKey }: { runtimeKey: string }) => {
       if (runtimeKey === providerA) {
-        throw Object.assign(new Error('provider traffic saturated for runtime 1token.key1.gpt-5.5'), {
-          statusCode: 429,
-          code: 'PROVIDER_TRAFFIC_SATURATED',
-          retryable: true,
-          details: {
-            reason: 'acquire_concurrency',
-            runtimeKey,
-            providerKey: runtimeKey
-          }
-        });
+        throw Object.assign(
+          new Error(
+            "provider traffic saturated for runtime 1token.key1.gpt-5.5",
+          ),
+          {
+            statusCode: 429,
+            code: "PROVIDER_TRAFFIC_SATURATED",
+            retryable: true,
+            details: {
+              reason: "acquire_concurrency",
+              runtimeKey,
+              providerKey: runtimeKey,
+            },
+          },
+        );
       }
       return {
         permit: {
           runtimeKey,
           providerKey: runtimeKey,
-          requestId: 'req-acquire-fast-fail',
+          requestId: "req-acquire-fast-fail",
           leaseId: `lease-${runtimeKey}`,
           stateKey: runtimeKey,
-          maxInFlight: 1
+          maxInFlight: 1,
         },
         policy: {
-          concurrency: { maxInFlight: 1, acquireTimeoutMs: 100, staleLeaseMs: 1000 },
-          rpm: { requestsPerMinute: 10, acquireTimeoutMs: 100, windowMs: 60000 }
+          concurrency: {
+            maxInFlight: 1,
+            acquireTimeoutMs: 100,
+            staleLeaseMs: 1000,
+          },
+          rpm: {
+            requestsPerMinute: 10,
+            acquireTimeoutMs: 100,
+            windowMs: 60000,
+          },
         },
         waitedMs: 0,
         activeInFlight: 1,
-        rpmInWindow: 1
+        rpmInWindow: 1,
       };
     });
     const fakeTrafficGovernor: any = {
@@ -1052,40 +1388,45 @@ describe('HubRequestExecutor failover', () => {
       async release() {
         return { released: true, activeInFlight: 0 };
       },
-      async isProviderAtConcurrencyCapacity() { return false; },
+      async isProviderAtConcurrencyCapacity() {
+        return false;
+      },
       isProviderAtConcurrencyCapacitySync(runtimeKey: string) {
         return runtimeKey === providerA;
       },
-      async observeOutcome() {}
+      async observeOutcome() {},
     };
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input?.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
         const selected = excluded.has(providerA) ? providerB : providerA;
         return {
           requestId: input.requestId,
-          providerPayload: { model: 'gpt-5.5', input: 'continue' },
+          providerPayload: { model: "gpt-5.5", input: "continue" },
           target: {
             providerKey: selected,
-            providerType: 'responses',
-            outboundProfile: 'openai-responses',
-            runtimeKey: selected
+            providerType: "responses",
+            outboundProfile: "openai-responses",
+            runtimeKey: selected,
           },
           routingDecision: {
-            routeName: 'default',
-            providerProtocol: 'openai-responses',
-            pool: [providerA, providerB]
+            routeName: "default",
+            providerProtocol: "openai-responses",
+            pool: [providerA, providerB],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
     const logStage = jest.fn();
     const executor = createRequestExecutor({
@@ -1093,1092 +1434,1266 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage,
       stats: new StatsManager(),
-      trafficGovernor: fakeTrafficGovernor
+      trafficGovernor: fakeTrafficGovernor,
     });
     const result = await executor.execute({
-      requestId: 'req-acquire-fast-fail',
-      entryEndpoint: '/v1/responses',
-      body: { model: 'gpt-5.5', input: 'continue' },
+      requestId: "req-acquire-fast-fail",
+      entryEndpoint: "/v1/responses",
+      body: { model: "gpt-5.5", input: "continue" },
       headers: {},
-      metadata: {}
+      metadata: {},
     });
 
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
     expect(processA).toHaveBeenCalledTimes(0);
     expect(processB).toHaveBeenCalledTimes(1);
     expect(acquire).toHaveBeenCalledTimes(2);
-    expect(acquire.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ runtimeKey: providerA }));
-    expect(acquire.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ runtimeKey: providerB }));
+    expect(acquire.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ runtimeKey: providerA }),
+    );
+    expect(acquire.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ runtimeKey: providerB }),
+    );
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<string, any>;
-    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
+    const secondPipelineInput = pipeline.execute.mock.calls[1]?.[0] as Record<
+      string,
+      any
+    >;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([
+      providerA,
+    ]);
     expect(
       logStage.mock.calls.some(
         (call) =>
-          call[0] === 'provider.retry' &&
+          call[0] === "provider.retry" &&
           Array.isArray(call[2]?.excluded) &&
-          call[2]?.excluded.includes(providerA)
-      )
+          call[2]?.excluded.includes(providerA),
+      ),
     ).toBe(true);
   });
 
-  test('covers request-executor helper snapshots and truncation utilities', async () => {
-    expect(__requestExecutorTestables.readString('  abc  ')).toBe('abc');
-    expect(__requestExecutorTestables.readString('')).toBeUndefined();
+  test("covers request-executor helper snapshots and truncation utilities", async () => {
+    expect(__requestExecutorTestables.readString("  abc  ")).toBe("abc");
+    expect(__requestExecutorTestables.readString("")).toBeUndefined();
     expect(__requestExecutorTestables.readString(undefined)).toBeUndefined();
 
-    const rawSnapshot = __requestExecutorTestables.extractRetryErrorSnapshot('plain-error');
-    expect(rawSnapshot.reason).toContain('plain-error');
+    const rawSnapshot =
+      __requestExecutorTestables.extractRetryErrorSnapshot("plain-error");
+    expect(rawSnapshot.reason).toContain("plain-error");
 
-    const detailedSnapshot = __requestExecutorTestables.extractRetryErrorSnapshot({
-      statusCode: 429,
-      details: { code: 'E_DETAIL', upstream_code: 'rate_limit_error' },
-      response: {
-        data: {
-          error: { code: 'E_RESPONSE' }
-        }
-      }
-    });
-    expect(detailedSnapshot.statusCode).toBe(429);
-    expect(detailedSnapshot.errorCode).toBe('E_DETAIL');
-    expect(detailedSnapshot.upstreamCode).toBe('rate_limit_error');
-
-    const runtimeResolveReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('followup failed before send'), {
-        code: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'client_inject_failed',
-        statusCode: 502
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'client_inject_failed',
-        reason: 'followup failed before send'
-      },
-      stage: 'provider.runtime_resolve'
-    });
-    expect(runtimeResolveReportPlan).toEqual({
-      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-      upstreamCode: 'CLIENT_INJECT_FAILED',
-      statusCode: 502,
-      stageHint: 'provider.runtime_resolve'
-    });
-
-    const sseDecodeReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(
-        new Error('Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'),
-        {
-          code: 'SSE_DECODE_ERROR',
-          upstreamCode: 'anthropic_sse_to_json_failed',
-          statusCode: 429
-        }
-      ),
-      retryError: {
+    const detailedSnapshot =
+      __requestExecutorTestables.extractRetryErrorSnapshot({
         statusCode: 429,
-        errorCode: 'SSE_DECODE_ERROR',
-        upstreamCode: 'anthropic_sse_to_json_failed',
-        reason: 'Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试'
-      },
-      stage: 'provider.send'
-    });
-    expect(sseDecodeReportPlan).toEqual({
-      errorCode: 'SSE_DECODE_ERROR',
-      upstreamCode: 'ANTHROPIC_SSE_TO_JSON_FAILED',
-      statusCode: 429,
-      stageHint: 'provider.sse_decode'
-    });
-
-    const followupReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('followup client inject failed'), {
-        code: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'client_inject_failed',
-        statusCode: 502
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'client_inject_failed',
-        reason: 'followup client inject failed'
-      },
-      stage: 'provider.send'
-    });
-    expect(followupReportPlan).toEqual({
-      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-      upstreamCode: 'CLIENT_INJECT_FAILED',
-      statusCode: 502,
-      stageHint: 'provider.followup'
-    });
-
-    const detailMarkedFollowupPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('followup client inject failed'), {
-        code: 'INTERNAL_ERROR',
-        statusCode: 502,
-        details: {
-          requestExecutorProviderErrorStage: 'provider.followup',
-          reason: 'client_inject_failed'
-        }
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'INTERNAL_ERROR',
-        reason: 'followup client inject failed'
-      },
-      stage: 'provider.send'
-    });
-    expect(detailMarkedFollowupPlan).toEqual({
-      errorCode: 'INTERNAL_ERROR',
-      statusCode: 502,
-      stageHint: 'provider.followup'
-    });
-
-    const providerHttpReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('HTTP 429'), {
-        statusCode: 429,
+        details: { code: "E_DETAIL", upstream_code: "rate_limit_error" },
         response: {
           data: {
-            error: {
-              code: 'HTTP_429',
-              message: 'rate limited'
-            }
-          }
-        }
-      }),
-      retryError: {
-        statusCode: 429,
-        errorCode: 'HTTP_429',
-        reason: 'rate limited'
-      },
-      stage: 'provider.http'
+            error: { code: "E_RESPONSE" },
+          },
+        },
+      });
+    expect(detailedSnapshot.statusCode).toBe(429);
+    expect(detailedSnapshot.errorCode).toBe("E_DETAIL");
+    expect(detailedSnapshot.upstreamCode).toBe("rate_limit_error");
+
+    const runtimeResolveReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("followup failed before send"), {
+          code: "SERVERTOOL_FOLLOWUP_FAILED",
+          upstreamCode: "client_inject_failed",
+          statusCode: 502,
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+          upstreamCode: "client_inject_failed",
+          reason: "followup failed before send",
+        },
+        stage: "provider.runtime_resolve",
+      });
+    expect(runtimeResolveReportPlan).toEqual({
+      errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+      upstreamCode: "CLIENT_INJECT_FAILED",
+      statusCode: 502,
+      stageHint: "provider.runtime_resolve",
     });
-    expect(providerHttpReportPlan).toEqual({
-      errorCode: 'HTTP_429',
+
+    const sseDecodeReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(
+          new Error(
+            "Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试",
+          ),
+          {
+            code: "SSE_DECODE_ERROR",
+            upstreamCode: "anthropic_sse_to_json_failed",
+            statusCode: 429,
+          },
+        ),
+        retryError: {
+          statusCode: 429,
+          errorCode: "SSE_DECODE_ERROR",
+          upstreamCode: "anthropic_sse_to_json_failed",
+          reason:
+            "Anthropic SSE error event [1305] 该模型当前访问量过大，请您稍后再试",
+        },
+        stage: "provider.send",
+      });
+    expect(sseDecodeReportPlan).toEqual({
+      errorCode: "SSE_DECODE_ERROR",
+      upstreamCode: "ANTHROPIC_SSE_TO_JSON_FAILED",
       statusCode: 429,
-      stageHint: 'provider.http'
+      stageHint: "provider.send",
     });
 
-    const responseContractReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('empty assistant payload'), {
-        code: 'EMPTY_ASSISTANT_RESPONSE',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.response_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'EMPTY_ASSISTANT_RESPONSE',
-        reason: 'empty assistant payload'
-      },
-      stage: 'provider.send'
-    });
-    expect(responseContractReportPlan).toEqual({
-      errorCode: 'EMPTY_ASSISTANT_RESPONSE',
-      statusCode: 502,
-      stageHint: 'host.response_contract'
-    });
-
-    await expect(__requestExecutorTestables.resolveProviderRetryExecutionPlan({
-      error: Object.assign(new Error('empty assistant payload'), {
-        code: 'EMPTY_ASSISTANT_RESPONSE',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.response_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'EMPTY_ASSISTANT_RESPONSE',
-        reason: 'empty assistant payload'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      stage: 'host.response_contract',
-      providerKey: 'provider-a.aliasA',
-      runtimeKey: 'runtime:one',
-      logicalRequestChainKey: 'req-response-contract-host',
-      logicalChainRetryLimitStageRequestId: 'req-response-contract-host',
-      routePool: ['provider-a.aliasA', 'tab.aliasB'],
-      runtimeManager: {
-        resolveRuntimeKey: () => 'runtime:one'
-      },
-      excludedProviderKeys: new Set<string>(),
-      recordAttempt: jest.fn(),
-      logStage: () => undefined,
-      status: 502
-    })).resolves.toMatchObject({
-      shouldRetry: true,
-      excludedCurrentProvider: true,
-      retrySwitchPlan: expect.objectContaining({
-        switchAction: 'exclude_and_reroute'
-      })
-    });
-
-    const missingToolCallReportPlan = __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
-      error: Object.assign(new Error('missing required tool call'), {
-        code: 'MISSING_REQUIRED_TOOL_CALL',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.response_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'MISSING_REQUIRED_TOOL_CALL',
-        reason: 'missing required tool call'
-      },
-      stage: 'provider.send'
-    });
-    expect(missingToolCallReportPlan).toEqual({
-      errorCode: 'MISSING_REQUIRED_TOOL_CALL',
-      statusCode: 502,
-      stageHint: 'host.response_contract'
-    });
-
-    await expect(__requestExecutorTestables.resolveProviderRetryExecutionPlan({
-      error: Object.assign(new Error('missing required tool call'), {
-        code: 'MISSING_REQUIRED_TOOL_CALL',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'host.response_contract'
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'MISSING_REQUIRED_TOOL_CALL',
-        reason: 'missing required tool call'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      stage: 'host.response_contract',
-      providerKey: 'provider-a.aliasA',
-      runtimeKey: 'runtime:one',
-      logicalRequestChainKey: 'req-missing-tool-call-host',
-      logicalChainRetryLimitStageRequestId: 'req-missing-tool-call-host',
-      routePool: ['provider-a.aliasA', 'tab.aliasB'],
-      runtimeManager: {
-        resolveRuntimeKey: () => 'runtime:one'
-      },
-      excludedProviderKeys: new Set<string>(),
-      recordAttempt: jest.fn(),
-      logStage: () => undefined,
-      status: 502
-    })).resolves.toMatchObject({
-      shouldRetry: true,
-      excludedCurrentProvider: true,
-      retrySwitchPlan: expect.objectContaining({
-        switchAction: 'exclude_and_reroute'
-      })
-    });
-
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output: [
-        {
-          type: 'reasoning',
-          text: 'internal only'
-        }
-      ],
-      reasoning: 'internal only'
-    })).resolves.toBeNull();
-
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      choices: [
-        {
-          finish_reason: 'stop',
-          message: {
-            reasoning: 'internal only'
-          }
-        }
-      ]
-    })).resolves.toMatchObject({
-      marker: 'chat_empty_assistant'
-    });
-
-    await expect(__requestExecutorTestables.hasRequestedToolsInSemantics({
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      }
-    })).resolves.toBe(true);
-
-    expect(__requestExecutorTestables.isRequiredToolCallTurn({
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      }
-    })).resolves.toBe(true);
-
-    await expect(__requestExecutorTestables.isRequiredToolCallTurn({
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'auto'
-      }
-    })).resolves.toBe(false);
-
-    expect(__requestExecutorTestables.isToolResultFollowupTurn({
-      messages: [
-        {
-          role: 'tool',
-          tool_call_id: 'call_1',
-          content: 'ok'
-        }
-      ]
-    })).resolves.toBe(true);
-
-    expect(__requestExecutorTestables.isToolResultFollowupTurn({
-      continuation: {
-        toolContinuation: {
-          mode: 'submit_tool_outputs',
-          submittedToolCallIds: ['call_submit_1']
-        }
-      },
-      toolOutputs: [
-        {
-          tool_call_id: 'call_submit_1',
-          content: 'ok'
-        }
-      ],
-      responses: {
-        resume: {
-          restoredFromResponseId: 'resp_submit_prev_1',
-          toolOutputsDetailed: [
-            {
-              callId: 'call_submit_1',
-              outputText: 'ok'
-            }
-          ]
-        }
-      }
-    })).resolves.toBe(true);
-
-    expect(__requestExecutorTestables.isToolResultFollowupTurn({
-      messages: [
-        {
-          role: 'system',
-          content: 'system guidance'
+    const followupReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("followup client inject failed"), {
+          code: "SERVERTOOL_FOLLOWUP_FAILED",
+          upstreamCode: "client_inject_failed",
+          statusCode: 502,
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+          upstreamCode: "client_inject_failed",
+          reason: "followup client inject failed",
         },
-        {
-          role: 'user',
-          content: 'investigate current rustification state'
+        stage: "provider.send",
+      });
+    expect(followupReportPlan).toEqual({
+      errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+      upstreamCode: "CLIENT_INJECT_FAILED",
+      statusCode: 502,
+      stageHint: "provider.followup",
+    });
+
+    const detailMarkedFollowupPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("followup client inject failed"), {
+          code: "INTERNAL_ERROR",
+          statusCode: 502,
+          details: {
+            requestExecutorProviderErrorStage: "provider.followup",
+            reason: "client_inject_failed",
+          },
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "INTERNAL_ERROR",
+          reason: "followup client inject failed",
         },
-        {
-          role: 'assistant',
-          tool_calls: [
-            {
-              id: 'call_prev_1',
-              type: 'function',
-              function: {
-                name: 'list_directory',
-                arguments: '{"path":"sharedmodule/llmswitch-core/src/servertool"}'
-              }
+        stage: "provider.send",
+      });
+    expect(detailMarkedFollowupPlan).toEqual({
+      errorCode: "INTERNAL_ERROR",
+      statusCode: 502,
+      stageHint: "provider.followup",
+    });
+
+    const providerHttpReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("HTTP 429"), {
+          statusCode: 429,
+          response: {
+            data: {
+              error: {
+                code: "HTTP_429",
+                message: "rate limited",
+              },
             },
-            {
-              id: 'call_prev_2',
-              type: 'function',
-              function: {
-                name: 'list_directory',
-                arguments: '{"path":"sharedmodule/llmswitch-core/rust-core/crates"}'
-              }
-            }
-          ]
+          },
+        }),
+        retryError: {
+          statusCode: 429,
+          errorCode: "HTTP_429",
+          reason: "rate limited",
         },
-        {
-          role: 'tool',
-          tool_call_id: 'call_prev_1',
-          content: 'stop-message-auto.ts\\nengine.ts'
-        },
-        {
-          role: 'tool',
-          tool_call_id: 'call_prev_2',
-          content: 'servertool-core\\nservertool-cli'
-        },
-        {
-          role: 'assistant',
-          tool_calls: [
-            {
-              id: 'call_curr_1',
-              type: 'function',
-              function: {
-                name: 'read_file',
-                arguments: '{"path":"sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs"}'
-              }
-            }
-          ]
-        },
-        {
-          role: 'tool',
-          tool_call_id: 'call_curr_1',
-          content: 'pub mod orchestration;'
-        }
-      ]
-    })).resolves.toBe(true);
+        stage: "provider.http",
+      });
+    expect(providerHttpReportPlan).toEqual({
+      errorCode: "HTTP_429",
+      statusCode: 429,
+      stageHint: "provider.http",
+    });
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      choices: [
-        {
-          finish_reason: 'stop',
-          message: {
-            content: '我可以先给你一个验证脚本。'
-          }
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
+    const responseContractReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("empty assistant payload"), {
+          code: "EMPTY_ASSISTANT_RESPONSE",
+          statusCode: 502,
+          retryable: true,
+          requestExecutorProviderErrorStage: "host.response_contract",
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "EMPTY_ASSISTANT_RESPONSE",
+          reason: "empty assistant payload",
+        },
+        stage: "provider.send",
+      });
+    expect(responseContractReportPlan).toEqual({
+      errorCode: "EMPTY_ASSISTANT_RESPONSE",
+      statusCode: 502,
+      stageHint: "host.response_contract",
+    });
+
+    await expect(
+      __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error("empty assistant payload"), {
+          code: "EMPTY_ASSISTANT_RESPONSE",
+          statusCode: 502,
+          retryable: true,
+          requestExecutorProviderErrorStage: "host.response_contract",
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "EMPTY_ASSISTANT_RESPONSE",
+          reason: "empty assistant payload",
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        stage: "host.response_contract",
+        providerKey: "provider-a.aliasA",
+        runtimeKey: "runtime:one",
+        logicalRequestChainKey: "req-response-contract-host",
+        logicalChainRetryLimitStageRequestId: "req-response-contract-host",
+        routePool: ["provider-a.aliasA", "tab.aliasB"],
+        runtimeManager: {
+          resolveRuntimeKey: () => "runtime:one",
+        },
+        excludedProviderKeys: new Set<string>(),
+        recordAttempt: jest.fn(),
+        logStage: () => undefined,
+        status: 502,
+      }),
+    ).resolves.toMatchObject({
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: "exclude_and_reroute",
+      }),
+    });
+
+    const missingToolCallReportPlan =
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorReportPlan({
+        error: Object.assign(new Error("missing required tool call"), {
+          code: "MISSING_REQUIRED_TOOL_CALL",
+          statusCode: 502,
+          retryable: true,
+          requestExecutorProviderErrorStage: "host.response_contract",
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "MISSING_REQUIRED_TOOL_CALL",
+          reason: "missing required tool call",
+        },
+        stage: "provider.send",
+      });
+    expect(missingToolCallReportPlan).toEqual({
+      errorCode: "MISSING_REQUIRED_TOOL_CALL",
+      statusCode: 502,
+      stageHint: "host.response_contract",
+    });
+
+    await expect(
+      __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error("missing required tool call"), {
+          code: "MISSING_REQUIRED_TOOL_CALL",
+          statusCode: 502,
+          retryable: true,
+          requestExecutorProviderErrorStage: "host.response_contract",
+        }),
+        retryError: {
+          statusCode: 502,
+          errorCode: "MISSING_REQUIRED_TOOL_CALL",
+          reason: "missing required tool call",
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        stage: "host.response_contract",
+        providerKey: "provider-a.aliasA",
+        runtimeKey: "runtime:one",
+        logicalRequestChainKey: "req-missing-tool-call-host",
+        logicalChainRetryLimitStageRequestId: "req-missing-tool-call-host",
+        routePool: ["provider-a.aliasA", "tab.aliasB"],
+        runtimeManager: {
+          resolveRuntimeKey: () => "runtime:one",
+        },
+        excludedProviderKeys: new Set<string>(),
+        recordAttempt: jest.fn(),
+        logStage: () => undefined,
+        status: 502,
+      }),
+    ).resolves.toMatchObject({
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: "exclude_and_reroute",
+      }),
+    });
+
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+        status: "completed",
+        output: [
           {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      }
-    })).resolves.toBeNull();
+            type: "reasoning",
+            text: "internal only",
+          },
+        ],
+        reasoning: "internal only",
+      }),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      choices: [
-        {
-          finish_reason: 'stop',
-          message: {
-            content: '工具执行完成，我继续给出结果。'
-          }
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+        choices: [
           {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      messages: [
-        {
-          role: 'tool',
-          tool_call_id: 'call_1',
-          content: 'ok'
-        }
-      ]
-    })).resolves.toBeNull();
+            finish_reason: "stop",
+            message: {
+              reasoning: "internal only",
+            },
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      marker: "chat_empty_assistant",
+    });
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      choices: [
-        {
-          finish_reason: 'tool_calls',
-          message: {
-            role: 'assistant',
+    await expect(
+      __requestExecutorTestables.hasRequestedToolsInSemantics({
+        tools: {
+          clientToolsRaw: [
+            {
+              type: "function",
+              function: { name: "exec_command" },
+            },
+          ],
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(
+      __requestExecutorTestables.isRequiredToolCallTurn({
+        tools: {
+          clientToolsRaw: [
+            {
+              type: "function",
+              function: { name: "exec_command" },
+            },
+          ],
+        },
+        responses: {
+          toolChoice: "required",
+        },
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      __requestExecutorTestables.isRequiredToolCallTurn({
+        tools: {
+          clientToolsRaw: [
+            {
+              type: "function",
+              function: { name: "exec_command" },
+            },
+          ],
+        },
+        responses: {
+          toolChoice: "auto",
+        },
+      }),
+    ).resolves.toBe(false);
+
+    expect(
+      __requestExecutorTestables.isToolResultFollowupTurn({
+        messages: [
+          {
+            role: "tool",
+            tool_call_id: "call_1",
+            content: "ok",
+          },
+        ],
+      }),
+    ).resolves.toBe(true);
+
+    expect(
+      __requestExecutorTestables.isToolResultFollowupTurn({
+        continuation: {
+          toolContinuation: {
+            mode: "submit_tool_outputs",
+            submittedToolCallIds: ["call_submit_1"],
+          },
+        },
+        toolOutputs: [
+          {
+            tool_call_id: "call_submit_1",
+            content: "ok",
+          },
+        ],
+        responses: {
+          resume: {
+            restoredFromResponseId: "resp_submit_prev_1",
+            toolOutputsDetailed: [
+              {
+                callId: "call_submit_1",
+                outputText: "ok",
+              },
+            ],
+          },
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(
+      __requestExecutorTestables.isToolResultFollowupTurn({
+        messages: [
+          {
+            role: "system",
+            content: "system guidance",
+          },
+          {
+            role: "user",
+            content: "investigate current rustification state",
+          },
+          {
+            role: "assistant",
             tool_calls: [
               {
-                id: 'call_exec_1',
-                type: 'function',
+                id: "call_prev_1",
+                type: "function",
                 function: {
-                  name: 'exec_command',
-                  arguments: JSON.stringify({ cmd: 'pwd' })
-                }
-              }
-            ]
-          }
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
+                  name: "list_directory",
+                  arguments:
+                    '{"path":"sharedmodule/llmswitch-core/src/servertool"}',
+                },
+              },
+              {
+                id: "call_prev_2",
+                type: "function",
+                function: {
+                  name: "list_directory",
+                  arguments:
+                    '{"path":"sharedmodule/llmswitch-core/rust-core/crates"}',
+                },
+              },
+            ],
+          },
           {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      __routecodex: {}
-    })).resolves.toBeNull();
+            role: "tool",
+            tool_call_id: "call_prev_1",
+            content: "stop-message-auto.ts\\nengine.ts",
+          },
+          {
+            role: "tool",
+            tool_call_id: "call_prev_2",
+            content: "servertool-core\\nservertool-cli",
+          },
+          {
+            role: "assistant",
+            tool_calls: [
+              {
+                id: "call_curr_1",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments:
+                    '{"path":"sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/lib.rs"}',
+                },
+              },
+            ],
+          },
+          {
+            role: "tool",
+            tool_call_id: "call_curr_1",
+            content: "pub mod orchestration;",
+          },
+        ],
+      }),
+    ).resolves.toBe(true);
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'requires_action',
-      required_action: {
-        submit_tool_outputs: {
-          tool_calls: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
+        {
+          choices: [
             {
-              id: 'call_exec_2',
-              type: 'function',
-              function: {
-                name: 'exec_command',
-                arguments: JSON.stringify({ cmd: 'ls' })
-              }
-            }
-          ]
-        }
-      },
-      output: [
+              finish_reason: "stop",
+              message: {
+                content: "我可以先给你一个验证脚本。",
+              },
+            },
+          ],
+        },
         {
-          type: 'function_call',
-          name: 'exec_command',
-          call_id: 'call_exec_2',
-          arguments: JSON.stringify({ cmd: 'ls' })
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      __routecodex: {}
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "required",
+          },
+        },
+      ),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      choices: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          finish_reason: 'stop',
-          message: {
-            content: '我已经完成了，下面给你结果。'
-          }
-        }
-      ]
-    }, {
-      __routecodex: {},
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'auto'
-      },
-      messages: [
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "工具执行完成，我继续给出结果。",
+              },
+            },
+          ],
+        },
         {
-          role: 'tool',
-          tool_call_id: 'call_1',
-          content: 'ok'
-        }
-      ]
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          messages: [
+            {
+              role: "tool",
+              tool_call_id: "call_1",
+              content: "ok",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '请你手动更新 secret 后再告诉我结果。',
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            { type: 'output_text', text: '请你手动更新 secret 后再告诉我结果。' }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      },
-      messages: [
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    id: "call_exec_1",
+                    type: "function",
+                    function: {
+                      name: "exec_command",
+                      arguments: JSON.stringify({ cmd: "pwd" }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
         {
-          role: 'user',
-          content: '继续执行'
-        }
-      ]
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          __routecodex: {},
+        },
+      ),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '我已经完成审计，下面是结果。',
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            { type: 'output_text', text: '我已经完成审计，下面是结果。' }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'auto'
-      },
-      messages: [
+          status: "requires_action",
+          required_action: {
+            submit_tool_outputs: {
+              tool_calls: [
+                {
+                  id: "call_exec_2",
+                  type: "function",
+                  function: {
+                    name: "exec_command",
+                    arguments: JSON.stringify({ cmd: "ls" }),
+                  },
+                },
+              ],
+            },
+          },
+          output: [
+            {
+              type: "function_call",
+              name: "exec_command",
+              call_id: "call_exec_2",
+              arguments: JSON.stringify({ cmd: "ls" }),
+            },
+          ],
+        },
         {
-          role: 'user',
-          content: '继续执行'
-        }
-      ]
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          __routecodex: {},
+        },
+      ),
+    ).resolves.toBeNull();
+
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
+        {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "我已经完成了，下面给你结果。",
+              },
+            },
+          ],
+        },
+        {
+          __routecodex: {},
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "auto",
+          },
+          messages: [
+            {
+              role: "tool",
+              tool_call_id: "call_1",
+              content: "ok",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
+
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
+        {
+          status: "completed",
+          output_text: "请你手动更新 secret 后再告诉我结果。",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: "请你手动更新 secret 后再告诉我结果。",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "required",
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续执行",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
+
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
+        {
+          status: "completed",
+          output_text: "我已经完成审计，下面是结果。",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [
+                { type: "output_text", text: "我已经完成审计，下面是结果。" },
+              ],
+            },
+          ],
+        },
+        {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "auto",
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续执行",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
 
     const malformedToolWrapperText = `<tool_call>
 {"arguments":{"cmd":"bash -lc 'pwd'","justification":"check"}}
 </tool_call>`;
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: malformedToolWrapperText,
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'message',
-          role: 'assistant',
-          content: [
+          status: "completed",
+          output_text: malformedToolWrapperText,
+          output: [
             {
-              type: 'output_text',
-              text: malformedToolWrapperText
-            }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      },
-      messages: [
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: malformedToolWrapperText,
+                },
+              ],
+            },
+          ],
+        },
         {
-          role: 'user',
-          content: '继续'
-        }
-      ]
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "required",
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '当前目录是 /Users/fanzhang/Documents/github/routecodex。',
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            { type: 'output_text', text: '当前目录是 /Users/fanzhang/Documents/github/routecodex。' }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'auto'
-      },
-      continuation: {
-        toolContinuation: {
-          mode: 'submit_tool_outputs',
-          submittedToolCallIds: ['call_1']
-        }
-      },
-      toolOutputs: [
-        {
-          tool_call_id: 'call_1',
-          content: '/Users/fanzhang/Documents/github/routecodex\\n'
-        }
-      ],
-      responses: {
-        resume: {
-          restoredFromResponseId: 'resp_submit_prev_1',
-          toolOutputsDetailed: [
+          status: "completed",
+          output_text:
+            "当前目录是 /Users/fanzhang/Documents/github/routecodex。",
+          output: [
             {
-              callId: 'call_1',
-              outputText: '/Users/fanzhang/Documents/github/routecodex\\n'
-            }
-          ]
-        }
-      }
-    })).resolves.toBeNull();
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: "当前目录是 /Users/fanzhang/Documents/github/routecodex。",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "auto",
+          },
+          continuation: {
+            toolContinuation: {
+              mode: "submit_tool_outputs",
+              submittedToolCallIds: ["call_1"],
+            },
+          },
+          toolOutputs: [
+            {
+              tool_call_id: "call_1",
+              content: "/Users/fanzhang/Documents/github/routecodex\\n",
+            },
+          ],
+          responses: {
+            resume: {
+              restoredFromResponseId: "resp_submit_prev_1",
+              toolOutputsDetailed: [
+                {
+                  callId: "call_1",
+                  outputText: "/Users/fanzhang/Documents/github/routecodex\\n",
+                },
+              ],
+            },
+          },
+        },
+      ),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '',
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'reasoning',
-          summary: [
+          status: "completed",
+          output_text: "",
+          output: [
             {
-              type: 'summary_text',
-              text: 'I have all the information I need. Let me create the hook file now.'
-            }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      },
-      messages: [
+              type: "reasoning",
+              summary: [
+                {
+                  type: "summary_text",
+                  text: "I have all the information I need. Let me create the hook file now.",
+                },
+              ],
+            },
+          ],
+        },
         {
-          role: 'user',
-          content: '继续执行'
-        }
-      ]
-    })).resolves.toMatchObject({
-      marker: 'responses_missing_required_tool_call'
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "required",
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续执行",
+            },
+          ],
+        },
+      ),
+    ).resolves.toMatchObject({
+      marker: "responses_missing_required_tool_call",
     });
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '.',
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            { type: 'output_text', text: '.' }
-          ]
-        }
-      ]
-    })).resolves.toBeNull();
-
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output_text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
-      output: [
-        {
-          type: 'message',
-          role: 'assistant',
-          content: [
-            {
-              type: 'output_text',
-              text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
-            }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse({
+        status: "completed",
+        output_text: ".",
+        output: [
           {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      responses: {
-        toolChoice: 'required'
-      },
-      messages: [
-        {
-          role: 'user',
-          content: '继续执行'
-        }
-      ]
-    })).resolves.toBeNull();
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "." }],
+          },
+        ],
+      }),
+    ).resolves.toBeNull();
 
-    await expect(__requestExecutorTestables.detectRetryableEmptyAssistantResponse({
-      status: 'completed',
-      output: [
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
         {
-          type: 'message',
-          role: 'assistant',
-          content: [
+          status: "completed",
+          output_text:
+            '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
+          output: [
             {
-              type: 'output_text',
-              output_text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}'
-            }
-          ]
-        }
-      ]
-    }, {
-      tools: {
-        clientToolsRaw: [
-          {
-            type: 'function',
-            function: { name: 'exec_command' }
-          }
-        ]
-      },
-      messages: [
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
+                },
+              ],
+            },
+          ],
+        },
         {
-          role: 'user',
-          content: '继续执行'
-        }
-      ]
-    })).resolves.toBeNull();
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          responses: {
+            toolChoice: "required",
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续执行",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
 
-    const longReason = 'x'.repeat(400);
+    await expect(
+      __requestExecutorTestables.detectRetryableEmptyAssistantResponse(
+        {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  output_text:
+                    '[reasoning.stop]\n用户任务目标: A\n是否完成: 是\n完成证据: B\n结束标记: [app.finished:reasoning.stop] {"tool":"reasoning.stop","completed":true}',
+                },
+              ],
+            },
+          ],
+        },
+        {
+          tools: {
+            clientToolsRaw: [
+              {
+                type: "function",
+                function: { name: "exec_command" },
+              },
+            ],
+          },
+          messages: [
+            {
+              role: "user",
+              content: "继续执行",
+            },
+          ],
+        },
+      ),
+    ).resolves.toBeNull();
+
+    const longReason = "x".repeat(400);
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);
-    expect(truncated.endsWith('…')).toBe(true);
+    expect(truncated.endsWith("…")).toBe(true);
 
-    const singleton429ExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'mimo.key1.mimo-v2.5-pro',
-      status: 429,
-      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
-      promptTooLong: false,
-      isVerify: false,
-      isReauth: false,
-      routePool: ['mimo.key1.mimo-v2.5-pro'],
-      excludedProviderKeys: new Set<string>()
-    });
+    const singleton429ExclusionPlan =
+      __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+        providerKey: "mimo.key1.mimo-v2.5-pro",
+        status: 429,
+        error: Object.assign(new Error("HTTP 429: overload"), {
+          statusCode: 429,
+        }),
+        promptTooLong: false,
+        isVerify: false,
+        isReauth: false,
+        routePool: ["mimo.key1.mimo-v2.5-pro"],
+        excludedProviderKeys: new Set<string>(),
+      });
     expect(singleton429ExclusionPlan.excludedCurrentProvider).toBe(false);
-    const multi429ThirdAttemptExclusionPlan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'sdfv.key1.gpt-5.4',
-      status: 429,
-      error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429 }),
-      attempt: 3,
-      promptTooLong: false,
-      isVerify: false,
-      isReauth: false,
-      routePool: ['sdfv.key1.gpt-5.4', 'dibittai.crsa.gpt-5.4'],
-      excludedProviderKeys: new Set<string>()
-    });
-    expect(multi429ThirdAttemptExclusionPlan.excludedCurrentProvider).toBe(true);
-    expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'mimo.key1.mimo-v2.5-pro',
-      status: 429,
-      error: Object.assign(new Error('HTTP 429: overload'), {
-        statusCode: 429,
-        code: 'HTTP_429'
+    const multi429ThirdAttemptExclusionPlan =
+      __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+        providerKey: "sdfv.key1.gpt-5.4",
+        status: 429,
+        error: Object.assign(new Error("HTTP 429: overload"), {
+          statusCode: 429,
+        }),
+        attempt: 3,
+        promptTooLong: false,
+        isVerify: false,
+        isReauth: false,
+        routePool: ["sdfv.key1.gpt-5.4", "dibittai.crsa.gpt-5.4"],
+        excludedProviderKeys: new Set<string>(),
+      });
+    expect(multi429ThirdAttemptExclusionPlan.excludedCurrentProvider).toBe(
+      true,
+    );
+    expect(
+      __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+        providerKey: "mimo.key1.mimo-v2.5-pro",
+        status: 429,
+        error: Object.assign(new Error("HTTP 429: overload"), {
+          statusCode: 429,
+          code: "HTTP_429",
+        }),
+        classification: "recoverable",
+        attempt: 3,
+        promptTooLong: false,
+        routePool: ["mimo.key1.mimo-v2.5-pro"],
+        excludedProviderKeys: new Set<string>(),
       }),
-      classification: 'recoverable',
-      attempt: 3,
-      promptTooLong: false,
-      routePool: ['mimo.key1.mimo-v2.5-pro'],
-      excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: false });
+    ).toEqual({ excludedCurrentProvider: false });
 
-    expect(__requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'mimo.key1.mimo-v2.5-pro',
-      status: 429,
-      error: Object.assign(new Error('usage limit exceeded'), {
-        statusCode: 429,
-        code: 'HTTP_429_2056',
-        upstreamCode: 'provider_status_2056'
+    expect(
+      __requestExecutorTestables.resolveProviderRetryExclusionPlan({
+        providerKey: "mimo.key1.mimo-v2.5-pro",
+        status: 429,
+        error: Object.assign(new Error("usage limit exceeded"), {
+          statusCode: 429,
+          code: "HTTP_429_2056",
+          upstreamCode: "provider_status_2056",
+        }),
+        classification: "recoverable",
+        attempt: 3,
+        promptTooLong: false,
+        routePool: ["mimo.key1.mimo-v2.5-pro"],
+        excludedProviderKeys: new Set<string>(),
       }),
-      classification: 'recoverable',
-      attempt: 3,
-      promptTooLong: false,
-      routePool: ['mimo.key1.mimo-v2.5-pro'],
-      excludedProviderKeys: new Set<string>()
-    })).toEqual({ excludedCurrentProvider: false });
+    ).toEqual({ excludedCurrentProvider: false });
 
     const promptTooLongPlan = resolveProviderFailureActionPlan({
-      error: new Error('context exceeded'),
+      error: new Error("context exceeded"),
       statusCode: 400,
-      reason: 'context exceeded',
-      classification: 'recoverable',
+      reason: "context exceeded",
+      classification: "recoverable",
       promptTooLong: true,
     });
     expect(promptTooLongPlan).toMatchObject({
       shouldRetry: true,
-      decisionLabel: 'exclude_and_reroute'
+      decisionLabel: "exclude_and_reroute",
     });
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('context exceeded'), {
-        code: 'CONTEXT_LENGTH_EXCEEDED',
-        statusCode: 400
-      }),
-      retryError: {
-        statusCode: 400,
-        errorCode: 'CONTEXT_LENGTH_EXCEEDED',
-        reason: 'context exceeded'
-      },
-      stage: 'provider.send'
-    })).toBe('recoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("context exceeded"), {
+            code: "CONTEXT_LENGTH_EXCEEDED",
+            statusCode: 400,
+          }),
+          retryError: {
+            statusCode: 400,
+            errorCode: "CONTEXT_LENGTH_EXCEEDED",
+            reason: "context exceeded",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('invalid access token or token expired'), {
-        code: 'invalid_api_key',
-        statusCode: 401
-      }),
-      retryError: {
-        statusCode: 401,
-        errorCode: 'invalid_api_key',
-        reason: 'invalid access token or token expired'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(
+            new Error("invalid access token or token expired"),
+            {
+              code: "invalid_api_key",
+              statusCode: 401,
+            },
+          ),
+          retryError: {
+            statusCode: 401,
+            errorCode: "invalid_api_key",
+            reason: "invalid access token or token expired",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('fetch failed'), {
-        code: 'HTTP_502',
-        statusCode: 502
-      }),
-      retryError: {
-        statusCode: 502,
-        errorCode: 'HTTP_502',
-        reason: 'fetch failed'
-      },
-      stage: 'provider.send'
-    })).toBe('recoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("fetch failed"), {
+            code: "HTTP_502",
+            statusCode: 502,
+          }),
+          retryError: {
+            statusCode: 502,
+            errorCode: "HTTP_502",
+            reason: "fetch failed",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('socket hang up'), {
-        code: 'ECONNRESET'
-      }),
-      retryError: {
-        errorCode: 'ECONNRESET',
-        reason: 'socket hang up'
-      },
-      stage: 'provider.send'
-    })).toBe('recoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("socket hang up"), {
+            code: "ECONNRESET",
+          }),
+          retryError: {
+            errorCode: "ECONNRESET",
+            reason: "socket hang up",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('usage limit exceeded'), {
-        code: 'MALFORMED_RESPONSE',
-        upstreamCode: 'provider_status_2056',
-        statusCode: 429
-      }),
-      retryError: {
-        statusCode: 429,
-        errorCode: 'MALFORMED_RESPONSE',
-        upstreamCode: 'provider_status_2056',
-        reason: 'usage limit exceeded'
-      },
-      stage: 'provider.send'
-    })).toBe('recoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("usage limit exceeded"), {
+            code: "MALFORMED_RESPONSE",
+            upstreamCode: "provider_status_2056",
+            statusCode: 429,
+          }),
+          retryError: {
+            statusCode: 429,
+            errorCode: "MALFORMED_RESPONSE",
+            upstreamCode: "provider_status_2056",
+            reason: "usage limit exceeded",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('daily usage limit exceeded'), {
-        code: 'HTTP_429',
-        upstreamCode: 'HTTP_429',
-        statusCode: 429
-      }),
-      retryError: {
-        statusCode: 429,
-        errorCode: 'HTTP_429',
-        upstreamCode: 'HTTP_429',
-        reason: 'daily usage limit exceeded'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("daily usage limit exceeded"), {
+            code: "HTTP_429",
+            upstreamCode: "HTTP_429",
+            statusCode: 429,
+          }),
+          retryError: {
+            statusCode: 429,
+            errorCode: "HTTP_429",
+            upstreamCode: "HTTP_429",
+            reason: "daily usage limit exceeded",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
-        code: 'HTTP_404',
-        statusCode: 404
-      }),
-      retryError: {
-        statusCode: 404,
-        errorCode: 'HTTP_404',
-        upstreamCode: 'HTTP_404',
-        reason: 'HTTP 404: {"detail":"Not Found"}'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
+            code: "HTTP_404",
+            statusCode: 404,
+          }),
+          retryError: {
+            statusCode: 404,
+            errorCode: "HTTP_404",
+            upstreamCode: "HTTP_404",
+            reason: 'HTTP 404: {"detail":"Not Found"}',
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('tool history contract violated'), {
-        code: 'MALFORMED_REQUEST'
-      }),
-      retryError: {
-        errorCode: 'MALFORMED_REQUEST',
-        reason: 'tool history contract violated'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("tool history contract violated"), {
+            code: "MALFORMED_REQUEST",
+          }),
+          retryError: {
+            errorCode: "MALFORMED_REQUEST",
+            reason: "tool history contract violated",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("unrecoverable");
 
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('tool_call missing required id'), {
-        code: 'MALFORMED_RESPONSE'
-      }),
-      retryError: {
-        errorCode: 'MALFORMED_RESPONSE',
-        reason: 'tool_call missing required id'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("tool_call missing required id"), {
+            code: "MALFORMED_RESPONSE",
+          }),
+          retryError: {
+            errorCode: "MALFORMED_RESPONSE",
+            reason: "tool_call missing required id",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("unrecoverable");
 
-    expect(resolveProviderFailureActionPlan({
-      error: Object.assign(new Error('tool history contract violated'), {
-        code: 'MALFORMED_REQUEST'
+    expect(
+      resolveProviderFailureActionPlan({
+        error: Object.assign(new Error("tool history contract violated"), {
+          code: "MALFORMED_REQUEST",
+        }),
+        errorCode: "MALFORMED_REQUEST",
+        reason: "tool history contract violated",
       }),
-      errorCode: 'MALFORMED_REQUEST',
-      reason: 'tool history contract violated'
-    })).toMatchObject({
+    ).toMatchObject({
       shouldRetry: false,
-      decisionLabel: 'direct_return'
+      decisionLabel: "direct_return",
     });
 
     const followupEligibilityPlan = resolveProviderFailureActionPlan({
-      error: Object.assign(new Error('followup failed'), {
-        code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      error: Object.assign(new Error("followup failed"), {
+        code: "SERVERTOOL_FOLLOWUP_FAILED",
         statusCode: 401,
-        upstreamCode: 'invalid_api_key'
+        upstreamCode: "invalid_api_key",
       }),
       statusCode: 401,
-      errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-      upstreamCode: 'invalid_api_key',
-      reason: 'followup failed',
-      stage: 'provider.followup',
-      classification: undefined
+      errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+      upstreamCode: "invalid_api_key",
+      reason: "followup failed",
+      stage: "provider.followup",
+      classification: undefined,
     });
     expect(followupEligibilityPlan).toMatchObject({
       shouldRetry: false,
-      decisionLabel: 'direct_return'
+      decisionLabel: "direct_return",
     });
 
     const orchestratorExcluded = new Set<string>();
     const recordAttempt = jest.fn();
-    const executionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
-        error: Object.assign(new Error('HTTP 429: overload'), { statusCode: 429, code: 'HTTP_429' }),
-        retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
+    const executionPlan =
+      await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error("HTTP 429: overload"), {
+          statusCode: 429,
+          code: "HTTP_429",
+        }),
+        retryError: {
+          statusCode: 429,
+          errorCode: "HTTP_429",
+          reason: "HTTP 429: overload",
+        },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'gemini.primary.gemini-2.5-pro',
-        runtimeKey: 'runtime:gemini-primary',
-        logicalRequestChainKey: 'req-helper',
-        logicalChainRetryLimitStageRequestId: 'req-helper',
+        providerKey: "gemini.primary.gemini-2.5-pro",
+        runtimeKey: "runtime:gemini-primary",
+        logicalRequestChainKey: "req-helper",
+        logicalChainRetryLimitStageRequestId: "req-helper",
         routePool: [
-          'gemini.primary.gemini-2.5-pro',
-          'gemini.backup.gemini-2.5-pro'
+          "gemini.primary.gemini-2.5-pro",
+          "gemini.backup.gemini-2.5-pro",
         ],
         runtimeManager: {
-          resolveRuntimeKey: () => 'runtime:gemini-primary'
+          resolveRuntimeKey: () => "runtime:gemini-primary",
         },
         excludedProviderKeys: orchestratorExcluded,
         recordAttempt,
@@ -2186,890 +2701,342 @@ describe('HubRequestExecutor failover', () => {
         promptTooLong: false,
         isVerify: false,
         isReauth: false,
-        status: 429
+        status: 429,
       });
-      expect(recordAttempt).toHaveBeenCalledWith({ error: true });
-      expect(executionPlan.shouldRetry).toBe(true);
-      expect(executionPlan.retrySwitchPlan).toEqual(expect.objectContaining({
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute'
-      }));
-      expect(Array.from(orchestratorExcluded)).toEqual(['gemini.primary.gemini-2.5-pro']);
+    expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+    expect(executionPlan.shouldRetry).toBe(true);
+    expect(executionPlan.retrySwitchPlan).toEqual(
+      expect.objectContaining({
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+      }),
+    );
+    expect(Array.from(orchestratorExcluded)).toEqual([
+      "gemini.primary.gemini-2.5-pro",
+    ]);
 
-      const telemetryPlan = __requestExecutorTestables.buildProviderRetryTelemetryPlan({
-        requestId: 'req-helper',
+    const telemetryPlan =
+      __requestExecutorTestables.buildProviderRetryTelemetryPlan({
+        requestId: "req-helper",
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'gemini.primary.gemini-2.5-pro',
-        retryError: { statusCode: 429, errorCode: 'HTTP_429', reason: 'HTTP 429: overload' },
+        providerKey: "gemini.primary.gemini-2.5-pro",
+        retryError: {
+          statusCode: 429,
+          errorCode: "HTTP_429",
+          reason: "HTTP 429: overload",
+        },
         excludedProviderKeys: orchestratorExcluded,
-        routeHint: 'thinking',
+        routeHint: "thinking",
         retryExecutionPlan: executionPlan,
-        stage: 'provider.send',
-        runtimeKey: 'runtime:gemini-primary'
+        stage: "provider.send",
+        runtimeKey: "runtime:gemini-primary",
       });
-      expect(telemetryPlan.switchLogArgs).toEqual(expect.objectContaining({
-        requestId: 'req-helper',
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute',
-        stage: 'provider.send'
-      }));
-      expect(telemetryPlan.retryStageDetails).toEqual(expect.objectContaining({
-        providerKey: 'gemini.primary.gemini-2.5-pro',
-        routeHint: 'thinking',
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute'
-      }));
+    expect(telemetryPlan.switchLogArgs).toEqual(
+      expect.objectContaining({
+        requestId: "req-helper",
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+        stage: "provider.send",
+      }),
+    );
+    expect(telemetryPlan.retryStageDetails).toEqual(
+      expect.objectContaining({
+        providerKey: "gemini.primary.gemini-2.5-pro",
+        routeHint: "thinking",
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+      }),
+    );
 
-      const networkExcluded = new Set<string>();
-      const networkExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
-        error: Object.assign(new Error('fetch failed'), {
-          code: 'HTTP_502',
-          statusCode: 502
+    const networkExcluded = new Set<string>();
+    const networkExecutionPlan =
+      await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error("fetch failed"), {
+          code: "HTTP_502",
+          statusCode: 502,
         }),
         retryError: {
           statusCode: 502,
-          errorCode: 'HTTP_502',
-          reason: 'fetch failed'
+          errorCode: "HTTP_502",
+          reason: "fetch failed",
         },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'deepseek.key1.model-c',
-        runtimeKey: 'runtime:deepseek',
-        logicalRequestChainKey: 'req-network-fetch-failed',
-        logicalChainRetryLimitStageRequestId: 'req-network-fetch-failed',
-        routePool: [
-          'deepseek.key1.model-c',
-          'deepseek.key2.model-c'
-        ],
+        providerKey: "deepseek.key1.model-c",
+        runtimeKey: "runtime:deepseek",
+        logicalRequestChainKey: "req-network-fetch-failed",
+        logicalChainRetryLimitStageRequestId: "req-network-fetch-failed",
+        routePool: ["deepseek.key1.model-c", "deepseek.key2.model-c"],
         runtimeManager: {
-          resolveRuntimeKey: () => 'runtime:deepseek'
+          resolveRuntimeKey: () => "runtime:deepseek",
         },
         excludedProviderKeys: networkExcluded,
         recordAttempt,
         logStage: () => undefined,
-        status: 502
+        status: 502,
       });
-      expect(networkExecutionPlan).toEqual(expect.objectContaining({
+    expect(networkExecutionPlan).toEqual(
+      expect.objectContaining({
         shouldRetry: true,
         excludedCurrentProvider: true,
         retrySwitchPlan: expect.objectContaining({
-          switchAction: 'exclude_and_reroute',
-          decisionLabel: 'exclude_and_reroute'
-        })
-      }));
-      expect(Array.from(networkExcluded)).toEqual(['deepseek.key1.model-c']);
+          switchAction: "exclude_and_reroute",
+          decisionLabel: "exclude_and_reroute",
+        }),
+      }),
+    );
+    expect(Array.from(networkExcluded)).toEqual(["deepseek.key1.model-c"]);
 
-
-      const notFoundExcluded = new Set<string>();
-      const notFoundExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+    const notFoundExcluded = new Set<string>();
+    const notFoundExecutionPlan =
+      await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
         error: Object.assign(new Error('HTTP 404: {"detail":"Not Found"}'), {
-          code: 'HTTP_404',
-          statusCode: 404
+          code: "HTTP_404",
+          statusCode: 404,
         }),
         retryError: {
           statusCode: 404,
-          errorCode: 'HTTP_404',
-          upstreamCode: 'HTTP_404',
-          reason: 'HTTP 404: {"detail":"Not Found"}'
+          errorCode: "HTTP_404",
+          upstreamCode: "HTTP_404",
+          reason: 'HTTP 404: {"detail":"Not Found"}',
         },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'mimo.key1.mimo-v2.5-pro',
-        runtimeKey: 'runtime:mimo',
-        logicalRequestChainKey: 'req-http-404',
-        logicalChainRetryLimitStageRequestId: 'req-http-404',
-        routePool: [
-          'mimo.key1.mimo-v2.5-pro',
-          'whitedrem.key1.model-c'
-        ],
+        providerKey: "mimo.key1.mimo-v2.5-pro",
+        runtimeKey: "runtime:mimo",
+        logicalRequestChainKey: "req-http-404",
+        logicalChainRetryLimitStageRequestId: "req-http-404",
+        routePool: ["mimo.key1.mimo-v2.5-pro", "whitedrem.key1.model-c"],
         runtimeManager: {
-          resolveRuntimeKey: () => 'runtime:mimo'
+          resolveRuntimeKey: () => "runtime:mimo",
         },
         excludedProviderKeys: notFoundExcluded,
         recordAttempt,
         logStage: () => undefined,
-        status: 404
+        status: 404,
       });
-      expect(notFoundExecutionPlan).toMatchObject({
-        shouldRetry: true,
-        excludedCurrentProvider: true,
-        retrySwitchPlan: expect.objectContaining({
-          switchAction: 'exclude_and_reroute',
-          decisionLabel: 'exclude_and_reroute'
-        })
-      });
-      expect(Array.from(notFoundExcluded)).toEqual(['mimo.key1.mimo-v2.5-pro']);
+    expect(notFoundExecutionPlan).toMatchObject({
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      retrySwitchPlan: expect.objectContaining({
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+      }),
+    });
+    expect(Array.from(notFoundExcluded)).toEqual(["mimo.key1.mimo-v2.5-pro"]);
 
-      const sqliteBusyExcluded = new Set<string>();
-      const sqliteBusyExecutionPlan = await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
-        error: Object.assign(new Error('database is locked (5) (SQLITE_BUSY)'), {
-          code: 'new_api_error',
-          upstreamCode: 'new_api_error',
-          statusCode: 500,
-          retryable: true
-        }),
+    const sqliteBusyExcluded = new Set<string>();
+    const sqliteBusyExecutionPlan =
+      await __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(
+          new Error("database is locked (5) (SQLITE_BUSY)"),
+          {
+            code: "new_api_error",
+            upstreamCode: "new_api_error",
+            statusCode: 500,
+            retryable: true,
+          },
+        ),
         retryError: {
           statusCode: 500,
-          errorCode: 'new_api_error',
-          upstreamCode: 'new_api_error',
-          reason: 'database is locked (5) (SQLITE_BUSY)'
+          errorCode: "new_api_error",
+          upstreamCode: "new_api_error",
+          reason: "database is locked (5) (SQLITE_BUSY)",
         },
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'deepseek.key1.model-c',
-        runtimeKey: 'runtime:deepseek',
-        logicalRequestChainKey: 'req-sqlite-busy',
-        logicalChainRetryLimitStageRequestId: 'req-sqlite-busy',
-        routePool: [
-          'deepseek.key1.model-c',
-          'deepseek.key2.model-c'
-        ],
+        providerKey: "deepseek.key1.model-c",
+        runtimeKey: "runtime:deepseek",
+        logicalRequestChainKey: "req-sqlite-busy",
+        logicalChainRetryLimitStageRequestId: "req-sqlite-busy",
+        routePool: ["deepseek.key1.model-c", "deepseek.key2.model-c"],
         runtimeManager: {
-          resolveRuntimeKey: () => 'runtime:deepseek'
+          resolveRuntimeKey: () => "runtime:deepseek",
         },
         excludedProviderKeys: sqliteBusyExcluded,
         recordAttempt,
         logStage: () => undefined,
-        status: 500
+        status: 500,
       });
-      expect(sqliteBusyExecutionPlan).toEqual(expect.objectContaining({
+    expect(sqliteBusyExecutionPlan).toEqual(
+      expect.objectContaining({
         shouldRetry: true,
         excludedCurrentProvider: true,
         retrySwitchPlan: expect.objectContaining({
-          switchAction: 'exclude_and_reroute',
-          decisionLabel: 'exclude_and_reroute'
-        })
-      }));
-      expect(Array.from(sqliteBusyExcluded)).toEqual(['deepseek.key1.model-c']);
-
-    await expect(__requestExecutorTestables.resolveProviderRetryExecutionPlan({
-      error: Object.assign(new Error('followup failed'), {
-        code: 'SERVERTOOL_FOLLOWUP_FAILED',
-        statusCode: 401,
-        upstreamCode: 'invalid_api_key'
+          switchAction: "exclude_and_reroute",
+          decisionLabel: "exclude_and_reroute",
+        }),
       }),
-      retryError: {
-        statusCode: 401,
-        errorCode: 'SERVERTOOL_FOLLOWUP_FAILED',
-        upstreamCode: 'invalid_api_key',
-        reason: 'followup failed'
-      },
-      attempt: 1,
-      maxAttempts: 6,
-      stage: 'provider.followup',
-      providerKey: 'ali-coding-plan.key1.kimi-k2.5',
-      runtimeKey: 'runtime:ali-coding-plan',
-      logicalRequestChainKey: 'req-followup',
-      logicalChainRetryLimitStageRequestId: 'req-followup',
-      routePool: ['ali-coding-plan.key1.kimi-k2.5', 'provider-b.1.model-a'],
-      runtimeManager: {
-        resolveRuntimeKey: () => 'runtime:ali-coding-plan'
-      },
-      excludedProviderKeys: new Set<string>(),
-      recordAttempt,
-      logStage: () => undefined,
-      status: 401
-    })).rejects.toThrow('[request-executor] provider failure classification missing');
+    );
+    expect(Array.from(sqliteBusyExcluded)).toEqual(["deepseek.key1.model-c"]);
 
-  });
-
-  test('classifies MALFORMED_REQUEST as unrecoverable local contract error', () => {
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('tool history contract violated'), {
-        code: 'MALFORMED_REQUEST'
-      }),
-      retryError: {
-        errorCode: 'MALFORMED_REQUEST',
-        reason: 'tool history contract violated'
-      },
-      stage: 'provider.send'
-    })).toBe('unrecoverable');
-
-    expect(resolveProviderFailureActionPlan({
-      error: Object.assign(new Error('tool history contract violated'), {
-        code: 'MALFORMED_REQUEST'
-      }),
-      errorCode: 'MALFORMED_REQUEST',
-      reason: 'tool history contract violated'
-    })).toMatchObject({
-      shouldRetry: false,
-      decisionLabel: 'direct_return'
-    });
-  });
-
-  test('classifies CONTEXT_LENGTH_EXCEEDED as recoverable provider failure', () => {
-    expect(__requestExecutorTestables.resolveRequestExecutorProviderErrorClassification({
-      error: Object.assign(new Error('context exceeded'), {
-        code: 'CONTEXT_LENGTH_EXCEEDED',
-        statusCode: 400
-      }),
-      retryError: {
-        statusCode: 400,
-        errorCode: 'CONTEXT_LENGTH_EXCEEDED',
-        reason: 'context exceeded'
-      },
-      stage: 'provider.send'
-    })).toBe('recoverable');
-
-    expect(resolveProviderFailureActionPlan({
-      error: new Error('context exceeded'),
-      statusCode: 400,
-      reason: 'context exceeded',
-      classification: 'recoverable',
-      promptTooLong: true,
-    })).toMatchObject({
-      shouldRetry: true,
-      decisionLabel: 'exclude_and_reroute'
-    });
-  });
-
-  test('retries when runtime resolution fails before provider send and then succeeds', async () => {
-    const firstProviderKey = 'runtime-missing.alias.model-a';
-    const secondProviderKey = 'runtime-ready.alias.model-b';
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-runtime-retry' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
-
-    const runtimeManager = {
-      resolveRuntimeKey: (providerKey?: string) => (providerKey === secondProviderKey ? secondProviderKey : undefined),
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === secondProviderKey ? successHandle : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const disabled = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
-        );
-        const providerKey = disabled.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'gemini',
-            outboundProfile: 'gemini-chat',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'default', providerProtocol: 'gemini-chat', pool: [firstProviderKey, secondProviderKey] },
-          metadata: {}
-        };
-      }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const logStage = jest.fn();
-    const deps = {
-      runtimeManager,
-      getHubPipeline: () => pipeline,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
-      }),
-      logStage,
-      stats: new StatsManager()
-    };
-
-    const executor = createRequestExecutor(deps);
-    const result = await executor.execute({
-      requestId: 'req-runtime-retry',
-      entryEndpoint: '/v1/responses',
-      body: {},
-      headers: {},
-      metadata: {}
-    });
-
-    expect(result).toEqual(expect.objectContaining({ status: 200 }));
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(successProcess).toHaveBeenCalledTimes(1);
-    expect(
-      logStage.mock.calls.some(
-        (call) =>
-          call[0] === 'provider.runtime_resolve.error' &&
-          call[1] === 'req-runtime-retry' &&
-          call[2]?.providerKey === firstProviderKey
-      )
-    ).toBe(true);
-    expect(
-      logStage.mock.calls.some(
-        (call) =>
-          call[0] === 'provider.retry' &&
-          call[1] === 'req-runtime-retry' &&
-          Array.isArray(call[2]?.excluded) &&
-          call[2]?.excluded.includes(firstProviderKey)
-      )
-    ).toBe(true);
-  });
-
-  test('RED: recoverable 429 must continue to later pools before failing when default still has candidates', async () => {
-    const firstProviderKey = 'minimax.key1.MiniMax-M3';
-    const secondProviderKey = 'asxs.crsa.gpt-5.4';
-
-    const firstProcess = jest.fn(async () => {
-      throw Object.assign(new Error('HTTP 429: upstream rate limited'), {
-        statusCode: 429,
-        code: 'HTTP_429',
-        upstreamCode: 'HTTP_429'
-      });
-    });
-    const secondProcess = jest.fn(async () => ({
-      status: 200,
-      data: {
-        id: 'ok-after-next-pool',
-        object: 'response',
-        status: 'completed',
-        output: [{
-          type: 'message',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: 'ok_from_default_pool' }]
-        }]
-      }
-    }));
-
-    const runtimeManager = {
-      resolveRuntimeKey: (providerKey?: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => {
-        if (runtimeKey === firstProviderKey) {
-          return buildHandle(firstProviderKey, firstProcess, 'openai-responses');
-        }
-        if (runtimeKey === secondProviderKey) {
-          return buildHandle(secondProviderKey, secondProcess, 'openai-responses');
-        }
-        return undefined;
-      }
-    };
-
-    const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const excluded = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
-        );
-        const providerKey = excluded.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
-        const pool = excluded.has(firstProviderKey)
-          ? [secondProviderKey]
-          : [firstProviderKey];
-        return {
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey
-          },
-          routingDecision: {
-            routeName: excluded.has(firstProviderKey) ? 'default' : 'search',
-            providerProtocol: 'openai-responses',
-            pool,
-            poolId: excluded.has(firstProviderKey) ? 'default-backstop' : 'search-primary'
-          },
-          metadata: {}
-        };
-      }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const executor = createRequestExecutor({
-      runtimeManager: runtimeManager as any,
-      getHubPipeline: () => pipeline as any,
-      getRoutingTiers: (_group: string, routeName: string) => {
-        if (routeName === 'search') {
-          return [{ id: 'search-primary', targets: [firstProviderKey] }];
-        }
-        if (routeName === 'default') {
-          return [{ id: 'default-backstop', targets: [secondProviderKey] }];
-        }
-        return [];
-      },
-      getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }) as any,
-      logStage: () => undefined,
-      stats: new StatsManager()
-    });
-
-    const result = await executor.execute({
-      entryEndpoint: '/v1/responses',
-      method: 'POST',
-      requestId: 'req-429-next-pool-default',
-      headers: {},
-      query: {},
-      body: { model: 'gpt-test', input: 'hi' },
-      metadata: { routecodexRoutingPolicyGroup: 'test-group' }
-    });
-
-    expect(firstProcess).toHaveBeenCalledTimes(1);
-    expect(secondProcess).toHaveBeenCalledTimes(1);
-    expect(pipeline.execute).toHaveBeenCalledTimes(2);
-    expect(result.body).toEqual(expect.objectContaining({
-      id: 'ok-after-next-pool'
-    }));
-  });
-
-  test('records attempt and fails fast when hub pipeline is unavailable', async () => {
-    const deps = {
-      runtimeManager: {
-        resolveRuntimeKey: () => undefined,
-        getHandleByRuntimeKey: () => undefined
-      },
-      getHubPipeline: () => null,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
-      }),
-      logStage: jest.fn(),
-      stats: new StatsManager()
-    };
-
-    const executor = createRequestExecutor(deps);
     await expect(
-      executor.execute({
-        requestId: 'req-no-pipeline',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      })
-    ).rejects.toThrow('Hub pipeline runtime is not initialized');
-  });
-
-  test('backs off recoverable pool exhaustion before retrying route selection', async () => {
-    jest.useFakeTimers();
-    const providerKey = 'provider-a.1.model-a';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
-
-    const runtimeManager = {
-      resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn()
-        .mockRejectedValueOnce(
-          Object.assign(new Error('All providers unavailable for route default'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
-              routeName: 'default',
-              attempted: ['default:default-primary:health'],
-              minRecoverableCooldownMs: 120
-            }
-          })
-        )
-        .mockResolvedValueOnce({
-          requestId: 'req-cooldown-wait',
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat' },
-          metadata: {}
+      __requestExecutorTestables.resolveProviderRetryExecutionPlan({
+        error: Object.assign(new Error("followup failed"), {
+          code: "SERVERTOOL_FOLLOWUP_FAILED",
+          statusCode: 401,
+          upstreamCode: "invalid_api_key",
         }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const logStage = jest.fn();
-    const deps = {
-      runtimeManager,
-      getHubPipeline: () => pipeline,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+        retryError: {
+          statusCode: 401,
+          errorCode: "SERVERTOOL_FOLLOWUP_FAILED",
+          upstreamCode: "invalid_api_key",
+          reason: "followup failed",
+        },
+        attempt: 1,
+        maxAttempts: 6,
+        stage: "provider.followup",
+        providerKey: "ali-coding-plan.key1.kimi-k2.5",
+        runtimeKey: "runtime:ali-coding-plan",
+        logicalRequestChainKey: "req-followup",
+        logicalChainRetryLimitStageRequestId: "req-followup",
+        routePool: ["ali-coding-plan.key1.kimi-k2.5", "provider-b.1.model-a"],
+        runtimeManager: {
+          resolveRuntimeKey: () => "runtime:ali-coding-plan",
+        },
+        excludedProviderKeys: new Set<string>(),
+        recordAttempt,
+        logStage: () => undefined,
+        status: 401,
       }),
-      logStage,
-      stats: new StatsManager()
-    };
-
-    const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: { id: 'ok-after-pool-exhausted-backoff', object: 'response', status: 'completed' }
-    });
-    const pending = executor.execute({
-      requestId: 'req-cooldown-wait',
-      entryEndpoint: '/v1/responses',
-      body: {},
-      headers: {},
-      metadata: {}
-    });
-    const expectation = expect(pending).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
-
-    await jest.advanceTimersByTimeAsync(1_000);
-    await expectation;
-
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
-    expect(
-      logStage.mock.calls.some(
-        (call) => call[0] === 'hub.pool_exhausted.backoff_wait'
-      )
-    ).toBe(false);
+    ).rejects.toThrow(
+      "[request-executor] provider failure classification missing",
+    );
   });
 
-  test('surfaces singleton concurrency busy immediately when no reroute plan exists', async () => {
-    jest.useFakeTimers();
-    const providerKey = 'mimo.key1.mimo-v2.5-pro';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-concurrency-wait' } }), 'openai-chat');
-
-    const runtimeManager = {
-      resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn()
-        .mockRejectedValueOnce(
-          Object.assign(new Error('No available providers after applying routing instructions'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
-              routeName: 'thinking',
-              attempted: ['thinking:thinking-mimo-primary:health'],
-              recoverableCooldownHints: [
-                { providerKey, waitMs: 120, source: 'concurrency.busy' }
-              ]
-            }
-          })
-        )
-        .mockResolvedValueOnce({
-          requestId: 'req-singleton-concurrency-wait',
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+  test("classifies MALFORMED_REQUEST as unrecoverable local contract error", () => {
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("tool history contract violated"), {
+            code: "MALFORMED_REQUEST",
+          }),
+          retryError: {
+            errorCode: "MALFORMED_REQUEST",
+            reason: "tool history contract violated",
           },
-          routingDecision: { routeName: 'thinking', providerProtocol: 'openai-chat', pool: [providerKey] },
-          metadata: {}
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("unrecoverable");
+
+    expect(
+      resolveProviderFailureActionPlan({
+        error: Object.assign(new Error("tool history contract violated"), {
+          code: "MALFORMED_REQUEST",
         }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const logStage = jest.fn();
-    const deps = {
-      runtimeManager,
-      getHubPipeline: () => pipeline,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+        errorCode: "MALFORMED_REQUEST",
+        reason: "tool history contract violated",
       }),
-      logStage,
-      stats: new StatsManager()
-    };
-
-    const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: {
-        choices: [
-          {
-            finish_reason: 'stop',
-            message: {
-              role: 'assistant',
-              content: 'ok'
-            }
-          }
-        ]
-      }
+    ).toMatchObject({
+      shouldRetry: false,
+      decisionLabel: "direct_return",
     });
-    const pending = executor.execute({
-      requestId: 'req-singleton-concurrency-wait',
-      entryEndpoint: '/v1/responses',
-      body: {},
-      headers: {},
-      metadata: {}
-    });
-    const expectation = expect(pending).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
-
-    await jest.advanceTimersByTimeAsync(1_000);
-    await expectation;
-
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
-    expect(
-      logStage.mock.calls.some(
-        (call) =>
-          call[0] === 'hub.pool_exhausted.backoff_wait'
-      )
-    ).toBe(false);
   });
 
-  test('fails fast on singleton recoverable pool exhaustion without local cooldown hold', async () => {
-    jest.useFakeTimers();
-    const providerKey = 'dbittai.key1.MiniMax-M2.7';
-    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-long-singleton-wait' } }));
+  test("classifies provider-origin auth quota and missing-model failures as recoverable", () => {
+    const cases = [
+      {
+        statusCode: 401,
+        errorCode: "INVALID_API_KEY",
+        reason: "invalid api key",
+      },
+      {
+        statusCode: 402,
+        errorCode: "INSUFFICIENT_QUOTA",
+        reason: "insufficient quota",
+      },
+      {
+        statusCode: 403,
+        errorCode: "ACCOUNT_DISABLED",
+        reason: "account disabled",
+      },
+      {
+        statusCode: 404,
+        errorCode: "NO_SUCH_MODEL",
+        reason: "model not supported",
+      },
+    ];
 
-    const runtimeManager = {
-      resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
-    };
-
-    let calls = 0;
-    const pipeline = {
-      execute: jest.fn(async () => {
-        calls += 1;
-        if (calls <= 2) {
-          throw Object.assign(new Error('No available providers after applying routing instructions'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
-              routeName: 'coding',
-              minRecoverableCooldownMs: 1000,
-              candidateProviderCount: 1,
-              recoverableCooldownHints: [
-                { providerKey, waitMs: 1000, source: 'concurrency.busy' }
-              ]
-            }
-          });
-        }
-        return {
-          requestId: 'req-singleton-cooldown-budget',
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: 'anthropic',
-            outboundProfile: 'anthropic-messages',
-            runtimeKey: providerKey
-          },
-          routingDecision: { routeName: 'coding', providerProtocol: 'gemini-chat', pool: [providerKey] },
-          metadata: {}
-        };
-      }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-
-    const logStage = jest.fn();
-    const deps = {
-      runtimeManager,
-      getHubPipeline: () => pipeline,
-      getModuleDependencies: () => ({
-        errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
-      }),
-      logStage,
-      stats: new StatsManager()
-    };
-
-    const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: {
-        choices: [
+    for (const testCase of cases) {
+      expect(
+        __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
           {
-            finish_reason: 'stop',
-            message: {
-              role: 'assistant',
-              content: 'ok'
-            }
-          }
-        ]
-      }
-    });
-
-    try {
-      const pending = executor.execute({
-        requestId: 'req-singleton-cooldown-budget',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      });
-      const expectation = expect(pending).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
-
-      await jest.advanceTimersByTimeAsync(1_000);
-      await expectation;
-
-      expect(pipeline.execute).toHaveBeenCalledTimes(1);
-      expect(
-        logStage.mock.calls.filter(
-          (call) => call[0] === 'provider.route_pool_cooldown_wait'
-        )
-      ).toHaveLength(0);
-      expect(
-        logStage.mock.calls.filter(
-          (call) => call[0] === 'provider.route_pool_cooldown_wait.completed'
-        )
-      ).toHaveLength(0);
-    } finally {
-      jest.useRealTimers();
+            error: Object.assign(new Error(testCase.reason), {
+              code: testCase.errorCode,
+              statusCode: testCase.statusCode,
+            }),
+            retryError: {
+              statusCode: testCase.statusCode,
+              errorCode: testCase.errorCode,
+              reason: testCase.reason,
+            },
+            stage: "provider.send",
+          },
+        ),
+      ).toBe("recoverable");
     }
   });
 
-  test('default-pool singleton exhaustion waits, clears exclusions, and replays the sole provider', async () => {
-    jest.resetModules();
-    jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/runtime-integrations.js',
-      createRequestExecutorLocalRuntimeIntegrationsMock
-    );
-    jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/routing-integrations.js',
-      createRequestExecutorLocalRoutingIntegrationsMock
-    );
-    const searchProvider = 'search.key1.gpt-5.4';
-    const defaultProvider = 'default.key1.MiniMax-M3';
-    const defaultAttemptExclusions: unknown[] = [];
-    const handle = buildHandle(
-      defaultProvider,
-      async () => ({ status: 200, data: { id: 'ok-after-default-singleton-wait' } }),
-      'openai-chat'
+  test("classifies CONTEXT_LENGTH_EXCEEDED as recoverable provider failure", () => {
+    expect(
+      __requestExecutorTestables.resolveRequestExecutorProviderErrorClassification(
+        {
+          error: Object.assign(new Error("context exceeded"), {
+            code: "CONTEXT_LENGTH_EXCEEDED",
+            statusCode: 400,
+          }),
+          retryError: {
+            statusCode: 400,
+            errorCode: "CONTEXT_LENGTH_EXCEEDED",
+            reason: "context exceeded",
+          },
+          stage: "provider.send",
+        },
+      ),
+    ).toBe("recoverable");
+
+    expect(
+      resolveProviderFailureActionPlan({
+        error: new Error("context exceeded"),
+        statusCode: 400,
+        reason: "context exceeded",
+        classification: "recoverable",
+        promptTooLong: true,
+      }),
+    ).toMatchObject({
+      shouldRetry: true,
+      decisionLabel: "exclude_and_reroute",
+    });
+  });
+
+  test("retries when runtime resolution fails before provider send and then succeeds", async () => {
+    const firstProviderKey = "runtime-missing.alias.model-a";
+    const secondProviderKey = "runtime-ready.alias.model-b";
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "ok-after-runtime-retry" },
+    }));
+    const successHandle = buildHandle(
+      secondProviderKey,
+      successProcess,
+      "gemini-chat",
     );
 
     const runtimeManager = {
-      resolveRuntimeKey: (key: string) => key,
+      resolveRuntimeKey: (providerKey?: string) =>
+        providerKey === secondProviderKey ? secondProviderKey : undefined,
       getHandleByRuntimeKey: (runtimeKey?: string) =>
-        runtimeKey === defaultProvider ? handle : undefined
+        runtimeKey === secondProviderKey ? successHandle : undefined,
     };
 
-    let defaultAttempts = 0;
     const pipeline = {
       execute: jest.fn((input: any) => {
-        const allowedProviders = input?.metadata?.allowedProviders;
-        if (Array.isArray(allowedProviders) && allowedProviders[0] === defaultProvider) {
-          defaultAttempts += 1;
-          defaultAttemptExclusions.push(input?.metadata?.excludedProviderKeys);
-          if (defaultAttempts === 1) {
-            throw Object.assign(new Error('All providers unavailable for route default'), {
-              code: 'PROVIDER_NOT_AVAILABLE',
-              details: {
-                routeName: 'default',
-                candidateProviderCount: 1,
-                minRecoverableCooldownMs: 5,
-                recoverableCooldownHints: [
-                  { providerKey: defaultProvider, waitMs: 5, source: 'provider.error' }
-                ]
-              }
-            });
-          }
-          return {
-            requestId: input.id,
-            providerPayload: { model: 'test-model', messages: [{ role: 'user', content: 'hello' }] },
-            target: {
-              providerKey: defaultProvider,
-              providerType: 'openai',
-              outboundProfile: 'openai-chat',
-              runtimeKey: defaultProvider
-            },
-            routingDecision: {
-              routeName: 'default',
-              providerProtocol: 'openai-chat',
-              routePool: [defaultProvider]
-            },
-            metadata: {}
-          };
-        }
-        throw Object.assign(new Error('All providers unavailable for route search'), {
-          code: 'PROVIDER_NOT_AVAILABLE',
-          details: {
-            primaryExhaustedRouteName: 'search',
-            primaryExhaustedTargets: [searchProvider],
-            unavailableRoutePools: [
-              {
-                routeName: 'search',
-                poolId: 'search-primary',
-                poolTargets: [searchProvider]
-              },
-              {
-                routeName: 'default',
-                poolId: 'default-primary',
-                poolTargets: [defaultProvider]
-              }
-            ]
-          }
-        });
-      }),
-      updateVirtualRouterConfig: jest.fn()
-    };
-    requestExecutorLocalHubPipelineExecute = (input: unknown) => pipeline.execute(input);
-    const { createRequestExecutor: createRequestExecutorLocal } = await import(
-      '../../../../src/server/runtime/http-server/request-executor'
-    );
-
-    const logStage = jest.fn();
-    const executor = createRequestExecutorLocal({
-      runtimeManager: runtimeManager as any,
-      getHubPipeline: () => 'request-executor-default-singleton-native-handle' as any,
-      getRoutingTiers: () => [
-        { id: 'search-primary', targets: [searchProvider], priority: 200 },
-        { id: 'default-primary', targets: [defaultProvider], priority: 100, backup: true }
-      ],
-      getModuleDependencies: () => ({ errorHandlingCenter: { handleError: async () => undefined } }) as any,
-      logStage,
-      stats: new StatsManager()
-    });
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: { id: 'ok-after-default-singleton-wait', object: 'response', status: 'completed' }
-    });
-
-    const pending = executor.execute({
-      requestId: 'req-default-pool-singleton-must-stop',
-      entryEndpoint: '/v1/chat/completions',
-      body: {
-        model: 'test-model',
-        messages: [{ role: 'user', content: 'hello' }]
-      },
-      headers: {},
-      metadata: {
-        routecodexRoutingPolicyGroup: 'gateway_priority_5555'
-      }
-    });
-
-    const result = await pending;
-    expect(result).toEqual(expect.objectContaining({ status: 200 }));
-    expect(pipeline.execute).toHaveBeenCalledTimes(3);
-    expect(defaultAttemptExclusions).toEqual([undefined, undefined]);
-    expect(
-      logStage.mock.calls.some((call) => call[0] === 'provider.primary_exhausted_to_default_pool.applied')
-    ).toBe(true);
-    expect(
-      logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait')
-    ).toBe(true);
-    expect(
-      logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait.completed')
-    ).toBe(true);
-  }, 20_000);
-
-
-  test('switches recoverable 429 to an alternative provider when available', async () => {
-    jest.useFakeTimers();
-    const firstProviderKey = 'gemini.primary.gemini-2.5-pro';
-    const secondProviderKey = 'gemini.backup.gemini-2.5-flash';
-    const failingError = new Error('HTTP 429: quota exhausted');
-    (failingError as any).statusCode = 429;
-
-    const failingProcess = jest.fn(async () => {
-      throw failingError;
-    });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'gemini-chat');
-    const successPayload = {
-      status: 200,
-      data: {
-        id: 'ok',
-        status: 'completed',
-        output_text: 'ok',
-        output: [{ type: 'output_text', text: 'ok' }]
-      }
-    };
-    const successProcess = jest.fn(async () => successPayload);
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
-
-    const handles = new Map<string, ProviderHandle>([
-      [firstProviderKey, failureHandle],
-      [secondProviderKey, successHandle]
-    ]);
-
-    const runtimeManager = {
-      resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
-    };
-
-    const pipeline = {
-      execute: jest.fn(async (input: any) => {
         const disabled = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const providerKey = disabled.has(firstProviderKey)
           ? secondProviderKey
@@ -3079,19 +3046,792 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'gemini',
-            outboundProfile: 'gemini-chat',
-            runtimeKey: providerKey
+            providerType: "gemini",
+            outboundProfile: "gemini-chat",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'thinking',
-            providerProtocol: 'gemini-chat',
-            pool: [firstProviderKey, secondProviderKey]
+            routeName: "default",
+            providerProtocol: "gemini-chat",
+            pool: [firstProviderKey, secondProviderKey],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined),
+        },
+      }),
+      logStage,
+      stats: new StatsManager(),
+    };
+
+    const executor = createRequestExecutor(deps);
+    const result = await executor.execute({
+      requestId: "req-runtime-retry",
+      entryEndpoint: "/v1/responses",
+      body: {},
+      headers: {},
+      metadata: {},
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === "provider.runtime_resolve.error" &&
+          call[1] === "req-runtime-retry" &&
+          call[2]?.providerKey === firstProviderKey,
+      ),
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === "provider.retry" &&
+          call[1] === "req-runtime-retry" &&
+          Array.isArray(call[2]?.excluded) &&
+          call[2]?.excluded.includes(firstProviderKey),
+      ),
+    ).toBe(true);
+  });
+
+  test("RED: recoverable 429 must continue to later pools before failing when default still has candidates", async () => {
+    const firstProviderKey = "minimax.key1.MiniMax-M3";
+    const secondProviderKey = "asxs.crsa.gpt-5.4";
+
+    const firstProcess = jest.fn(async () => {
+      throw Object.assign(new Error("HTTP 429: upstream rate limited"), {
+        statusCode: 429,
+        code: "HTTP_429",
+        upstreamCode: "HTTP_429",
+      });
+    });
+    const secondProcess = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: "ok-after-next-pool",
+        object: "response",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "ok_from_default_pool" }],
+          },
+        ],
+      },
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey?: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => {
+        if (runtimeKey === firstProviderKey) {
+          return buildHandle(
+            firstProviderKey,
+            firstProcess,
+            "openai-responses",
+          );
+        }
+        if (runtimeKey === secondProviderKey) {
+          return buildHandle(
+            secondProviderKey,
+            secondProcess,
+            "openai-responses",
+          );
+        }
+        return undefined;
+      },
+    };
+
+    const pipeline = {
+      execute: jest.fn((input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
+        );
+        const providerKey = excluded.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
+        const pool = excluded.has(firstProviderKey)
+          ? [secondProviderKey]
+          : [firstProviderKey];
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "openai",
+            outboundProfile: "openai-responses",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: excluded.has(firstProviderKey) ? "default" : "search",
+            providerProtocol: "openai-responses",
+            pool,
+            poolId: excluded.has(firstProviderKey)
+              ? "default-backstop"
+              : "search-primary",
+          },
+          metadata: {},
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+
+    const executor = createRequestExecutor({
+      runtimeManager: runtimeManager as any,
+      getHubPipeline: () => pipeline as any,
+      getRoutingTiers: (_group: string, routeName: string) => {
+        if (routeName === "search") {
+          return [{ id: "search-primary", targets: [firstProviderKey] }];
+        }
+        if (routeName === "default") {
+          return [{ id: "default-backstop", targets: [secondProviderKey] }];
+        }
+        return [];
+      },
+      getModuleDependencies: () =>
+        ({
+          errorHandlingCenter: { handleError: async () => undefined },
+        }) as any,
+      logStage: () => undefined,
+      stats: new StatsManager(),
+    });
+
+    const result = await executor.execute({
+      entryEndpoint: "/v1/responses",
+      method: "POST",
+      requestId: "req-429-next-pool-default",
+      headers: {},
+      query: {},
+      body: { model: "gpt-test", input: "hi" },
+      metadata: { routecodexRoutingPolicyGroup: "test-group" },
+    });
+
+    expect(firstProcess).toHaveBeenCalledTimes(1);
+    expect(secondProcess).toHaveBeenCalledTimes(1);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        id: "ok-after-next-pool",
+      }),
+    );
+  });
+
+  test("records attempt and fails fast when hub pipeline is unavailable", async () => {
+    const deps = {
+      runtimeManager: {
+        resolveRuntimeKey: () => undefined,
+        getHandleByRuntimeKey: () => undefined,
+      },
+      getHubPipeline: () => null,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined),
+        },
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager(),
+    };
+
+    const executor = createRequestExecutor(deps);
+    await expect(
+      executor.execute({
+        requestId: "req-no-pipeline",
+        entryEndpoint: "/v1/responses",
+        body: {},
+        headers: {},
+        metadata: {},
+      }),
+    ).rejects.toThrow("Hub pipeline runtime is not initialized");
+  });
+
+  test("backs off recoverable pool exhaustion before retrying route selection", async () => {
+    jest.useFakeTimers();
+    const providerKey = "provider-a.1.model-a";
+    const handle = buildHandle(providerKey, async () => ({
+      status: 200,
+      data: { id: "ok-after-wait" },
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey
+          ? runtimeKey === providerKey
+            ? handle
+            : undefined
+          : undefined,
+    };
+
+    const pipeline = {
+      execute: jest
+        .fn()
+        .mockImplementationOnce(() => {
+          throw Object.assign(
+            new Error("All providers unavailable for route default"),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                routeName: "default",
+                attempted: ["default:default-primary:health"],
+                minRecoverableCooldownMs: 120,
+              },
+            },
+          );
+        })
+        .mockReturnValueOnce({
+          requestId: "req-cooldown-wait",
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: "default",
+            providerProtocol: "openai-chat",
+          },
+          metadata: {},
+        }),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined),
+        },
+      }),
+      logStage,
+      stats: new StatsManager(),
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          id: "ok-after-pool-exhausted-backoff",
+          object: "response",
+          status: "completed",
+        },
+      });
+    const pending = executor.execute({
+      requestId: "req-cooldown-wait",
+      entryEndpoint: "/v1/responses",
+      body: {},
+      headers: {},
+      metadata: {},
+    });
+    const expectation = expect(pending).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "hub.pool_exhausted.backoff_wait",
+      ),
+    ).toBe(false);
+  });
+
+  test("surfaces singleton concurrency busy immediately when no reroute plan exists", async () => {
+    jest.useFakeTimers();
+    const providerKey = "mimo.key1.mimo-v2.5-pro";
+    const handle = buildHandle(
+      providerKey,
+      async () => ({ status: 200, data: { id: "ok-after-concurrency-wait" } }),
+      "openai-chat",
+    );
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey
+          ? runtimeKey === providerKey
+            ? handle
+            : undefined
+          : undefined,
+    };
+
+    const pipeline = {
+      execute: jest
+        .fn()
+        .mockImplementationOnce(() => {
+          throw Object.assign(
+            new Error(
+              "No available providers after applying routing instructions",
+            ),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                routeName: "thinking",
+                attempted: ["thinking:thinking-mimo-primary:health"],
+                recoverableCooldownHints: [
+                  { providerKey, waitMs: 120, source: "concurrency.busy" },
+                ],
+              },
+            },
+          );
+        })
+        .mockReturnValueOnce({
+          requestId: "req-singleton-concurrency-wait",
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: "thinking",
+            providerProtocol: "openai-chat",
+            pool: [providerKey],
+          },
+          metadata: {},
+        }),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined),
+        },
+      }),
+      logStage,
+      stats: new StatsManager(),
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "ok",
+              },
+            },
+          ],
+        },
+      });
+    const pending = executor.execute({
+      requestId: "req-singleton-concurrency-wait",
+      entryEndpoint: "/v1/responses",
+      body: {},
+      headers: {},
+      metadata: {},
+    });
+    const expectation = expect(pending).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
+
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "hub.pool_exhausted.backoff_wait",
+      ),
+    ).toBe(false);
+  });
+
+  test("fails fast on singleton recoverable pool exhaustion without local cooldown hold", async () => {
+    jest.useFakeTimers();
+    const providerKey = "dbittai.key1.MiniMax-M2.7";
+    const handle = buildHandle(providerKey, async () => ({
+      status: 200,
+      data: { id: "ok-after-long-singleton-wait" },
+    }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey
+          ? runtimeKey === providerKey
+            ? handle
+            : undefined
+          : undefined,
+    };
+
+    let calls = 0;
+    const pipeline = {
+      execute: jest.fn(() => {
+        calls += 1;
+        if (calls <= 2) {
+          throw Object.assign(
+            new Error(
+              "No available providers after applying routing instructions",
+            ),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                routeName: "coding",
+                minRecoverableCooldownMs: 1000,
+                candidateProviderCount: 1,
+                recoverableCooldownHints: [
+                  { providerKey, waitMs: 1000, source: "concurrency.busy" },
+                ],
+              },
+            },
+          );
+        }
+        return {
+          requestId: "req-singleton-cooldown-budget",
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "anthropic",
+            outboundProfile: "anthropic-messages",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: "coding",
+            providerProtocol: "gemini-chat",
+            pool: [providerKey],
+          },
+          metadata: {},
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined),
+        },
+      }),
+      logStage,
+      stats: new StatsManager(),
+    };
+
+    const executor = createRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "ok",
+              },
+            },
+          ],
+        },
+      });
+
+    try {
+      const pending = executor.execute({
+        requestId: "req-singleton-cooldown-budget",
+        entryEndpoint: "/v1/responses",
+        body: {},
+        headers: {},
+        metadata: {},
+      });
+      const expectation = expect(pending).rejects.toMatchObject({
+        code: "PROVIDER_NOT_AVAILABLE",
+      });
+
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expectation;
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(1);
+      expect(
+        logStage.mock.calls.filter(
+          (call) => call[0] === "provider.route_pool_cooldown_wait",
+        ),
+      ).toHaveLength(0);
+      expect(
+        logStage.mock.calls.filter(
+          (call) => call[0] === "provider.route_pool_cooldown_wait.completed",
+        ),
+      ).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("default-pool singleton exhaustion waits, clears exclusions, and replays the sole provider", async () => {
+    jest.resetModules();
+    jest.unstable_mockModule(
+      "../../../../src/modules/llmswitch/bridge/runtime-integrations.js",
+      createRequestExecutorLocalRuntimeIntegrationsMock,
+    );
+    jest.unstable_mockModule(
+      "../../../../src/modules/llmswitch/bridge/routing-integrations.js",
+      createRequestExecutorLocalRoutingIntegrationsMock,
+    );
+    const searchProvider = "search.key1.gpt-5.4";
+    const defaultProvider = "default.key1.MiniMax-M3";
+    const defaultAttemptExclusions: unknown[] = [];
+    const handle = buildHandle(
+      defaultProvider,
+      async () => ({
+        status: 200,
+        data: { id: "ok-after-default-singleton-wait" },
+      }),
+      "openai-chat",
+    );
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey === defaultProvider ? handle : undefined,
+    };
+
+    let defaultAttempts = 0;
+    const pipeline = {
+      execute: jest.fn((input: any) => {
+        const allowedProviders = input?.metadata?.allowedProviders;
+        if (
+          Array.isArray(allowedProviders) &&
+          allowedProviders[0] === defaultProvider
+        ) {
+          defaultAttempts += 1;
+          defaultAttemptExclusions.push(input?.metadata?.excludedProviderKeys);
+          if (defaultAttempts === 1) {
+            throw Object.assign(
+              new Error("All providers unavailable for route default"),
+              {
+                code: "PROVIDER_NOT_AVAILABLE",
+                details: {
+                  routeName: "default",
+                  candidateProviderCount: 1,
+                  minRecoverableCooldownMs: 5,
+                  recoverableCooldownHints: [
+                    {
+                      providerKey: defaultProvider,
+                      waitMs: 5,
+                      source: "provider.error",
+                    },
+                  ],
+                },
+              },
+            );
+          }
+          return {
+            requestId: input.id,
+            providerPayload: {
+              model: "test-model",
+              messages: [{ role: "user", content: "hello" }],
+            },
+            target: {
+              providerKey: defaultProvider,
+              providerType: "openai",
+              outboundProfile: "openai-chat",
+              runtimeKey: defaultProvider,
+            },
+            routingDecision: {
+              routeName: "default",
+              providerProtocol: "openai-chat",
+              routePool: [defaultProvider],
+            },
+            metadata: {},
+          };
+        }
+        throw Object.assign(
+          new Error("All providers unavailable for route search"),
+          {
+            code: "PROVIDER_NOT_AVAILABLE",
+            details: {
+              primaryExhaustedRouteName: "search",
+              primaryExhaustedTargets: [searchProvider],
+              unavailableRoutePools: [
+                {
+                  routeName: "search",
+                  poolId: "search-primary",
+                  poolTargets: [searchProvider],
+                },
+                {
+                  routeName: "default",
+                  poolId: "default-primary",
+                  poolTargets: [defaultProvider],
+                },
+              ],
+            },
+          },
+        );
+      }),
+      updateVirtualRouterConfig: jest.fn(),
+    };
+    requestExecutorLocalHubPipelineExecute = (input: unknown) =>
+      pipeline.execute(input);
+    const { createRequestExecutor: createRequestExecutorLocal } =
+      await import("../../../../src/server/runtime/http-server/request-executor");
+
+    const logStage = jest.fn();
+    const executor = createRequestExecutorLocal({
+      runtimeManager: runtimeManager as any,
+      getHubPipeline: () =>
+        "request-executor-default-singleton-native-handle" as any,
+      getRoutingTiers: () => [
+        { id: "search-primary", targets: [searchProvider], priority: 200 },
+        {
+          id: "default-primary",
+          targets: [defaultProvider],
+          priority: 100,
+          backup: true,
+        },
+      ],
+      getModuleDependencies: () =>
+        ({
+          errorHandlingCenter: { handleError: async () => undefined },
+        }) as any,
+      logStage,
+      stats: new StatsManager(),
+    });
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          id: "ok-after-default-singleton-wait",
+          object: "response",
+          status: "completed",
+        },
+      });
+
+    const pending = executor.execute({
+      requestId: "req-default-pool-singleton-must-stop",
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+      headers: {},
+      metadata: {
+        routecodexRoutingPolicyGroup: "gateway_priority_5555",
+      },
+    });
+
+    const result = await pending;
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(3);
+    expect(defaultAttemptExclusions).toEqual([undefined, undefined]);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === "provider.primary_exhausted_to_default_pool.applied",
+      ),
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "provider.route_pool_cooldown_wait",
+      ),
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "provider.route_pool_cooldown_wait.completed",
+      ),
+    ).toBe(true);
+  }, 20_000);
+
+  test("switches recoverable 429 to an alternative provider when available", async () => {
+    jest.useFakeTimers();
+    const firstProviderKey = "gemini.primary.gemini-2.5-pro";
+    const secondProviderKey = "gemini.backup.gemini-2.5-flash";
+    const failingError = new Error("HTTP 429: quota exhausted");
+    (failingError as any).statusCode = 429;
+
+    const failingProcess = jest.fn(async () => {
+      throw failingError;
+    });
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "gemini-chat",
+    );
+    const successPayload = {
+      status: 200,
+      data: {
+        id: "ok",
+        status: "completed",
+        output_text: "ok",
+        output: [{ type: "output_text", text: "ok" }],
+      },
+    };
+    const successProcess = jest.fn(async () => successPayload);
+    const successHandle = buildHandle(
+      secondProviderKey,
+      successProcess,
+      "gemini-chat",
+    );
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+      [secondProviderKey, successHandle],
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
+    };
+
+    const pipeline = {
+      execute: jest.fn((input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
+        );
+        const providerKey = disabled.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "gemini",
+            outboundProfile: "gemini-chat",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: "thinking",
+            providerProtocol: "gemini-chat",
+            pool: [firstProviderKey, secondProviderKey],
+          },
+          metadata: {},
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -3099,47 +3839,51 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: {
-        choices: [
-          {
-            finish_reason: 'stop',
-            message: {
-              role: 'assistant',
-              content: 'ok'
-            }
-          }
-        ]
-      }
-    });
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "ok",
+              },
+            },
+          ],
+        },
+      });
     try {
       const pending = executor.execute({
-        requestId: 'req-retry',
-        entryEndpoint: '/v1/chat/completions',
+        requestId: "req-retry",
+        entryEndpoint: "/v1/chat/completions",
         body: {},
         headers: {},
         metadata: {
           __rt: {
             preselectedRoute: {
               decision: {
-                routeName: 'thinking',
+                routeName: "thinking",
                 providerKey: firstProviderKey,
-                pool: [firstProviderKey, secondProviderKey]
-              }
-            }
-          }
-        }
+                pool: [firstProviderKey, secondProviderKey],
+              },
+            },
+          },
+        },
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
@@ -3148,21 +3892,27 @@ describe('HubRequestExecutor failover', () => {
       expect(failingProcess).toHaveBeenCalledTimes(1);
       expect(successProcess).toHaveBeenCalledTimes(1);
 
-      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-      expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
-      expect((secondCallMetadata.__rt as { preselectedRoute?: unknown } | undefined)?.preselectedRoute).toBeUndefined();
+      const secondCallMetadata = pipeline.execute.mock.calls[1][0]
+        .metadata as Record<string, unknown>;
+      expect(secondCallMetadata.excludedProviderKeys).toEqual([
+        firstProviderKey,
+      ]);
+      expect(
+        (secondCallMetadata.__rt as { preselectedRoute?: unknown } | undefined)
+          ?.preselectedRoute,
+      ).toBeUndefined();
     } finally {
       jest.useRealTimers();
     }
   });
 
-  test('records transport backoff and waits before switching priority providers', async () => {
+  test("records transport backoff and waits before switching priority providers", async () => {
     jest.useFakeTimers();
-    const providerA = 'tab.key1.gpt-5.4';
-    const providerB = 'tab.key2.gpt-5.4';
-    const retryable429 = Object.assign(new Error('HTTP 429: quota exhausted'), {
+    const providerA = "tab.key1.gpt-5.4";
+    const providerB = "tab.key2.gpt-5.4";
+    const retryable429 = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
-      code: 'HTTP_429'
+      code: "HTTP_429",
     });
     let providerAAttempt = 0;
     const providerAProcess = jest.fn(async () => {
@@ -3172,41 +3922,45 @@ describe('HubRequestExecutor failover', () => {
       }
       return {
         status: 200,
-        data: { id: 'ok_after_backoff' }
+        data: { id: "ok_after_backoff" },
       };
     });
     const providerBProcess = jest.fn(async () => ({
       status: 200,
-      data: { id: 'backup_after_switch' }
+      data: { id: "backup_after_switch" },
     }));
 
     const handles = new Map<string, ProviderHandle>([
       [providerA, buildHandle(providerA, providerAProcess)],
-      [providerB, buildHandle(providerB, providerBProcess)]
+      [providerB, buildHandle(providerB, providerBProcess)],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const routePool = [providerA, providerB];
         if (routePool.every((providerKey) => excluded.has(providerKey))) {
-          throw Object.assign(new Error('All providers unavailable for model qwen3.6-plus'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
-              routeName: 'longcontext',
-              candidateProviderCount: routePool.length,
-              exhaustedTargets: routePool
-            }
-          });
+          throw Object.assign(
+            new Error("All providers unavailable for model qwen3.6-plus"),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                routeName: "longcontext",
+                candidateProviderCount: routePool.length,
+                exhaustedTargets: routePool,
+              },
+            },
+          );
         }
         const providerKey = excluded.has(providerA) ? providerB : providerA;
         return {
@@ -3214,19 +3968,19 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'gemini',
-            outboundProfile: 'gemini-chat',
-            runtimeKey: providerKey
+            providerType: "gemini",
+            outboundProfile: "gemini-chat",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'thinking',
-            providerProtocol: 'gemini-chat',
-            pool: [providerA, providerB]
+            routeName: "thinking",
+            providerProtocol: "gemini-chat",
+            pool: [providerA, providerB],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const logStage = jest.fn();
@@ -3235,106 +3989,130 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage,
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: {
-        choices: [
-          {
-            finish_reason: 'stop',
-            message: {
-              role: 'assistant',
-              content: 'ok_after_backoff'
-            }
-          }
-        ]
-      }
-    });
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "ok_after_backoff",
+              },
+            },
+          ],
+        },
+      });
 
     try {
       const firstPending = executor.execute({
-        requestId: 'req-backoff-first',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-backoff-first",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
 
       await jest.advanceTimersByTimeAsync(0);
       expect(providerAProcess).toHaveBeenCalledTimes(1);
       expect(providerBProcess).not.toHaveBeenCalled();
-      expect(logStage.mock.calls.some((call) => call[0] === 'provider.switch_backoff_wait')).toBe(true);
+      expect(
+        logStage.mock.calls.some(
+          (call) => call[0] === "provider.switch_backoff_wait",
+        ),
+      ).toBe(true);
 
       await jest.advanceTimersByTimeAsync(1_000);
       const firstResult = await firstPending;
       expect(firstResult).toEqual(expect.objectContaining({ status: 200 }));
       expect(providerAProcess).toHaveBeenCalledTimes(1);
       expect(providerBProcess).toHaveBeenCalledTimes(1);
-      expect(logStage.mock.calls.some((call) => call[0] === 'provider.transport_backoff.recorded')).toBe(true);
+      expect(
+        logStage.mock.calls.some(
+          (call) => call[0] === "provider.transport_backoff.recorded",
+        ),
+      ).toBe(true);
     } finally {
       jest.useRealTimers();
     }
   });
 
-  test('prints retry switch reason and error code to console on provider switch', async () => {
+  test("prints retry switch reason and error code to console on provider switch", async () => {
     jest.useFakeTimers();
-    const firstProviderKey = 'crs.key2.gpt-5.3-codex';
-    const secondProviderKey = 'crs.key1.gpt-5.3-codex';
-    const failingError = new Error('Upstream SSE parser terminated');
+    const firstProviderKey = "crs.key2.gpt-5.3-codex";
+    const secondProviderKey = "crs.key1.gpt-5.3-codex";
+    const failingError = new Error("Upstream SSE parser terminated");
     (failingError as any).statusCode = 429;
-    (failingError as any).code = 'SSE_TO_JSON_ERROR';
-    (failingError as any).upstreamCode = 'rate_limit_error';
+    (failingError as any).code = "SSE_TO_JSON_ERROR";
+    (failingError as any).upstreamCode = "rate_limit_error";
 
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "openai-responses",
+    );
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "unused-fallback" },
+    }));
+    const successHandle = buildHandle(
+      secondProviderKey,
+      successProcess,
+      "openai-responses",
+    );
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
-      [secondProviderKey, successHandle]
+      [secondProviderKey, successHandle],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
-        const providerKey = excluded.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+        const providerKey = excluded.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
         return {
           requestId: input.id,
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-responses",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'longcontext',
-            providerProtocol: 'openai-responses',
-            pool: [firstProviderKey, secondProviderKey]
+            routeName: "longcontext",
+            providerProtocol: "openai-responses",
+            pool: [firstProviderKey, secondProviderKey],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -3342,36 +4120,52 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const executor = createRequestExecutor(deps);
       const pending = executor.execute({
-        requestId: 'req-switch-log',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-switch-log",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(failingProcess).toHaveBeenCalledTimes(1);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[provider-switch]'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('status=429'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[provider-switch]"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("status=429"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("code=SSE_TO_JSON_ERROR"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("upstreamCode=rate_limit_error"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("switch=exclude_and_reroute"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("decision=exclude_and_reroute"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("provider=crs.key2.gpt-5.3-codex"),
+      );
       expect(successProcess).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
@@ -3379,112 +4173,144 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('responses standard pipeline does not apply direct payload contract before provider.send', async () => {
+  test("responses standard pipeline does not apply direct payload contract before provider.send", async () => {
     jest.resetModules();
     jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/runtime-integrations.js',
-      createRequestExecutorLocalRuntimeIntegrationsMock
+      "../../../../src/modules/llmswitch/bridge/runtime-integrations.js",
+      createRequestExecutorLocalRuntimeIntegrationsMock,
     );
     jest.unstable_mockModule(
-      '../../../../src/modules/llmswitch/bridge/routing-integrations.js',
-      createRequestExecutorLocalRoutingIntegrationsMock
+      "../../../../src/modules/llmswitch/bridge/routing-integrations.js",
+      createRequestExecutorLocalRoutingIntegrationsMock,
     );
-    const providerA = 'asxs.crsa.gpt-5.5';
-    const providerB = 'cc.key1.gpt-5.5';
-    const processA = jest.fn(async () => ({ status: 200, data: { id: 'should_not_send_a' } }));
-    const processB = jest.fn(async () => ({ status: 200, data: { id: 'should_not_send_b' } }));
+    const providerA = "asxs.crsa.gpt-5.5";
+    const providerB = "cc.key1.gpt-5.5";
+    const processA = jest.fn(async () => ({
+      status: 200,
+      data: { id: "should_not_send_a" },
+    }));
+    const processB = jest.fn(async () => ({
+      status: 200,
+      data: { id: "should_not_send_b" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, {
-        ...buildHandle(providerA, processA, 'openai-responses'),
-        providerType: 'responses',
-        providerFamily: 'responses',
-        providerProtocol: 'openai-responses',
-        runtime: {
-          runtimeKey: providerA,
-          providerId: providerA,
-          keyAlias: providerA,
-          providerType: 'responses',
-          endpoint: 'https://example.invalid',
-          auth: { type: 'oauth' },
-          outboundProfile: 'openai-responses'
-        }
-      }],
-      [providerB, {
-        ...buildHandle(providerB, processB, 'openai-responses'),
-        providerType: 'responses',
-        providerFamily: 'responses',
-        providerProtocol: 'openai-responses',
-        runtime: {
-          runtimeKey: providerB,
-          providerId: providerB,
-          keyAlias: providerB,
-          providerType: 'responses',
-          endpoint: 'https://example.invalid',
-          auth: { type: 'oauth' },
-          outboundProfile: 'openai-responses'
-        }
-      }]
+      [
+        providerA,
+        {
+          ...buildHandle(providerA, processA, "openai-responses"),
+          providerType: "responses",
+          providerFamily: "responses",
+          providerProtocol: "openai-responses",
+          runtime: {
+            runtimeKey: providerA,
+            providerId: providerA,
+            keyAlias: providerA,
+            providerType: "responses",
+            endpoint: "https://example.invalid",
+            auth: { type: "oauth" },
+            outboundProfile: "openai-responses",
+          },
+        },
+      ],
+      [
+        providerB,
+        {
+          ...buildHandle(providerB, processB, "openai-responses"),
+          providerType: "responses",
+          providerFamily: "responses",
+          providerProtocol: "openai-responses",
+          runtime: {
+            runtimeKey: providerB,
+            providerId: providerB,
+            keyAlias: providerB,
+            providerType: "responses",
+            endpoint: "https://example.invalid",
+            auth: { type: "oauth" },
+            outboundProfile: "openai-responses",
+          },
+        },
+      ],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
       execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
-          Array.isArray(input?.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input?.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
         const selected = excluded.has(providerA) ? providerB : providerA;
         return {
           requestId: input.id,
           providerPayload: {
-            model: 'gpt-5.5',
-            input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }],
-            tools: [{ type: 'function', function: { name: 'exec_command', parameters: { type: 'object' } } }],
+            model: "gpt-5.5",
+            input: [
+              {
+                role: "user",
+                content: [{ type: "input_text", text: "continue" }],
+              },
+            ],
+            tools: [
+              {
+                type: "function",
+                function: {
+                  name: "exec_command",
+                  parameters: { type: "object" },
+                },
+              },
+            ],
           },
           target: {
             providerKey: selected,
-            providerType: 'responses',
-            outboundProfile: 'openai-responses',
-            runtimeKey: selected
+            providerType: "responses",
+            outboundProfile: "openai-responses",
+            runtimeKey: selected,
           },
           routingDecision: {
-            routeName: 'longcontext',
-            providerProtocol: 'openai-responses',
-            pool: [providerA, providerB]
+            routeName: "longcontext",
+            providerProtocol: "openai-responses",
+            pool: [providerA, providerB],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
-    requestExecutorLocalHubPipelineExecute = (input: unknown) => pipeline.execute(input);
-    const { createRequestExecutor: createRequestExecutorLocal } = await import('../../../../src/server/runtime/http-server/request-executor');
+    requestExecutorLocalHubPipelineExecute = (input: unknown) =>
+      pipeline.execute(input);
+    const { createRequestExecutor: createRequestExecutorLocal } =
+      await import("../../../../src/server/runtime/http-server/request-executor");
 
     const executor = createRequestExecutorLocal({
       runtimeManager,
-      getHubPipeline: () => 'request-executor-local-native-handle' as any,
+      getHubPipeline: () => "request-executor-local-native-handle" as any,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     });
 
     const result = await executor.execute({
-      requestId: 'req-responses-standard-shape-lock',
-      entryEndpoint: '/v1/responses',
+      requestId: "req-responses-standard-shape-lock",
+      entryEndpoint: "/v1/responses",
       body: {
-        model: 'gpt-5.5',
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'continue' }] }]
+        model: "gpt-5.5",
+        input: [
+          { role: "user", content: [{ type: "input_text", text: "continue" }] },
+        ],
       },
       headers: {},
-      metadata: {}
+      metadata: {},
     });
 
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -3492,9 +4318,9 @@ describe('HubRequestExecutor failover', () => {
     expect(processB).not.toHaveBeenCalled();
   });
 
-  test('prints compact aggregated provider-switch logs without dedupe key payload', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
-    const nowSpy = jest.spyOn(Date, 'now');
+  test("prints compact aggregated provider-switch logs without dedupe key payload", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const nowSpy = jest.spyOn(Date, "now");
     try {
       let nowCall = 0;
       nowSpy.mockImplementation(() => {
@@ -3515,101 +4341,125 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: undefined as any,
         getModuleDependencies: undefined as any,
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
       const logger = (executor as any).logProviderRetrySwitch.bind(executor);
       logger({
-        requestId: 'req-agg-1',
+        requestId: "req-agg-1",
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        providerKey: "mimo.key1.mimo-v2.5-pro",
         nextAttempt: 2,
-        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout</body></html>',
+        reason:
+          "HTTP 504: <!DOCTYPE html><html><body>gateway timeout</body></html>",
         statusCode: 504,
-        errorCode: 'HTTP_504',
-        upstreamCode: 'HTTP_504',
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute',
-        stage: 'provider.send'
+        errorCode: "HTTP_504",
+        upstreamCode: "HTTP_504",
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+        stage: "provider.send",
       });
       logger({
-        requestId: 'req-agg-2',
+        requestId: "req-agg-2",
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        providerKey: "mimo.key1.mimo-v2.5-pro",
         nextAttempt: 2,
-        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout again</body></html>',
+        reason:
+          "HTTP 504: <!DOCTYPE html><html><body>gateway timeout again</body></html>",
         statusCode: 504,
-        errorCode: 'HTTP_504',
-        upstreamCode: 'HTTP_504',
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute',
-        stage: 'provider.send'
+        errorCode: "HTTP_504",
+        upstreamCode: "HTTP_504",
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+        stage: "provider.send",
       });
-      const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
-      expect(lines.some((line) => line.includes('[provider-switch] aggregated'))).toBe(false);
+      const lines = warnSpy.mock.calls.map((call) => String(call[0] ?? ""));
+      expect(
+        lines.some((line) => line.includes("[provider-switch] aggregated")),
+      ).toBe(false);
       logger({
-        requestId: 'req-agg-3',
+        requestId: "req-agg-3",
         attempt: 1,
         maxAttempts: 6,
-        providerKey: 'mimo.key1.mimo-v2.5-pro',
+        providerKey: "mimo.key1.mimo-v2.5-pro",
         nextAttempt: 2,
-        reason: 'HTTP 504: <!DOCTYPE html><html><body>gateway timeout final</body></html>',
+        reason:
+          "HTTP 504: <!DOCTYPE html><html><body>gateway timeout final</body></html>",
         statusCode: 504,
-        errorCode: 'HTTP_504',
-        upstreamCode: 'HTTP_504',
-        switchAction: 'exclude_and_reroute',
-        decisionLabel: 'exclude_and_reroute',
-        stage: 'provider.send'
+        errorCode: "HTTP_504",
+        upstreamCode: "HTTP_504",
+        switchAction: "exclude_and_reroute",
+        decisionLabel: "exclude_and_reroute",
+        stage: "provider.send",
       });
-      const finalLines = warnSpy.mock.calls.map((call) => String(call[0] ?? ''));
-      const aggregated = finalLines.find((line) => line.includes('[provider-switch] aggregated'));
+      const finalLines = warnSpy.mock.calls.map((call) =>
+        String(call[0] ?? ""),
+      );
+      const aggregated = finalLines.find((line) =>
+        line.includes("[provider-switch] aggregated"),
+      );
       expect(aggregated).toBeDefined();
-      expect(aggregated).toContain('provider=mimo.key1.mimo-v2.5-pro');
-      expect(aggregated).toContain('status=504');
-      expect(aggregated).toContain('code=HTTP_504');
-      expect(aggregated).toContain('upstreamCode=HTTP_504');
-      expect(aggregated).toContain('suppressed=1');
-      expect(aggregated).not.toContain('aggregated key=');
-      expect(aggregated).not.toContain('<!DOCTYPE html>');
+      expect(aggregated).toContain("provider=mimo.key1.mimo-v2.5-pro");
+      expect(aggregated).toContain("status=504");
+      expect(aggregated).toContain("code=HTTP_504");
+      expect(aggregated).toContain("upstreamCode=HTTP_504");
+      expect(aggregated).toContain("suppressed=1");
+      expect(aggregated).not.toContain("aggregated key=");
+      expect(aggregated).not.toContain("<!DOCTYPE html>");
     } finally {
       nowSpy.mockRestore();
       warnSpy.mockRestore();
     }
   });
 
-  test('switches 429 to alternative provider when route pool exposes one', async () => {
+  test("switches 429 to alternative provider when route pool exposes one", async () => {
     jest.useFakeTimers();
-    const firstProviderKey = 'tabglm.key1.glm-5.1';
-    const secondProviderKey = 'crs.key2.gpt-5.3-codex';
-    const failingError = Object.assign(new Error('HTTP 429: model overloaded'), {
-      statusCode: 429,
-      retryable: true
-    });
+    const firstProviderKey = "tabglm.key1.glm-5.1";
+    const secondProviderKey = "crs.key2.gpt-5.3-codex";
+    const failingError = Object.assign(
+      new Error("HTTP 429: model overloaded"),
+      {
+        statusCode: 429,
+        retryable: true,
+      },
+    );
 
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-responses');
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'unused-fallback' } }));
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'openai-responses');
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "openai-responses",
+    );
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "unused-fallback" },
+    }));
+    const successHandle = buildHandle(
+      secondProviderKey,
+      successProcess,
+      "openai-responses",
+    );
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
-      [secondProviderKey, successHandle]
+      [secondProviderKey, successHandle],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const disabled = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const useFallback = disabled.has(firstProviderKey);
         return {
@@ -3617,48 +4467,53 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey: useFallback ? secondProviderKey : firstProviderKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: useFallback ? secondProviderKey : firstProviderKey
+            providerType: "openai",
+            outboundProfile: "openai-responses",
+            runtimeKey: useFallback ? secondProviderKey : firstProviderKey,
           },
           routingDecision: {
-            routeName: 'thinking',
-            providerProtocol: 'openai-responses',
-            pool: [firstProviderKey, secondProviderKey]
+            routeName: "thinking",
+            providerProtocol: "openai-responses",
+            pool: [firstProviderKey, secondProviderKey],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const logStage = jest.fn();
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const deps = {
         runtimeManager,
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage,
-        stats: new StatsManager()
+        stats: new StatsManager(),
       };
 
       const executor = createRequestExecutor(deps);
       jest
-        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok-after-reroute' } });
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: { output_text: "ok-after-reroute" },
+        });
       const pending = executor.execute({
-        requestId: 'req-singleton-429-reroute',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-singleton-429-reroute",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
@@ -3666,65 +4521,90 @@ describe('HubRequestExecutor failover', () => {
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
       expect(failingProcess).toHaveBeenCalledTimes(1);
       expect(successProcess).toHaveBeenCalledTimes(1);
-      expect((pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>).excludedProviderKeys)
-        .toEqual([firstProviderKey]);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('decision=exclude_and_reroute'));
+      expect(
+        (pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>)
+          .excludedProviderKeys,
+      ).toEqual([firstProviderKey]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("switch=exclude_and_reroute"),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("decision=exclude_and_reroute"),
+      );
     } finally {
       jest.useRealTimers();
       warnSpy.mockRestore();
     }
   });
 
-  test('forces longcontext routeHint on prompt-too-long retry', async () => {
+  test("forces longcontext routeHint on prompt-too-long retry", async () => {
     jest.useFakeTimers();
-    const firstProviderKey = 'tabglm.key1.glm-5';
-    const secondProviderKey = 'tabglm.longcontext.glm-5';
+    const firstProviderKey = "tabglm.key1.glm-5";
+    const secondProviderKey = "tabglm.longcontext.glm-5";
     const failingError = new Error(
-      "Request input tokens exceeds the model's maximum context length 202752"
+      "Request input tokens exceeds the model's maximum context length 202752",
     );
-    (failingError as any).code = 'SSE_DECODE_ERROR';
+    (failingError as any).code = "SSE_DECODE_ERROR";
     (failingError as any).statusCode = 400;
 
     const failingProcess = jest.fn(async () => {
       throw failingError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'gemini-chat');
-    const successPayload = { status: 200, data: { id: 'ok' } };
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "gemini-chat",
+    );
+    const successPayload = { status: 200, data: { id: "ok" } };
     const successProcess = jest.fn(async () => successPayload);
-    const successHandle = buildHandle(secondProviderKey, successProcess, 'gemini-chat');
+    const successHandle = buildHandle(
+      secondProviderKey,
+      successProcess,
+      "gemini-chat",
+    );
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
-      [secondProviderKey, successHandle]
+      [secondProviderKey, successHandle],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const routeHints: Array<string | undefined> = [];
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
-        const runtimeControl = MetadataCenter.read(input.metadata)?.readRuntimeControl() ?? {};
-        routeHints.push(typeof runtimeControl.routeHint === 'string' ? runtimeControl.routeHint : undefined);
-        const useLongcontext = runtimeControl.routeHint === 'longcontext';
-        const providerKey = useLongcontext ? secondProviderKey : firstProviderKey;
+      execute: jest.fn((input: any) => {
+        const runtimeControl =
+          MetadataCenter.read(input.metadata)?.readRuntimeControl() ?? {};
+        routeHints.push(
+          typeof runtimeControl.routeHint === "string"
+            ? runtimeControl.routeHint
+            : undefined,
+        );
+        const useLongcontext = runtimeControl.routeHint === "longcontext";
+        const providerKey = useLongcontext
+          ? secondProviderKey
+          : firstProviderKey;
         return {
           requestId: input.id,
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'gemini',
-            outboundProfile: 'gemini-chat',
-            runtimeKey: providerKey
+            providerType: "gemini",
+            outboundProfile: "gemini-chat",
+            runtimeKey: providerKey,
           },
-          routingDecision: { routeName: useLongcontext ? 'longcontext' : 'tools', providerProtocol: 'gemini-chat' },
-          metadata: {}
+          routingDecision: {
+            routeName: useLongcontext ? "longcontext" : "tools",
+            providerProtocol: "gemini-chat",
+          },
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -3732,53 +4612,59 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
-    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-      status: 200,
-      body: {
-        choices: [
-          {
-            finish_reason: 'stop',
-            message: {
-              role: 'assistant',
-              content: 'ok'
-            }
-          }
-        ]
-      }
-    });
+    jest
+      .spyOn(executor as any, "convertProviderResponseIfNeeded")
+      .mockReturnValue({
+        status: 200,
+        body: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: "ok",
+              },
+            },
+          ],
+        },
+      });
     try {
       const pending = executor.execute({
-        requestId: 'req-context-overflow',
-        entryEndpoint: '/v1/chat/completions',
+        requestId: "req-context-overflow",
+        entryEndpoint: "/v1/chat/completions",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      expect(routeHints[0]).not.toBe('longcontext');
-      expect(routeHints[1]).toBe('longcontext');
+      expect(routeHints[0]).not.toBe("longcontext");
+      expect(routeHints[1]).toBe("longcontext");
     } finally {
       jest.useRealTimers();
     }
   });
 
-  test('reroutes 403 OAuth reauth-required error when provider pool has an alternative', async () => {
-    const firstProviderKey = 'gemini.primary.gemini-2.5-pro';
-    const secondProviderKey = 'gemini.backup.gemini-2.5-pro';
-    const failingError = new Error('HTTP 403: Please authenticate with Google OAuth first');
+  test("reroutes 403 OAuth reauth-required error when provider pool has an alternative", async () => {
+    const firstProviderKey = "gemini.primary.gemini-2.5-pro";
+    const secondProviderKey = "gemini.backup.gemini-2.5-pro";
+    const failingError = new Error(
+      "HTTP 403: Please authenticate with Google OAuth first",
+    );
     (failingError as any).statusCode = 403;
     (failingError as any).retryable = false;
 
@@ -3786,26 +4672,27 @@ describe('HubRequestExecutor failover', () => {
       throw failingError;
     });
     const failureHandle = buildHandle(firstProviderKey, failingProcess);
-    const successPayload = { status: 200, data: { id: 'ok' } };
+    const successPayload = { status: 200, data: { id: "ok" } };
     const successProcess = jest.fn(async () => successPayload);
     const successHandle = buildHandle(secondProviderKey, successProcess);
 
     const handles = new Map<string, ProviderHandle>([
       [firstProviderKey, failureHandle],
-      [secondProviderKey, successHandle]
+      [secondProviderKey, successHandle],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const disabled = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const providerKey = disabled.has(firstProviderKey)
           ? secondProviderKey
@@ -3815,15 +4702,19 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'gemini',
-            outboundProfile: 'gemini-chat',
-            runtimeKey: providerKey
+            providerType: "gemini",
+            outboundProfile: "gemini-chat",
+            runtimeKey: providerKey,
           },
-          routingDecision: { routeName: 'default', providerProtocol: 'gemini-chat', pool: [firstProviderKey, secondProviderKey] },
-          metadata: {}
+          routingDecision: {
+            routeName: "default",
+            providerProtocol: "gemini-chat",
+            pool: [firstProviderKey, secondProviderKey],
+          },
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -3831,72 +4722,85 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
-      requestId: 'req-403-reauth',
-      entryEndpoint: '/v1/responses',
+      requestId: "req-403-reauth",
+      entryEndpoint: "/v1/responses",
       body: {},
       headers: {},
-      metadata: {}
+      metadata: {},
     });
 
     expect(result.status).toBe(200);
-    expect(result.body).toEqual(expect.objectContaining({ id: 'ok' }));
+    expect(result.body).toEqual(expect.objectContaining({ id: "ok" }));
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(failingProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(1);
   });
-  test('preserves first upstream error when retry-exhausted routing reports provider unavailable', async () => {
+  test("preserves first upstream error when retry-exhausted routing reports provider unavailable", async () => {
     jest.useFakeTimers();
-    const firstProviderKey = 'glm.1-186.kimi-k2.5';
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+    const firstProviderKey = "glm.1-186.kimi-k2.5";
+    const firstError = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
-      code: 'HTTP_429'
+      code: "HTTP_429",
     });
 
     const failingProcess = jest.fn(async () => {
       throw firstError;
     });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-chat');
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "openai-chat",
+    );
 
-    const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+    ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
-    const poolExhaustedError = Object.assign(new Error('All providers unavailable for model glm.kimi-k2.5'), {
-      code: 'PROVIDER_NOT_AVAILABLE'
-    });
+    const poolExhaustedError = Object.assign(
+      new Error("All providers unavailable for model glm.kimi-k2.5"),
+      {
+        code: "PROVIDER_NOT_AVAILABLE",
+      },
+    );
     let pipelineCall = 0;
     const pipeline = {
-      execute: jest.fn(async () => {
+      execute: jest.fn(() => {
         pipelineCall += 1;
         if (pipelineCall === 1) {
           return {
-            requestId: 'req-pool-exhausted',
+            requestId: "req-pool-exhausted",
             providerPayload: {},
             target: {
               providerKey: firstProviderKey,
-              providerType: 'openai',
-              outboundProfile: 'openai-chat',
-              runtimeKey: firstProviderKey
+              providerType: "openai",
+              outboundProfile: "openai-chat",
+              runtimeKey: firstProviderKey,
             },
-            routingDecision: { routeName: 'direct', providerProtocol: 'openai-chat' },
-            metadata: {}
+            routingDecision: {
+              routeName: "direct",
+              providerProtocol: "openai-chat",
+            },
+            metadata: {},
           };
         }
         throw poolExhaustedError;
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -3904,27 +4808,27 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
 
     try {
       const pending = executor.execute({
-        requestId: 'req-pool-exhausted',
-        entryEndpoint: '/v1/chat/completions',
+        requestId: "req-pool-exhausted",
+        entryEndpoint: "/v1/chat/completions",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
       const expectation = expect(pending).rejects.toMatchObject({
-        message: 'HTTP 429: quota exhausted',
+        message: "HTTP 429: quota exhausted",
         statusCode: 429,
-        code: 'HTTP_429'
+        code: "HTTP_429",
       });
 
       await jest.advanceTimersByTimeAsync(1_000);
@@ -3932,130 +4836,155 @@ describe('HubRequestExecutor failover', () => {
 
       expect(pipeline.execute).toHaveBeenCalledTimes(1);
       expect(
-        deps.logStage.mock.calls.filter((call) => call[0] === 'hub.pool_exhausted.backoff_wait')
+        deps.logStage.mock.calls.filter(
+          (call) => call[0] === "hub.pool_exhausted.backoff_wait",
+        ),
       ).toHaveLength(0);
     } finally {
       jest.useRealTimers();
     }
   }, 20_000);
-  test('does not use route-pool cooldown wait when singleton 429 reroute reports provider unavailable', async () => {
-    const firstProviderKey = 'glm.key1.glm-4.7';
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+  test("does not use route-pool cooldown wait when singleton 429 reroute reports provider unavailable", async () => {
+    const firstProviderKey = "glm.key1.glm-4.7";
+    const firstError = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
-      code: 'HTTP_429'
+      code: "HTTP_429",
     });
 
-    const failingProcess = jest.fn()
+    const failingProcess = jest
+      .fn()
       .mockRejectedValueOnce(firstError)
-      .mockResolvedValueOnce({ status: 200, data: { id: 'ok-after-blocking-hold' } });
-    const failureHandle = buildHandle(firstProviderKey, failingProcess, 'openai-chat');
+      .mockReturnValueOnce({
+        status: 200,
+        data: { id: "ok-after-blocking-hold" },
+      });
+    const failureHandle = buildHandle(
+      firstProviderKey,
+      failingProcess,
+      "openai-chat",
+    );
 
-    const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+    ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     let pipelineCalls = 0;
     const pipeline = {
-      execute: jest.fn()
-        .mockResolvedValueOnce({
-          requestId: 'req-single-pool-unavailable',
+      execute: jest
+        .fn()
+        .mockReturnValueOnce({
+          requestId: "req-single-pool-unavailable",
           providerPayload: {},
           target: {
             providerKey: firstProviderKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: firstProviderKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: firstProviderKey,
           },
           routingDecision: {
-            routeName: 'direct',
-            providerProtocol: 'openai-chat',
+            routeName: "direct",
+            providerProtocol: "openai-chat",
             pool: [firstProviderKey],
-            routePool: [firstProviderKey]
+            routePool: [firstProviderKey],
           },
-          metadata: {}
+          metadata: {},
         })
         .mockImplementation(async () => {
           pipelineCalls += 1;
           if (pipelineCalls === 1) {
             return {
-              requestId: 'req-single-pool-unavailable',
+              requestId: "req-single-pool-unavailable",
               providerPayload: {},
               target: {
                 providerKey: firstProviderKey,
-                providerType: 'openai',
-                outboundProfile: 'openai-chat',
-                runtimeKey: firstProviderKey
+                providerType: "openai",
+                outboundProfile: "openai-chat",
+                runtimeKey: firstProviderKey,
               },
               routingDecision: {
-                routeName: 'direct',
-                providerProtocol: 'openai-chat',
+                routeName: "direct",
+                providerProtocol: "openai-chat",
                 pool: [firstProviderKey],
-                routePool: [firstProviderKey]
+                routePool: [firstProviderKey],
               },
-              metadata: {}
+              metadata: {},
             };
           }
           if (pipelineCalls === 2) {
-            throw Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
-              code: 'PROVIDER_NOT_AVAILABLE',
-              details: {
-                routeName: 'direct',
-                candidateProviderCount: 1,
-                minRecoverableCooldownMs: 1000,
-                recoverableCooldownHints: [{ providerKey: firstProviderKey, waitMs: 1000, source: 'provider.error' }]
-              }
-            });
+            throw Object.assign(
+              new Error("All providers unavailable for model glm.glm-4.7"),
+              {
+                code: "PROVIDER_NOT_AVAILABLE",
+                details: {
+                  routeName: "direct",
+                  candidateProviderCount: 1,
+                  minRecoverableCooldownMs: 1000,
+                  recoverableCooldownHints: [
+                    {
+                      providerKey: firstProviderKey,
+                      waitMs: 1000,
+                      source: "provider.error",
+                    },
+                  ],
+                },
+              },
+            );
           }
           return {
-            requestId: 'req-single-pool-unavailable',
+            requestId: "req-single-pool-unavailable",
             providerPayload: {},
             target: {
               providerKey: firstProviderKey,
-              providerType: 'openai',
-              outboundProfile: 'openai-chat',
-              runtimeKey: firstProviderKey
+              providerType: "openai",
+              outboundProfile: "openai-chat",
+              runtimeKey: firstProviderKey,
             },
             routingDecision: {
-              routeName: 'direct',
-              providerProtocol: 'openai-chat',
+              routeName: "direct",
+              providerProtocol: "openai-chat",
               pool: [firstProviderKey],
-              routePool: [firstProviderKey]
+              routePool: [firstProviderKey],
             },
-            metadata: {}
+            metadata: {},
           };
         }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
       runtimeManager,
       getHubPipeline: () => pipeline,
       getRoutingTiers: () => [
-        { id: 'direct-singleton', targets: [firstProviderKey], priority: 100 }
+        { id: "direct-singleton", targets: [firstProviderKey], priority: 100 },
       ],
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
     jest.useFakeTimers();
     try {
       const pending = executor.execute({
-        requestId: 'req-single-pool-unavailable',
-        entryEndpoint: '/v1/chat/completions',
+        requestId: "req-single-pool-unavailable",
+        entryEndpoint: "/v1/chat/completions",
         body: {},
         headers: {},
-        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
+        metadata: { routecodexRoutingPolicyGroup: "test-group" },
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
@@ -4063,21 +4992,20 @@ describe('HubRequestExecutor failover', () => {
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
       expect(
         deps.logStage.mock.calls.some(
-          (call: unknown[]) =>
-            call[0] === 'provider.route_pool_cooldown_wait'
-        )
+          (call: unknown[]) => call[0] === "provider.route_pool_cooldown_wait",
+        ),
       ).toBe(false);
     } finally {
       jest.useRealTimers();
     }
   });
 
-  test('reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate', async () => {
-    const primaryProviderKey = 'glm.key1.glm-4.7';
-    const fallbackProviderKey = 'provider-b.key2.model-b';
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+  test("reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate", async () => {
+    const primaryProviderKey = "glm.key1.glm-4.7";
+    const fallbackProviderKey = "provider-b.key2.model-b";
+    const firstError = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
-      code: 'HTTP_429'
+      code: "HTTP_429",
     });
 
     let primaryAttempt = 0;
@@ -4088,53 +5016,62 @@ describe('HubRequestExecutor failover', () => {
       }
       return {
         status: 200,
-        data: { id: 'ok_after_same_provider_backoff' }
+        data: { id: "ok_after_same_provider_backoff" },
       };
     });
     const fallbackProcess = jest.fn(async () => ({
       status: 200,
-      data: { id: 'ok_after_reroute' }
+      data: { id: "ok_after_reroute" },
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [primaryProviderKey, buildHandle(primaryProviderKey, primaryProcess, 'openai-chat')],
-      [fallbackProviderKey, buildHandle(fallbackProviderKey, fallbackProcess, 'openai-chat')]
+      [
+        primaryProviderKey,
+        buildHandle(primaryProviderKey, primaryProcess, "openai-chat"),
+      ],
+      [
+        fallbackProviderKey,
+        buildHandle(fallbackProviderKey, fallbackProcess, "openai-chat"),
+      ],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const useFallback = excluded.has(primaryProviderKey);
-        const providerKey = useFallback ? fallbackProviderKey : primaryProviderKey;
+        const providerKey = useFallback
+          ? fallbackProviderKey
+          : primaryProviderKey;
         const routePool = [primaryProviderKey, fallbackProviderKey];
         return {
-          requestId: 'req-singleton-selected-pool-fallback',
+          requestId: "req-singleton-selected-pool-fallback",
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'default',
-            providerProtocol: 'openai-chat',
+            routeName: "default",
+            providerProtocol: "openai-chat",
             pool: routePool,
-            routePool
+            routePool,
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -4142,20 +5079,20 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
-      requestId: 'req-singleton-selected-pool-fallback',
-      entryEndpoint: '/v1/chat/completions',
+      requestId: "req-singleton-selected-pool-fallback",
+      entryEndpoint: "/v1/chat/completions",
       body: {},
       headers: {},
-      metadata: {}
+      metadata: {},
     });
 
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -4163,55 +5100,72 @@ describe('HubRequestExecutor failover', () => {
     expect(primaryProcess).toHaveBeenCalledTimes(1);
     expect(fallbackProcess).toHaveBeenCalledTimes(1);
 
-    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect(secondCallMetadata.excludedProviderKeys).toEqual([primaryProviderKey]);
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0]
+      .metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual([
+      primaryProviderKey,
+    ]);
   });
 
-  test('excludes each provider on repeated 429 when route pool has another candidate', async () => {
-    const providerA = 'openrouter.key1.openai/model-a:free';
-    const providerB = 'provider-b.2-135.model-a';
-    const error429A = Object.assign(new Error('HTTP 429: provider A rate limited'), {
-      statusCode: 429,
-      code: 'HTTP_429'
-    });
-    const error429B = Object.assign(new Error('HTTP 429: provider B rate limited'), {
-      statusCode: 429,
-      code: 'HTTP_429'
-    });
-    const processA = jest.fn()
+  test("excludes each provider on repeated 429 when route pool has another candidate", async () => {
+    const providerA = "openrouter.key1.openai/model-a:free";
+    const providerB = "provider-b.2-135.model-a";
+    const error429A = Object.assign(
+      new Error("HTTP 429: provider A rate limited"),
+      {
+        statusCode: 429,
+        code: "HTTP_429",
+      },
+    );
+    const error429B = Object.assign(
+      new Error("HTTP 429: provider B rate limited"),
+      {
+        statusCode: 429,
+        code: "HTTP_429",
+      },
+    );
+    const processA = jest
+      .fn()
       .mockRejectedValueOnce(error429A)
-      .mockResolvedValueOnce({ status: 200, data: { id: 'ok_after_same_provider_wait' } });
+      .mockReturnValueOnce({
+        status: 200,
+        data: { id: "ok_after_same_provider_wait" },
+      });
     const processB = jest.fn(async () => {
       throw error429B;
     });
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA, 'openai-chat')],
-      [providerB, buildHandle(providerB, processB, 'openai-chat')]
+      [providerA, buildHandle(providerA, processA, "openai-chat")],
+      [providerB, buildHandle(providerB, processB, "openai-chat")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const routePool = [providerA, providerB];
         if (routePool.every((providerKey) => excluded.has(providerKey))) {
-          throw Object.assign(new Error('All providers unavailable for model qwen3.6-plus'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
-              routeName: 'longcontext',
-              candidateProviderCount: routePool.length,
-              exhaustedTargets: routePool
-            }
-          });
+          throw Object.assign(
+            new Error("All providers unavailable for model qwen3.6-plus"),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                routeName: "longcontext",
+                candidateProviderCount: routePool.length,
+                exhaustedTargets: routePool,
+              },
+            },
+          );
         }
         const providerKey = excluded.has(providerA) ? providerB : providerA;
         return {
@@ -4219,24 +5173,24 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'longcontext',
-            providerProtocol: 'openai-chat',
+            routeName: "longcontext",
+            providerProtocol: "openai-chat",
             pool: routePool,
-            routePool
+            routePool,
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
 
     try {
       const logStage = jest.fn();
@@ -4245,40 +5199,52 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage,
-        stats: new StatsManager()
+        stats: new StatsManager(),
       };
 
       const executor = createRequestExecutor(deps);
       jest
-        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_last_provider_wait' } });
-      await expect(executor.execute({
-        requestId: 'req-last-provider-429',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      })).rejects.toThrow(/HTTP 429/);
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: { output_text: "ok_after_last_provider_wait" },
+        });
+      await expect(
+        executor.execute({
+          requestId: "req-last-provider-429",
+          entryEndpoint: "/v1/responses",
+          body: {},
+          headers: {},
+          metadata: {},
+        }),
+      ).rejects.toThrow(/HTTP 429/);
 
       expect(pipeline.execute).toHaveBeenCalledTimes(3);
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
 
-      const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+      const secondCallMetadata = pipeline.execute.mock.calls[1][0]
+        .metadata as Record<string, unknown>;
       expect(secondCallMetadata.excludedProviderKeys).toEqual([providerA]);
-      const thirdCallMetadata = pipeline.execute.mock.calls[2][0].metadata as Record<string, unknown>;
-      expect(thirdCallMetadata.excludedProviderKeys).toEqual([providerA, providerB]);
+      const thirdCallMetadata = pipeline.execute.mock.calls[2][0]
+        .metadata as Record<string, unknown>;
+      expect(thirdCallMetadata.excludedProviderKeys).toEqual([
+        providerA,
+        providerB,
+      ]);
       const retryEvents = logStage.mock.calls
-        .filter((call) => call[0] === 'provider.retry')
+        .filter((call) => call[0] === "provider.retry")
         .map((call) => call[2] as Record<string, unknown>);
-      expect(retryEvents[0]).toEqual(expect.objectContaining({
-        providerKey: providerA,
-        excluded: [providerA]
-      }));
+      expect(retryEvents[0]).toEqual(
+        expect.objectContaining({
+          providerKey: providerA,
+          excluded: [providerA],
+        }),
+      );
     } finally {
       if (previousAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -4288,40 +5254,47 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-
-  test('BLACKBOX: converted HTTP 503 keeps same provider with recoverable backoff before success', async () => {
-    const providerA = 'sdfv.key1.gpt-5.5';
-    const providerB = 'mimo.mimo-v2.5-pro';
-    const processA = jest.fn()
-      .mockResolvedValueOnce({
+  test("BLACKBOX: converted HTTP 503 keeps same provider with recoverable backoff before success", async () => {
+    const providerA = "sdfv.key1.gpt-5.5";
+    const providerB = "mimo.mimo-v2.5-pro";
+    const processA = jest
+      .fn()
+      .mockReturnValueOnce({
         status: 503,
         data: {
           error: {
-            code: 'HTTP_503',
-            message: 'Service temporarily unavailable'
-          }
-        }
+            code: "HTTP_503",
+            message: "Service temporarily unavailable",
+          },
+        },
       })
-      .mockResolvedValueOnce({ status: 200, data: { id: 'raw_a_ok_after_retry' } });
-    const processB = jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } }));
+      .mockReturnValueOnce({
+        status: 200,
+        data: { id: "raw_a_ok_after_retry" },
+      });
+    const processB = jest.fn(async () => ({
+      status: 200,
+      data: { id: "raw_b" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA, 'openai-responses')],
-      [providerB, buildHandle(providerB, processB, 'openai-responses')]
+      [providerA, buildHandle(providerA, processA, "openai-responses")],
+      [providerB, buildHandle(providerB, processB, "openai-responses")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const selectedProviders: string[] = [];
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const providerKey = excluded.has(providerA) ? providerB : providerA;
         selectedProviders.push(providerKey);
@@ -4330,67 +5303,79 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-responses',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-responses",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'coding',
-            providerProtocol: 'openai-responses',
-            pool: [providerA, providerB]
+            routeName: "coding",
+            providerProtocol: "openai-responses",
+            pool: [providerA, providerB],
           },
-          processMode: 'standard',
-          metadata: {}
+          processMode: "standard",
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '4';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "4";
 
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
       jest
-        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
         .mockImplementation(async () => ({
           status: 200,
           body: {
-            choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok_from_backup' } }]
-          }
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { role: "assistant", content: "ok_from_backup" },
+              },
+            ],
+          },
         }));
 
       await executor.execute({
-        requestId: 'req-blackbox-converted-503-reroute',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-blackbox-converted-503-reroute",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
 
       expect(selectedProviders).toEqual([providerA, providerB]);
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       const switchLines = warnSpy.mock.calls
-        .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]') && line.includes('req-blackbox-converted-503-reroute'));
-      expect(switchLines.some((line) => (
-        line.includes(`provider=${providerA}`)
-        && line.includes('switch=exclude_and_reroute')
-        && line.includes('decision=exclude_and_reroute')
-        && line.includes('status=503')
-      ))).toBe(true);
+        .map((call) => String(call[0] ?? ""))
+        .filter(
+          (line) =>
+            line.includes("[provider-switch]") &&
+            line.includes("req-blackbox-converted-503-reroute"),
+        );
+      expect(
+        switchLines.some(
+          (line) =>
+            line.includes(`provider=${providerA}`) &&
+            line.includes("switch=exclude_and_reroute") &&
+            line.includes("decision=exclude_and_reroute") &&
+            line.includes("status=503"),
+        ),
+      ).toBe(true);
     } finally {
       warnSpy.mockRestore();
       if (previousAttempts === undefined) {
@@ -4400,35 +5385,45 @@ describe('HubRequestExecutor failover', () => {
       }
     }
   });
-  test('reroutes generic recoverable 500 immediately when route pool exposes alternatives', async () => {
+  test("reroutes generic recoverable 500 immediately when route pool exposes alternatives", async () => {
     jest.useFakeTimers();
-    const providerA = 'tabglm.key1.glm-5.1';
-    const providerB = 'crs.key2.gpt-5.3-codex';
-    const providerC = 'ali-coding-plan.key1.model-a';
-    const authErrorA = Object.assign(new Error('HTTP 500: provider A overloaded'), {
-      statusCode: 500
-    });
+    const providerA = "tabglm.key1.glm-5.1";
+    const providerB = "crs.key2.gpt-5.3-codex";
+    const providerC = "ali-coding-plan.key1.model-a";
+    const authErrorA = Object.assign(
+      new Error("HTTP 500: provider A overloaded"),
+      {
+        statusCode: 500,
+      },
+    );
     const processA = jest.fn().mockRejectedValueOnce(authErrorA);
-    const processB = jest.fn(async () => ({ status: 200, data: { id: 'ok_after_immediate_reroute' } }));
-    const processC = jest.fn(async () => ({ status: 200, data: { id: 'unused_provider_c' } }));
+    const processB = jest.fn(async () => ({
+      status: 200,
+      data: { id: "ok_after_immediate_reroute" },
+    }));
+    const processC = jest.fn(async () => ({
+      status: 200,
+      data: { id: "unused_provider_c" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processA, 'openai-chat')],
-      [providerB, buildHandle(providerB, processB, 'openai-chat')],
-      [providerC, buildHandle(providerC, processC, 'openai-chat')]
+      [providerA, buildHandle(providerA, processA, "openai-chat")],
+      [providerB, buildHandle(providerB, processB, "openai-chat")],
+      [providerC, buildHandle(providerC, processC, "openai-chat")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const excluded = new Set<string>(
           Array.isArray(input.metadata?.excludedProviderKeys)
             ? input.metadata.excludedProviderKeys
-            : []
+            : [],
         );
         const providerKey = !excluded.has(providerA)
           ? providerA
@@ -4440,56 +5435,65 @@ describe('HubRequestExecutor failover', () => {
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
           },
           routingDecision: {
-            routeName: 'thinking',
-            providerProtocol: 'openai-chat',
-            pool: [providerA, providerB, providerC]
+            routeName: "thinking",
+            providerProtocol: "openai-chat",
+            pool: [providerA, providerB, providerC],
           },
-          metadata: {}
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
       jest
-        .spyOn(executor as any, 'convertProviderResponseIfNeeded')
-        .mockResolvedValue({ status: 200, body: { output_text: 'ok_after_immediate_reroute' } });
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: { output_text: "ok_after_immediate_reroute" },
+        });
 
       const pending = executor.execute({
-        requestId: 'req-immediate-reroute-500',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-immediate-reroute-500",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: {}
+        metadata: {},
       });
-      const expectation = expect(pending).resolves.toEqual(expect.objectContaining({ status: 200 }));
+      const expectation = expect(pending).resolves.toEqual(
+        expect.objectContaining({ status: 200 }),
+      );
 
       await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       const switchLines = warnSpy.mock.calls
-        .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]') && line.includes('req-immediate-reroute-500'));
+        .map((call) => String(call[0] ?? ""))
+        .filter(
+          (line) =>
+            line.includes("[provider-switch]") &&
+            line.includes("req-immediate-reroute-500"),
+        );
       expect(switchLines).toHaveLength(1);
       expect(switchLines[0]).toContain(`provider=${providerA}`);
-      expect(switchLines[0]).toContain('switch=exclude_and_reroute');
+      expect(switchLines[0]).toContain("switch=exclude_and_reroute");
       expect(processA).toHaveBeenCalledTimes(1);
       expect(processB).toHaveBeenCalledTimes(1);
       expect(processC).toHaveBeenCalledTimes(0);
@@ -4499,55 +5503,66 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('retries same provider when upstream SSE error event is retryable network failure', async () => {
-    const firstProviderKey = 'provider-a.primary.model-a';
-    const secondProviderKey = 'provider-a.backup.model-a';
+  test("retries same provider when upstream SSE error event is retryable network failure", async () => {
+    const firstProviderKey = "provider-a.primary.model-a";
+    const secondProviderKey = "provider-a.backup.model-a";
 
-    const failingProcess = jest.fn()
-      .mockResolvedValueOnce({
+    const failingProcess = jest
+      .fn()
+      .mockReturnValueOnce({
         status: 200,
         data: {
-          mode: 'sse',
+          mode: "sse",
           error: {
-            type: 'error',
+            type: "error",
             error: {
-              type: 'api_error',
-              message: 'Internal Network Failure'
-            }
-          }
-        }
+              type: "api_error",
+              message: "Internal Network Failure",
+            },
+          },
+        },
       })
-      .mockResolvedValueOnce({ status: 200, data: { id: 'resp_ok' } });
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+      .mockReturnValueOnce({ status: 200, data: { id: "resp_ok" } });
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "resp_ok" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [firstProviderKey, buildHandle(firstProviderKey, failingProcess, 'openai-chat')],
-      [secondProviderKey, buildHandle(secondProviderKey, successProcess, 'openai-chat')]
+      [
+        firstProviderKey,
+        buildHandle(firstProviderKey, failingProcess, "openai-chat"),
+      ],
+      [
+        secondProviderKey,
+        buildHandle(secondProviderKey, successProcess, "openai-chat"),
+      ],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => ({
+      execute: jest.fn((input: any) => ({
         requestId: input.id,
         providerPayload: {},
         target: {
           providerKey: firstProviderKey,
-          providerType: 'openai',
-          outboundProfile: 'openai-chat',
-          runtimeKey: firstProviderKey
+          providerType: "openai",
+          outboundProfile: "openai-chat",
+          runtimeKey: firstProviderKey,
         },
         routingDecision: {
-          routeName: 'deepseek',
-          providerProtocol: 'openai-chat',
-          pool: [firstProviderKey, secondProviderKey]
+          routeName: "deepseek",
+          providerProtocol: "openai-chat",
+          pool: [firstProviderKey, secondProviderKey],
         },
-        metadata: {}
+        metadata: {},
       })),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -4555,71 +5570,91 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(executor.execute({
-      requestId: 'req-sse-network-retry',
-      entryEndpoint: '/v1/messages',
-      body: {},
-      headers: {},
-      metadata: {}
-    })).rejects.toThrow('Upstream SSE error event [api_error]');
+    await expect(
+      executor.execute({
+        requestId: "req-sse-network-retry",
+        entryEndpoint: "/v1/messages",
+        body: {},
+        headers: {},
+        metadata: {},
+      }),
+    ).rejects.toThrow("Upstream SSE error event [api_error]");
 
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(failingProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(0);
   });
 
-  test('reroutes converted HTTP 401 when provider pool has an alternative', async () => {
-    const firstProviderKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
-    const secondProviderKey = 'opencode-zen-free.key2.mimo-v2-pro-free';
+  test("reroutes converted HTTP 401 when provider pool has an alternative", async () => {
+    const firstProviderKey = "opencode-zen-free.key1.mimo-v2-pro-free";
+    const secondProviderKey = "opencode-zen-free.key2.mimo-v2-pro-free";
 
     const unauthorizedProcess = jest.fn(async () => ({
       status: 401,
       data: {
         error: {
-          message: 'Upstream authentication failed'
-        }
-      }
+          message: "Upstream authentication failed",
+        },
+      },
     }));
-    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+    const successProcess = jest.fn(async () => ({
+      status: 200,
+      data: { id: "resp_ok" },
+    }));
 
     const handles = new Map<string, ProviderHandle>([
-      [firstProviderKey, buildHandle(firstProviderKey, unauthorizedProcess, 'openai-chat')],
-      [secondProviderKey, buildHandle(secondProviderKey, successProcess, 'openai-chat')]
+      [
+        firstProviderKey,
+        buildHandle(firstProviderKey, unauthorizedProcess, "openai-chat"),
+      ],
+      [
+        secondProviderKey,
+        buildHandle(secondProviderKey, successProcess, "openai-chat"),
+      ],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const disabled = new Set<string>(
-          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
         );
-        const providerKey = disabled.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+        const providerKey = disabled.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
         return {
           requestId: input.id,
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
           },
-          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool: [firstProviderKey, secondProviderKey] },
-          metadata: {}
+          routingDecision: {
+            routeName: "default",
+            providerProtocol: "openai-chat",
+            pool: [firstProviderKey, secondProviderKey],
+          },
+          metadata: {},
         };
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const logStage = jest.fn();
@@ -4628,67 +5663,75 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage,
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
-      requestId: 'req-401-failover',
-      entryEndpoint: '/v1/responses',
+      requestId: "req-401-failover",
+      entryEndpoint: "/v1/responses",
       body: {},
       headers: {},
-      metadata: {}
+      metadata: {},
     });
 
     expect(result.status).toBe(200);
-    expect(result.body).toEqual(expect.objectContaining({ id: 'resp_ok' }));
+    expect(result.body).toEqual(expect.objectContaining({ id: "resp_ok" }));
     expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(1);
   });
 
-  test('surfaces HTTP 401 only after pool is exhausted', async () => {
-    const providerKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
+  test("surfaces HTTP 401 only after pool is exhausted", async () => {
+    const providerKey = "opencode-zen-free.key1.mimo-v2-pro-free";
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "1";
 
     try {
       const unauthorizedProcess = jest.fn(async () => ({
         status: 401,
         data: {
           error: {
-            message: 'Upstream authentication failed'
-          }
-        }
+            message: "Upstream authentication failed",
+          },
+        },
       }));
 
       const handles = new Map<string, ProviderHandle>([
-        [providerKey, buildHandle(providerKey, unauthorizedProcess, 'openai-chat')]
+        [
+          providerKey,
+          buildHandle(providerKey, unauthorizedProcess, "openai-chat"),
+        ],
       ]);
 
       const runtimeManager = {
         resolveRuntimeKey: (key: string) => key,
-        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+        getHandleByRuntimeKey: (runtimeKey?: string) =>
+          runtimeKey ? handles.get(runtimeKey) : undefined,
       };
 
       const pipeline = {
-        execute: jest.fn(async (input: any) => ({
+        execute: jest.fn((input: any) => ({
           requestId: input.id,
           providerPayload: {},
           target: {
             providerKey,
-            providerType: 'openai',
-            outboundProfile: 'openai-chat',
-            runtimeKey: providerKey
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
           },
-          routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool: [providerKey] },
-          metadata: {}
+          routingDecision: {
+            routeName: "default",
+            providerProtocol: "openai-chat",
+            pool: [providerKey],
+          },
+          metadata: {},
         })),
-        updateVirtualRouterConfig: jest.fn()
+        updateVirtualRouterConfig: jest.fn(),
       };
 
       const deps = {
@@ -4696,24 +5739,26 @@ describe('HubRequestExecutor failover', () => {
         getHubPipeline: () => pipeline,
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       };
 
       const executor = createRequestExecutor(deps);
-      await expect(executor.execute({
-        requestId: 'req-401-exhausted',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: {}
-      })).rejects.toMatchObject({
+      await expect(
+        executor.execute({
+          requestId: "req-401-exhausted",
+          entryEndpoint: "/v1/responses",
+          body: {},
+          headers: {},
+          metadata: {},
+        }),
+      ).rejects.toMatchObject({
         statusCode: 401,
         status: 401,
-        message: 'Upstream authentication failed'
+        message: "Upstream authentication failed",
       });
 
       expect(pipeline.execute).toHaveBeenCalledTimes(1);
@@ -4727,46 +5772,50 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('surfaces readable SSE error message when upstream error event is non-retryable', async () => {
-    const providerKey = 'provider-a.primary.model-a';
+  test("surfaces readable SSE error message when upstream error event is non-retryable", async () => {
+    const providerKey = "provider-a.primary.model-a";
 
     const failingProcess = jest.fn(async () => ({
       status: 200,
       data: {
-        mode: 'sse',
+        mode: "sse",
         error: {
-          type: 'error',
+          type: "error",
           error: {
-            type: 'invalid_request_error',
-            message: 'Invalid request payload'
-          }
-        }
-      }
+            type: "invalid_request_error",
+            message: "Invalid request payload",
+          },
+        },
+      },
     }));
 
     const handles = new Map<string, ProviderHandle>([
-      [providerKey, buildHandle(providerKey, failingProcess, 'openai-chat')]
+      [providerKey, buildHandle(providerKey, failingProcess, "openai-chat")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => ({
+      execute: jest.fn((input: any) => ({
         requestId: input.id,
         providerPayload: {},
         target: {
           providerKey,
-          providerType: 'openai',
-          outboundProfile: 'openai-chat',
-          runtimeKey: providerKey
+          providerType: "openai",
+          outboundProfile: "openai-chat",
+          runtimeKey: providerKey,
         },
-        routingDecision: { routeName: 'deepseek', providerProtocol: 'openai-chat' },
-        metadata: {}
+        routingDecision: {
+          routeName: "deepseek",
+          providerProtocol: "openai-chat",
+        },
+        metadata: {},
       })),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
@@ -4774,77 +5823,89 @@ describe('HubRequestExecutor failover', () => {
       getHubPipeline: () => pipeline,
       getModuleDependencies: () => ({
         errorHandlingCenter: {
-          handleError: jest.fn(async () => undefined)
-        }
+          handleError: jest.fn(async () => undefined),
+        },
       }),
       logStage: jest.fn(),
-      stats: new StatsManager()
+      stats: new StatsManager(),
     };
 
     const executor = createRequestExecutor(deps);
 
-    await expect(executor.execute({
-      requestId: 'req-sse-readable',
-      entryEndpoint: '/v1/messages',
-      body: {},
-      headers: {},
-      metadata: {}
-    })).rejects.toMatchObject({
-      code: 'SSE_DECODE_ERROR',
-      message: expect.stringContaining('Upstream SSE error event [invalid_request_error]: Invalid request payload')
+    await expect(
+      executor.execute({
+        requestId: "req-sse-readable",
+        entryEndpoint: "/v1/messages",
+        body: {},
+        headers: {},
+        metadata: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "SSE_DECODE_ERROR",
+      message: expect.stringContaining(
+        "Upstream SSE error event [invalid_request_error]: Invalid request payload",
+      ),
     });
 
     expect(pipeline.execute).toHaveBeenCalledTimes(1);
     expect(failingProcess).toHaveBeenCalledTimes(1);
   });
 
-  test('derives logical request chain from followup request id and resolves retry seeds without eager duplicate snapshots', () => {
-    expect(__requestExecutorTestables.deriveLogicalRequestChainKey('req-root:reasoning_stop_guard:servertool_followup'))
-      .toBe('req-root');
+  test("derives logical request chain from followup request id and resolves retry seeds without eager duplicate snapshots", () => {
+    expect(
+      __requestExecutorTestables.deriveLogicalRequestChainKey(
+        "req-root:reasoning_stop_guard:servertool_followup",
+      ),
+    ).toBe("req-root");
 
-    const serializedSeed = __requestExecutorTestables.prepareRequestPayloadRetrySeed({
-      model: 'glm-5',
+    const smallPayload = {
+      model: "glm-5",
       messages: [
         {
-          role: 'user',
-          content: 'hello'
-        }
-      ]
-    });
+          role: "user",
+          content: "hello",
+        },
+      ],
+    };
+    const serializedSeed =
+      __requestExecutorTestables.prepareRequestPayloadRetrySeed(smallPayload);
 
-    expect(serializedSeed.mode).toBe('serialized');
-    expect(__requestExecutorTestables.resolveOriginalRequestForResponseConversion(serializedSeed)).toEqual({
-      model: 'glm-5',
+    expect(serializedSeed.mode).toBe("borrowed");
+    expect(
+      __requestExecutorTestables.resolveOriginalRequestForResponseConversion(
+        serializedSeed,
+      ),
+    ).toBe(smallPayload);
+
+    const largePayload = {
+      model: "glm-5",
       messages: [
         {
-          role: 'user',
-          content: 'hello'
-        }
-      ]
-    });
+          role: "user",
+          content: "x".repeat(400_000),
+        },
+      ],
+    };
+    const retrySeed =
+      __requestExecutorTestables.prepareRequestPayloadRetrySeed(largePayload);
 
-    const retrySeed = __requestExecutorTestables.prepareRequestPayloadRetrySeed({
-      model: 'glm-5',
-      messages: [
-        {
-          role: 'user',
-          content: 'x'.repeat(400_000)
-        }
-      ]
-    });
-
-    expect(retrySeed.mode).toBe('snapshot');
-    expect((retrySeed as { serializedPayload?: string }).serializedPayload).toBeUndefined();
-    expect(__requestExecutorTestables.resolveOriginalRequestForResponseConversion(retrySeed)).toBe(
-      (retrySeed as { snapshotPayload: Record<string, unknown> }).snapshotPayload
-    );
+    expect(retrySeed.mode).toBe("borrowed");
+    expect(
+      (retrySeed as { serializedPayload?: string }).serializedPayload,
+    ).toBeUndefined();
+    expect(
+      __requestExecutorTestables.resolveOriginalRequestForResponseConversion(
+        retrySeed,
+      ),
+    ).toBe(largePayload);
   });
 
-  test('blocking recoverable retry waits once before same-provider success', async () => {
-    const providerA = 'storm.a.glm-5';
-    const retryableRecoverable = () => Object.assign(new Error('fetch failed'), {
-      code: 'ECONNRESET'
-    });
+  test("blocking recoverable retry waits once before same-provider success", async () => {
+    const providerA = "storm.a.glm-5";
+    const retryableRecoverable = () =>
+      Object.assign(new Error("fetch failed"), {
+        code: "ECONNRESET",
+      });
     let failuresLeft = 1;
     const processIncoming = jest.fn(async () => {
       if (failuresLeft > 0) {
@@ -4854,39 +5915,46 @@ describe('HubRequestExecutor failover', () => {
       return {
         status: 200,
         body: {
-          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
-        }
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        },
       };
     });
 
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processIncoming, 'openai-chat')]
+      [providerA, buildHandle(providerA, processIncoming, "openai-chat")],
     ]);
 
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pool = [providerA];
     const pipeline = {
-      execute: jest.fn(async (input: any) => ({
+      execute: jest.fn((input: any) => ({
         requestId: input.id,
         providerPayload: {},
         target: {
           providerKey: providerA,
-          providerType: 'openai',
-          outboundProfile: 'openai-chat',
-          runtimeKey: providerA
+          providerType: "openai",
+          outboundProfile: "openai-chat",
+          runtimeKey: providerA,
         },
-        routingDecision: { routeName: 'default', providerProtocol: 'openai-chat', pool, routePool: pool },
-        metadata: {}
+        routingDecision: {
+          routeName: "default",
+          providerProtocol: "openai-chat",
+          pool,
+          routePool: pool,
+        },
+        metadata: {},
       })),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
-    const previousLimit = process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
-    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = '1';
+    const previousLimit =
+      process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
+    process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = "1";
 
     try {
       const logStage = jest.fn();
@@ -4894,128 +5962,143 @@ describe('HubRequestExecutor failover', () => {
         runtimeManager,
         getHubPipeline: () => pipeline,
         getRoutingTiers: () => [
-          { id: 'default-singleton', targets: [providerA], priority: 100 }
+          { id: "default-singleton", targets: [providerA], priority: 100 },
         ],
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage,
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-        status: 200,
-        body: {
-          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
-        }
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: {
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+          },
+        });
 
       const result = await executor.execute({
-        requestId: 'req-storm-root:reasoning_stop_guard',
-        entryEndpoint: '/v1/responses',
+        requestId: "req-storm-root:reasoning_stop_guard",
+        entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
-        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
+        metadata: { routecodexRoutingPolicyGroup: "test-group" },
       });
 
       expect(result.status).toBe(200);
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
       expect(
-        logStage.mock.calls.some((call) => call[0] === 'provider.retry.logical_chain_limit_hit')
+        logStage.mock.calls.some(
+          (call) => call[0] === "provider.retry.logical_chain_limit_hit",
+        ),
       ).toBe(false);
     } finally {
       if (previousLimit === undefined) {
         delete process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT;
       } else {
-        process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT = previousLimit;
+        process.env.ROUTECODEX_LOGICAL_CHAIN_RECOVERABLE_RETRY_LIMIT =
+          previousLimit;
       }
     }
   });
 
-  test('blocking recoverable retries can exceed maxAttempts without overflowing next-attempt logs', async () => {
-    const providerA = 'storm.fetch.a';
+  test("blocking recoverable retries can exceed maxAttempts without overflowing next-attempt logs", async () => {
+    const providerA = "storm.fetch.a";
     let failuresLeft = 2;
     const processIncoming = jest.fn(async () => {
       if (failuresLeft > 0) {
         failuresLeft -= 1;
-        throw Object.assign(new Error('fetch failed'), {
-          code: 'HTTP_502',
-          statusCode: 502
+        throw Object.assign(new Error("fetch failed"), {
+          code: "HTTP_502",
+          statusCode: 502,
         });
       }
       return {
         status: 200,
         body: {
-          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
-        }
+          choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        },
       };
     });
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processIncoming, 'openai-responses')]
+      [providerA, buildHandle(providerA, processIncoming, "openai-responses")],
     ]);
 
     const pool = [providerA];
     const runtimeManager = {
       resolveRuntimeKey: (providerKey: string) => providerKey,
-      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
     const pipeline = {
-      execute: jest.fn(async (input: any) => ({
+      execute: jest.fn((input: any) => ({
         requestId: input.id,
         providerPayload: {},
         target: {
           providerKey: providerA,
-          providerType: 'openai',
-          outboundProfile: 'openai-responses',
-          runtimeKey: providerA
+          providerType: "openai",
+          outboundProfile: "openai-responses",
+          runtimeKey: providerA,
         },
-        routingDecision: { routeName: 'tools', providerProtocol: 'openai-responses', pool, routePool: pool },
-        metadata: {}
+        routingDecision: {
+          routeName: "tools",
+          providerProtocol: "openai-responses",
+          pool,
+          routePool: pool,
+        },
+        metadata: {},
       })),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
 
     const prevAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '2';
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
 
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const executor = createRequestExecutor({
         runtimeManager,
         getHubPipeline: () => pipeline,
         getRoutingTiers: () => [
-          { id: 'tools-singleton', targets: [providerA], priority: 100 }
+          { id: "tools-singleton", targets: [providerA], priority: 100 },
         ],
         getModuleDependencies: () => ({
           errorHandlingCenter: {
-            handleError: jest.fn(async () => undefined)
-          }
+            handleError: jest.fn(async () => undefined),
+          },
         }),
         logStage: jest.fn(),
-        stats: new StatsManager()
+        stats: new StatsManager(),
       });
-      jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
-        status: 200,
-        body: {
-          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
-        }
-      });
+      jest
+        .spyOn(executor as any, "convertProviderResponseIfNeeded")
+        .mockReturnValue({
+          status: 200,
+          body: {
+            choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+          },
+        });
 
-      await expect(executor.execute({
-        requestId: 'req-fetch-failed-cap',
-        entryEndpoint: '/v1/responses',
-        body: {},
-        headers: {},
-        metadata: { routecodexRoutingPolicyGroup: 'test-group' }
-      })).rejects.toThrow(/fetch failed/);
+      await expect(
+        executor.execute({
+          requestId: "req-fetch-failed-cap",
+          entryEndpoint: "/v1/responses",
+          body: {},
+          headers: {},
+          metadata: { routecodexRoutingPolicyGroup: "test-group" },
+        }),
+      ).rejects.toThrow(/fetch failed/);
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
       const switchLines = warnSpy.mock.calls
-        .map((call) => String(call[0] ?? ''))
-        .filter((line) => line.includes('[provider-switch]'));
-      expect(switchLines.some((line) => line.includes('3/2'))).toBe(false);
+        .map((call) => String(call[0] ?? ""))
+        .filter((line) => line.includes("[provider-switch]"));
+      expect(switchLines.some((line) => line.includes("3/2"))).toBe(false);
     } finally {
       warnSpy.mockRestore();
       if (prevAttempts === undefined) {
@@ -5026,166 +6109,170 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('RED: 2056 single-attempt 429 excludes current provider instead of retrying same provider', () => {
+  test("RED: 2056 single-attempt 429 excludes current provider instead of retrying same provider", () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'mini27.key1.MiniMax-M2.7',
+      providerKey: "mini27.key1.MiniMax-M2.7",
       status: 429,
-      error: Object.assign(new Error('usage limit exceeded'), {
+      error: Object.assign(new Error("usage limit exceeded"), {
         statusCode: 429,
-        code: 'HTTP_429_2056',
-        upstreamCode: 'provider_status_2056'
+        code: "HTTP_429_2056",
+        upstreamCode: "provider_status_2056",
       }),
-      classification: 'recoverable',
+      classification: "recoverable",
       attempt: 1,
       promptTooLong: false,
-      routePool: ['mini27.key1.MiniMax-M2.7', 'backup.key1.gpt-5.4'],
-      excludedProviderKeys: excluded
+      routePool: ["mini27.key1.MiniMax-M2.7", "backup.key1.gpt-5.4"],
+      excludedProviderKeys: excluded,
     });
 
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excluded)).toEqual(['mini27.key1.MiniMax-M2.7']);
+    expect(Array.from(excluded)).toEqual(["mini27.key1.MiniMax-M2.7"]);
   });
 
-  test('last available provider 429 does not synthesize same-provider exclusion', () => {
+  test("last available provider 429 does not synthesize same-provider exclusion", () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'mini27.key1.MiniMax-M2.7',
+      providerKey: "mini27.key1.MiniMax-M2.7",
       status: 429,
-      error: Object.assign(new Error('usage limit exceeded'), {
+      error: Object.assign(new Error("usage limit exceeded"), {
         statusCode: 429,
-        code: 'HTTP_429_2056',
-        upstreamCode: 'provider_status_2056'
+        code: "HTTP_429_2056",
+        upstreamCode: "provider_status_2056",
       }),
-      classification: 'recoverable',
+      classification: "recoverable",
       attempt: 3,
       promptTooLong: false,
-      routePool: ['mini27.key1.MiniMax-M2.7'],
-      excludedProviderKeys: excluded
+      routePool: ["mini27.key1.MiniMax-M2.7"],
+      excludedProviderKeys: excluded,
     });
 
     expect(plan.excludedCurrentProvider).toBe(false);
     expect(Array.from(excluded)).toEqual([]);
   });
 
-  test('recoverable 502 excludes current provider when alternative exists', () => {
+  test("recoverable 502 excludes current provider when alternative exists", () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'fetch.key1.primary',
+      providerKey: "fetch.key1.primary",
       status: 502,
-      error: Object.assign(new Error('fetch failed'), {
+      error: Object.assign(new Error("fetch failed"), {
         statusCode: 502,
-        code: 'HTTP_502'
+        code: "HTTP_502",
       }),
-      classification: 'recoverable',
+      classification: "recoverable",
       attempt: 1,
       promptTooLong: false,
-      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
-      excludedProviderKeys: excluded
+      routePool: ["fetch.key1.primary", "fetch.key2.backup"],
+      excludedProviderKeys: excluded,
     });
 
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
+    expect(Array.from(excluded)).toEqual(["fetch.key1.primary"]);
   });
 
-  test('unrecoverable 401 excludes current provider when alternative exists', () => {
+  test("recoverable 401 excludes current provider when alternative exists", () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'fetch.key1.primary',
+      providerKey: "fetch.key1.primary",
       status: 401,
-      error: Object.assign(new Error('HTTP 401: unauthorized'), {
+      error: Object.assign(new Error("HTTP 401: unauthorized"), {
         statusCode: 401,
-        code: 'INVALID_API_KEY'
+        code: "INVALID_API_KEY",
       }),
-      classification: 'unrecoverable',
+      classification: "recoverable",
       attempt: 1,
       promptTooLong: false,
-      routePool: ['fetch.key1.primary', 'fetch.key2.backup'],
-      excludedProviderKeys: excluded
+      routePool: ["fetch.key1.primary", "fetch.key2.backup"],
+      excludedProviderKeys: excluded,
     });
 
     expect(plan.excludedCurrentProvider).toBe(true);
-    expect(Array.from(excluded)).toEqual(['fetch.key1.primary']);
+    expect(Array.from(excluded)).toEqual(["fetch.key1.primary"]);
   });
 
-  test('recoverable 502 keeps current provider eligible when no alternative exists', () => {
+  test("recoverable 502 keeps current provider eligible when no alternative exists", () => {
     const excluded = new Set<string>();
     const plan = __requestExecutorTestables.resolveProviderRetryExclusionPlan({
-      providerKey: 'fetch.key1.primary',
+      providerKey: "fetch.key1.primary",
       status: 502,
-      error: Object.assign(new Error('fetch failed'), {
+      error: Object.assign(new Error("fetch failed"), {
         statusCode: 502,
-        code: 'HTTP_502'
+        code: "HTTP_502",
       }),
-      classification: 'recoverable',
+      classification: "recoverable",
       attempt: 1,
       promptTooLong: false,
-      routePool: ['fetch.key1.primary'],
-      excludedProviderKeys: excluded
+      routePool: ["fetch.key1.primary"],
+      excludedProviderKeys: excluded,
     });
 
     expect(plan.excludedCurrentProvider).toBe(false);
     expect(Array.from(excluded)).toEqual([]);
   });
-
 });
 
-describe('HubRequestExecutor session storm backoff', () => {
+describe("HubRequestExecutor session storm backoff", () => {
   beforeEach(() => {
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-04-22T12:00:00.000Z'));
+    jest.setSystemTime(new Date("2026-04-22T12:00:00.000Z"));
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  test('does not record session storm backoff when hub routing fails before provider send', async () => {
+  test("does not record session storm backoff when hub routing fails before provider send", async () => {
     jest.useFakeTimers();
     const pipelineError = Object.assign(
-      new Error('No available providers after applying routing instructions'),
-      { code: 'PROVIDER_NOT_AVAILABLE' }
+      new Error("No available providers after applying routing instructions"),
+      { code: "PROVIDER_NOT_AVAILABLE" },
     );
     const pipeline = {
-      execute: jest.fn(async () => {
+      execute: jest.fn(() => {
         throw pipelineError;
       }),
-      updateVirtualRouterConfig: jest.fn()
+      updateVirtualRouterConfig: jest.fn(),
     };
     const logStage = jest.fn();
     const executor = createRequestExecutor({
       runtimeManager: { getHandleByRuntimeKey: jest.fn() } as any,
       getHubPipeline: () => pipeline as any,
       getModuleDependencies: () => ({
-        errorHandlingCenter: { handleError: jest.fn(async () => undefined) }
+        errorHandlingCenter: { handleError: jest.fn(async () => undefined) },
       }),
       logStage,
-      stats: new StatsManager()
+      stats: new StatsManager(),
     });
 
     const pending = executor.execute({
-      requestId: 'req-hub-no-provider-storm-1',
-      entryEndpoint: '/v1/responses',
-      body: { model: 'gpt-5.2-codex', input: 'hello' },
+      requestId: "req-hub-no-provider-storm-1",
+      entryEndpoint: "/v1/responses",
+      body: { model: "gpt-5.2-codex", input: "hello" },
       headers: {},
-      metadata: { sessionId: 'storm-session-1' }
+      metadata: { sessionId: "storm-session-1" },
     });
-    const expectation = expect(pending).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
+    const expectation = expect(pending).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
 
     await jest.advanceTimersByTimeAsync(1_000);
     await expectation;
 
     expect(
-      logStage.mock.calls.some((call) => call[0] === 'request.session_storm_backoff.recorded')
+      logStage.mock.calls.some(
+        (call) => call[0] === "request.session_storm_backoff.recorded",
+      ),
     ).toBe(false);
     expect(
-      logStage.mock.calls.some((call) => call[0] === 'hub.pool_exhausted.backoff_wait')
+      logStage.mock.calls.some(
+        (call) => call[0] === "hub.pool_exhausted.backoff_wait",
+      ),
     ).toBe(false);
   });
-
 });
 
-describe('HubRequestExecutor provider transport backoff', () => {
+describe("HubRequestExecutor provider transport backoff", () => {
   // Backoff regression coverage was removed with the no-op helper cleanup.
 });

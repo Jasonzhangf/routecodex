@@ -457,11 +457,7 @@ pub fn format_virtual_router_hit_json(
     );
     let (provider_label, resolved_model) =
         describe_target_provider_inner(&record.provider_key, record.model_id.as_deref());
-    let route_label = record
-        .pool_id
-        .as_ref()
-        .map(|p| format!("{}/{}", record.route_name, p))
-        .unwrap_or_else(|| record.route_name.clone());
+    let route_label = record.route_name.clone();
     let session_id = record
         .session_id
         .as_deref()
@@ -782,12 +778,7 @@ pub fn to_virtual_router_hit_event_json(
     );
     event.insert(
         "pool".to_string(),
-        serde_json::Value::String(
-            record
-                .pool_id
-                .clone()
-                .unwrap_or_else(|| record.route_name.clone()),
-        ),
+        serde_json::Value::String(record.route_name.clone()),
     );
     event.insert(
         "providerKey".to_string(),
@@ -884,7 +875,8 @@ mod tests {
         )
         .expect("line");
         assert!(line.contains("[virtual-router-hit]"));
-        assert!(line.contains("thinking/thinking-primary -> glm[key1].kimi-k2.5"));
+        assert!(line.contains("thinking -> glm[key1].kimi-k2.5"));
+        assert!(!line.contains("thinking-primary"));
         assert!(!line.contains("req=req-1"));
         assert!(line.contains("sid=tmux-alpha-01"));
         assert!(line.contains("reqTokens=1235"));
@@ -900,7 +892,7 @@ mod tests {
         assert_eq!(event["requestId"], "req-evt");
         assert_eq!(event["entryEndpoint"], "/v1/messages");
         assert_eq!(event["routeName"], "thinking");
-        assert_eq!(event["pool"], "thinking-primary");
+        assert_eq!(event["pool"], "thinking");
         assert_eq!(event["requestTokens"], 1235);
         assert_eq!(event["selectionPenalty"], 3);
         assert_eq!(event["stopMessageActive"], true);

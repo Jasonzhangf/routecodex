@@ -49,10 +49,10 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
         ownerBuilder: 'describeErrorActionQueueContract',
         effects: expect.arrayContaining([
           'record_error_action_backoff',
-          'blocking_wait_1s_3s_5s_cycle',
+          'blocking_wait_1s_2s_3s_cycle',
         ]),
       },
     });
-    expect(String(one.module?.help ?? '')).toContain('1s -> 3s -> 5s -> repeat');
+    expect(String(one.module?.help ?? '')).toContain('1s -> 2s -> 3s -> repeat');
   });
 });

@@ -60,7 +60,7 @@ features:
       forbidden_claim: "Do not claim P3 Debug persistence, P4 Error policy runtime, P5 Router/Target runtime, P6 Responses provider execution, or full V3 MVP usable from P0-P2 evidence."
 
   - feature_id: v3.responses_direct_mvp_architecture
-    status: p6_binding_pending_after_p5
+    status: p6_provider_slice_source_bound_server_pending
     change_risk: high
     owner_kind: rust_project_v3
     owner_scope: "P6 generic Responses direct Runtime/Provider lifecycle after verified P0-P5 foundation"
@@ -80,7 +80,8 @@ features:
       - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
       - Server and CLI cannot import or call Provider transport
       - no relay continuation servertool other protocol V2 compatibility fallback repair sanitize or raw replay
-      - all unverified P6 resources and edges remain binding_pending without invented symbols or paths
+      - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
+      - all remaining unverified P6 resources and edges remain binding_pending without invented symbols or paths
     required_gates:
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-rust-only
@@ -89,15 +90,62 @@ features:
       - npm run verify:v3-static-hook-registry
       - npm run verify:v3-resource-map
       - npm run test:v3-compile-fail
+      - npm run test:v3-provider-responses
       - npm run test:v3-responses-direct-unit
       - npm run test:v3-responses-direct-blackbox
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
     completion_rule:
-      source: "Pending P6: red source/compile-fail evidence must precede implementation; then every adjacent edge/resource requires verified source binding and all mapped gates."
-      runtime: "Pending P6: controlled or real upstream Responses request must traverse Runtime/Provider before this feature can be marked usable."
-      forbidden_claim: "Prototype symbols/tests do not prove P6 complete. Do not claim relay, continuation, servertool, other protocols, V2 compatibility, global install, real ~/.rcc mutation, or production replacement."
+      source: "Partially source-bound: provider wire/transport/raw edges 10-12 require generic Provider blackbox plus gates; remaining client/server edges stay binding_pending until their own evidence exists."
+      runtime: "Pending full P6: controlled or real upstream Responses request must traverse Server/Runtime/Provider before this feature can be marked usable end to end."
+      forbidden_claim: "Provider-only evidence does not prove Server /v1/responses usable. Do not claim relay, continuation, servertool, other protocols, V2 compatibility, global install, real ~/.rcc mutation, or production replacement."
+  - feature_id: v3.responses_provider_runtime
+    status: source_verified_controlled_upstream
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "Generic Rust Responses Provider runtime slice: selected Target -> Provider wire -> transport request -> typed raw response/source error"
+    owner_modules:
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime
+    design:
+      - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+      - docs/goals/v3-responses-direct-mvp-test-design.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    test_design:
+      - docs/goals/v3-responses-direct-mvp-test-design.md
+    required_unit:
+      - Provider wire moves the request body, changes only selected wire model, and preserves client extensions
+      - Provider transport resolves env and token-file auth only at send boundary
+      - Provider raw response preserves JSON bytes and validated SSE event bytes
+      - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
+    required_contract:
+      - routecodex-v3-provider-responses remains generic across provider IDs and contains no deployment provider branch
+      - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources
+      - Server and CLI cannot import Provider transport
+      - Provider node structs 12, 13, and 14 cannot be constructed by non-owner code
+      - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload
+    required_gates:
+      - npm run test:v3-provider-responses
+      - npm run test:v3-responses-direct-blackbox
+      - npm run test:v3-provider-health-contract
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "Provider nodes 12-14 and adjacent edges 10-12 are bound to real Rust symbols, and Provider module blackbox passes against a controlled upstream."
+      runtime: "This feature proves Provider execution only; Server /v1/responses live usability remains pending until the full Responses Direct MVP feature is completed."
+      forbidden_claim: "Do not claim Server live integration, client projection completeness, relay, continuation, servertool, V2 compatibility, global install, or real ~/.rcc mutation from this provider slice."
   - feature_id: v3.debug_error_foundation
     status: p3_p4_source_and_live_verified
     change_risk: high

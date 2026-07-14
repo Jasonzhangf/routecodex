@@ -83,6 +83,7 @@
 - `aliases` 只给客户端展示 / 客户端输入匹配
 - provider 出站 `body.model` 必须回写 `modelId`，不能发 alias
 - 每个 routingPolicyGroup 的 `routing.default` 池必须包含该组其他池出现过的所有模型/forwarder。
+- 路由池不再需要单独命名；authoring `routing.*[]` 的 `id` / `poolId` 不是运行时显示或分组真源。路由分类显示只用 route key（如 `thinking` / `search` / `default`），隔离只用 `routeParams.routePolicyGroup`。
 - `default.targets` 排序按业务 priority 排序；同等可用时，支持 `web_search` 和 `multimodal` 的模型/forwarder 靠前。
 - GPT forwarder 分类：`fwd.gpt.*` 表示 free/限免动态池，默认优先于 `fwd.paid.*`；free 池只保留当前免费 provider，paid 池承载付费 provider 聚合。
 

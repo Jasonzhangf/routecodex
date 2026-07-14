@@ -65,7 +65,7 @@ pub(crate) fn ${trimHelper}(value: Option<&Value>) -> Option<String> {
 
 function engineSource({ localTrimWrappers = 0, localStoplessParse = false } = {}) {
   const lines = [
-    'use crate::shared_json_utils::{parse_json_with_context, read_trimmed_string};',
+    'use crate::shared_json_utils::read_trimmed_string;',
     'use serde_json::Value;',
     'struct ExecuteHubPipelineInput;',
     'pub fn execute_hub_pipeline_json(input_json: String) -> Result<String, String> {',
@@ -78,10 +78,6 @@ function engineSource({ localTrimWrappers = 0, localStoplessParse = false } = {}
     'let _c = read_trimmed_string(metadata.get("sessionId"));',
     'let _d = read_trimmed_string(metadata.get("conversationId"));',
     'let _e = read_trimmed_string(metadata.get("providerKey"));',
-    'let _f = read_trimmed_string(metadata.get("routingPolicyGroup"));',
-    'let _gateway: Value = parse_json_with_context::<Value>(raw_runtime, "inspect stop gateway signal").ok()?;',
-    'let _runtime: Value = parse_json_with_context(raw_runtime, "Rust stopless response hook runtime returned invalid JSON").ok()?;',
-    'let _projection: Value = parse_json_with_context(raw_projection, "Rust stopless response hook projection returned invalid JSON").ok()?;',
     'Some("ok".to_string())',
     '}',
   ];
@@ -171,7 +167,7 @@ const cases = [
         'use serde_json::{Map, Value};\n',
       );
     },
-    'missing shared parse_json_with_context helper',
+    'missing shared read_trimmed_string helper',
   ),
 
   runVerifier(

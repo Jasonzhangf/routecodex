@@ -3,19 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-const UNRECOVERABLE_CODES: &[&str] = &[
-    "INVALID_API_KEY",
-    "INVALID_ACCESS_TOKEN",
-    "INSUFFICIENT_QUOTA",
-    "MODEL_NOT_SUPPORTED",
-    "MODEL_DISABLED",
-    "NO_SUCH_MODEL",
-    "ACCOUNT_DISABLED",
-    "ACCOUNT_SUSPENDED",
-    "ACCESS_DENIED",
-    "FORBIDDEN",
-];
-
 const BLOCKING_RECOVERABLE_CODES: &[&str] = &[
     "PROVIDER_TRAFFIC_SATURATED",
     "HTTP_429",
@@ -671,21 +658,6 @@ pub fn classify_error_err02_host_captured(
         || reason.contains("invalid request payload")
         || reason.contains("\"message\":\"bad request\"")
         || reason.contains("signature-invalid");
-    let auth_or_account_text = [
-        "invalid api key",
-        "invalid access token",
-        "token expired",
-        "insufficient_quota",
-        "quota exceeded",
-        "model is not supported",
-        "model not supported",
-        "access denied",
-        "account suspended",
-        "account disabled",
-        "blocked due to unauthorized requests",
-    ]
-    .iter()
-    .any(|hint| reason.contains(hint));
     let classification = if client_disconnect {
         Some(FailureClassification::Unrecoverable)
     } else if prompt_too_long
@@ -728,11 +700,6 @@ pub fn classify_error_err02_host_captured(
         || provider_runtime_request_contract
         || local_response_contract
         || (local_request_contract && !prompt_too_long)
-        || matches!(input.status_code, Some(401 | 402 | 403 | 404))
-        || (input.status_code == Some(434)
-            && (reason.contains("blocked due to unauthorized requests")
-                || reason.contains("access to the current ak has been blocked")))
-        || auth_or_account_text
         || (malformed_response
             && !reason.contains("context_length_exceeded")
             && !reason.contains("instead of sse")
@@ -761,9 +728,6 @@ pub fn classify_failure(
     is_network_error: bool,
 ) -> FailureClassification {
     let code = error_code.or(upstream_code).unwrap_or("");
-    if UNRECOVERABLE_CODES.contains(&code) {
-        return FailureClassification::Unrecoverable;
-    }
     if is_network_error {
         return FailureClassification::Recoverable;
     }
@@ -1169,12 +1133,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_unrecoverable_codes() {
+    fn test_provider_origin_auth_codes_are_recoverable() {
         let classification = classify_failure(Some(401), Some("INVALID_API_KEY"), None, false);
-        assert!(matches!(
-            classification,
-            FailureClassification::Unrecoverable
-        ));
+        assert!(matches!(classification, FailureClassification::Recoverable));
+    }
+
+    #[test]
+    fn provider_origin_auth_quota_errors_are_recoverable() {
+        let cases = [
+            (401, "INVALID_API_KEY", "invalid api key"),
+            (402, "INSUFFICIENT_QUOTA", "insufficient_quota"),
+            (403, "ACCOUNT_DISABLED", "account disabled"),
+            (404, "NO_SUCH_MODEL", "model not supported"),
+            (403, "ACCESS_DENIED", "access denied"),
+            (403, "FORBIDDEN", "blocked due to unauthorized requests"),
+        ];
+        for (status_code, error_code, message) in cases {
+            let decision = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+                stage: Some("provider.send".to_string()),
+                status_code: Some(status_code),
+                error_code: Some(error_code.to_string()),
+                upstream_code: Some(error_code.to_string()),
+                error_message: Some(message.to_string()),
+                ..Default::default()
+            });
+            assert_eq!(
+                decision.classification,
+                Some(FailureClassification::Recoverable),
+                "provider-origin {status_code}/{error_code} must remain reroutable"
+            );
+            assert!(!decision.client_disconnect);
+        }
+    }
+
+    #[test]
+    fn provider_origin_auth_quota_error_reroutes_while_default_pool_available() {
+        let mut input = error_err05_input();
+        input.classification = None;
+        input.error_err02_host_captured = Some(ErrorErr02HostCapturedInput {
+            stage: Some("provider.send".to_string()),
+            status_code: Some(403),
+            error_code: Some("HTTP_403".to_string()),
+            upstream_code: Some("INSUFFICIENT_QUOTA".to_string()),
+            error_message: Some("HTTP 403: insufficient quota".to_string()),
+            ..Default::default()
+        });
+        input.route_pool = vec!["p1.model".to_string()];
+        input.default_pool_available = true;
+        input.is_streaming_request = true;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn local_contract_failure_remains_unrecoverable() {
+        let cases = [
+            ("MALFORMED_REQUEST", "invalid request payload"),
+            ("CLIENT_TOOL_ARGS_INVALID", "invalid tool arguments"),
+        ];
+        for (error_code, message) in cases {
+            let decision = classify_error_err02_host_captured(ErrorErr02HostCapturedInput {
+                stage: Some("provider.send".to_string()),
+                status_code: Some(400),
+                error_code: Some(error_code.to_string()),
+                error_message: Some(message.to_string()),
+                ..Default::default()
+            });
+            assert_eq!(
+                decision.classification,
+                Some(FailureClassification::Unrecoverable),
+                "local contract error {error_code} must not reroute"
+            );
+        }
     }
 
     #[test]

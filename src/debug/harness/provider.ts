@@ -13,11 +13,8 @@ import type {
   ProviderHarnessRuntime
 } from '../types.js';
 
-function deepClone<T>(value: T): T {
-  if (typeof globalThis.structuredClone === 'function') {
-    return globalThis.structuredClone(value);
-  }
-  return JSON.parse(JSON.stringify(value)) as T;
+function cloneProviderReplayInput(value: Record<string, unknown>): Record<string, unknown> {
+  return globalThis.structuredClone(value);
 }
 
 function createNoopLogger(): PipelineDebugLogger {
@@ -111,7 +108,7 @@ export class ProviderPreprocessHarness
 
   async executeForward(input: ProviderHarnessExecuteInput): Promise<ProviderHarnessResult> {
     const provider = await this.ensureProvider(input.runtime, input.dependencies);
-    const cloned = deepClone(input.request);
+    const cloned = cloneProviderReplayInput(input.request);
     attachProviderRuntimeMetadata(cloned, input.metadata);
     const context = typeof provider.createContext === 'function' ? provider.createContext(cloned) : undefined;
     if (input.action === 'postprocess' && typeof provider.postprocessResponse === 'function') {

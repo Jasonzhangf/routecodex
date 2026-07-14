@@ -1,5 +1,6 @@
 /**
  * Retry Payload Snapshot Utilities
+ * feature_id: request.payload_copy_budget
  *
  * Extracted from request-executor.ts.
  * Delegates non-blocking logging via injected callback.
@@ -9,7 +10,6 @@ import { describeRetryReason } from './retry-engine.js';
 import { readString } from './request-executor-error-shared.js';
 import type { RetryErrorSnapshot } from './request-executor-error-types.js';
 import { extractStatusCodeFromError, firstFiniteNumber } from './utils.js';
-import { estimateRetryPayloadBytes } from './retry-payload-bytes-estimator.js';
 import { readRuntimeDebugSnapshotProjection } from '../metadata-center/request-truth-readers.js';
 import { normalizeKnownProviderError } from '../../../../providers/core/runtime/provider-error-catalog.js';
 
@@ -17,9 +17,6 @@ type LogNonBlockingError = (stage: string, error: unknown, details?: Record<stri
 let _logNB: LogNonBlockingError | undefined;
 
 const RETRY_SNAPSHOT_PARSE_MAX_CHARS = 256 * 1024;
-const RETRY_SNAPSHOT_RESTORE_MAX_CHARS = 2 * 1024 * 1024;
-const RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS = 256 * 1024;
-const RETRY_PAYLOAD_ESTIMATE_MAX_BYTES = RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS * 2;
 
 function logNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   _logNB?.(stage, error, details);
@@ -83,8 +80,8 @@ export type HubDecodeBreakdown = {
 
 export type RetryPayloadSeed =
   | {
-    mode: 'serialized';
-    serializedPayload: string;
+    mode: 'borrowed';
+    sourcePayload: Record<string, unknown>;
   }
   | {
     mode: 'snapshot';
@@ -374,18 +371,6 @@ export function readHubDecodeBreakdown(hubStageTop: HubStageTopEntry[] | undefin
   return { sseDecodeMs, codecDecodeMs };
 }
 
-export function serializeRequestPayloadForRetry(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-  try {
-    return JSON.stringify(payload);
-  } catch (error) {
-    logNonBlockingError('serializeRequestPayloadForRetry', error);
-    return undefined;
-  }
-}
-
 export function cloneRequestPayloadForRetry(payload: unknown): Record<string, unknown> | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return undefined;
@@ -405,86 +390,30 @@ export function prepareRequestPayloadRetrySeed(payload: unknown): RetryPayloadSe
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { mode: 'none' };
   }
-
-  const estimatedBytes = estimateRetryPayloadBytes(payload, {
-    maxBytes: RETRY_PAYLOAD_ESTIMATE_MAX_BYTES + 1
-  });
-  if (estimatedBytes <= RETRY_PAYLOAD_ESTIMATE_MAX_BYTES) {
-    const serializedPayload = serializeRequestPayloadForRetry(payload);
-    if (
-      typeof serializedPayload === 'string'
-      && serializedPayload.length <= RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS
-    ) {
-      return {
-        mode: 'serialized',
-        serializedPayload
-      };
-    }
-  }
-
-  const snapshotPayload = cloneRequestPayloadForRetry(payload);
-  if (snapshotPayload) {
-    return {
-      mode: 'snapshot',
-      snapshotPayload
-    };
-  }
-
-  const serializedPayload = serializeRequestPayloadForRetry(payload);
-  if (
-    typeof serializedPayload === 'string'
-    && serializedPayload.length <= RETRY_SNAPSHOT_SERIALIZE_MAX_CHARS
-  ) {
-    return {
-      mode: 'serialized',
-      serializedPayload
-    };
-  }
-
-  return { mode: 'none' };
+  return {
+    mode: 'borrowed',
+    sourcePayload: payload as Record<string, unknown>
+  };
 }
 
 export function restoreRequestPayloadFromRetrySeed(seed: RetryPayloadSeed): Record<string, unknown> | undefined {
-  if (seed.mode === 'serialized') {
-    return restoreRequestPayloadFromRetrySnapshot(seed.serializedPayload);
+  if (seed.mode === 'borrowed') {
+    return cloneRequestPayloadForRetry(seed.sourcePayload);
   }
   if (seed.mode === 'snapshot') {
-    return cloneRequestPayloadForRetry(seed.snapshotPayload) ?? { ...seed.snapshotPayload };
+    return cloneRequestPayloadForRetry(seed.snapshotPayload);
   }
   return undefined;
 }
 
 export function resolveOriginalRequestForResponseConversion(seed: RetryPayloadSeed): Record<string, unknown> | undefined {
+  if (seed.mode === 'borrowed') {
+    return seed.sourcePayload;
+  }
   if (seed.mode === 'snapshot') {
     return seed.snapshotPayload;
   }
   return restoreRequestPayloadFromRetrySeed(seed);
-}
-
-export function restoreRequestPayloadFromRetrySnapshot(
-  serializedPayload?: string
-): Record<string, unknown> | undefined {
-  if (serializedPayload && typeof serializedPayload === 'string') {
-    if (serializedPayload.length > RETRY_SNAPSHOT_RESTORE_MAX_CHARS) {
-      logNonBlockingError(
-        'restoreRequestPayloadFromRetrySnapshot.oversized_skip',
-        'serialized retry payload too large',
-        { payloadLength: serializedPayload.length, maxChars: RETRY_SNAPSHOT_RESTORE_MAX_CHARS }
-      );
-    } else {
-    try {
-      const parsed = JSON.parse(serializedPayload) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch (error) {
-      logNonBlockingError('restoreRequestPayloadFromRetrySnapshot.parseSerialized', error, {
-        payloadLength: serializedPayload.length
-      });
-    }
-    }
-  }
-  return undefined;
 }
 
 export function resetRetrySnapshotStateForTests(): void {

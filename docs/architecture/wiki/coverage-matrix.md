@@ -24,6 +24,7 @@
 | Pipeline topology | `docs/design/pipeline-type-topology-and-module-boundaries.md` | done | 结构真源，不放在 wiki 重复写 |
 | Topology residual node review | `docs/architecture/wiki/topology-residual-node-review.md` | done | 原 `topology-sync-manifest.yml` locked debt 的 14 个 residual nodes 已进入 review surface |
 | Hub Pipeline Rust reference closeout | `docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md` | done | broad `native-exports` / narrow host / direct-native helper 引用接口第一轮收敛 review surface |
+| RouteCodex V3 Responses direct | `docs/architecture/wiki/v3-responses-direct-mainline.md` | draft | 项目级 V3 Rust-only config/server/runtime/provider/CLI，第一条 MVP 路径为 `/v1/responses` direct |
 
 ## Missing Wiki Pages
 

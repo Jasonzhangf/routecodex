@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
 import {
   buildAnthropicRequestFromOpenAIChat,
@@ -167,10 +168,8 @@ function findCodexSampleFile() {
   throw new Error('no suitable codex sample found (with messages+tools)');
 }
 
-function clonePayload(obj) {
-  try { return structuredClone(obj); } catch {
-    try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; }
-  }
+export function cloneOutboundRegressionExecutionPayload(value) {
+  return structuredClone(value);
 }
 
 function collectSystemText(messages) {
@@ -330,7 +329,7 @@ async function run() {
       await rateGate(providerId);
       const provider = ProviderFactory.createProvider(cfg, { logger: { logModule: ()=>{}, logProviderRequest: ()=>{} }, errorHandlingCenter: { handleError: async ()=>{} } });
       await provider.initialize();
-      const chatPayload = clonePayload(req.data);
+      const chatPayload = cloneOutboundRegressionExecutionPayload(req.data);
       const providerPayload = await buildProviderPayload(providerType, chatPayload);
       const finalReq = { data: providerPayload };
       const res = await provider.sendRequest(finalReq);
@@ -350,4 +349,6 @@ async function run() {
   console.log(JSON.stringify(report, null, 2));
 }
 
-run().catch(e => { console.error(e); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run().catch(e => { console.error(e); process.exit(1); });
+}

@@ -26,15 +26,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import YAML from 'yaml';
-
-const root = process.cwd();
-const mainlinePath = path.join(root, 'docs/architecture/mainline-call-map.yml');
-const outDir = path.join(root, 'docs/architecture/manifests');
-
-const mainline = YAML.parse(fs.readFileSync(mainlinePath, 'utf8'));
-
-fs.mkdirSync(outDir, { recursive: true });
 
 const chainToWikiPage = {
   'config.user_config_materialization.mainline': 'docs/architecture/wiki/mainline-call-graph.md',
@@ -47,10 +40,8 @@ const chainToWikiPage = {
   'metadata.center.mainline':   'docs/architecture/wiki/metadata-center-mainline-source.md',
 };
 
-let written = 0;
-for (const chain of (mainline?.chains ?? [])) {
+export function buildMainlineChainManifest(chain) {
   const chainId = chain?.chain_id ?? '';
-  if (!chainId) continue;
 
   const nodeSet = new Set();
   const edges = [];
@@ -80,7 +71,7 @@ for (const chain of (mainline?.chains ?? [])) {
   const firstEdge = chain.edges?.[0];
   const entryNode = firstEdge?.from_node ?? '';
 
-  const manifest = {
+  return {
     lifecycle_id: chainId,
     summary: typeof chain.summary === 'string' ? chain.summary : '',
     owner_feature_id: dominantOwner,
@@ -98,14 +89,32 @@ for (const chain of (mainline?.chains ?? [])) {
       ],
     },
   };
-
-  // strip nulls
-  const manifestClean = JSON.parse(JSON.stringify(manifest));
-
-  const outPath = path.join(outDir, `${chainId.replace(/\//g, '_')}.yml`);
-  fs.writeFileSync(outPath, YAML.stringify(manifestClean), 'utf8');
-  console.log(`[generate-mainline-chain-manifests] wrote ${outPath}`);
-  written++;
 }
 
-console.log(`[generate-mainline-chain-manifests] ok - ${written} manifests written`);
+export function generateMainlineChainManifests({ repoRoot = process.cwd(), log = console.log } = {}) {
+  const mainlinePath = path.join(repoRoot, 'docs/architecture/mainline-call-map.yml');
+  const outDir = path.join(repoRoot, 'docs/architecture/manifests');
+  const mainline = YAML.parse(fs.readFileSync(mainlinePath, 'utf8'));
+
+  fs.mkdirSync(outDir, { recursive: true });
+
+  let written = 0;
+  for (const chain of (mainline?.chains ?? [])) {
+    const chainId = chain?.chain_id ?? '';
+    if (!chainId) continue;
+
+    const manifest = buildMainlineChainManifest(chain);
+
+    const outPath = path.join(outDir, `${chainId.replace(/\//g, '_')}.yml`);
+    fs.writeFileSync(outPath, YAML.stringify(manifest), 'utf8');
+    log(`[generate-mainline-chain-manifests] wrote ${outPath}`);
+    written++;
+  }
+
+  log(`[generate-mainline-chain-manifests] ok - ${written} manifests written`);
+  return written;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  generateMainlineChainManifests();
+}

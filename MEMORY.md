@@ -2623,6 +2623,13 @@
 
 - Pending Responses conversation request entries are in-memory-only until a response id exists; a separate direct-native binding/store instance reloads persisted entries and cannot prove host in-memory pending state.
 - Tests that assert state produced by `responses-conversation-store-host.ts` capture/record operations must use host-owned debug wrappers (`hasResponsesConversation*InStore`) or host metrics. Reserve direct-native store helpers for pure Rust/NAPI output evidence, not host store instance identity checks.
+
+# 2026-07-13: Repairable blockers must be fixed forward in multi-worker goals
+
+- For long-running RouteCodex multi-worker goals, a blocker that can be resolved by a forward fix is not a reason to wait, reset, or mark the goal blocked.
+- Examples: stale source/map anchors, gate wiring drift, review-surface drift, narrow fixture drift, and other non-destructive source/map/gate consistency issues.
+- Required behavior: refresh `.agent-collab`, record evidence, acquire the semantic claim if free, or handoff plus minimal forward-only repair when an active claim owns the low-risk alignment drift; then run the proving gate.
+- High-risk production writes, deletes, migrations, release/global install mutation, auth/secrets/payment, and live runtime mutation still need explicit Jason approval or checked handoff.
 # 2026-07-13: direct runtime metadata projection Rust owner
 
 - Direct route/provider metadata field selection and control projection are Rust-owned by `direct_runtime_metadata_projection.rs`; TS only performs cycle-aware JSON transport and NAPI invocation.
@@ -2694,6 +2701,49 @@
 - `hub.provider_response_stream_pipe_effect_plan` owns `no_pipe` / `use_pipe`, canonical codec/requestId normalization, object payload validation, and malformed errors in Rust.
 - TS may consume the returned pipe for Node SSE IO, return null for `no_pipe`, and reject unknown actions. It must not inspect streamPipe fields or recreate malformed-shape policy.
 - Verified by Rust 1/1, provider-response Jest 261/261, required architecture/native/base/release gates, installed `0.90.3932`, managed 5555 restart, and relay SSE request `req_1783905286656_132cccdc` completing with `STREAM_PIPE_OK`, `response.completed`, and `response.done` without internal effect leakage.
+# 2026-07-13: Complete Rust effect arguments pass unchanged to host IO
+
+- When a Rust planner emits a complete serializable effect/store argument object, the TS executor must pass it unchanged to the host IO function.
+- Rebuilding the object, truthy-filtering optional fields, or repeating owner/default constants in TS creates a second semantic owner even when the final operation is filesystem/stream/HTTP/store IO.
+- Lock this boundary with a direct-object positive assertion and residue negatives for TS constants, optional spreads, and local reconstruction.
+# 2026-07-13: Runtime effect shape validation belongs to the Rust consumer
+
+- TS must not use `asRecord` or equivalent coercion to turn malformed Rust effect arrays/scalars into null before native consumption.
+- The Rust consumer owns parse errors and the accepted object/null shape; TS may only project absent `undefined` to JSON null at the transport boundary.
+- Pair canonical object/null positives with malformed array/scalar negatives and a residue gate that forbids TS coercion revival.
+# 2026-07-13: Diagnostic alarm messages are Rust-owned effects
+
+- Provider-response diagnostics are not harmless TS logging glue: alarm selection, normalization, details serialization, and complete message formatting belong to the Rust effect planner. TS may only perform the host console IO.
+- A managed `/v1/responses` entry generates request-local session truth when the caller omits a session header, so `stopless_missing_session_id` cannot be forced naturally by header omission. Verify emit with the real native-binding integration path and verify no-op/payload isolation with live replay; do not mutate live config to manufacture the alarm.
+
+# 2026-07-13: Provider-response total-plan materialization is Rust-owned
+
+- Provider-response host code must pass the total native response plan to one Rust materializer. Rust owns payload/requestId/diagnostics/effect-plan validation and returns the closed payload, diagnostic input, and normalized runtime effects.
+- TS may execute console, MetadataCenter, store, and stream IO, but must not inspect nested native-plan semantics, normalize effects, or retain a native-plan context cache. Old narrow normalize exports must be physically removed rather than aliased.
+- Verified with Rust positive/negative 2/2, provider-response Jest 27/27, required architecture/native/build/release gates, installed `0.90.3932`, managed 5555 restart, and cross-protocol relay request `req_1783911950468_327981fa` returning HTTP 200 without internal carrier leakage.
+
+# 2026-07-13: direct semantic classification top-down contract
+
+- Provider/model authoring exposes one closed `direct.semantics` enum: missing or explicit `routing` keeps canonical routed model/thinking behavior; explicit `passthrough` preserves direct request and provider response model/thinking fields. Unknown values fail validation.
+- `ConfigDirect02ValidatedPolicy` compiles only deterministic `config.provider_profile_projection`. After final real-target selection, `VrDirect03ResolvedSemantics` is the sole writer of request-scoped `direct.semantic_policy`.
+- Direct request and response projectors consume the same resolved contract independently. Response projection must not depend on request projector output or infer class from payload deltas, `originalClientModel`, provider names, forwarder state, or MetadataCenter.
+- The lifecycle is a side chain, not a new Hub request-mainline node. Current runtime remains unchanged while `dsc-01` through `dsc-04` are `binding_pending: true`.
+- 2026-07-13：provider-response debug stage record 也是 Rust effect contract。`planProviderResponseStageRecorderEffectJson` 唯一拥有 stage9/stage10 名称、protocol 与 payload envelope；TS 只在 recorder 存在时执行 `record(stage,payload)`。已由 Rust 2/2、Jest 27/27、residue 234/234、build/release 及 5555 live `req_1783914007571_505e44b3` 验证。
+
+# 2026-07-13: direct semantic classification runtime correction and live routing truth
+
+- Supersedes the earlier design-only statement that `dsc-01..dsc-04` were pending. All four edges are now anchored to real Rust symbols, and architecture review reports `direct.semantic_classification.mainline: anchored=4, binding_pending=0`.
+- Route-tier thinking is a separate runtime truth, not a `routeParams` field. The only accepted chain is `RoutePoolTier.thinking -> SelectionResult.route_thinking -> target.routeThinking -> VrDirect03ResolvedSemantics.route_thinking`; `routeParams.thinking` compatibility was physically removed.
+- Tests for this lifecycle must use the real top-level route-tier authoring shape. Moving `thinking` into `routeParams` is invalid input and cannot prove request projection.
+- Managed 5555 routing is verified on installed `0.90.3932`: same-entry provider-request dry-run projected `gpt-5.5` plus route `high` over client `low`; real JSON restored `client-visible-live-model`; real SSE restored `client-visible-sse-model` and route `xhigh`; provider/client artifacts contained no internal direct policy or MetadataCenter fields.
+- Explicit passthrough is source/module-blackbox verified but not managed-live verified because no current provider config explicitly declares `semantics = "passthrough"`. Do not modify real provider config or claim live passthrough closure without Jason authorization.
+
+# 2026-07-13: Route pool display uses route classification only
+
+- Route pool authoring `id` / `poolId` is not runtime display truth. Rust `config.user_config_materialization` strips those fields from public compiled routing config, and route isolation uses only `routeParams.routePolicyGroup`.
+- Virtual Router hit-log projection prints `routeName -> provider.model`; telemetry `pool` equals the route classification, not the standalone pool name.
+- Server log rollup display and aggregation ignore `poolId`; rows group by route classification + provider + model.
+- Verified source/config gates passed, including native build, focused Rust config/bootstrap/hit-log tests, focused config/hit-log/log-rollup/usage Jest, TypeScript, touched Rust format, function/resource/mainline/rustification/VR gates, generated wiki sync, base build, target diff check, and `routecodex config validate -c ~/.rcc/config.toml --no-reload`. Live runtime reload/replay was not run in this slice.
 
 # 2026-07-13: Aggregate server restart supersedes single-port restart
 
@@ -2702,6 +2752,122 @@
 - Configured/listening member ports with the same PID identity receive exactly one `/daemon/restart-process` or SIGUSR2 request. Different non-empty PID identities fail before restart IO; per-port restart loops are forbidden.
 - Restart success requires every configured member port to return healthy with one listener identity. The original managed parent/session restart contract remains unchanged.
 - Verified on 2026-07-13: focused positive/negative restart contracts passed 23/23; TypeScript, runtime lifecycle/function-map/mainline/wiki/browser/native/base/release gates passed. Global install used locator 5520 and emitted one aggregate restart. PID changed `52949 -> 85361` under the same parent `24613`; 4444/5520/5555/10000 all reported ready/pipelineReady with version `0.90.3932`.
+
+# 2026-07-13: direct semantic classification explicit passthrough was temporarily managed-live verified
+
+- Supersedes the earlier same-day statement that managed-live explicit passthrough was unproven. Jason authorized a bounded real-config probe, not a production rollout. The temporary `[provider.models."gpt-5.5".direct] semantics = "passthrough"` block was removed after evidence capture.
+- Installed `0.90.3932` on managed 5555 proves request passthrough: route `tools` has `thinking=xhigh`, but provider-request dry-run selected `cc.key1.gpt-5.5` and preserved client model `client-visible-passthrough-model` and effort `low`.
+- JSON and SSE prove response passthrough. JSON provider/client responses both carried `gpt-5.5-anyint` and effort `low`. SSE provider/client frames are identical after removing only the client transport keepalive prefix and preserve model/effort/event sequence/text/terminal `[DONE]`.
+- Real retry proves policy is request-target scoped: passthrough `cc` sent an invalid client model unchanged and failed 403; reroute selected routing `asxs.crsa.gpt-5.5`, whose raw response used canonical `gpt-5.5-2026-04-23` plus route `xhigh`, while client projection restored the original client model. No passthrough classification leaked across the target switch.
+- Provider/client/error artifacts contain no internal direct policy, projector contract, or MetadataCenter carrier. Current design/runtime/Rust/Jest/resource/function/mainline/wiki/review/TypeScript/diff gates are green; direct mainline remains 4/4 anchored with zero pending.
+- Current production config has no explicit direct passthrough policy. After withdrawal, `routecodex config validate` passed, one aggregate restart restored all four member ports at `0.90.3932`, and provider-request dry-run `direct-routing-after-config-withdrawal-*` projected canonical `model=gpt-5.5` plus route `reasoningEffort=xhigh`. Validation authorization must never be treated as rollout authorization.
+
+# 2026-07-13: Request payload copy budget uses lazy ownership, not semantic trimming
+
+- Request payload memory reduction must preserve exact live semantics. Legal optimizations are ownership moves, borrowed references, delayed materialization, and debug/snapshot-only containment; trimming real request/response payloads is forbidden.
+- Retry seed now borrows object payloads on the successful first-attempt path and clones only when retry/reentry restore is actually requested. Success-path response conversion can read the borrowed source reference.
+- Rust req_inbound Responses capture should borrow before mutation, then move raw request ownership into the normalized request owner. Do not hold raw and normalized full-payload copies at the same time unless a contract explicitly requires both.
+- Verified source/native/build gates: request payload copy budget Jest/Cargo verifier, resource/function map gates, native hotpath build, and base build. No release/global install or live large-payload replay was run for this slice.
+
+# 2026-07-13: Relay continuation store writes are Rust-planned Chat Process effects
+
+- `/v1/responses` relay continuation save has one writer: Rust `publishResponsesRecordPlanJson` emits ordered `continuationStoreEffects` (`record_response` before `finalize_retention`) at `ChatProcRespContinuation07CanonicalSaved`; TS may only execute the returned store IO.
+- Handler/request-bridge post-pipeline save helpers are forbidden continuation writers. Do not restore `finalizeResponsesPipelineResultForHttp`, `seedResponsesToolCallResponseForHttp`, `recordResponsesResponseForHttp`, or `readResponsesResponseIdFromHttp` as response-side relay save logic.
+- Source gates passed for this slice: continuation writer uniqueness verifier/red fixture, focused Jest/Rust continuation suites, function/native/rustification gates, architecture mainline/wiki/manifest gates, `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, and `git diff --check`.
+- Remaining boundary: this is source/build closure only. Live install/restart/replay still requires explicit authorization and must not be implied by source gates.
+
+# 2026-07-13: Hub standardization should consume owned payload parts
+
+- Hub request standardization should avoid temporary wrapper objects that force the standardizer to clone large `payload` values back out of borrowed JSON.
+- Use an owned parts entrypoint when the caller already owns the payload and normalized metadata. Keep the wrapper entrypoint only for external/NAPI compatibility and prove both paths are byte-equivalent at the Value level.
+- This reduces internal copy count without changing `standardizedRequest` / `rawPayload` output contracts. Further reductions must not delete required semantic branches without a contract and test update.
+
+# 2026-07-13: Responses request bridge writer and prompt finalization are Rust-planned
+
+- For `/v1/responses` request pipeline metadata, Rust must emit complete MetadataCenter write descriptors including `writer.module`, `writer.symbol`, and `writer.stage`; TS bridge must pass `write.writer` unchanged and must not branch on `write.family` to select writer identity.
+- System prompt override for Responses is split: TS may read optional prompt content from env/FS host IO via `getSystemPromptOverride()`, but Rust `finalizeResponsesHandlerPayloadForHttpJson` owns whether/how that prompt mutates `/v1/responses.instructions` and how it combines with existing instructions.
+- Do not restore `applySystemPromptOverride` inside `responses-request-bridge.ts`, local `RESPONSES_PIPELINE_*_WRITER` constants, or `write.family === 'continuation_context' ? ...` writer branches. The residue gate is `npm run verify:responses-request-bridge-total-plan-shrink`.
+- Verified source/build gates passed for this first cut, including Rust/Jest/TypeScript/native/base build. This does not close the full request-bridge total-plan slice; continuation action, client error descriptor, and errorsample classification still need later Rust total-plan work.
+
+# 2026-07-13: Responses request bridge errorsample classification is Rust-planned
+
+- Malformed `/v1/responses` inbound tool-history errorsample classification belongs to Rust `planResponsesInboundToolHistoryErrorsampleForHttpJson`, not the TS request bridge.
+- TS may convert an `Error` into a serializable record, call the Rust plan, add a current timestamp, and execute `writeErrorsampleJson` file IO. It must not branch on `MALFORMED_REQUEST`, `Tool history contract violated`, or `toolHistoryContractViolation`.
+- The residue gate is `npm run verify:responses-request-bridge-total-plan-shrink`; focused proof includes bridge Jest `responses-request-bridge.tool-history-errorsample.spec.ts` and Rust `inbound_tool_history_errorsample_plan`.
+
+# 2026-07-13: Responses resume-error projection is Rust-planned
+
+- `/v1/responses` request bridge resume-error projection belongs to Rust `planResponsesResumeErrorForHttpJson` / `plan_responses_resume_error_for_http`.
+- TS may serialize a thrown error into `{name,message,status,code,origin,details}`, call the Rust plan, return the exact `client_error` descriptor, or rethrow the original error for `rethrow`. It must not keep split builder/projectability helpers or local defaults such as `responses_resume_failed` / `Unable to resume Responses conversation`.
+- Residue gate: `npm run verify:responses-request-bridge-total-plan-shrink`; focused proof: Rust `responses_resume_error_plan`, bridge Jest client/non-client resume-error cases, and native binding smoke for `planResponsesResumeErrorForHttpJson`.
+- Current source closure still does not close the full §11.16 request-bridge slice; continuation action execution effect arguments and live replay remain.
+
+# 2026-07-13: Stopless third consecutive stop is original-response passthrough
+
+- Stopless repeat count is a same-session consecutive missing/invalid-schema stop streak. Rounds 1 and 2 project CLI with `repeatCount=1/2`; round 3 reaches the limit and passes the original provider `finish_reason=stop` through unchanged. It must not project another CLI or synthesize a budget-exhausted terminal response.
+- Non-stop progress, ordinary tool calls, valid terminal schema, `simple_question=true`, and session changes reset the streak. A later missing/invalid stop starts at `repeatCount=1`.
+- CLI/manual `repeatCount >= maxRepeats` is invalid and must fail fast. Do not clamp it or restore the removed `build_terminal_stopless_output`.
+- Repeated relay submit capture must use the materialized Chat Process payload when `MetadataCenter.continuation_context.responsesResume` exists. Raw HTTP `{tool_outputs}` is entry evidence only and must not replace the restored model/base payload.
+- Verified source/build evidence: stop-message 22/22, servertool CLI contract 51/51, router-hotpath stopless 81/81, request-executor Jest 16/16, servertool CLI and stopless HTTP blackboxes, Rust-only/function/resource/mainline/wiki gates, TypeScript, target rustfmt, `build:base`, and diff check. The HTTP blackbox made exactly three upstream requests and returned the third original stop with no fourth CLI.
+- This is source/build closure only. No release/global install, aggregate restart, or managed live replay was performed for this slice.
+
+# 2026-07-13: Stopless third-stop passthrough is globally installed and managed-live verified
+
+- Supersedes the same-day source-only closure gap. Global `routecodex`, `rcc`, install/current, and aggregate health now agree on release `0.90.3934`; configured members 4444/5520/5555/10000 are ready and pipelineReady.
+- Release installation used one aggregate restart signal at `2026-07-13T13:58:56Z`; do not repeat restart per member port.
+- Real managed sample `req_1783951138541_630f931a` proves the at-limit contract on the installed build: `stopless.active=true`, `repeatCount=3`, managed provider `orangeai.key1.glm-5.2`, original response completed, and no `reasoningStop`, `exec_command`, synthetic budget-exhausted response, or fourth CLI reached the client.
+- A naked `/v1/responses` probe that lacks stopless runtime control is invalid evidence even if it asks the model to emit stop schema. Record it as `invalid_direct_or_no_stopless_path`; use real Codex managed request/runtime evidence for stopless acceptance.
+
+# 2026-07-13: Responses request bridge continuation effects are Rust-planned
+
+- `responses-request-bridge.ts` is host IO only for continuation execution: it may execute Rust-returned `lookup_continuation`, `materialize_provider_owned_submit`, `resume_relay`, and `materialize_scope` effects, then return the IO result plus opaque `resultPlanInput` to Rust.
+- Rust `planResponsesContinuationRequestActionJson` owns response-id selection, lookup options, direct `previous_response_id` mutation, direct materialized input merge, relay resume args, scope materialize args, endpoint selection, resume metadata, missing/not-found/unknown-owner client descriptors, malformed result fail-fast, operation-token mismatch fail-fast, and final ok/expired/client-error descriptors.
+- Request bridge must not restore local response-id/owner/scope/endpoint/default selection, resumeMeta parsing, materialized input merge, or relay-specific request-context reconstruction helpers. `buildCapturedRelayResumeRequestContextForHttp` is dead and removed; rct-03 binds `buildResponsesRequestContextForHttp -> captureReqInboundResponsesContextSnapshotJson`.
+- Source/native/build closure evidence passed: Rust continuation action tests 7/7, request bridge Jest 28/28, submit handler 5/5, handler-executor E2E 17/17, total-plan positive/red gates, TypeScript, function-map compile gate, handler/native/rustification gates, architecture review/light with wiki/html sync, native hotpath build, base build, rustfmt target check, and diff check. Live install/restart/replay remains unauthorized and unproven.
+
+# 2026-07-13: Provider-response converter preserves raw error evidence
+
+- `src/server/runtime/http-server/executor/provider-response-converter.ts` is not an ErrorErr classifier. SSE wrapper handling may capture raw message/code/status/upstream fields under `response/details`, but it must not write normalized `code`, `status`, `statusCode`, `retryable`, or `upstreamCode`, apply provider-configured mapping, or classify rate/context/network/SSE errors by message.
+- Gate: `npm run verify:provider-response-errorerr-bypass-closeout`; negative fixtures: `npm run test:provider-response-errorerr-bypass-closeout-red-fixtures`.
+- This does not yet close provider-response ErrorErr item 3. `request-executor-provider-send-failure.ts` still owns a TS remap/retry predicate and must be migrated to the Rust ErrorErr decision chain before error-path closure.
+
+# 2026-07-13: Provider-response TS SSE remapper is physically deleted
+
+- Supersedes the same-day statement that `request-executor-provider-send-failure.ts` still owned `remapBridgeSseErrorToHttp`: the executor/report-plan TS remap and SSE message/status stage inference are absent in source and locked by `npm run verify:provider-response-errorerr-bypass-closeout`.
+- `provider-response-sse-error-normalizer.ts` and `provider-response-converter-empty-sse.spec.ts` are dead semantics and must remain deleted. The provider-response ErrorErr verifier and red fixtures fail if either file is revived.
+- Current source gates passed for this cleanup: positive/red provider-response ErrorErr gates, converter Jest 25/25, raw SSE focused Jest 2/2, provider failure stage regression 3/3, TypeScript, ErrorErr contract, function-map compile, host-split, resource-operation-map, manifest sync, wiki HTML sync, native hotpath build, and target diff check.
+- Remaining closure gaps: `failure_policy.rs` still classifies 401/402/403/404 as unrecoverable under an active default-pool claim, so 403/quota/account provider errors are not fully proven reroutable; architecture/base gates are independently blocked by servertool `sth-req-03` missing `inject_reasoning_stop_tool`; no release/global install/restart/live replay was authorized or run.
+
+# 2026-07-13: Servertool hook skeleton call-map drift is unblocked
+
+- Supersedes the same-day provider-response cleanup note saying architecture/base gates were blocked by `servertool.hook_skeleton.mainline sth-req-03 -> inject_reasoning_stop_tool`.
+- Current source truth is `sth-req-03` request-side servertool injection maps to `maybe_apply_servertool_orchestration` in `req_process_stage1_tool_governance_blocks/servertool_injection.rs`. The old `inject_reasoning_stop_tool` symbol is not the call-map callee for this edge; stopless schema guidance is represented separately by `stopless.session.mainline` edge `stl-07 -> inject_stopless_system_instruction`.
+- Verified gates after map/wiki/generated sync: `npm run verify:architecture-wiki-html-sync`, `npm run verify:architecture-review-surface-light`, and `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base` all passed. A first `build:base` attempt hit a concurrent stopless import compile window, but focused `npm run verify:responses-history-protocol-contract` then passed 96/96 and the full base build passed.
+- Remaining provider-response gap is still `failure_policy.rs` 401/402/403/404 recoverability under active `gate_id:default_pool_last_provider_no_remove`. No release/global install/restart/live replay was authorized or run for this continuation.
+
+# 2026-07-13: Default pool singleton is not removable by request-local exclusion
+
+- Supersedes any reading that `excludedProviderKeys` can make a configured `default` singleton terminal. `vr.route_availability_floor` derives default availability from configured default-route targets, emits `defaultPoolSingletonProvider`, and ErrorErr05 retries that same provider with its exclusion removed. Client projection remains forbidden while this configured default target exists.
+- The inverse remains locked: a primary-route singleton with a separate default provider is not a default singleton; it must still exclude/reroute to the default pool.
+- `RequestExecutor` must clear request-local exclusions after its singleton exhaustion blocking wait before replay. The shared error-action queue is the fixed blocking cycle `1s -> 2s -> 3s -> repeat`.
+- Installed release `0.90.3934` proved both native decisions: availability returned `defaultPoolAvailable=true`, `defaultPoolSingletonProvider=true`, `policyExhausted=false`, `mayProject=false`; execution returned `shouldRetry=true`, `excludedCurrentProvider=false`, and an empty exclusion list.
+- Managed 5555 is healthy and returned `DEFAULT_POOL_LIVE_OK` for request `default-pool-live-20260713-01`, but its current default route is multi-provider. Therefore managed-live singleton failure/replay remains structurally unproducible without changing real routing config; source, focused blackbox, and installed-native evidence cover the singleton branch without such mutation.
+
+# 2026-07-13: Retired provider-response host effects return no semantic result
+
+- When Rust has already materialized the provider-response payload/effect plan, a retired host effect executor must return `Promise<void>`. An empty retired-action list is host no-op; malformed or non-empty retired actions fail fast in the Rust-owned contract.
+- The provider-response host consumes Rust `rawPayload` for body responses and `streamPipe.payload` for stream responses. It must not reconstruct a `HubRespChatProcess03Governed | unchanged` stage result or branch response payload selection on that dead stage union.
+- Zero-production-caller TS projection wrappers must be physically deleted, including root native wrappers that turn malformed native output into `{}`. Keep the Rust projector and direct-native contract tests as the owner rather than retaining a TS compatibility export.
+- Gate with a pre-fix positive verifier that names every live residue plus negative revival fixtures. Source/build closure requires focused provider-response contracts, TypeScript, function-map/architecture/thin-wrapper/rustification gates, native hotpath, base build, and diff check; it does not imply release or live verification.
+
+# 2026-07-13: StreamPipe effect is metadata-only
+
+- Supersedes the 2026-07-01 requirement that `streamPipe.payload` carry a second full client response and the same-day retired-host statement that stream truth is `streamPipe.payload`.
+- `HubRespOutbound04ClientSemantic/rawPayload` is the sole full client-response owner for both JSON/body and SSE delivery. A StreamPipe effect contains only `codec` and `requestId`.
+- Rust owns stream shape validation and must reject legacy effect-owned `payload` or `body`. TS may reuse the already materialized top-level response object reference for SSE frame encoding, but it must not copy the full response, reconstruct stream semantics, or fall back between payload owners.
+- Regression evidence is `tests/sharedmodule/stream-pipe-payload-ownership.spec.ts`, focused Rust planner/normalizer/materializer tests, provider-response focused Jest, Hub stage residue audit, function/mainline/verification map gates, and `build:native-hotpath`.
+- This is source/native/build proof only. It does not prove managed-live RSS reduction until an authorized installed-release concurrent large-payload replay is measured.
+
 # 2026-07-13: Stopless continuation is transparent at the provider boundary
 
 - Relay submit materialization may change the internal endpoint to `/v1/responses`; current-turn stopless state must therefore come from the current `MetadataCenter.continuation_context.responsesResume.toolOutputsDetailed` truth, not an endpoint substring.
@@ -2717,7 +2883,247 @@
 - The installed-artifact gate passed `no_schema`, `invalid_schema`, and `next_step`, inspecting final dry-run `providerRequest.body` for the complete system schema, transparent user continuation or exact `next_step`, internal-marker absence, `stoppedBeforeProviderSend=true`, and no second upstream request.
 - Global installer isolated builds must copy tracked governance authoring sources required by architecture gates. Copy `.agent-collab/PROTOCOL.md`, `schema`, and `examples`, but never package runtime `runs`, `claims`, heartbeats, evidence, or kill-switch state.
 
+# 2026-07-13: Provider-origin auth/quota/account/model errors remain reroutable until all pools are empty
+
+- This supersedes older RouteCodex interpretations that provider-origin 401/402/403/404, `INVALID_API_KEY`, `INSUFFICIENT_QUOTA`, `ACCOUNT_DISABLED`, or missing-model errors are inherently unrecoverable.
+- Rust ErrorErr03 classifies provider-origin auth/quota/account/model failures as recoverable. Rust ErrorErr05 permits client projection only when the authoritative route pool and configured default pool are both exhausted.
+- Local/client contract failures remain a separate class: `MALFORMED_REQUEST`, `CLIENT_TOOL_ARGS_INVALID`, provider runtime request contract, and local response contract are unrecoverable. `client_disconnect` remains health-neutral and does not enter provider reroute/health policy.
+- Provider-response Node/TS code may capture raw error evidence and execute host IO, but must not reconstruct normalized status/code/retryability, message-based auth/quota policy, or SSE/provider-response remapping. Classification and execution decisions remain Rust-owned.
+- Verified source/native/build evidence: Rust failure policy 47/47; provider-origin auth/quota focused 2/2; local-contract negative 1/1; client-disconnect 1/1; focused executor/Jest; provider-response ErrorErr positive/red gates; ErrorErr/function/architecture/TypeScript/native gates; provider-failure blackbox rerouted 401, 403, and insufficient-quota primary failures to backup with HTTP 200; full base build passed.
+- This record is source/native/build truth only. No release/global install, aggregate restart, production configuration mutation, or managed-live replay was authorized for this closeout.
+
+# 2026-07-14: Debug provider replay requires one explicit isolation copy
+
+- `ProviderPreprocessHarness.executeForward` accepts caller-owned captured request/response objects, while provider context, preprocess, and postprocess hooks may mutate their input. Until every harness caller provides a verifiable unique-ownership transfer contract, one independent replay execution graph is semantically necessary.
+- The single clone owner is `src/debug/harness/provider.ts::cloneProviderReplayInput`, using Node.js `structuredClone`. JSON stringify/parse compatibility cloning is forbidden because it changes circular, BigInt, undefined, and typed-value replay semantics.
+- The captured replay input must retain its original nested values and must not receive provider runtime metadata. The independent execution graph releases with harness/provider execution and cannot become provider/client live payload truth or MetadataCenter state.
+- Regression evidence is `tests/debug/harness-provider-payload-copy-budget.spec.ts`, `feature_id: debug.harness_replay_payload_copy_budget`, and `resource_id: debug.harness_replay_execution_copy`.
+
+# 2026-07-14: Legacy DebugUtils deepClone is dead and must stay deleted
+
+- `DebugUtilsImpl.deepClone`, `DebugUtilsStatic.deepClone`, and `DebugUtils.deepClone` had no caller and duplicated a generic full-payload clone API outside the unified debug owner. They are physically deleted.
+- `src/utils/debug-utils.ts` remains because `src/utils/logger.ts` still uses `DebugUtilsStatic.sanitizeData`; do not delete or migrate sanitizer/logger behavior without a separate logger/sanitize owner slice.
+- Regression evidence is `tests/debug/debug-utils-deepclone-removal.spec.ts`. Reintroducing a clone helper, `structuredClone`, or JSON round-trip clone in `src/utils/debug-utils.ts` is forbidden.
+
+# 2026-07-14: Unified Hub shadow compare must diff by borrowing, not JSON cloning
+
+- `scripts/unified-hub-shadow-compare.mjs` is a debug-only black-box comparison script. Its baseline/candidate debug wrappers must go directly into `diffPayloads`; do not reintroduce `cloneJsonSafe` or `JSON.parse(JSON.stringify(...))` before comparison.
+- A real shadow diff must still persist complete baseline and candidate debug outputs through `writeCompareErrorSample`; only the pre-diff comparison clone is removed.
+- Regression evidence is `tests/scripts/unified-hub-shadow-compare-payload-copy-budget.spec.ts`, `feature_id: debug.unified_hub_shadow_compare_payload_copy_budget`, and `resource_id: debug.unified_hub_shadow_compare_diff_projection`.
+
+# 2026-07-14: Hub Pipeline retry exclusions are typed native input only
+
+- `route.retry_exclusion_set` / top-level `HubPipelineRequest.retryExclusionSet` is the only native Hub Pipeline retry-exclusion input accepted by the engine/VR path. Flat `metadata.excludedProviderKeys` must not create or mirror retry exclusion truth.
+- Compiled `.node` evidence: `tests/sharedmodule/hub-pipeline-engine-failfast-direct-native.spec.ts` proves explicit `providerProtocol="openai-responses"` plus `retryExclusionSet=["openai.key1.gpt-5.5"]` selects `openai.key2.gpt-5.5`, while flat `metadata.excludedProviderKeys` alone still selects `openai.key1.gpt-5.5`.
+- §11.16 item 5 source/native/build closeout gates include `verify:hub-pipeline-engine-failfast-closeout`, 13/13 red fixtures, Rust `hub_pipeline_engine_failfast` 11/11, TS executor focused 8/8, direct native replay 2/2, resource/function/mainline/review gates, native hotpath build, base build, and diff check. This does not imply release/global install/restart/live replay without authorization.
+
+# 2026-07-14: Hub bridge actions borrow reads and move mutations
+
+- `hub.bridge_action_payload_copy_budget` is owned by `hub_bridge_actions/pipeline.rs::run_bridge_action_pipeline`.
+- Read-only bridge actions borrow raw request/response state. Actions that may mutate state take the exact `Option<Value>` or `Option<Vec<Value>>` owner and return it to the same pipeline slot before the next configured action.
+- Ownership transfer must preserve semantic presence: `Some([])`, non-object metadata, and unmatched captured tool results cannot collapse to `None`. Internal retained-owner fields must remain serde-skipped and absent from N-API JSON output.
+- Request-outbound bridge history must not clone raw request `tools` when the active history builder does not consume that input.
+- This is source/native/build evidence for fewer Rust object-graph copies, not installed-runtime RSS proof. The JSON-string N-API boundary remains a separate open contract.
+
+# 2026-07-14: GLM tool schema sanitizer owns and mutates provider-wire branches
+
+- `conversion.glm_tool_schema_payload_copy_budget` is owned by `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs`.
+- The GLM sanitizer must consume the already parsed owned provider-wire `Value`; use `remove()` / owned maps / `into_iter()` for tools, shell parameters, `tool_choice`, messages, and tool calls. Do not clone the full payload object or full branch objects before editing small compatibility fields.
+- The N-API wrapper remains a thin parse-owned-JSON -> `sanitize_glm_tools_schema_owned` -> serialize path. Do not add a TS fallback, provider-config branch, MetadataCenter carrier, routing hook, or second semantic sanitizer.
+- Regression evidence is the Rust source-residue test inside `compat_tool_schema.rs`; it rejects full-branch clone patterns such as `payload_obj.clone()`, `tool_obj.clone()`, `message_obj.clone()`, and `tool_call_obj.clone()`.
+- This is source/native/build evidence only. Installed-runtime RSS reduction still requires authorized release install, managed restart, and large-payload replay.
+
+# 2026-07-14: Debug replay scripts should use shallow replay owners for top-level mutation
+
+- `scripts/tools/responses-provider-replay.mjs` is debug-only provider replay. It must not deep-clone captured chat payloads with `deepClone` or `JSON.parse(JSON.stringify(...))` just to default `model`, replace system prompts, or call the Responses request builder.
+- Use `createReplayChatOwner` for one shallow top-level owner; use `ensureReplayChatModel` for top-level model mutation; use `replaceSystemMessages` to create a new top-level chat object and message array while preserving unaffected nested message/tool/metadata references.
+- Importing replay scripts for unit tests must not trigger provider IO. CLI provider replay remains explicit execution only.
+- Regression evidence is `tests/scripts/responses-provider-replay-payload-copy-budget.spec.ts`, `feature_id: debug.responses_provider_replay_payload_copy_budget`, and `resource_id: debug.responses_provider_replay_projection`.
+- This rule does not apply to the separate `debug.harness_replay_execution_copy`, which remains necessary for provider preprocess/postprocess mutation isolation until a unique-ownership transfer contract exists.
+
+# 2026-07-14: Debug compatibility probes must yield variants lazily
+
+- `scripts/responses-fai-capture.mjs` is debug-only FAI-compatible Responses capture. It must not build an eager array of full request variants or use `JSON.parse(JSON.stringify(...))`, `structuredClone`, or `deepClone` to prepare compatibility probes.
+- Use `buildResponseProbeVariants` as the single variant projection owner. It returns a lazy iterator; early variants only shallow-own the top-level request, and tool-shape variants allocate only the changed `tools` wrappers while preserving shared parameter schema and input/content references.
+- Explicit sample mode must fail fast for missing or invalid sample bodies. It must not silently switch to generated variants, because that changes the diagnostic truth from "same request" to "new probe request".
+- Regression evidence is `tests/scripts/responses-fai-capture-payload-copy-budget.spec.ts`, `feature_id: debug.responses_fai_capture_payload_copy_budget`, and `resource_id: debug.responses_fai_capture_variant_projection`.
+- This rule is source/debug-script evidence only. It does not prove live provider behavior or installed-runtime RSS reduction without authorized provider capture or release replay.
+
+# 2026-07-14: Debug capture overrides should shallow-own the request
+
+- `scripts/responses-sse-capture.mjs` applies only top-level capture overrides after loading or converting a request. It must use `createResponsesCaptureRequestOwner` instead of JSON round-trip, structured, or recursive cloning.
+- Top-level `model`, `tool_choice`, `instructions`, and `stream` changes belong to the shallow capture owner. Unchanged `input`, `tools`, parameter schemas, metadata, and extension branches remain borrowed until explicit provider/artifact serialization.
+- Importing a provider capture script for tests must not read provider configuration, initialize provider clients, call the network, or write artifacts. Provider capture remains direct CLI execution only.
+- Regression evidence is `tests/scripts/responses-sse-capture-payload-copy-budget.spec.ts`, `feature_id: debug.responses_sse_capture_payload_copy_budget`, and `resource_id: debug.responses_sse_capture_request_projection`.
+- This is debug-script source evidence only; no provider capture or installed-runtime RSS reduction is proven.
+
+# 2026-07-14: Outbound provider regression requires one fail-fast execution copy
+
+- `scripts/outbound-regression-codex-samples.mjs` reuses one built request across provider attempts, while provider converters and runtimes may mutate their input. Each attempt therefore needs one independent execution graph owned by `cloneOutboundRegressionExecutionPayload`.
+- Node `structuredClone` is the sole copy contract. JSON stringify/parse cloning and return-original fallback are forbidden because they change structured values or silently expose the caller-owned request to provider mutation.
+- The copy must be created immediately before provider conversion/send and release with that attempt. It cannot become live provider/client payload truth, route truth, MetadataCenter state, provider configuration, or process-global retained state.
+- Importing the regression script for tests must not scan configs/samples, initialize providers, rate-wait, call the network, or write artifacts.
+- Regression evidence is `tests/scripts/outbound-regression-payload-copy-budget.spec.ts`, `feature_id: debug.outbound_regression_payload_copy_budget`, and `resource_id: debug.outbound_regression_execution_copy`.
+
+# 2026-07-14: RouteCodex V3 Responses direct MVP architecture is project-level Rust-only
+
+- Marker: routecodex-v3-responses-direct-rust-only-20260714.
+- V3 is the next RouteCodex project architecture under `v3/`, not a llmswitch-core sub-version.
+- The first V3 executable target is `/v1/responses` direct. Relay, continuation, servertool/stopless, TypeScript bridge, dynamic hooks, and V2 compatibility execution are out of MVP scope.
+- V3 MVP modules are Rust-owned: `routecodex-v3-config`, `routecodex-v3-server`, `routecodex-v3-runtime`, `routecodex-v3-provider-responses`, and `routecodex-v3-cli`.
+- Runtime kernel is the only full lifecycle/resource executor. Flow modules register static hooks only and cannot own independent lifecycles. Shared pure functions own small parser/validator/projector logic; module code orchestrates typed node and hook transitions.
+- Responses direct remains a full resource path: config authoring -> validated manifest -> server raw request -> standardized Responses request -> selected route -> direct policy -> provider wire -> transport request -> provider raw response -> client payload -> server HTTP frame.
+- Direct provider wire follows the existing direct rule: keep current request semantics as provider wire; no provider-wire preflight, sanitize, repair, raw replay, forced relay, or server/CLI/provider shortcut.
+- Canonical draft docs/maps: `docs/design/v3-routecodex-rust-module-boundaries.md`, `docs/design/v3-routecodex-runtime-resource-contract.md`, `docs/goals/v3-responses-direct-mvp-test-design.md`, `docs/architecture/v3-resource-operation-map.yml`, `docs/architecture/v3-mainline-call-map.yml`, `docs/architecture/v3-verification-map.yml`, and `docs/architecture/wiki/v3-responses-direct-mainline.md`.
+- Evidence: `npm run verify:v3-architecture-docs`, existing architecture/resource/mainline/function-map gates, wiki/manifest sync, agent-collab gate, package JSON parse, and target diff check passed for the docs slice. This is documentation/map/gate evidence only; no V3 Rust source or runtime execution is complete yet.
+# 2026-07-14: Responses SSE utils completed-response projection borrows immutable debug payloads
+
+- Completed `response.completed` event payloads in `sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs` are already the authoritative debug projection for golden roundtrip; if the immediate consumer only encodes them and does not mutate, return the same object reference instead of JSON-cloning a full response graph.
+- Aggregation fallback is only for streams without a completed response; duplicate `response.completed` clone branches inside the aggregator are dead semantics and should be physically deleted, not retained as compatibility.
+- Feature/map truth: `debug.responses_sse_utils_payload_copy_budget` owns `debug.responses_sse_completed_response_projection`; it is diagnostic-only and forbidden from provider/client payload truth, route truth, MetadataCenter, provider config, and live runtime state.
+- Verification used: focused SSE utils Jest 3/3, resource/function/mainline gates, generated wiki/html sync, TypeScript, and target diff check. This is source/Jest evidence only, not installed-runtime RSS evidence.
+# 2026-07-14: Codex sample replay request preparation is path-local copy-on-write
+
+- `scripts/replay-codex-sample.mjs` must not JSON-clone complete captured request bodies just to strip replay-only metadata or project provider-request samples into replayable client requests.
+- Use path-local shallow owners for metadata rewriting: preserve unchanged `input`, `tools`, extensions, content blocks, and nested metadata references; do not mutate the captured source sample.
+- Provider-request-to-Responses replay conversion is read-only over the captured provider body and returns a new client envelope that borrows typed content blocks, tools, metadata, and stream intent. Non-Responses provider replay can return the original body when no script-local mutation is required.
+- Feature/map truth: `debug.replay_codex_sample_payload_copy_budget` owns `debug.replay_codex_sample_request_projection`; it is diagnostic-only and forbidden from provider/client payload truth, route truth, MetadataCenter, provider config, and live runtime state.
+- Verification used: focused replay-codex-sample Jest 9/9, resource/function/mainline gates, generated wiki/html sync, TypeScript, no-fallback diff, and target diff check. This is source/Jest evidence only, not installed-runtime RSS evidence.
+
+# 2026-07-14: Cross-protocol matrix canonicalization uses path-local owners
+
+- `debug.cross_protocol_matrix_payload_copy_budget` is owned by `sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs::canonicalizeChat`.
+- The canonicalizer must not JSON-clone complete chat payloads or function tool parameter schemas. It creates only path-local owners for top-level, metadata, messages, tool-call wrappers/functions, and function-tool wrappers before normalization.
+- Unchanged schema branches must keep exact reference identity, and the original chat sample must remain untouched.
+- Feature/map truth: `debug.cross_protocol_matrix_payload_copy_budget` owns `debug.cross_protocol_matrix_chat_projection`; it is diagnostic-only and forbidden from provider/client payload truth, route truth, MetadataCenter, provider config, and live runtime state.
+- Verification used: focused cross-protocol matrix Jest 2/2, resource/function/mainline/wiki/html/manifest sync, TypeScript, no-fallback diff, target diff check, MemoryPalace mine, and MemoryPalace search. This is source/Jest evidence only, not installed-runtime RSS evidence.
+
+# 2026-07-14: Debug parity coverage should compare directly, not JSON clone
+
+- `debug.coverage_hub_standardized_payload_copy_budget` is owned by `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs::chatEnvelopeToStandardizedWithNative`.
+- The coverage helper must not run TS/native standardized outputs through `JSON.parse(JSON.stringify(value))` just to compare them. Use direct `assert.deepEqual` unless a concrete semantic mismatch requires a narrower comparator.
+- Feature/map truth: `debug.coverage_hub_standardized_payload_copy_budget` owns `debug.coverage_hub_standardized_parity_projection`; it is diagnostic-only and forbidden from provider/client payload truth, route truth, MetadataCenter, provider config, and live runtime state.
+- Verification used: focused coverage Jest 1/1, resource/function/mainline/wiki/html/manifest sync, TypeScript, no-fallback diff, inventory spec, and target diff check. This is source/Jest evidence only, not installed-runtime RSS evidence.
+
+# 2026-07-14: Debug report summaries need one authoritative owner
+
+- `debug.v2_consistency_payload_copy_budget` is owned by `scripts/v2-consistency/comprehensive-consistency-test.mjs::runAllTests`.
+- Generate the summary once, assign it to `this.testResults.summary`, then borrow it for artifact serialization and console display. Do not JSON parse/stringify clone diagnostic summaries between those steps.
+- The final `JSON.stringify(summary, null, 2)` for report file IO is required serialization, not an in-memory clone helper.
+- Feature/map truth: `debug.v2_consistency_payload_copy_budget` owns `debug.v2_consistency_summary_projection` and cannot write provider/client payload truth, route truth, MetadataCenter, provider config, or live runtime state.
+- Verification used: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest sync, TypeScript, no-fallback diff, inventory gate, target diff, MemoryPalace mine, and MemoryPalace retrieval.
+
+# 2026-07-14: Responses split custom_tool_call_output is req-inbound semantic normalization
+
+- Marker: responses-split-custom-tool-output-live-closeout-20260714.
+- For `/v1/responses`, `custom_tool_call_output` rows with the same custom-call `call_id` are one semantic async tool output split across chunks. They may be non-adjacent when a separate `wait` function call/output is interleaved. Merge them only in Rust req-inbound context capture before bridge conversion.
+- Do not generalize this normalization to ordinary function outputs. A result without a matching custom call remains a true orphan and must fail fast.
+- The continuation immutable interval remains hard: after `resp_chatprocess save` and before next `req_chatprocess restore`, `capturedChatRequest`, `entryOriginRequest`, `requestSemantics`, session-only scope, handler, resp_outbound, SSE, and store transport must not restore context, repair history, infer required_action, or rebuild request semantics. Only semantic-equivalent normalization, projection, transport, scope check, and release are allowed.
+- Installed-runtime evidence: release snapshot `routecodex-0.90.3934-2026-07-14T055610Z`; `routecodex --version` and `rcc --version` returned `0.90.3934`; active config members 5520/10000/5555/4444 all returned `/health` with `status=ok`, `ready=true`, `pipelineReady=true`, `version=0.90.3934`.
+- Live positive evidence: exact diag request `/Volumes/extension/.rcc/diag/error-openai-responses-router-gpt-5.6-sol-20260714T124247513-524573-3922.json` replayed to `http://127.0.0.1:5520/v1/responses` and returned HTTP 200 SSE with stream start for split `call_f7bdbbaec1f947d485d9d0787179c887`.
+- Live evidence update: exact sample `openai-responses-router-gpt-5.6-sol-20260714T165507733-527078-6427` contains custom exec output chunks at input 81-84 and 89, separated by a `wait` function call/output at 87-88. Runtime `0.90.3934` replay returned HTTP 200 after owner-based merge; the normalized custom call has one output containing the final `running build-native-hotpath` chunk.
+
+# 2026-07-14: RouteCodex V3 Responses direct MVP has a verified Rust-only controlled-upstream path
+
+- Marker: `routecodex-v3-responses-direct-mvp-implemented-20260714`.
+- The project-level V3 runtime lives under `v3/` with Rust crates for config, server, runtime, Responses provider, and CLI. No V3 MVP TypeScript source is allowed.
+- The runtime kernel is the only complete lifecycle executor. Static hook registration means callable typed functions/effects that the kernel actually executes; a list of hook names alone is insufficient.
+- Small route/response semantics live in one shared pure Rust layer. Hook modules orchestrate. Server uniquely owns HTTP listener/request entry/`V3Server11HttpFrame`; provider uniquely owns Responses wire/auth resolution/HTTP transport/raw response; config uniquely owns strict authoring IO and deterministic validated manifest.
+- Responses direct preserves the current request body as provider wire. Missing/unsupported content-type, malformed JSON, provider errors, missing auth env, and invalid config fail explicitly; there is no preflight, sanitize, repair, raw replay, forced relay, or fallback.
+- Controlled-upstream evidence covers JSON, SSE byte/content-type preservation, provider-facing wire equality, secret/internal carrier absence, typed node order, typed `V3Error01` through `V3Error05`, wrong method/path non-entry, and CLI smoke through the same runtime kernel.
+- Compile locking uses Rust-only/module/static-hook/resource gates plus temporary Rust compile-fail crates proving server and CLI cannot import provider transport.
+- Canonical verification: `cargo fmt --manifest-path v3/Cargo.toml --all -- --check`; `cargo clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings`; `cargo test --manifest-path v3/Cargo.toml --workspace -- --nocapture`; all `verify:v3-*` gates; `test:v3-compile-fail`; `test:v3-responses-direct-blackbox`; existing architecture/resource/mainline/function-map baselines.
+- This proves the controlled-upstream V3 MVP only. It does not claim global installation, production replacement, real-provider reachability, relay, continuation, or servertool/stopless.
+# 2026-07-14: Provider golden capture config projection is path-local copy-on-write
+
+- `debug.provider_golden_capture_payload_copy_budget` is owned by `scripts/tools/capture-provider-goldens.mjs::buildDerivedConfig` and writes only `debug.provider_golden_capture_config_projection`.
+- Temporary capture configs must own only top-level, `virtualrouter`, `providers`, selected provider wrapper, `routing`, and `httpserver` paths that are rewritten. Unchanged model catalogs, auth/header/extensions, and unrelated config branches remain borrowed until temporary artifact serialization.
+- Importing the capture script must not scan provider configuration, write artifacts, spawn RouteCodex, or call provider IO; direct CLI execution is the only capture entry.
+- This source/Jest rule does not authorize changes to live provider configuration, `config.toml`, `~/.rcc`, normalization semantics, global install, restart, provider capture, or RSS claims.
+- Verification used: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory gate, and target diff check.
+# 2026-07-14: Both Hub coverage conversion directions compare without JSON clones
+
+- `debug.coverage_hub_chat_projection_payload_copy_budget` owns `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs::standardizedToChatEnvelopeWithNative` parity observation.
+- Standardized-to-chat full and minimal fixtures compare already materialized TS/native outputs directly. They must not recreate `stableJson`, JSON round-trip, structured, or recursive clone helpers for equality.
+- This complements `debug.coverage_hub_standardized_payload_copy_budget`; parity copy audits must inspect both conversion directions rather than assuming one fixed helper closes the pair.
+- Direct CLI parity requires built sharedmodule dist artifacts. Missing `dist/conversion/hub/standardized-bridge.js` is an explicit verification gap, not permission for fallback or a runtime/RSS claim.
+- Verification used: focused Jest 1/1, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory gate, and target diff check.
+# 2026-07-14: Hub chain equivalence sanitization is path-local
+
+- `debug.hub_chain_equivalence_payload_copy_budget` owns `sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs::sanitizePayload` and writes only `debug.hub_chain_equivalence_sanitized_payload`.
+- Diagnostic field stripping must not JSON-clone complete protocol payloads. Shallow-own only the top-level object and metadata object when removing `__rcc_tools_field_present`, `__rcc_raw_system`, or `__rcc_provider_metadata` comparison fields.
+- Unchanged messages, tools, content/schema, extension, and unrelated branches stay borrowed until the diagnostic diff/JSON comparison boundary.
+- Importing equivalence scripts for focused tests must not load built dist modules, run conversion chains, read samples, or call provider/native IO.
+- Verification used: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory gate, and target diff check. Direct CLI was blocked by missing `openai-chat` sample, so no runtime/RSS claim.
+# 2026-07-14: LM Studio compatibility simulation uses path-local ownership
+
+- `debug.lmstudio_compat_tools_payload_copy_budget` owns `sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs::applyLMStudioCompatibility` and writes only `debug.lmstudio_compat_tools_projection`.
+- The debug compatibility helper shallow-owns the top-level request and parameters projection and allocates normalized tool/function wrappers only where rewritten. It must not JSON-clone complete messages, tools, schemas, content, or extension branches.
+- Unchanged nested request branches remain borrowed until explicit debug network/report serialization, and the caller-owned request stays unchanged.
+- Importing the helper for focused tests must not call localhost LM Studio, create report directories, or write artifacts. Direct network execution is a separate explicit action and cannot support RSS/runtime claims unless actually authorized and evidenced.
+- Verification used: focused Jest 2/2, node parse check, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory gate, and target diff check.
+# 2026-07-14: Anthropic response regression uses the Rust native owner directly
+
+- `debug.anthropic_response_regression_payload_copy_budget` owns `sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs::buildAnthropicRegressionProjectionWithNative` and writes only `debug.anthropic_response_regression_projection`.
+- The regression script must not import the removed TS `response-runtime-anthropic.js` path or deep-clone the tracked sample. It serializes the payload once at the required JS/Rust native boundary and delegates response semantics to `buildOpenAIChatFromAnthropicMessageFullWithNative`.
+- Native envelope/result parsing must fail fast when malformed or when the compiled native artifact/capability is missing. Importing the script must not execute native work; direct CLI execution is the regression entry.
+- Verification used: focused Jest 3/3, node parse check, direct local native CLI replay, resource/function/mainline/wiki/html/manifest gates, TypeScript, no-fallback diff, inventory gate, and target diff check. This does not prove installed runtime, live provider equivalence, concurrency, memory RSS, or provider configuration behavior.
+# 2026-07-14: Mainline manifest generation reuses one projection
+
+- `architecture.mainline_chain_manifest_payload_copy_budget` owns `scripts/architecture/generate-mainline-chain-manifests.mjs::buildMainlineChainManifest` and writes only `architecture.mainline_chain_manifest_projection`.
+- The generator must pass each built manifest directly to `YAML.stringify`; do not recreate `manifestClean` through JSON serialization/parsing. JSON round-trip did not strip null fields and only created a redundant complete graph.
+- Importing the generator must not read/write repository artifacts or log. `generateMainlineChainManifests` under direct CLI execution is the sole artifact-write entry, and `verify:architecture-mainline-manifest-sync` locks the generated schema.
+- Verification used: focused Jest 2/2, node parse/direct 20-manifest generation, mainline manifest sync, resource/function/mainline/wiki/html gates, TypeScript, no-fallback diff, inventory gate, and target diff check. This is architecture artifact evidence, not runtime request/response RSS evidence.
+
+# 2026-07-14: V3 P0-P2 foundation truth
+
+- P0-P2 completion means P0 docs/maps/gates green, P1 full config.v3.toml compiler through V3ConfigStore, and P2 one Rust CLI process starting every enabled listener with real health probes.
+- Config Manifest is declaration/index only. Do not reintroduce single-server, default-tier, provider auth-env, selected provider/model, expanded forwarder, or routing interpretation fields.
+- P2 pending endpoints traverse Server -> Debug event -> Error projection -> Server frame. Handler-local errors, provider calls, and business pipeline execution are invalid P2 behavior.
+- Verified fixture v3/fixtures/config.p2.toml uses local ports 45444 and 45445. The actual built CLI started both, returned listener-specific health, returned structured pending endpoint errors, stopped through the exact session, and released both ports.
+# 2026-07-14: Retry restore must not JSON-compensate clone failure
+
+- `gate_id:retry_seed_no_json_compensation` locks `src/server/runtime/http-server/executor/retry-payload-snapshot.ts` so borrowed retry seeds perform no eager serialization and restore performs no JSON serialize/parse compensation.
+- `restoreRequestPayloadFromRetrySeed()` returns an owned `structuredClone` result or explicit `undefined`. It must not revive `serialized` retry seeds, `serializeRequestPayloadForRetry`, `restoreRequestPayloadFromRetrySnapshot`, or shallow-spread snapshot backup.
+- This keeps first-attempt residency borrowed and retry/reentry materialization explicit. It does not remove the semantically required independent clone on actual retry while downstream mutation consumers still need isolation.
+- Verification used: focused retry payload Jest 4/4, `npm run verify:request-payload-copy-budget`, TypeScript, no-fallback diff, inventory gate, and target diff check.
+# 2026-07-14: Snapshot queues require byte and count budgets
+
+- A bounded item count is insufficient for diagnostic queues carrying full provider payloads. The Rust snapshot queue now limits both jobs (default 10) and estimated retained bytes (default 8 MiB), reserves bytes before enqueue, and releases accounting on receive or failed enqueue.
+- Estimate diagnostic payload size by borrowing the existing JSON value; serializing solely to compute queue size creates the same temporary memory amplification the budget is intended to prevent.
+- Snapshot overflow may drop debug-only artifacts with an explicit reason, but live provider/client payload semantics must remain untouched.
+
+# 2026-07-14: V3 P3/P4 Debug and Error foundation truth
+
+- V3 Debug is one shared Rust runtime across all listeners. It owns ordered events, console/file sinks, retained raw request/response projections, transient snapshots, Dry Run fixtures, and centralized secret redaction.
+- Dry Run must use the Runtime foundation entry, return the current execution's transient snapshots, stop with `no_network_send` before Provider transport, then release its snapshot session. Fixture request/response projections must pass through Debug redaction.
+- Debug sink/capture/event/snapshot/fixture failures are runtime errors and traverse the global six-node Error chain. Ignoring `Result`, using `expect`, or continuing with memory-only success is forbidden.
+- `routecodex-v3-error` is the only owner of `V3Error01SourceRaised` through `V3Error06ClientProjected`. Server projects Runtime output only; it does not classify errors or build action/exhaustion decisions.
+
+# 2026-07-14: V3 P5 Router/Target foundation truth
+
+- V3 Virtual Router truth is `v3/crates/routecodex-v3-virtual-router`: resolve the listener's configured route group, require the explicit `default` pool, consume a non-Clone pool token, and publish exactly one opaque `V3Router07OpaqueTargetHitOnce`. It cannot import Provider health/availability or interpret Provider/Forwarder/auth/model internals.
+- V3 Target truth is `v3/crates/routecodex-v3-target`: recursively expand the one opaque direct/Forwarder target, apply deterministic priority/weighted/round-robin order, read Provider availability, and keep invalid-member/availability reselection internal until concrete selection or full selected-target exhaustion. Target never calls Router.
+- The P5 Server path must traverse the unique Runtime-owned adjacent contracts `V3Server03HttpRequestRaw -> V3Req04StandardizedResponses -> V3Router05RequestClassified -> V3Router06RoutePoolResolved -> V3Router07OpaqueTargetHitOnce -> V3Target08KindClassified -> V3Target09CandidateSetExpanded -> V3Target10ConcreteProviderSelected`. Server-local duplicate request DTOs and Server03 -> Router05 shortcuts are gated violations.
+- Provider configured-disabled state is exposed through Provider-owned `V3ProviderAvailabilityRegistry`; mutation stays private to Provider and Target receives only `V3ProviderAvailabilityReader`.
+- Verified live fixture `v3/fixtures/config.p5.toml`: port 45454 skipped disabled `cc`, selected `asxs` on Target attempt 2 with Router hit count 1 and no network send; port 45455 exhausted its selected target and returned the complete six-node Error chain. Exact Ctrl-C closed both ports.
+- P5 evidence does not prove P6 Provider transport, real upstream availability, P7 relay/protocol expansion, V2 compatibility, global installation, or `~/.rcc` changes.
+- Provider alone owns provider-instance/auth-key/canonical-model cooldown, quota, concurrency, and health mutation. Mutation methods are crate-private; future Target code receives only the read-only availability contract, and Router receives no health dependency.
+- Verified dedicated fixture ports remain 45444 and 45445. Actual CLI/HTTP evidence proved shared Debug state, secret isolation, complete pending Error chain, six transient Dry Run snapshots, snapshot release, malformed Dry Run Error projection, exact Ctrl-C shutdown, and closed ports.
+
+# 2026-07-14: Responses bridge input conversion has one borrowed internal core
+
+- `BridgeInputToChatBorrowedInput<'a>` and `convert_bridge_input_to_chat_messages_borrowed` are the internal request projection path for req-inbound context capture and Responses standardization.
+- The existing owned converter is a thin wrapper over the borrowed core; do not create a second semantic implementation or clone complete `input`, `tools`, content-block, or tool-call arrays merely to call the projector.
+- Independently owned normalized tools/messages may still copy the exact output values they retain. This is output ownership, not permission to restore call-argument owner clones.
+- Verification used: focused residue Jest, `verify:request-payload-copy-budget`, resource/function/mainline gates, inventory gate, rustfmt, native hotpath build, and base build. No live RSS improvement is claimed without installed-runtime concurrent large-payload replay.
 # 2026-07-14: Terminal provider failure observation
 
 - Final provider failures must preserve the selected target as diagnostic observation on the original error: `providerKey` plus provider wire `providerModel`.
 - `ErrorErr06` request logging may render those fields, but must not infer them from text, overwrite existing observation truth, alter message/status/code, change client/provider payloads, or affect retry/reroute policy.
+# 2026-07-14: V3 P6 prototype evidence cannot advance architecture binding state
+
+- Verified P0-P5 lifecycle stops at `V3Target10ConcreteProviderSelected` before network send. P6 owns only adjacent transitions `10->11->12->13->14->15->16`.
+- Early P6-shaped Rust symbols, unit tests, and controlled-upstream harnesses are prototype evidence until red-first source/compile gates, final owner review, adjacent source binding, and mapped runtime evidence all agree.
+- Unverified P6 resources and edges remain `binding_pending` with no caller/callee symbol or source path. `routecodex-v3-provider-responses` is a generic protocol Provider and production source must not branch on deployment provider IDs or provider families.
+- Parallel Provider implementation does not block independent contract/map/gate calibration. Contract work proceeds and commits exact non-runtime scope; only actively changing runtime compilation/format checks wait for integration.

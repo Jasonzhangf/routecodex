@@ -13,14 +13,6 @@ import {
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
-import { isRateLimitLikeError } from './request-retry-helpers.js';
-import { applyProviderConfiguredErrorMapping } from '../../../../providers/core/runtime/provider-configured-error-mapping.js';
-import type { ProviderContext } from '../../../../providers/core/api/provider-types.js';
-import type { ProviderErrorAugmented } from '../../../../providers/core/runtime/provider-error-types.js';
-import {
-  isEmptyOpenAiChatSseBridgeError,
-  remapBridgeSseErrorToHttp
-} from './provider-response-sse-error-normalizer.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';
 import { logPipelineStage } from '../../../utils/stage-logger.js';
@@ -36,15 +28,8 @@ import {
 } from '../metadata-center/dualwrite-api.js';
 
 import {
-  asFlatRecord,
-  findNestedRawString,
-  findNestedErrorMarker,
-  isGenericBridgeResponseContractError,
-  isContextLengthExceededError,
-  isRetryableNetworkSseWrapperError,
   extractBridgeProviderResponsePayload,
   TRUTHY_VALUES,
-  FATAL_CONVERSION_ERROR_CODES,
   shouldAllowDirectResponsesPrebuiltSsePassthrough
 } from './provider-response-shared-pure-blocks.js';
 
@@ -121,10 +106,6 @@ function logProviderResponseConverterNonBlockingError(
     details,
     throttleKey: stage
   });
-}
-
-function isRecoverableSseDecodeBridgeError(error: Record<string, unknown>): boolean {
-  return error.requestExecutorProviderErrorStage === 'provider.sse_decode' && error.retryable === true;
 }
 
 function shouldEnableHubStageRecorder(): boolean {
@@ -254,33 +235,6 @@ export type ConvertProviderResponseDeps = {
   executeNested(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 };
 
-function buildProviderContextForResponseConversion(
-  options: ConvertProviderResponseOptions,
-  deps: ConvertProviderResponseDeps
-): ProviderContext {
-  const runtimeKey = deps.runtimeManager.resolveRuntimeKey(options.providerKey);
-  const handle = deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
-  const runtimeExtensions = asRecord(handle?.runtime?.extensions);
-  const metadataExtensions = asRecord(options.pipelineMetadata?.extensions);
-  const extensions = runtimeExtensions ?? metadataExtensions;
-  const runtimeMetadata = {
-    ...(asRecord(options.pipelineMetadata) ?? {}),
-    ...(extensions ? { extensions } : {})
-  };
-  const providerProtocol = readProviderProtocolForProviderResponseConverter({ metadata: runtimeMetadata });
-  return {
-    requestId: options.requestId,
-    providerType: (options.providerType || 'unknown') as ProviderContext['providerType'],
-    providerFamily: options.providerFamily,
-    providerKey: options.providerKey,
-    providerProtocol,
-    startTime: Date.now(),
-    runtimeMetadata,
-    extensions,
-    ...(handle?.runtime ? { target: handle.runtime as unknown as ProviderContext['target'] } : {})
-  };
-}
-
 export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
@@ -293,16 +247,15 @@ export async function convertProviderResponseIfNeeded(
     const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
     if (wrapperError) {
       const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
-      const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as ProviderErrorAugmented & {
-        code?: string;
-        status?: number;
-        statusCode?: number;
-        retryable?: boolean;
-        upstreamCode?: string;
-        requestExecutorProviderErrorStage?: string;
+      const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
+        response?: {
+          data: {
+            error: Record<string, unknown>;
+          };
+          status?: number;
+        };
+        details?: Record<string, unknown>;
       };
-      error.code = 'SSE_DECODE_ERROR';
-      error.requestExecutorProviderErrorStage = 'provider.sse_decode';
       error.response = {
         data: {
           error: {
@@ -315,49 +268,13 @@ export async function convertProviderResponseIfNeeded(
         },
         status: wrapperError.statusCode
       };
-      if (wrapperError.errorCode) {
-        error.upstreamCode = wrapperError.errorCode;
-      }
-      error.retryable = wrapperError.retryable;
-      if (typeof wrapperError.statusCode === 'number' && Number.isFinite(wrapperError.statusCode)) {
-        error.status = wrapperError.statusCode;
-        error.statusCode = wrapperError.statusCode;
-      }
-      const isContextLengthExceeded = isContextLengthExceededError(wrapperError.message, wrapperError.errorCode);
-      if (isContextLengthExceeded) {
-        error.code = 'CONTEXT_LENGTH_EXCEEDED';
-        error.status = 400;
-        error.statusCode = 400;
-        error.retryable = false;
-        if (typeof error.upstreamCode !== 'string' || !error.upstreamCode.trim()) {
-          error.upstreamCode = wrapperError.errorCode || 'context_length_exceeded';
-        }
-      }
-      if (!isContextLengthExceeded && isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
-        error.code = 'HTTP_429';
-        error.status = 429;
-        error.statusCode = 429;
-        error.retryable = true;
-      } else if (
-        !isContextLengthExceeded &&
-        isRetryableNetworkSseWrapperError(wrapperError.message, wrapperError.errorCode, wrapperError.statusCode)
-      ) {
-        error.code = 'HTTP_502';
-        error.status = 502;
-        error.statusCode = 502;
-        error.retryable = true;
-      } else if (wrapperError.retryable && error.statusCode === undefined) {
-        error.status = 503;
-        error.statusCode = 503;
-      }
-      const mappedStatus = applyProviderConfiguredErrorMapping({
-        normalized: error,
-        context: buildProviderContextForResponseConversion(options, deps),
-        statusCode: error.statusCode ?? error.status
-      });
-      if (mappedStatus !== undefined) {
-        error.retryable = mappedStatus === 429 || error.retryable;
-      }
+      error.details = {
+        source: 'provider_response_sse_wrapper',
+        rawMessage: wrapperError.message,
+        ...(wrapperError.errorCode ? { rawCode: wrapperError.errorCode } : {}),
+        ...(wrapperError.statusCode !== undefined ? { rawStatusCode: wrapperError.statusCode } : {}),
+        ...(wrapperError.upstreamError ? { rawUpstreamError: wrapperError.upstreamError } : {})
+      };
       throw error;
     }
   }
@@ -496,11 +413,6 @@ export async function convertProviderResponseIfNeeded(
     const errRecord = err as Record<string, unknown>;
     const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
     const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
-    const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
-    const requestExecutorProviderErrorStage =
-      typeof errRecord.requestExecutorProviderErrorStage === 'string'
-        ? errRecord.requestExecutorProviderErrorStage
-        : undefined;
     const detailRecord = asRecord(errRecord.details);
     const detailUpstreamCode =
       typeof (detailRecord as Record<string, unknown> | undefined)?.upstreamCode === 'string'
@@ -512,92 +424,6 @@ export async function convertProviderResponseIfNeeded(
         : typeof (detailRecord as Record<string, unknown> | undefined)?.error === 'string'
           ? String((detailRecord as Record<string, unknown>).error)
         : undefined;
-    const validationReason =
-      typeof errRecord.validationReason === 'string'
-        ? errRecord.validationReason
-        : typeof detailRecord?.validationReason === 'string'
-          ? detailRecord.validationReason
-          : undefined;
-    const validationMessage =
-      typeof errRecord.validationMessage === 'string'
-        ? errRecord.validationMessage
-        : typeof detailRecord?.validationMessage === 'string'
-          ? detailRecord.validationMessage
-          : undefined;
-    const missingFields = Array.isArray(errRecord.missingFields)
-      ? (errRecord.missingFields.filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
-      : Array.isArray(detailRecord?.missingFields)
-        ? ((detailRecord.missingFields as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0))
-        : undefined;
-    const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
-    const fatalConversionCode =
-      (typeof errCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(errCode) ? errCode : undefined)
-      ?? (typeof upstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(upstreamCode) ? upstreamCode : undefined)
-      ?? (typeof detailUpstreamCode === 'string' && FATAL_CONVERSION_ERROR_CODES.has(detailUpstreamCode) ? detailUpstreamCode : undefined);
-
-    if (fatalConversionCode) {
-      logPipelineStage('convert.bridge.error', options.requestId, {
-        code: errCode,
-        upstreamCode: upstreamCode || detailUpstreamCode,
-        reason: detailReason,
-        message,
-        ...buildChoicesArrayBridgeDebugDetailsWithNative({
-          message,
-          bridgeProviderProtocol: bridgeProviderProtocolForError,
-          bridgeSeed: bridgeSeedForError,
-          bridgePayload: bridgePayloadForError
-        })
-      });
-      throw error;
-    }
-    const isSseDecodeError =
-      errCode === 'SSE_DECODE_ERROR' ||
-      errCode === 'HTTP_502' ||
-      errCode === 'HTTP_429' ||
-      isEmptyOpenAiChatSseBridgeError(message) ||
-      (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
-    const normalizedMessage = message.toLowerCase();
-    const isContextLengthExceeded = isContextLengthExceededError(
-      normalizedMessage,
-      upstreamCode || detailUpstreamCode,
-      detailReason
-    );
-
-    if (isGenericBridgeResponseContractError({ error: errRecord, message })) {
-      errRecord.requestExecutorProviderErrorStage = 'host.response_contract';
-    }
-
-    const effectiveErrorStage =
-      typeof errRecord.requestExecutorProviderErrorStage === 'string'
-        ? errRecord.requestExecutorProviderErrorStage
-        : typeof detailRecord?.requestExecutorProviderErrorStage === 'string'
-          ? detailRecord.requestExecutorProviderErrorStage
-          : requestExecutorProviderErrorStage;
-    if (isSseDecodeError || isContextLengthExceeded) {
-      if (isSseDecodeError && errRecord) {
-        errRecord.requestExecutorProviderErrorStage = 'provider.sse_decode';
-      }
-      remapBridgeSseErrorToHttp(errRecord, message);
-      const bridgeErrorStage = isRecoverableSseDecodeBridgeError(errRecord)
-        ? 'convert.bridge.recoverable'
-        : 'convert.bridge.error';
-      logPipelineStage(bridgeErrorStage, options.requestId, {
-        code: typeof errRecord.code === 'string' ? errRecord.code : errCode,
-        upstreamCode:
-          typeof errRecord.upstreamCode === 'string'
-            ? errRecord.upstreamCode
-            : upstreamCode || detailUpstreamCode,
-        reason: detailReason,
-        message
-      });
-      if (isVerboseErrorLoggingEnabled()) {
-        console.error(
-          '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
-          error
-        );
-      }
-      throw error;
-    }
 
     logPipelineStage('convert.bridge.error', options.requestId, {
       code: errCode,

@@ -1805,27 +1805,11 @@ export function resolveBudgetForModelWithNative(
 }
 
 export type PublishResponsesRecordPlan = {
-  shouldRecord: boolean;
-  hasScope: boolean;
-  recordArgs: {
-    requestId: string;
-    response: Record<string, unknown>;
-    sessionId: string;
-    conversationId: string;
-    providerKey: string;
-    entryKind: 'responses' | 'chat' | 'messages';
-    continuationOwner: 'direct' | 'relay';
-    matchedPort: number;
-    routingPolicyGroup: string;
-    allowScopeContinuation: boolean;
-    routeHint: string;
-  } | null;
-  finalizeArgs: {
-    requestId: string;
-    keepForSubmitToolOutputs: boolean;
-  } | null;
+  continuationStoreEffects: Array<{
+    operation: 'record_response' | 'finalize_retention';
+    payload: Record<string, unknown>;
+  }>;
   usageArgs: {
-    capturedChatRequest: unknown;
     usage: unknown;
   } | null;
 };

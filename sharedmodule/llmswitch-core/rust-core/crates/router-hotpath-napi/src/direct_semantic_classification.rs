@@ -259,9 +259,7 @@ mod tests {
     #[test]
     fn validates_default_explicit_and_invalid_config_classes() {
         assert_eq!(
-            validate_config_direct_02("m", None)
-                .unwrap()
-                .semantic_class,
+            validate_config_direct_02("m", None).unwrap().semantic_class,
             DirectSemanticClass::Routing
         );
         assert_eq!(

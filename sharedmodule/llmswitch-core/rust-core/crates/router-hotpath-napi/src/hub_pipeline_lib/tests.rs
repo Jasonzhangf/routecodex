@@ -2,9 +2,13 @@ use napi::Env;
 use serde_json::json;
 use std::fs;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, HubPipelineRequest};
+use crate::servertool_stopless_hook::{
+    is_stopless_runtime_active, require_terminal_stopless_chat_response,
+    timestamp_ms_from_system_time,
+};
 use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
 use crate::virtual_router_engine::provider_runtime_ingress::{
     register_runtime, report_provider_error, reset_for_tests, test_registry_guard,
@@ -17,6 +21,38 @@ fn test_now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
+}
+
+fn provider_message_contains_exact_text(message: &serde_json::Value, expected: &str) -> bool {
+    if message["content"].as_str() == Some(expected) {
+        return true;
+    }
+    message["content"]
+        .as_array()
+        .is_some_and(|parts| {
+            parts
+                .iter()
+                .any(|part| part["text"].as_str() == Some(expected))
+        })
+}
+
+fn response_metadata_center_snapshot(
+    provider_protocol: &str,
+    mut snapshot: serde_json::Value,
+) -> serde_json::Value {
+    if snapshot.is_null() {
+        snapshot = json!({});
+    }
+    let snapshot = snapshot
+        .as_object_mut()
+        .expect("response metadata center snapshot must be an object");
+    let runtime_control = snapshot
+        .entry("runtimeControl")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("response runtime control must be an object");
+    runtime_control.insert("providerProtocol".to_string(), json!(provider_protocol));
+    serde_json::Value::Object(snapshot.clone())
 }
 
 fn build_runtime_route_config(routing_policy_group: &str) -> serde_json::Value {
@@ -208,7 +244,7 @@ fn execute_hub_pipeline_json_fails_fast_when_runtime_router_required_without_reg
 }
 
 #[test]
-fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
+fn hub_pipeline_engine_failfast_preserves_nonempty_request_id_and_explicit_protocol() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig {
         virtual_router: json!({
             "target": {
@@ -231,6 +267,7 @@ fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
             payload: json!({ "model": "m", "messages": [{ "role": "user", "content": "hi" }] }),
             metadata: json!({}),
             metadata_center_snapshot: json!(null),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "request".to_string(),
@@ -247,6 +284,86 @@ fn engine_execute_normalizes_request_and_returns_empty_effect_plan() {
         .and_then(|metadata| metadata.get("providerProtocol"))
         .and_then(|value| value.as_str())
         .is_some_and(|protocol| protocol == "openai-chat"));
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_blank_request_id_before_stage_execution() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "openai.m",
+                    "runtimeKey": "openai",
+                    "modelId": "m",
+                    "outboundProfile": "openai-chat"
+                },
+                "routeName": "default"
+            }
+        },
+        "request": {
+            "requestId": "   ",
+            "endpoint": "/v1/chat/completions",
+            "entryEndpoint": "/v1/chat/completions",
+            "providerProtocol": "openai-chat",
+            "payload": {
+                "model": "m",
+                "messages": [{ "role": "user", "content": "hi" }]
+            },
+            "metadata": {},
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(output["success"], json!(false));
+    assert_eq!(
+        output.pointer("/error/code"),
+        Some(&json!("hub_pipeline_missing_request_id"))
+    );
+    assert!(output["diagnostics"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_endpoint_only_client_protocol() {
+    let input = json!({
+        "config": {
+            "virtualRouter": {
+                "target": {
+                    "providerKey": "openai.m",
+                    "runtimeKey": "openai",
+                    "modelId": "m",
+                    "outboundProfile": "openai-chat"
+                },
+                "routeName": "default"
+            }
+        },
+        "request": {
+            "requestId": "req-endpoint-only-protocol",
+            "endpoint": "/v1/responses",
+            "entryEndpoint": "/v1/responses",
+            "payload": {
+                "model": "m",
+                "input": [{ "role": "user", "content": "hi" }]
+            },
+            "metadata": {
+                "clientProtocol": "openai-chat"
+            },
+            "processMode": "chat",
+            "direction": "request",
+            "stage": "inbound"
+        }
+    });
+
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(output["success"], json!(false));
+    assert_eq!(
+        output.pointer("/error/code"),
+        Some(&json!("hub_pipeline_missing_client_protocol"))
+    );
 }
 
 #[test]
@@ -280,6 +397,7 @@ fn request_live_path_keeps_inline_metadata_out_of_typed_normal_payload() {
                 "routeHint": "tools"
             }),
             metadata_center_snapshot: json!(null),
+            retry_exclusion_set: Default::default(),
             stream: true,
             process_mode: "chat".to_string(),
             direction: "request".to_string(),
@@ -410,9 +528,8 @@ fn execute_hub_pipeline_json_selects_virtual_router_without_preselected_route() 
     );
 }
 
-#[test]
-fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_route() {
-    let input = json!({
+fn build_hub_pipeline_engine_failfast_retry_exclusion_input() -> serde_json::Value {
+    json!({
         "config": {
             "virtualRouter": {
                 "providers": {
@@ -466,11 +583,8 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
                 "model": "gpt-5.5",
                 "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "ping" }] }]
             },
-            "metadata": {
-                "excludedProviderKeys": [
-                    "openai.key1.gpt-5.5"
-                ]
-            },
+            "retryExclusionSet": ["openai.key1.gpt-5.5"],
+            "metadata": {},
             "metadataCenterSnapshot": {
                 "requestTruth": {
                     "requestId": "req-explicit-retry-route"
@@ -481,7 +595,12 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
             "direction": "request",
             "stage": "inbound"
         }
-    });
+    })
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_routes_with_typed_retry_exclusion_set() {
+    let input = build_hub_pipeline_engine_failfast_retry_exclusion_input();
 
     let output: serde_json::Value =
         serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
@@ -496,6 +615,33 @@ fn execute_hub_pipeline_json_uses_explicit_retry_exclusions_without_preselected_
             .pointer("/metadata/target/providerKey")
             .and_then(|value| value.as_str()),
         Some("openai.key2.gpt-5.5")
+    );
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_flat_retry_exclusion_mirror() {
+    let mut input = build_hub_pipeline_engine_failfast_retry_exclusion_input();
+    input["request"]
+        .as_object_mut()
+        .expect("request object")
+        .remove("retryExclusionSet");
+    input["request"]["metadata"] = json!({
+        "excludedProviderKeys": ["openai.key1.gpt-5.5"]
+    });
+
+    let output: serde_json::Value =
+        serde_json::from_str(&execute_hub_pipeline_json(input.to_string()).unwrap()).unwrap();
+    assert_eq!(
+        output["success"],
+        json!(true),
+        "unexpected output: {output}"
+    );
+    assert_eq!(
+        output
+            .pointer("/metadata/target/providerKey")
+            .and_then(serde_json::Value::as_str),
+        Some("openai.key1.gpt-5.5"),
+        "flat metadata must not become route retry truth: {output}"
     );
 }
 
@@ -1114,10 +1260,16 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_transparent_user_gu
         "provider payload must carry transparent stopless continuation as user text, got: {}",
         output["payload"]
     );
-    assert_eq!(messages[0]["role"], json!("user"));
-    assert_eq!(
-        messages[0]["content"][0]["text"],
-        json!(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == json!("user")
+                && provider_message_contains_exact_text(
+                    message,
+                    STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
+                )
+        }),
+        "provider payload must carry transparent stopless continuation as user text, got: {}",
+        output["payload"]
     );
     assert!(
         output["payload"]["tools"]
@@ -1200,19 +1352,23 @@ fn stopless_non_stop_response_resets_error_streak_before_next_missing_schema_sto
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
-                "runtimeControl": {
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "sessionId": "sess-stopless-reset-non-stop",
-                        "repeatCount": 2,
-                        "maxRepeats": 3,
-                        "triggerHint": "no_schema",
-                        "active": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "sessionId": "sess-stopless-reset-non-stop",
+                            "repeatCount": 2,
+                            "maxRepeats": 3,
+                            "triggerHint": "no_schema",
+                            "active": true
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1248,10 +1404,14 @@ fn stopless_non_stop_response_resets_error_streak_before_next_missing_schema_sto
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
-                "runtimeControl": reset_plan
-            }),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": { "sessionId": "sess-stopless-reset-non-stop" },
+                    "runtimeControl": reset_plan
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1294,30 +1454,34 @@ fn stopless_repeated_missing_schema_increments_cli_projection_repeat_count() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": {
-                    "requestId": "req-stopless-repeat-next-stop",
-                    "sessionId": "sess-stopless-repeat-next-stop"
-                },
-                "runtimeControl": {
-                    "stopMessage": {
-                        "enabled": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": {
+                        "requestId": "req-stopless-repeat-next-stop",
+                        "sessionId": "sess-stopless-repeat-next-stop"
                     },
-                    "stopless": {
-                        "active": true,
-                        "flowId": "stop_message_flow",
-                        "sessionId": "sess-stopless-repeat-next-stop",
-                        "repeatCount": 1,
-                        "maxRepeats": 3,
-                        "triggerHint": "invalid_schema",
-                        "continuationPrompt": "上一轮缺少 next_step",
-                        "schemaFeedback": {
-                            "reasonCode": "stop_schema_next_step_missing",
-                            "missingFields": ["next_step"]
+                    "runtimeControl": {
+                        "stopMessage": {
+                            "enabled": true
+                        },
+                        "stopless": {
+                            "active": true,
+                            "flowId": "stop_message_flow",
+                            "sessionId": "sess-stopless-repeat-next-stop",
+                            "repeatCount": 1,
+                            "maxRepeats": 3,
+                            "triggerHint": "invalid_schema",
+                            "continuationPrompt": "上一轮缺少 next_step",
+                            "schemaFeedback": {
+                                "reasonCode": "stop_schema_next_step_missing",
+                                "missingFields": ["next_step"]
+                            }
                         }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1359,23 +1523,27 @@ fn stopless_third_consecutive_missing_schema_passes_original_stop_through() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": {
-                    "requestId": "req-stopless-third-stop-passthrough",
-                    "sessionId": "sess-stopless-third-stop-passthrough"
-                },
-                "runtimeControl": {
-                    "stopMessage": { "enabled": true },
-                    "stopless": {
-                        "active": true,
-                        "flowId": "stop_message_flow",
-                        "sessionId": "sess-stopless-third-stop-passthrough",
-                        "repeatCount": 2,
-                        "maxRepeats": 3,
-                        "triggerHint": "no_schema"
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": {
+                        "requestId": "req-stopless-third-stop-passthrough",
+                        "sessionId": "sess-stopless-third-stop-passthrough"
+                    },
+                    "runtimeControl": {
+                        "stopMessage": { "enabled": true },
+                        "stopless": {
+                            "active": true,
+                            "flowId": "stop_message_flow",
+                            "sessionId": "sess-stopless-third-stop-passthrough",
+                            "repeatCount": 2,
+                            "maxRepeats": 3,
+                            "triggerHint": "no_schema"
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1426,17 +1594,21 @@ fn stopless_missing_session_id_does_not_intercept_and_reports_alarm() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "requestId": "req-stopless-missing-session-alarm" },
-                "runtimeControl": {
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 0,
-                        "maxRepeats": 3,
-                        "active": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": { "requestId": "req-stopless-missing-session-alarm" },
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 0,
+                            "maxRepeats": 3,
+                            "active": true
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1458,7 +1630,7 @@ fn stopless_missing_session_id_does_not_intercept_and_reports_alarm() {
 }
 
 #[test]
-fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_and_reports_alarm() {
+fn flat_stop_message_enabled_missing_session_does_not_activate_stopless_runtime() {
     let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
     let output = engine
         .execute(HubPipelineRequest {
@@ -1487,6 +1659,7 @@ fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_an
                     "providerProtocol": "openai-chat"
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1509,7 +1682,7 @@ fn stop_message_enabled_missing_session_id_suppresses_stopless_runtime_action_an
         &output,
         "missing sessionId must suppress legacy servertool runtime action",
     );
-    assert!(output.diagnostics.iter().any(|diagnostic| {
+    assert!(!output.diagnostics.iter().any(|diagnostic| {
         diagnostic.details.as_ref().is_some_and(|details| {
             details.get("alarm").and_then(serde_json::Value::as_str)
                 == Some("stopless_missing_session_id")
@@ -1549,6 +1722,7 @@ fn stop_message_enabled_from_metadata_center_snapshot_reports_missing_session_al
                     "stopMessageExcludeDirect": false
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1612,6 +1786,7 @@ fn stop_message_enabled_from_metadata_center_snapshot_projects_reasoning_stop_cl
                     "stopMessageExcludeDirect": false
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1663,19 +1838,23 @@ fn stopless_counter_isolated_by_session_id() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "sessionId": "sess-stopless-B" },
-                "runtimeControl": {
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "sessionId": "sess-stopless-A",
-                        "repeatCount": 2,
-                        "maxRepeats": 3,
-                        "triggerHint": "no_schema",
-                        "active": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-chat",
+                json!({
+                    "requestTruth": { "sessionId": "sess-stopless-B" },
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "sessionId": "sess-stopless-A",
+                            "repeatCount": 2,
+                            "maxRepeats": 3,
+                            "triggerHint": "no_schema",
+                            "active": true
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1714,7 +1893,7 @@ fn stopless_counter_does_not_inherit_unscoped_runtime_state() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!({
                 "requestTruth": { "sessionId": "sess-stopless-current" },
                 "runtimeControl": {
                     "stopless": {
@@ -1725,7 +1904,8 @@ fn stopless_counter_does_not_inherit_unscoped_runtime_state() {
                         "active": true
                     }
                 }
-            }),
+            })),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1773,7 +1953,7 @@ fn stopless_terminal_schema_clears_error_streak() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!({
                 "requestTruth": { "sessionId": "sess-stopless-terminal-reset" },
                 "runtimeControl": {
                     "stopless": {
@@ -1785,7 +1965,8 @@ fn stopless_terminal_schema_clears_error_streak() {
                         "active": true
                     }
                 }
-            }),
+            })),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -1966,6 +2147,11 @@ fn execute_hub_pipeline_json_serializes_response_path_errors() {
                 "clientProtocol": "openai-chat",
                 "entryEndpoint": "/v1/chat/completions"
             },
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "providerProtocol": "openai-chat"
+                }
+            },
             "processMode": "chat",
             "direction": "response",
             "stage": "outbound"
@@ -2021,7 +2207,12 @@ fn response_path_moves_provider_top_level_metadata_out_of_normal_payload() {
                 "entryEndpoint": "/v1/responses",
                 "stream": false
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: json!({
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                }
+            }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2087,7 +2278,12 @@ fn response_path_preserves_existing_responses_custom_tool_call() {
                     }
                 }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: json!({
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                }
+            }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2159,6 +2355,7 @@ fn response_path_projects_responses_required_action_reasoning_stop_to_exec_comma
                     "sessionId": "sess-responses-required-action-stopless"
                 },
                 "runtimeControl": {
+                    "providerProtocol": "openai-responses",
                     "stopless": {
                         "active": true,
                         "flowId": "stop_message_flow",
@@ -2167,6 +2364,7 @@ fn response_path_projects_responses_required_action_reasoning_stop_to_exec_comma
                     }
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2251,8 +2449,12 @@ fn response_path_projects_responses_required_action_reasoning_stop_from_gateway_
                 "requestTruth": {
                     "requestId": "req-responses-required-action-stopless-gateway",
                     "sessionId": "sess-responses-required-action-stopless-gateway"
+                },
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2303,7 +2505,11 @@ fn anthropic_response_remaps_to_openai_responses_client_payload() {
                 "entryEndpoint": "/v1/responses",
                 "providerProtocol": "openai-chat"
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "anthropic-messages",
+                json!(null),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2342,7 +2548,8 @@ fn openai_chat_response_remaps_to_openai_responses_client_payload() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2366,7 +2573,7 @@ fn response_path_missing_provider_protocol_fails_fast() {
             request_id: "req-missing-provider-protocol".to_string(),
             endpoint: "/v1/responses".to_string(),
             entry_endpoint: "/v1/responses".to_string(),
-            provider_protocol: String::new(),
+            provider_protocol: "openai-chat".to_string(),
             payload: json!({
                 "id": "chatcmpl_missing_protocol",
                 "object": "chat.completion",
@@ -2378,9 +2585,11 @@ fn response_path_missing_provider_protocol_fails_fast() {
             }),
             metadata: json!({
                 "clientProtocol": "openai-responses",
-                "entryEndpoint": "/v1/responses"
+                "entryEndpoint": "/v1/responses",
+                "providerProtocol": "openai-chat"
             }),
             metadata_center_snapshot: json!(null),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2389,7 +2598,94 @@ fn response_path_missing_provider_protocol_fails_fast() {
         .unwrap_err();
 
     assert_eq!(error.code, "hub_pipeline_missing_provider_protocol");
-    assert!(error.message.contains("requires providerProtocol"));
+    assert!(error
+        .message
+        .contains("metadataCenterSnapshot.runtimeControl.providerProtocol"));
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_activates_stopless_from_runtime_control() {
+    assert!(is_stopless_runtime_active(&json!({
+        "runtimeControl": {
+            "stopless": {
+                "active": true
+            }
+        }
+    })));
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_noncanonical_stopless_activation_sources() {
+    for snapshot in [
+        json!({ "stopless": { "active": true } }),
+        json!({ "requestTruth": { "stopless": { "active": true } } }),
+        json!({ "__rt": { "stopless": { "active": true } } }),
+        json!({
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "stopless": {
+                        "active": true
+                    }
+                }
+            }
+        }),
+    ] {
+        assert!(
+            !is_stopless_runtime_active(&snapshot),
+            "noncanonical stopless source became active: {snapshot}"
+        );
+    }
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_returns_terminal_handler_chat_response() {
+    let chat_response = json!({
+        "id": "chatcmpl_terminal",
+        "choices": []
+    });
+    let output = require_terminal_stopless_chat_response(&json!({
+        "chatResponse": chat_response,
+        "runtimeOutput": {
+            "chatResponse": {
+                "id": "chatcmpl_noncanonical"
+            }
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(output, chat_response);
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_terminal_result_without_chat_response() {
+    let error = require_terminal_stopless_chat_response(&json!({
+        "runtimeOutput": {
+            "chatResponse": {
+                "id": "chatcmpl_noncanonical"
+            }
+        }
+    }))
+    .unwrap_err();
+
+    assert_eq!(
+        error.code,
+        "hub_pipeline_stopless_resp_hook_terminal_missing_chat_response"
+    );
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_reads_valid_system_time() {
+    assert_eq!(
+        timestamp_ms_from_system_time(UNIX_EPOCH + Duration::from_millis(42)).unwrap(),
+        42
+    );
+}
+
+#[test]
+fn hub_pipeline_engine_failfast_rejects_pre_epoch_system_time() {
+    let error = timestamp_ms_from_system_time(UNIX_EPOCH - Duration::from_millis(1)).unwrap_err();
+
+    assert_eq!(error.code, "hub_pipeline_state_clock_failed");
 }
 
 #[test]
@@ -2419,6 +2715,7 @@ fn response_path_reads_provider_protocol_from_runtime_control_snapshot() {
                     "providerProtocol": "openai-chat"
                 }
             }),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2466,7 +2763,7 @@ fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses"
             }),
-            metadata_center_snapshot: json!({
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!({
                 "requestTruth": {
                     "sessionId": "stopless-live-test-session",
                     "conversationId": "stopless-live-test-session"
@@ -2497,7 +2794,8 @@ fn response_chat_stop_schema_projects_stopless_cli_before_responses_outbound() {
                         }
                     }
                 }
-            }),
+            })),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2556,17 +2854,21 @@ fn anthropic_end_turn_stopless_effect_uses_chatprocess_payload() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "sessionId": "sess-anthropic-stopless-chatprocess" },
-                "runtimeControl": {
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 0,
-                        "maxRepeats": 3,
-                        "active": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "anthropic-messages",
+                json!({
+                    "requestTruth": { "sessionId": "sess-anthropic-stopless-chatprocess" },
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 0,
+                            "maxRepeats": 3,
+                            "active": true
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2619,17 +2921,21 @@ fn anthropic_empty_end_turn_stopless_effect_uses_chatprocess_payload() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!({
-                "requestTruth": { "sessionId": "sess-anthropic-empty-stopless-chatprocess" },
-                "runtimeControl": {
-                    "stopless": {
-                        "flowId": "stop_message_flow",
-                        "repeatCount": 0,
-                        "maxRepeats": 3,
-                        "active": true
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "anthropic-messages",
+                json!({
+                    "requestTruth": { "sessionId": "sess-anthropic-empty-stopless-chatprocess" },
+                    "runtimeControl": {
+                        "stopless": {
+                            "flowId": "stop_message_flow",
+                            "repeatCount": 0,
+                            "maxRepeats": 3,
+                            "active": true
+                        }
                     }
-                }
-            }),
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2680,7 +2986,7 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!({
+            metadata_center_snapshot: response_metadata_center_snapshot("anthropic-messages", json!({
                 "requestTruth": { "sessionId": "sess-anthropic-wrapped-empty-stopless-chatprocess" },
                 "runtimeControl": {
                     "stopless": {
@@ -2690,7 +2996,8 @@ fn anthropic_wrapped_empty_end_turn_stopless_effect_uses_body_data() {
                         "active": true
                     }
                 }
-            }),
+            })),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2757,7 +3064,7 @@ fn openai_responses_wrapped_bare_continue_schema_missing_current_goal_projects_c
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!({
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-responses", json!({
                 "requestTruth": { "sessionId": "sess-openai-responses-wrapped-bare-schema-current-goal" },
                 "runtimeControl": {
                     "stopless": {
@@ -2768,7 +3075,8 @@ fn openai_responses_wrapped_bare_continue_schema_missing_current_goal_projects_c
                         "triggerHint": "non_terminal_schema"
                     }
                 }
-            }),
+            })),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2823,7 +3131,8 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
                 "entryEndpoint": "/v1/chat/completions",
                 "stream": true
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: true,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2844,7 +3153,10 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
         .filter(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
         .count();
     assert_eq!(stream_pipe_count, 1);
-    assert_eq!(runtime_state_write_count, 1);
+    assert_eq!(
+        runtime_state_write_count, 0,
+        "a response without usage or submit retention must not emit an empty runtime state effect"
+    );
     assert_no_legacy_servertool_runtime_actions(
         &output,
         "stream planning must not emit legacy servertool runtime action",
@@ -2861,26 +3173,80 @@ fn response_stream_path_returns_stream_pipe_effect_plan() {
     );
     assert_eq!(effect.payload["codec"], json!("openai-chat"));
     assert_eq!(effect.payload["requestId"], json!("req-stream-1"));
-    let payload = output.payload.unwrap();
-    assert_eq!(effect.payload["payload"], payload);
     assert!(
-        effect.payload["payload"]["created"]
+        effect.payload.get("payload").is_none(),
+        "streamPipe must not carry a duplicate client payload"
+    );
+    assert!(
+        effect.payload.get("body").is_none(),
+        "streamPipe must not carry a duplicate client body"
+    );
+    let payload = output.payload.unwrap();
+    assert!(
+        payload["created"]
             .as_i64()
             .is_some_and(|created| created > 0),
-        "Rust streamPipe payload must be directly encodable by openai-chat SSE codec"
+        "top-level client semantic payload must remain directly encodable by openai-chat SSE codec"
     );
+}
+
+#[test]
+fn response_runtime_state_write_retains_only_usage_signal() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-runtime-state-minimal".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-responses".to_string(),
+            payload: json!({
+                "id": "resp_runtime_state_minimal",
+                "object": "response",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 7,
+                    "total_tokens": 18
+                }
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses",
+                "stream": false
+            }),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-responses",
+                json!(null),
+            ),
+            retry_exclusion_set: Default::default(),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
     let runtime_effect = output
         .effect_plan
         .effects
         .iter()
         .find(|effect| serde_json::to_value(&effect.kind).unwrap() == json!("runtimeStateWrite"))
-        .unwrap();
-    assert_eq!(runtime_effect.payload["requestId"], json!("req-stream-1"));
-    assert_eq!(runtime_effect.payload["payload"], payload);
+        .expect("usage response must emit runtime state");
     assert_eq!(
-        runtime_effect.payload["keepForSubmitToolOutputs"],
-        json!(false)
+        runtime_effect.payload,
+        json!({
+            "usage": {
+                "input_tokens": 11.0,
+                "output_tokens": 7.0,
+                "total_tokens": 18.0
+            }
+        })
     );
+    assert!(runtime_effect.payload.get("payload").is_none());
+    assert!(runtime_effect.payload.get("responseRecord").is_none());
+    assert!(runtime_effect.payload.get("requestId").is_none());
+    assert!(runtime_effect.payload.get("clientProtocol").is_none());
 }
 
 #[test]
@@ -2909,11 +3275,18 @@ fn response_stream_stop_with_missing_session_returns_stream_and_alarm_without_se
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses",
                 "stream": true,
-                "stopMessageEnabled": true,
-                "routecodexPortStopMessageEnabled": true,
                 "runtimeEffects": { "clientInjectDispatch": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "openai-responses",
+                json!({
+                    "runtimeControl": {
+                        "stopMessageEnabled": true,
+                        "stopMessageExcludeDirect": false
+                    }
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: true,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -2979,7 +3352,11 @@ fn anthropic_sse_end_turn_stream_stop_without_stopmessage_runtime_returns_stream
                 "stream": true,
                 "runtimeEffects": { "clientInjectDispatch": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "anthropic-messages",
+                json!(null),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: true,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3035,11 +3412,18 @@ fn anthropic_sse_end_turn_stream_stop_with_missing_session_reports_alarm() {
                 "clientProtocol": "openai-responses",
                 "entryEndpoint": "/v1/responses",
                 "stream": true,
-                "stopMessageEnabled": true,
-                "routecodexPortStopMessageEnabled": true,
                 "runtimeEffects": { "clientInjectDispatch": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot(
+                "anthropic-messages",
+                json!({
+                    "runtimeControl": {
+                        "stopMessageEnabled": true,
+                        "stopMessageExcludeDirect": false
+                    }
+                }),
+            ),
+            retry_exclusion_set: Default::default(),
             stream: true,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3082,7 +3466,8 @@ fn response_stop_without_stopmessage_runtime_returns_no_servertool_effect_plan()
                 "entryEndpoint": "/v1/chat/completions",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3127,7 +3512,8 @@ fn response_tool_call_with_runtime_callbacks_returns_servertool_executor_effect_
                 "entryEndpoint": "/v1/chat/completions",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3172,7 +3558,8 @@ fn responses_tool_call_projects_required_action_without_legacy_runtime_action() 
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3224,7 +3611,8 @@ fn responses_reasoning_stop_tool_call_emits_only_stop_runtime_action() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3275,7 +3663,8 @@ fn responses_reasoning_stop_tool_call_survives_requested_client_tool_filter() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3332,7 +3721,8 @@ fn responses_openai_chat_reasoning_stop_terminal_schema_projects_normal_stop() {
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3398,7 +3788,8 @@ fn responses_anthropic_reasoning_stop_terminal_schema_uses_same_chatprocess_mapp
                 "entryEndpoint": "/v1/responses",
                 "runtimeEffects": { "providerInvoker": true }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("anthropic-messages", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),
@@ -3462,7 +3853,8 @@ fn responses_reasoning_stop_tool_call_emits_stop_runtime_action_without_runtime_
                     "clientInjectDispatch": false
                 }
             }),
-            metadata_center_snapshot: json!(null),
+            metadata_center_snapshot: response_metadata_center_snapshot("openai-chat", json!(null)),
+            retry_exclusion_set: Default::default(),
             stream: false,
             process_mode: "chat".to_string(),
             direction: "response".to_string(),

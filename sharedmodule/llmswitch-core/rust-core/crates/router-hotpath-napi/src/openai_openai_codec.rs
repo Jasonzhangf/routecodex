@@ -7,6 +7,7 @@ use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatproc
 use crate::hub_resp_outbound_04_finalize_boundary::finalize_hub_resp_outbound_04_client_semantic;
 use crate::resp_process_stage1_tool_governance::ToolGovernanceInput;
 use crate::resp_process_stage2_finalize::FinalizeInput;
+use crate::shared_chat_request_filters::prune_chat_request_payload_owned;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -124,14 +125,7 @@ pub fn run_openai_openai_request_codec_json(
     let mut payload = parse_value(&payload_json)?;
     normalize_request_tool_call_arguments(&mut payload);
 
-    let pruned_raw = crate::shared_chat_request_filters::prune_chat_request_payload_json(
-        serde_json::to_string(&serde_json::json!({
-            "payload": payload,
-            "preserveStreamField": options.preserve_stream_field,
-        }))
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?,
-    )?;
-    let pruned = parse_value(&pruned_raw)?;
+    let pruned = prune_chat_request_payload_owned(payload, options.preserve_stream_field);
     stringify_value(&pruned)
 }
 

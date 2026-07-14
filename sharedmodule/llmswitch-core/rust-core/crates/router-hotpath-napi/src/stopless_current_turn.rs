@@ -16,6 +16,72 @@ pub(crate) fn is_stopless_internal_tool_name(raw_name: &str) -> bool {
     )
 }
 
+pub(crate) fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(row) = parse_stopless_tool_output_payload(&Value::String(trimmed.to_string())) {
+        if is_stopless_tool_output_record(&row) {
+            if let Some(prompt) = read_continue_next_step_prompt(&row) {
+                return prompt;
+            }
+            return STOPLESS_TRANSPARENT_CONTINUATION_PROMPT.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn parse_stopless_tool_output_payload(value: &Value) -> Option<Map<String, Value>> {
+    match value {
+        Value::Object(row) => Some(row.clone()),
+        Value::String(text) => serde_json::from_str::<Value>(text)
+            .ok()
+            .and_then(|parsed| parsed.as_object().cloned()),
+        _ => None,
+    }
+}
+
+fn is_stopless_tool_output_record(row: &Map<String, Value>) -> bool {
+    let tool_name = read_trimmed_string(row.get("toolName"))
+        .or_else(|| read_trimmed_string(row.get("tool_name")))
+        .or_else(|| read_trimmed_string(row.get("tool")))
+        .or_else(|| read_trimmed_string(row.get("kind")));
+    if tool_name.as_deref() == Some("stop_message_auto") {
+        return true;
+    }
+    read_trimmed_string(row.get("flowId"))
+        .or_else(|| read_trimmed_string(row.get("flow_id")))
+        .is_some_and(|flow_id| flow_id == "stop_message_flow")
+        && (row.contains_key("continuationPrompt")
+            || row.contains_key("continuation_prompt")
+            || row.contains_key("repeatCount")
+            || row.contains_key("repeat_count")
+            || row.contains_key("schemaFeedback")
+            || row.contains_key("schema_feedback")
+            || row.contains_key("schemaGuidance")
+            || row.contains_key("schema_guidance"))
+}
+
+fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
+    let feedback = row
+        .get("schemaFeedback")
+        .or_else(|| row.get("schema_feedback"))?
+        .as_object()?;
+    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
+        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
+    if reason_code != "stop_schema_continue_next_step" {
+        return None;
+    }
+    read_trimmed_string(row.get("continuationPrompt"))
+        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
+}
+
+fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum StoplessCurrentTurnScan<T> {
     Evidence(T),

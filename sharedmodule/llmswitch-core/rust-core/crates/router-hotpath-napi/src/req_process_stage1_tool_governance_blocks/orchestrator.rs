@@ -17,6 +17,9 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
     resolve_governance_context,
 };
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::maybe_apply_servertool_orchestration;
+use crate::servertool_hook_registry::STOPLESS_REQUEST_HOOK_ID;
+use crate::servertool_hook_runtime::run_servertool_request_hooks;
+use crate::servertool_stopless_hook::rewrite_stopless_request_after_restore;
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
 use crate::stopless_current_turn::{
     is_stopless_transparent_continuation_prompt, scan_stopless_current_turn_items,
@@ -1034,7 +1037,6 @@ pub fn apply_req_process_tool_governance(
     let start_time_ms = now_millis();
 
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
-
     let lifted = lift_responses_resume_into_semantics(&input.request, &input.metadata);
     let lifted_obj = lifted.as_object();
     let lifted_request = lifted_obj
@@ -1049,109 +1051,132 @@ pub fn apply_req_process_tool_governance(
     let mut metadata = normalize_record(lifted_metadata.clone());
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
     let mut request = normalize_record(lifted_request);
-    let current_request_stopless = request
-        .get("metadata")
-        .and_then(Value::as_object)
-        .and_then(current_request_stopless_runtime_control);
     apply_chat_process_request_sanitizer(&mut request);
-    let has_current_session_id = has_request_truth_session_id(&metadata_center);
-    let allow_explicit_resume_output = input.entry_endpoint.contains("submit_tool_outputs")
-        || has_current_responses_resume(&request);
-    let current_turn_evidence = current_request_stopless
-        .map(StoplessCurrentTurnEvidence::Guidance)
-        .unwrap_or_else(|| {
-            latest_stopless_current_turn_evidence(&request, allow_explicit_resume_output)
-        });
-    let user_turn_reset = matches!(
-        current_turn_evidence,
-        StoplessCurrentTurnEvidence::ResetByUserTurn
-    );
-    let has_terminal_stopless_turn = match &current_turn_evidence {
-        StoplessCurrentTurnEvidence::CliOutput(row) => stopless_cli_output_is_terminal(row),
-        StoplessCurrentTurnEvidence::Guidance(_)
-        | StoplessCurrentTurnEvidence::TransparentContinuation
-        | StoplessCurrentTurnEvidence::ResetByUserTurn
-        | StoplessCurrentTurnEvidence::None => false,
-    } || (!user_turn_reset
-        && metadata_has_terminal_stopless_runtime_control(&metadata));
-    let current_turn_stopless = match &current_turn_evidence {
-        StoplessCurrentTurnEvidence::CliOutput(row) => build_stopless_runtime_control_from_cli(
-            row,
-            &metadata_center,
-            input
-                .has_active_stop_message_for_continue_execution
-                .unwrap_or(false),
-        ),
-        StoplessCurrentTurnEvidence::Guidance(stopless) => stopless.as_object().and_then(|row| {
-            build_stopless_runtime_control_from_cli(
-                row,
-                &metadata_center,
-                input
-                    .has_active_stop_message_for_continue_execution
-                    .unwrap_or(false),
-            )
-        }),
-        StoplessCurrentTurnEvidence::TransparentContinuation => {
-            clone_stopless_runtime_control_from_snapshot(
+    let mut terminal_stopless_turn = false;
+    run_servertool_request_hooks(|hook_id| {
+        if hook_id != STOPLESS_REQUEST_HOOK_ID {
+            return Err(crate::hub_pipeline_lib::errors::HubPipelineError::new(
+                "hub_pipeline_servertool_req_hook_unknown",
+                format!("unsupported required request hook: {hook_id}"),
+            ));
+        }
+        let current_request_stopless = request
+            .get("metadata")
+            .and_then(Value::as_object)
+            .and_then(current_request_stopless_runtime_control);
+        let has_current_session_id = has_request_truth_session_id(&metadata_center);
+        let allow_explicit_resume_output = input.entry_endpoint.contains("submit_tool_outputs")
+            || has_current_responses_resume(&request);
+        let current_turn_evidence = current_request_stopless
+            .map(StoplessCurrentTurnEvidence::Guidance)
+            .unwrap_or_else(|| {
+                latest_stopless_current_turn_evidence(&request, allow_explicit_resume_output)
+            });
+        let user_turn_reset = matches!(
+            current_turn_evidence,
+            StoplessCurrentTurnEvidence::ResetByUserTurn
+        );
+        let has_terminal_stopless_turn = match &current_turn_evidence {
+            StoplessCurrentTurnEvidence::CliOutput(row) => stopless_cli_output_is_terminal(row),
+            StoplessCurrentTurnEvidence::Guidance(_)
+            | StoplessCurrentTurnEvidence::TransparentContinuation
+            | StoplessCurrentTurnEvidence::ResetByUserTurn
+            | StoplessCurrentTurnEvidence::None => false,
+        } || metadata_has_terminal_stopless_runtime_control(&metadata);
+        let current_turn_stopless = match &current_turn_evidence {
+            StoplessCurrentTurnEvidence::CliOutput(row) => {
+                if !stopless_cli_output_is_terminal(row) {
+                    rewrite_stopless_request_after_restore(&mut request, row);
+                }
+                build_stopless_runtime_control_from_cli(
+                    row,
+                    &metadata_center,
+                    input
+                        .has_active_stop_message_for_continue_execution
+                        .unwrap_or(false),
+                )
+            }
+            StoplessCurrentTurnEvidence::Guidance(stopless) => {
+                stopless.as_object().and_then(|row| {
+                    build_stopless_runtime_control_from_cli(
+                        row,
+                        &metadata_center,
+                        input
+                            .has_active_stop_message_for_continue_execution
+                            .unwrap_or(false),
+                    )
+                })
+            }
+            StoplessCurrentTurnEvidence::TransparentContinuation => {
+                clone_stopless_runtime_control_from_snapshot(
+                    &input.metadata_center_snapshot,
+                    &metadata_center,
+                )
+            }
+            StoplessCurrentTurnEvidence::ResetByUserTurn | StoplessCurrentTurnEvidence::None => None,
+        };
+        if let Some(stopless) = current_turn_stopless {
+            write_stopless_runtime_control(&mut metadata, stopless);
+        } else if user_turn_reset {
+            strip_previous_cycle_stopless_history(&mut request);
+            clear_stopless_runtime_control(&mut metadata);
+            if has_current_session_id && should_inject_stopless_system_instruction(&metadata_center)
+            {
+                if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+                    write_stopless_runtime_control(&mut metadata, stopless);
+                }
+            }
+        } else if !has_terminal_stopless_turn
+            && metadata
+                .get("runtime_control")
+                .and_then(Value::as_object)
+                .and_then(|runtime_control| runtime_control.get("stopless"))
+                .is_none()
+        {
+            if let Some(stopless) = clone_stopless_runtime_control_from_snapshot(
                 &input.metadata_center_snapshot,
                 &metadata_center,
-            )
-        }
-        StoplessCurrentTurnEvidence::ResetByUserTurn | StoplessCurrentTurnEvidence::None => None,
-    };
-    if let Some(stopless) = current_turn_stopless {
-        write_stopless_runtime_control(&mut metadata, stopless);
-    } else if user_turn_reset {
-        strip_previous_cycle_stopless_history(&mut request);
-        clear_stopless_runtime_control(&mut metadata);
-        if has_current_session_id && should_inject_stopless_system_instruction(&metadata_center) {
-            if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+            ) {
                 write_stopless_runtime_control(&mut metadata, stopless);
+            } else if has_current_session_id
+                && should_inject_stopless_system_instruction(&metadata_center)
+            {
+                if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+                    write_stopless_runtime_control(&mut metadata, stopless);
+                }
             }
         }
-    } else if !has_terminal_stopless_turn
-        && metadata
-            .get("runtime_control")
-            .and_then(Value::as_object)
-            .and_then(|runtime_control| runtime_control.get("stopless"))
-            .is_none()
-    {
-        if let Some(stopless) = clone_stopless_runtime_control_from_snapshot(
-            &input.metadata_center_snapshot,
-            &metadata_center,
-        ) {
-            write_stopless_runtime_control(&mut metadata, stopless);
-        } else if has_current_session_id
+        if has_terminal_stopless_turn {
+            terminal_stopless_turn = true;
+            strip_stopless_terminal_controls(&mut request);
+            clear_stopless_runtime_control(&mut metadata);
+        }
+        if has_current_session_id
             && should_inject_stopless_system_instruction(&metadata_center)
+            && !has_terminal_stopless_turn
         {
-            if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
-                write_stopless_runtime_control(&mut metadata, stopless);
-            }
+            inject_stopless_live_continuation_prompt(&mut request, &metadata);
+            inject_stopless_system_instruction(&mut request);
         }
-    }
-    if has_terminal_stopless_turn {
-        strip_stopless_terminal_controls(&mut request);
-    }
-    if has_current_session_id
-        && should_inject_stopless_system_instruction(&metadata_center)
-        && !has_terminal_stopless_turn
-    {
-        inject_stopless_live_continuation_prompt(&mut request, &metadata);
-        inject_stopless_system_instruction(&mut request);
-    }
+        Ok(())
+    })
+    .map_err(|error| format!("{}: {}", error.code, error.message))?;
+
     normalize_apply_patch_freeform_tool_schema(&mut request);
 
     apply_anthropic_tool_alias_semantics(&mut request, &ctx.entry_endpoint);
 
     let governed = build_governed_filter_payload(&Value::Object(request));
     let mut governed_request = normalize_record(governed);
-    maybe_apply_servertool_orchestration(
-        &mut governed_request,
-        &metadata,
-        input
-            .has_active_stop_message_for_continue_execution
-            .unwrap_or(false),
-    );
+    if !terminal_stopless_turn {
+        maybe_apply_servertool_orchestration(
+            &mut governed_request,
+            &metadata,
+            input
+                .has_active_stop_message_for_continue_execution
+                .unwrap_or(false),
+        );
+    }
     apply_post_governed_media_cleanup(&mut governed_request);
 
     let processed = build_processed_request(Value::Object(governed_request), &metadata);
@@ -1234,7 +1259,8 @@ eof_line: "*** End of File" LF
 #[cfg(test)]
 mod apply_patch_tool_schema_tests {
     use super::{
-        apply_req_process_tool_governance, normalize_apply_patch_freeform_tool_schema,
+        apply_req_process_tool_governance, metadata_has_terminal_stopless_runtime_control,
+        normalize_apply_patch_freeform_tool_schema, strip_stopless_terminal_controls,
         ToolGovernanceInput,
     };
     use serde_json::{json, Map, Value};
@@ -1337,6 +1363,62 @@ mod apply_patch_tool_schema_tests {
         assert_eq!(tool["format"]["syntax"], json!("lark"));
         assert!(tool.get("parameters").is_none());
         assert!(tool.get("function").is_none());
+    }
+
+    #[test]
+    fn terminal_stopless_runtime_control_is_detected_from_request_metadata() {
+        let metadata = json!({
+            "runtime_control": {
+                "stopless": {
+                    "active": true,
+                    "repeatCount": 3,
+                    "maxRepeats": 3,
+                    "triggerHint": "stop_schema_budget_exhausted"
+                }
+            }
+        })
+        .as_object()
+        .cloned()
+        .expect("metadata object");
+
+        assert!(metadata_has_terminal_stopless_runtime_control(&metadata));
+    }
+
+    #[test]
+    fn terminal_stopless_strip_removes_legacy_instruction_and_tool_surface() {
+        let mut request = json!({
+            "model": "gpt-test",
+            "instructions": "必须调用 reasoningStop。<rcc_stop_schema>{\"stopreason\":2}</rcc_stop_schema>",
+            "input": [{
+                "type": "message",
+                "role": "system",
+                "content": [{"type": "input_text", "text": "停止输出合同 <rcc_stop_schema>{\"stopreason\":2}</rcc_stop_schema>"}]
+            }],
+            "tools": [{
+                "type": "function",
+                "function": { "name": "reasoningStop" }
+            }],
+            "tool_choice": {
+                "type": "function",
+                "function": { "name": "reasoningStop" }
+            }
+        })
+        .as_object()
+        .cloned()
+        .expect("request object");
+
+        strip_stopless_terminal_controls(&mut request);
+
+        assert!(request.get("instructions").is_none());
+        assert_eq!(
+            request.get("input").and_then(Value::as_array).map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            request.get("tools").and_then(Value::as_array).map(Vec::len),
+            Some(0)
+        );
+        assert!(request.get("tool_choice").is_none());
     }
 }
 

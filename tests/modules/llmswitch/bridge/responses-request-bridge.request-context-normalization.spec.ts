@@ -11,9 +11,11 @@ const mockPlanResponsesHandlerEntry = jest.fn();
 const mockMaterializeProviderOwnedSubmitContext = jest.fn();
 const mockPlanResponsesRequestContext = jest.fn();
 const mockPlanResponsesContinuationRequestAction = jest.fn();
+const mockPlanResponsesResumeErrorForHttpNative = jest.fn();
 const mockLookupResponsesContinuationByResponseId = jest.fn();
 const mockMaterializeLatestResponsesContinuationByScope = jest.fn();
 const mockResumeResponsesConversation = jest.fn();
+const mockGetSystemPromptOverride = jest.fn(() => null);
 const mockPlanResponsesRequestBodyForHttpNative = jest.fn((payload: Record<string, unknown>) => {
   const { metadata, ...pipelineBody } = payload;
   return {
@@ -59,6 +61,7 @@ const mockExtractSessionIdentifiersFromMetadataNative = jest.fn((metadata: Recor
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
+  getSystemPromptOverride: mockGetSystemPromptOverride,
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
@@ -90,34 +93,8 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  }) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message:
-          typeof args.message === 'string' && args.message.trim()
-            ? args.message
-            : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code:
-          typeof args.code === 'string' && args.code.trim()
-            ? args.code
-            : 'responses_resume_failed',
-        origin:
-          typeof args.origin === 'string' && args.origin.trim()
-            ? args.origin
-            : 'client',
-      },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
-    (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
-  ),
+  planResponsesResumeErrorForHttpNative: mockPlanResponsesResumeErrorForHttpNative,
+  planResponsesInboundToolHistoryErrorsampleForHttpNative: jest.fn(() => ({ action: 'none' })),
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
@@ -189,13 +166,28 @@ describe('responses-request-bridge relay request-context normalization', () => {
       return { kind: 'capture_request', payload };
     });
     mockPlanResponsesContinuationRequestAction.mockReset();
-    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
-      action: 'none',
-      pipelineEntryEndpoint: '/v1/responses'
-    });
+    mockPlanResponsesResumeErrorForHttpNative.mockReset();
+    mockPlanResponsesResumeErrorForHttpNative.mockReturnValue({ action: 'rethrow' });
+    mockPlanResponsesContinuationRequestAction.mockImplementation(async (input: {
+      plannedEntry?: {
+        mode?: 'none' | 'submit_tool_outputs' | 'scope_materialize';
+        payload?: Record<string, unknown>;
+      };
+    }) => ({
+      action: 'complete',
+      result: {
+        kind: 'ok',
+        payload: input.plannedEntry?.payload ?? {},
+        pipelineEntryEndpoint: '/v1/responses',
+        plannedEntryMode: input.plannedEntry?.mode ?? 'none',
+        isSubmitToolOutputs: input.plannedEntry?.mode === 'submit_tool_outputs',
+      },
+    }));
     mockLookupResponsesContinuationByResponseId.mockReset();
     mockMaterializeLatestResponsesContinuationByScope.mockReset();
     mockResumeResponsesConversation.mockReset();
+    mockGetSystemPromptOverride.mockReset();
+    mockGetSystemPromptOverride.mockReturnValue(null);
   });
 
   it('RED: relay request context uses normalized native input instead of raw duplicate tool history', async () => {
@@ -470,19 +462,58 @@ describe('responses-request-bridge relay request-context normalization', () => {
       providerKey: 'provider.key1',
       requestId: 'req_prev_direct_1'
     });
-    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
-      action: 'direct_submit',
-      responseId: 'resp_direct_plan_1',
-      pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
-      materializeProviderOwnedSubmitContext: true,
-      resumeMeta: {
-        responseId: 'resp_direct_plan_1',
-        restored: false,
-        continuationOwner: 'direct',
-        providerKey: 'provider.key1',
-        previousRequestId: 'req_prev_direct_1'
-      }
-    });
+    mockPlanResponsesContinuationRequestAction
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'lookup_continuation',
+          args: {
+            responseId: 'resp_direct_plan_1',
+            options: {
+              entryKind: 'responses',
+              matchedPort: 5555,
+              routingPolicyGroup: 'gateway_priority_5555',
+            },
+          },
+        },
+        resultPlanInput: { stage: 'lookup_continuation' },
+      })
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'materialize_provider_owned_submit',
+          args: {
+            payload: {
+              response_id: 'resp_direct_plan_1',
+              previous_response_id: 'resp_direct_plan_1',
+              tool_outputs: [{ call_id: 'call_direct_plan_1', output: 'ok' }],
+            },
+          },
+        },
+        resultPlanInput: { stage: 'materialize_provider_owned_submit' },
+      })
+      .mockResolvedValueOnce({
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: {
+            response_id: 'resp_direct_plan_1',
+            previous_response_id: 'resp_direct_plan_1',
+            tool_outputs: [{ call_id: 'call_direct_plan_1', output: 'ok' }],
+            input: [{ type: 'function_call_output', call_id: 'call_direct_plan_1', output: 'ok' }],
+          },
+          pipelineEntryEndpoint: '/v1/responses.submit_tool_outputs',
+          plannedEntryMode: 'submit_tool_outputs',
+          isSubmitToolOutputs: true,
+          resumeMeta: {
+            responseId: 'resp_direct_plan_1',
+            restored: false,
+            continuationOwner: 'direct',
+            providerKey: 'provider.key1',
+            previousRequestId: 'req_prev_direct_1',
+          },
+        },
+      });
     mockMaterializeProviderOwnedSubmitContext.mockResolvedValue({
       payload: {
         response_id: 'resp_direct_plan_1',
@@ -503,11 +534,20 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555'
     });
 
+    expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+      'resp_direct_plan_1',
+      {
+        entryKind: 'responses',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+      }
+    );
     expect(mockPlanResponsesContinuationRequestAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        plannedEntryMode: 'submit_tool_outputs',
-        responseId: 'resp_direct_plan_1',
-        continuation: expect.objectContaining({ continuationOwner: 'direct' })
+        effectResult: expect.objectContaining({
+          operation: 'lookup_continuation',
+          result: expect.objectContaining({ continuationOwner: 'direct' }),
+        })
       })
     );
     expect(mockResumeResponsesConversation).not.toHaveBeenCalled();
@@ -534,11 +574,59 @@ describe('responses-request-bridge relay request-context normalization', () => {
       continuationOwner: 'relay',
       requestId: 'req_prev_relay_1'
     });
-    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
-      action: 'relay_submit',
-      responseId: 'resp_relay_plan_1',
-      pipelineEntryEndpoint: '/v1/responses'
-    });
+    mockPlanResponsesContinuationRequestAction
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'lookup_continuation',
+          args: {
+            responseId: 'resp_relay_plan_1',
+            options: {
+              entryKind: 'responses',
+              matchedPort: 5555,
+              routingPolicyGroup: 'gateway_priority_5555',
+            },
+          },
+        },
+        resultPlanInput: { stage: 'lookup_continuation' },
+      })
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'resume_relay',
+          args: {
+            responseId: 'resp_relay_plan_1',
+            payload: {
+              response_id: 'resp_relay_plan_1',
+              tool_outputs: [{ call_id: 'call_relay_plan_1', output: 'ok' }],
+            },
+            options: {
+              requestId: 'req_relay_plan_1',
+              entryKind: 'responses',
+              matchedPort: 5555,
+              routingPolicyGroup: 'gateway_priority_5555',
+            },
+          },
+        },
+        resultPlanInput: { stage: 'resume_relay' },
+      })
+      .mockResolvedValueOnce({
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: {
+            previous_response_id: 'resp_relay_plan_1',
+            input: [{ type: 'function_call_output', call_id: 'call_relay_plan_1', output: 'ok' }],
+          },
+          pipelineEntryEndpoint: '/v1/responses',
+          plannedEntryMode: 'submit_tool_outputs',
+          isSubmitToolOutputs: true,
+          resumeMeta: {
+            restored: true,
+            continuationOwner: 'relay',
+          },
+        },
+      });
     mockResumeResponsesConversation.mockResolvedValue({
       payload: {
         previous_response_id: 'resp_relay_plan_1',
@@ -558,6 +646,14 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555'
     });
 
+    expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+      'resp_relay_plan_1',
+      {
+        entryKind: 'responses',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+      }
+    );
     expect(mockResumeResponsesConversation).toHaveBeenCalledWith(
       'resp_relay_plan_1',
       expect.objectContaining({ response_id: 'resp_relay_plan_1' }),
@@ -586,12 +682,59 @@ describe('responses-request-bridge relay request-context normalization', () => {
       continuationOwner: 'relay',
       requestId: 'req_prev_scope_1'
     });
-    mockPlanResponsesContinuationRequestAction.mockResolvedValue({
-      action: 'relay_scope_materialize',
-      responseId: 'resp_scope_plan_1',
-      pipelineEntryEndpoint: '/v1/responses',
-      continuationOwner: 'relay'
-    });
+    mockPlanResponsesContinuationRequestAction
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'lookup_continuation',
+          args: {
+            responseId: 'resp_scope_plan_1',
+            options: {
+              entryKind: 'responses',
+              matchedPort: 5555,
+              routingPolicyGroup: 'gateway_priority_5555',
+            },
+          },
+        },
+        resultPlanInput: { stage: 'lookup_continuation' },
+      })
+      .mockResolvedValueOnce({
+        action: 'execute_effect',
+        effect: {
+          operation: 'materialize_scope',
+          args: {
+            payload: {
+              previous_response_id: 'resp_scope_plan_1',
+              input: [{ type: 'function_call_output', call_id: 'call_scope_plan_1', output: 'ok' }],
+            },
+            requestId: 'req_scope_plan_1',
+            sessionId: 'sess_scope_plan_1',
+            conversationId: 'conv_scope_plan_1',
+            entryKind: 'responses',
+            continuationOwner: 'relay',
+            matchedPort: 5555,
+            routingPolicyGroup: 'gateway_priority_5555',
+          },
+        },
+        resultPlanInput: { stage: 'materialize_scope' },
+      })
+      .mockResolvedValueOnce({
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: {
+            previous_response_id: 'resp_scope_plan_1',
+            input: [{ type: 'function_call_output', call_id: 'call_scope_plan_1', output: 'ok' }],
+          },
+          pipelineEntryEndpoint: '/v1/responses',
+          plannedEntryMode: 'scope_materialize',
+          isSubmitToolOutputs: false,
+          resumeMeta: {
+            materialized: true,
+            continuationOwner: 'relay',
+          },
+        },
+      });
     mockMaterializeLatestResponsesContinuationByScope.mockResolvedValue({
       payload: {
         previous_response_id: 'resp_scope_plan_1',
@@ -613,6 +756,14 @@ describe('responses-request-bridge relay request-context normalization', () => {
       routingPolicyGroup: 'gateway_priority_5555'
     });
 
+    expect(mockLookupResponsesContinuationByResponseId).toHaveBeenCalledWith(
+      'resp_scope_plan_1',
+      {
+        entryKind: 'responses',
+        matchedPort: 5555,
+        routingPolicyGroup: 'gateway_priority_5555',
+      }
+    );
     expect(mockMaterializeLatestResponsesContinuationByScope).toHaveBeenCalledWith(
       expect.objectContaining({
         continuationOwner: 'relay',
@@ -884,6 +1035,109 @@ describe('responses-request-bridge relay request-context normalization', () => {
     }
     expect(prepared.requestContext.sessionId).toBe('sess_codex_header_1');
     expect(prepared.requestContext.conversationId).toBe('conv_codex_header_1');
+  });
+
+  it('passes host-read system prompt override into native responses payload finalization', async () => {
+    mockGetSystemPromptOverride.mockReturnValue({
+      source: 'codex',
+      prompt: 'SYSTEM OVERRIDE',
+    });
+    mockPlanResponsesHandlerEntry.mockResolvedValue({
+      payload: {
+        model: 'gpt-5.4',
+        instructions: 'Keep this.',
+        input: [],
+      },
+      mode: 'none',
+      responseId: undefined
+    });
+    mockCaptureReqInboundResponsesContextSnapshotJson.mockReturnValue({
+      input: [],
+      toolsRaw: []
+    });
+
+    const prepared = await prepareResponsesHandlerRuntimeForHttp({
+      payload: {
+        model: 'gpt-5.4',
+        instructions: 'Keep this.',
+        input: []
+      },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_system_prompt_native_finalize_1',
+      requestMetadata: {},
+      acceptsSse: false
+    });
+
+    expect(prepared.kind).toBe('ok');
+    if (prepared.kind !== 'ok') {
+      throw new Error(`expected ok, got ${prepared.kind}`);
+    }
+    expect(prepared.payload.instructions).toBe('SYSTEM OVERRIDE\n\nKeep this.');
+  });
+
+  it('returns the exact Rust-planned client resume error descriptor', async () => {
+    const thrown = Object.assign(new Error('client resume failed'), {
+      origin: 'client',
+      status: 409,
+      code: 'resume_conflict',
+    });
+    mockPlanResponsesHandlerEntry.mockRejectedValue(thrown);
+    mockPlanResponsesResumeErrorForHttpNative.mockReturnValue({
+      action: 'client_error',
+      status: 409,
+      body: {
+        error: {
+          message: 'client resume failed',
+          type: 'invalid_request_error',
+          code: 'resume_conflict',
+          origin: 'client',
+        },
+      },
+    });
+
+    await expect(prepareResponsesHandlerRuntimeForHttp({
+      payload: { model: 'gpt-5.4', input: [] },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_client_resume_error_1',
+      requestMetadata: {},
+      acceptsSse: false,
+    })).resolves.toMatchObject({
+      kind: 'client_error',
+      status: 409,
+      body: {
+        error: {
+          message: 'client resume failed',
+          type: 'invalid_request_error',
+          code: 'resume_conflict',
+          origin: 'client',
+        },
+      },
+    });
+    expect(mockPlanResponsesResumeErrorForHttpNative).toHaveBeenCalledWith({
+      name: 'Error',
+      message: 'client resume failed',
+      status: 409,
+      code: 'resume_conflict',
+      origin: 'client',
+      details: undefined,
+    });
+  });
+
+  it('rethrows the original non-client resume error from the Rust plan', async () => {
+    const thrown = Object.assign(new Error('provider resume failed'), {
+      origin: 'provider',
+      status: 503,
+    });
+    mockPlanResponsesHandlerEntry.mockRejectedValue(thrown);
+    mockPlanResponsesResumeErrorForHttpNative.mockReturnValue({ action: 'rethrow' });
+
+    await expect(prepareResponsesHandlerRuntimeForHttp({
+      payload: { model: 'gpt-5.4', input: [] },
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_provider_resume_error_1',
+      requestMetadata: {},
+      acceptsSse: false,
+    })).rejects.toBe(thrown);
   });
 
   it('materializes request context session truth from request body metadata inside the bridge', async () => {

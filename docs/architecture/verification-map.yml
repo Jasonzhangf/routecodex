@@ -70,6 +70,30 @@ verification:
       - "Project-local .agent-collab protocol is doc/schema/gate governance only and must not mutate runtime behavior."
       - "Completion requires evidence.jsonl; merge/integration defaults to handoff or merge queue."
 
+  - feature_id: architecture.mainline_chain_manifest_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/architecture/generate-mainline-chain-manifests.mjs
+      - tests/architecture/mainline-chain-manifests-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-mainline-chain-manifest-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/manifests
+    smoke:
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check scripts/architecture/generate-mainline-chain-manifests.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves import-safe builder semantics and direct CLI manifest regeneration."
+      - "Negative evidence rejects complete manifest JSON round-trip cloning and the redundant manifestClean graph."
+      - "This is architecture artifact memory evidence, not runtime request/response or RSS evidence."
+
   - feature_id: hub.servertool_followup
     change_risk: high
     unit:
@@ -159,6 +183,7 @@ verification:
       - npm run verify:stopless-invalid-schema-blackbox
       - npm run verify:servertool-cli-binary-blackbox
       - npm run verify:servertool-rust-only
+      - npm run verify:servertool-mount-boundary
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
@@ -617,7 +642,6 @@ verification:
       - tests/providers/core/runtime/service-profile-resolver.spec.ts
       - tests/providers/core/runtime/vercel-ai-sdk-openai-transport.spec.ts
     integration:
-      - tests/server/runtime/executor-provider.retryable.spec.ts
       - tests/server/runtime/request-executor.error-snapshot-guard.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-client-disconnect-499.spec.ts
       - tests/providers/core/runtime/provider-failure-policy-upstream-stream-incomplete.spec.ts
@@ -654,7 +678,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove fixed 1s/3s/5s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
+      - "Minimal change stack must prove fixed 1s/2s/3s cycling, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
       - "The traffic-governor TS shell must use the narrow `traffic-governor-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
 
@@ -737,6 +761,42 @@ verification:
     notes:
       - "At minimum prove runtime_control preselectedRoute wins, legacy `__rt` route pins do not revive, and relay continuation scope keeps routeHint/provider pin queryable before Hub req-03 seals VrRoute04."
       - "If req-03 caller/callee changes, rerun the mainline binding gate before claiming M3 closure."
+
+  - feature_id: hub.pipeline_engine_failfast_closeout
+    change_risk: high
+    unit:
+      - scripts/architecture/verify-hub-pipeline-engine-failfast-closeout.mjs
+      - scripts/tests/hub-pipeline-engine-failfast-closeout-red-fixtures.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+      - tests/sharedmodule/hub-pipeline-engine-failfast-direct-native.spec.ts
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+    contract:
+      - docs/goals/hub-pipeline-engine-failfast-closeout-test-design.md
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/mainline-call-map.yml
+    integration:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/types.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/protocol.rs
+      - src/server/runtime/http-server/executor-pipeline.ts
+    smoke:
+      - npm run verify:hub-pipeline-engine-failfast-closeout
+      - npm run test:hub-pipeline-engine-failfast-closeout-red-fixtures
+      - npm run jest:run -- --runInBand --runTestsByPath tests/sharedmodule/hub-pipeline-engine-failfast-direct-native.spec.ts
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-review-surface-light
+    build:
+      - npm run build:native-hotpath
+      - npm run build:base
+    notes:
+      - "Positive/negative pairs must cover request identity, client/provider protocol truth, retry exclusions, stopless activation, terminal chatResponse, and clock failure."
+      - "The source verifier is intentionally red before implementation; revival fixtures must stay green throughout the slice."
+      - "Release/global install/restart/live replay remain authorization-gated."
 
   - feature_id: hub.req_outbound_provider_semantic
     change_risk: high
@@ -845,8 +905,28 @@ verification:
       - npm run build:base
     notes:
       - "Focused closeout must prove Rust owns create/format/reason/color/session/provider parsing/telemetry projection and TS facade has no local semantic duplicate."
+      - "Hit-log output and telemetry must prove standalone pool names are suppressed: formatted lines use `routeName -> provider.model`, and telemetry `pool` equals route classification."
       - "Session log color helpers must stay Rust-owned through the narrow `session-log-color-host.ts` bridge; server logging code may only consume resolved color tokens."
       - "This is diagnostic projection; live runtime closure is only required if claiming production log behavior, not for code/gate-only rustification."
+
+  - feature_id: log.virtual_router_rollup_projection
+    change_risk: medium
+    unit:
+      - src/server/runtime/http-server/executor/log-rollup-format-blocks.ts
+      - src/server/runtime/http-server/executor/log-rollup.ts
+      - src/server/runtime/http-server/executor/usage-logger.ts
+    contract:
+      - tests/server/runtime/http-server/executor/log-rollup.spec.ts
+      - tests/server/runtime/http-server/executor/usage-logger.spec.ts
+    integration: []
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
+    build:
+      - npm run build:base
+    notes:
+      - "Rollup display and aggregation tests must prove `poolId` is ignored: route pool text is only `routeName`, and rows for the same route/provider/model are grouped together even when pool names differ."
+      - "This gate is display/aggregation only; VR route selection and telemetry record creation remain Rust-owned."
 
   - feature_id: vr.route_host_effects
     change_risk: medium
@@ -1219,6 +1299,8 @@ verification:
   - feature_id: hub.pipeline_rust_residual_reference_closeout
     change_risk: medium
     unit:
+      - scripts/architecture/verify-architecture-thin-wrapper-only.mjs
+      - scripts/tests/architecture-thin-wrapper-only-red-fixtures.mjs
       - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
       - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
       - tests/providers/helpers/responses-handler-host-fakes.ts
@@ -1227,6 +1309,8 @@ verification:
       - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
     integration: []
     smoke:
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:hub-pipeline-native-reference-gate
       - npm run test:hub-pipeline-native-reference-gate-red-fixtures
       - npm run jest:run -- --runTestsByPath tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts tests/server/handlers/responses-handler.submit-tool-outputs.responses-provider.spec.ts tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts --runInBand
@@ -1237,7 +1321,8 @@ verification:
       - npm run verify:architecture-review-surface-light
       - npm run verify:architecture-ci-longtail
     notes:
-      - "This gate protects the reference interface surface only; passing it does not claim runtime behavior refactor completion."
+      - "The reference gate protects broad native call/mocking/docs surfaces; the thin-wrapper gate additionally scans root bridge/handler/converter/executor hosts and fails when rootHostCheckedFiles is zero."
+      - "Passing source gates does not claim release/global-install/restart/live completion."
       - "Red fixtures must prove broad runtime native import, broad monitored white-box test mock/fake helper import, runtime direct-native helper import, stale doc owner wording, and missing map owner all fail."
 
   - feature_id: hub.chat_envelope_type_surface
@@ -1368,7 +1453,6 @@ verification:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
     integration:
       - tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts
-      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
@@ -1438,9 +1522,12 @@ verification:
       - src/modules/llmswitch/bridge/provider-response-metadata-effects.ts
       - src/modules/llmswitch/bridge/provider-response-effects.ts
       - scripts/architecture/verify-provider-response-host-split.mjs
+      - docs/goals/provider-response-dead-legacy-host-surface-test-design.md
     contract:
       - scripts/tests/provider-response-host-split-red-fixtures.mjs
       - scripts/architecture/verify-provider-response-host-split.mjs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
     integration:
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
@@ -1460,6 +1547,7 @@ verification:
     notes:
       - "This gate proves provider-response-converter-host.ts remains orchestration-only after the host split; it does not claim runtime behavior change or live closeout."
       - "Red fixtures must fail when native call wrappers, metadata write helpers, or runtime effect executors return to the main provider-response host file."
+      - "Item 4 dead-surface closure requires positive body/stream delivery plus malformed/retired action fail-fast, and negative locks against the host stage-result branch, zero-caller metadata wrapper, root native wrapper export, and malformed `{}` fallback."
 
   - feature_id: hub.rust_napi_json_wrapper_helper
     change_risk: medium
@@ -1633,6 +1721,7 @@ verification:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:servertool-mount-boundary
     build:
       - npm run build:base
     notes:
@@ -1662,6 +1751,97 @@ verification:
     notes:
       - "Malformed relay tool history must be rejected or normalized in Rust before the request bridge can store/reuse it."
       - "Coverage must lock both directions: repeated identical tool-call batches collapse to the latest output, while ordinary distinct duplicate outputs remain preserved."
+
+  - feature_id: request.payload_copy_budget
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/retry-payload-snapshot.ts
+      - src/server/runtime/http-server/executor-pipeline.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types
+    contract:
+      - tests/server/runtime/http-server/executor/retry-payload-snapshot.spec.ts
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+      - tests/server/runtime/http-server/request-executor.spec.ts
+      - tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts
+    integration:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+    smoke:
+      - npm run test:request-payload-copy-budget-retry
+      - npm run test:request-payload-copy-budget-executor
+      - npm run test:request-payload-copy-budget-cargo
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts --runInBand
+      - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts --runInBand
+      - npm run jest:run -- --runTestsByPath tests/server/handlers/handler-request-executor.unified-semantics.e2e.spec.ts --runInBand -t "responses"
+      - npm run verify:request-payload-copy-budget
+      - npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts --runInBand -t "request-stage route decision path"
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Validation must prove successful first attempts do not eagerly JSON stringify or structuredClone request payloads for retry snapshots."
+      - "Retry/reentry restore may materialize a clone only when it is actually requested."
+      - "Rust req_inbound validation must preserve Responses context semantics while avoiding simultaneous full raw and normalized request ownership."
+      - "ReqInbound semantic lift must borrow its source payload and must not require a second owned full request."
+      - "Owned Hub standardizer validation must prove the engine path remains equivalent to the wrapper path while avoiding the wrapper payload clone."
+      - "Executor Hub native input must strip top-level `body` and send the current request only as `payload`."
+      - "Positive coverage keeps the source `__raw_request_body` object by reference; negative coverage rejects that full raw-entry mirror from Rust-bound metadata while preserving Responses capture, submit_tool_outputs, missing-context fail-fast, and provider request-id rebind behavior."
+
+  - feature_id: hub.bridge_action_payload_copy_budget
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs
+    contract:
+      - docs/goals/full-pipeline-hub-bridge-action-payload-copy-budget-test-design.md
+      - tests/sharedmodule/hub-bridge-action-payload-copy-budget.spec.ts
+    integration:
+      - npm run verify:hub-response-responses-chat-projection
+      - npm run verify:request-payload-copy-budget
+    smoke:
+      - npm run jest:run -- --runTestsByPath tests/sharedmodule/hub-bridge-action-payload-copy-budget.spec.ts --runInBand
+      - cargo test -p router-hotpath-napi hub_bridge_actions --lib
+      - cargo test -p router-hotpath-napi hub_tool_session_compat --lib
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive tests prove ordered actions retain raw request/response access and mutating actions return state before the next action."
+      - "Negative tests lock Some([]), non-object metadata, unmatched captured results, and source residues so take-based ownership cannot silently erase state."
+
+  - feature_id: hub.payload_size_validation_budget
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    contract:
+      - docs/goals/full-pipeline-payload-size-validation-test-design.md
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi payload_size --lib -- --nocapture
+    integration:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    smoke:
+      - npm run verify:payload-size-validation
+      - npm run build:native-hotpath
+    build:
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage proves exact UTF-8 serialized byte equivalence and unchanged under-limit behavior."
+      - "Negative coverage rejects local full-string size validation, allocation sinks, and silent serialization failure."
 
   - feature_id: hub.req_chatprocess_governance
     change_risk: high
@@ -1713,6 +1893,48 @@ verification:
       - npm run build:base
     notes:
       - "Stage A locks chat_servertool_orchestration.rs as the current Rust owner; TS servertool shells are forbidden from owning semantic decisions."
+
+  - feature_id: conversion.openai_request_filter_payload_copy_budget
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs
+    contract:
+      - tests/sharedmodule/openai-request-filter-payload-copy-budget.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters/tests.rs
+    integration:
+      - tests/sharedmodule/openai-request-filter-payload-copy-budget.spec.ts
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run build:native-hotpath
+      - npm run build:base
+    notes:
+      - "Positive proof: the OpenAI request codec consumes the already parsed owned payload through `prune_chat_request_payload_owned` and preserves established provider-wire filtering semantics."
+      - "Negative proof: the request codec must not create a temporary `{payload,preserveStreamField}` JSON wrapper, parse filter output back, or use a borrowed `&Value` full-payload clone filter."
+      - "RSS improvement remains unclaimed until a release-installed concurrent large-payload replay is authorized."
+
+  - feature_id: conversion.glm_tool_schema_payload_copy_budget
+    change_risk: medium
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+    contract:
+      - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+    integration:
+      - cargo test -p router-hotpath-napi compat_tool_schema --lib
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive proof: shell schema and tool-name normalization semantics stay equivalent."
+      - "Negative proof: the sanitizer source rejects full branch clones before small GLM compatibility edits."
+      - "RSS improvement remains unclaimed until release install and concurrent large-payload replay are authorized."
 
   - feature_id: conversion.shared.anthropic
     change_risk: high
@@ -1885,16 +2107,23 @@ verification:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/modules/llmswitch/bridge/responses-request-handler-host.ts
       - src/server/handlers/handler-response-utils.ts
+      - src/server/runtime/http-server/request-executor.ts
     contract:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/sharedmodule/responses-json-client-projection-direct-native.spec.ts
+      - tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
     integration:
       - tests/servertool/servertool-cli-native-bridge.spec.ts
       - tests/server/runtime/http-server/direct-result-metadata-propagation.spec.ts
     smoke:
       - npm run verify:responses-history-protocol-contract
+      - npm run verify:responses-relay-continuation-writer-uniqueness
+      - npm run verify:responses-continuation-immutable-boundary
+      - npm run test:responses-continuation-immutable-boundary-red-fixtures
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
@@ -1905,6 +2134,7 @@ verification:
       - "Responses continuation is a Chat Process boundary block: request restore runs after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`; response save runs after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
       - "Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation, tool governance, and semantic recovery must happen in Chat Process before save/restore."
       - "Validation must prove the save->restore interval is immutable: no handler, bridge, req_inbound, resp_outbound, SSE, or store helper may clean, convert, reorder, patch, or otherwise mutate saved request/response history between canonical save and canonical restore."
+      - "Validation must prove `MetadataCenter.continuation_context.responsesResume` selects the materialized Chat Process payload for repeated submit_tool_outputs capture, preserves model/base payload across rounds, and never replaces it with the raw HTTP tool_outputs body; non-Responses entrypoints must not capture this continuation state."
       - "Validation must prove cross-boundary control state is carried by MetadataCenter families, not by request/response payload or history fields."
       - "Tests must lock current-request explicit evidence, owner resolution, canonical restore, stopless CLI result restore, response schema judgment/projection, post-projection canonical save, stale transient request-id clearing, and released retained state."
       - "Tests must lock response save request-id priority: the current active provider request label passed to the Rust record planner wins over stale `requestTruth.requestId` after request-executor rebind."
@@ -1936,6 +2166,76 @@ verification:
       - "If apply_patch guidance, schema, or protocol-history normalization changes, rerun freeform contract plus regression samples together."
       - "apply_patch must not have a servertool handler; it remains native/freeform client tooling."
       - "Live sample regressions must cover GNU line-number hunks with inline context trailers and prove canonical `@@` reconstruction before execution."
+
+  - feature_id: debug.errorsample_payload_copy_budget
+    change_risk: high
+    unit:
+      - src/debug/errorsamples.ts
+      - src/utils/sensitive-redaction.ts
+    contract:
+      - docs/goals/full-pipeline-errorsample-payload-copy-budget-test-design.md
+      - tests/utils/errorsamples-payload-copy-budget.spec.ts
+      - tests/utils/sensitive-redaction.spec.ts
+    integration:
+      - tests/utils/errorsamples.spec.ts
+      - tests/red-tests/multi_port_server_isolation.test.ts
+    smoke:
+      - npm run verify:errorsample-payload-copy-budget
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage locks redaction and bounded queue/file behavior."
+      - "Negative coverage rejects complete redacted-object clones and duplicate normal-mode full JSON strings."
+
+  - feature_id: debug.contract_observation_payload_budget
+    change_risk: high
+    unit:
+      - src/server/runtime/http-server/executor/request-executor-runtime-blocks.ts
+    contract:
+      - docs/goals/full-pipeline-contract-observation-payload-copy-budget-test-design.md
+      - tests/server/runtime/http-server/executor/request-executor-contract-observation-payload-budget.spec.ts
+    integration:
+      - tests/server/runtime/http-server/request-executor.spec.ts
+      - tests/server/runtime/http-server/request-executor.error-reporting.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-response-contract.snapshot-metadata.spec.ts
+    smoke:
+      - npm run verify:contract-observation-payload-copy-budget
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage locks bounded observation summaries and circular handling."
+      - "Negative coverage rejects raw full-observation passthrough into payload-contract errorsamples."
+      - "Snapshot metadata tests protect the explicit full provider snapshot path from being silently narrowed by this debug-only budget."
+
+  - feature_id: snapshot.payload_copy_budget
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
+    contract:
+      - docs/goals/full-pipeline-snapshot-payload-copy-budget-test-design.md
+      - tests/sharedmodule/snapshot-payload-copy-budget.spec.ts
+    integration:
+      - tests/sharedmodule/snapshot-recorder-native-plan.spec.ts
+      - tests/utils/snapshot-stage-policy.spec.ts
+    smoke:
+      - npm run verify:snapshot-payload-copy-budget
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage locks owned queue/write behavior and unchanged snapshot plan semantics."
+      - "Negative coverage rejects full SnapshotHookOptions clone-then-discard patterns and disabled trace payload serialization."
 
   - feature_id: snapshot.stage_contract
     change_risk: high
@@ -2002,6 +2302,419 @@ verification:
       - "Debug example hooks are observation/demo surface only; changes must not silently widen normal response metadata ownership."
       - "Focused tests should cover response metadata observation plus debug-mode toggle wiring through BidirectionalHookManager."
 
+  - feature_id: provider.debug_example_hooks_payload_copy_budget
+    change_risk: low
+    unit:
+      - src/debug/hooks/payload-budget.ts
+      - src/debug/hooks/bidirectional.ts
+      - src/debug/hooks/example-hooks.ts
+      - src/providers/core/config/provider-debug-output-utils.ts
+    contract:
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+      - docs/goals/full-pipeline-provider-debug-hooks-payload-copy-budget-test-design.md
+    integration: []
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:base
+    notes:
+      - "Positive coverage proves hooks still receive the complete caller-owned object while debug dataFlow retains only a bounded independent projection."
+      - "Negative coverage rejects full request stringify size estimates, JSON round-trip dataFlow clones, unbounded oversized previews, and provider/client/MetadataCenter use."
+
+  - feature_id: debug.llms_engine_shadow_payload_copy_budget
+    change_risk: low
+    unit:
+      - src/utils/llms-engine-shadow.ts
+      - src/utils/llms-engine-shadow.js
+      - tests/utils/llms-engine-shadow-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-llms-engine-shadow-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration: []
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:base
+    notes:
+      - "Positive evidence must preserve full debug artifacts for real differences."
+      - "Negative evidence must prove excluded-only differences do not mutate inputs or allocate JSON comparison clones."
+
+  - feature_id: debug.unified_hub_shadow_compare_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/unified-hub-shadow-compare.mjs
+      - tests/scripts/unified-hub-shadow-compare-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-unified-hub-shadow-compare-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration: []
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:base
+    notes:
+      - "Positive evidence preserves complete debug outputs for real differences via existing script artifact writer."
+      - "Negative evidence rejects full JSON comparison clones before recursive diffing."
+
+  - feature_id: debug.vision_snapshot_payload_copy_budget
+    change_risk: low
+    unit:
+      - src/providers/core/runtime/vision-debug-utils.ts
+      - tests/providers/core/runtime/vision-debug-utils.payload-copy-budget.spec.ts
+    contract:
+      - tests/providers/core/runtime/vision-debug-utils.snapshot-entry-port.spec.ts
+      - docs/goals/full-pipeline-vision-debug-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - src/debug/snapshot/provider-utils.ts
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:base
+    notes:
+      - "Positive evidence must prove writer materialization is independent before caller mutation."
+      - "Negative evidence must reject pre-writer JSON clone helpers and payload loss for circular data."
+
+  - feature_id: debug.harness_replay_payload_copy_budget
+    change_risk: low
+    unit:
+      - src/debug/harness/provider.ts
+      - tests/debug/harness-provider-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-debug-harness-replay-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - src/debug/harness/replay-runner.ts
+      - src/debug/snapshot-store.ts
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:debug-unified-surface
+    build:
+      - npx tsc --noEmit --pretty false
+      - npm run build:base
+    notes:
+      - "Positive evidence proves provider mutation remains visible in the harness result while the captured replay input remains unchanged."
+      - "Negative evidence rejects JSON compatibility cloning, runtime metadata pollution of the captured input, and removal of the only isolation copy."
+
+  - feature_id: debug.responses_provider_replay_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/tools/responses-provider-replay.mjs
+      - tests/scripts/responses-provider-replay-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-responses-provider-replay-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - scripts/helpers/responses-codec-direct-native.mjs
+      - scripts/helpers/anthropic-codec-direct-native.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves model defaulting and system replacement do not mutate captured sample payloads while preserving nested references."
+      - "Negative evidence rejects `deepClone` and JSON round-trip cloning in the replay script."
+      - "Provider replay itself is not executed by this source/test slice."
+
+  - feature_id: debug.replay_codex_sample_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/replay-codex-sample.mjs
+      - tests/scripts/replay-codex-sample.spec.ts
+    contract:
+      - docs/goals/full-pipeline-replay-codex-sample-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - "node scripts/replay-codex-sample.mjs --sample <client-request.json> --dry-run provider-request --base http://127.0.0.1:<port>"
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves replay-only metadata stripping and provider-request conversion preserve nested reference identity."
+      - "Negative evidence rejects full JSON round-trip request clones in replay request preparation."
+      - "Live replay itself is not executed by this source/test slice."
+
+  - feature_id: debug.responses_fai_capture_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/responses-fai-capture.mjs
+      - tests/scripts/responses-fai-capture-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-responses-fai-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - scripts/helpers/sse-direct-native.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-fallback-denylist
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves compatibility variants are yielded lazily and preserve nested reference identity."
+      - "Negative evidence rejects JSON round-trip clones, structuredClone, deepClone, eager variant materialization, and invalid-sample fallback."
+      - "Provider capture itself is not executed by this source/test slice."
+
+  - feature_id: debug.responses_sse_capture_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/responses-sse-capture.mjs
+      - tests/scripts/responses-sse-capture-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-responses-sse-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - scripts/helpers/sse-direct-native.mjs
+      - scripts/helpers/responses-codec-direct-native.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves top-level capture overrides do not mutate source requests while preserving nested reference identity."
+      - "Negative evidence rejects full JSON/structured/deep cloning and import-time provider IO."
+      - "Provider capture itself is not executed by this source/test slice."
+
+  - feature_id: debug.responses_sse_utils_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs
+      - tests/scripts/responses-sse-utils-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-responses-sse-utils-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/responses-golden-roundtrip.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves completed response extraction preserves object and nested reference identity."
+      - "Negative evidence rejects JSON/structured/deep cloning and duplicate completed-response aggregation branches."
+      - "Golden-roundtrip execution itself is not a provider/client live runtime proof."
+
+  - feature_id: debug.cross_protocol_matrix_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+      - tests/scripts/cross-protocol-matrix-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-cross-protocol-matrix-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves canonicalization preserves source isolation while borrowing unchanged parameter schemas."
+      - "Negative evidence rejects full JSON round-trip clones and generic clone helpers in the parity canonicalizer."
+      - "Cross-protocol matrix execution itself is not a provider/client live runtime proof."
+
+  - feature_id: debug.coverage_hub_standardized_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
+      - tests/scripts/coverage-hub-chat-envelope-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-coverage-hub-standardized-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/module-blackbox-gate.mjs
+      - sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves the debug coverage helper no longer creates JSON-cloned comparison object graphs."
+      - "The direct CLI blackbox requires built sharedmodule dist artifacts; absence of dist is not live runtime evidence."
+      - "JS/Rust JSON boundary serialization remains separately classified as a contract limit."
+
+  - feature_id: debug.coverage_hub_chat_projection_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+      - tests/scripts/coverage-hub-standardized-to-chat-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-coverage-hub-chat-projection-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/dist/conversion/hub/standardized-bridge.js
+      - sharedmodule/llmswitch-core/dist/native/router-hotpath/native-hub-pipeline-req-outbound-semantics.js
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves the coverage helper no longer creates JSON-cloned parity comparison graphs."
+      - "Direct CLI execution requires built sharedmodule dist artifacts and is not live runtime evidence."
+      - "The JS/Rust JSON boundary remains a separately classified contract limit."
+
+  - feature_id: debug.hub_chain_equivalence_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+      - tests/scripts/hub-chain-equivalence-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-hub-chain-equivalence-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/dist/conversion/hub/registry.js
+      - sharedmodule/llmswitch-core/dist/conversion/hub/pipelines/inbound.js
+      - sharedmodule/llmswitch-core/dist/conversion/hub/pipelines/outbound.js
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves diagnostic field removal leaves caller payload untouched and preserves unchanged nested branch identity."
+      - "Negative evidence rejects full JSON/structured/recursive clones and import-time dist/native execution."
+      - "Direct chain blackbox requires built sharedmodule dist artifacts and is not live provider/RSS evidence."
+
+  - feature_id: debug.lmstudio_compat_tools_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+      - tests/scripts/lmstudio-compatibility-tools-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-lmstudio-compat-tools-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves top-level/parameters ownership, caller immutability, normalized tool wrapper ownership, and unchanged nested schema identity."
+      - "Negative evidence rejects complete JSON/structured/recursive request clones and import-time CLI execution."
+      - "Live LM Studio network execution and RSS are not part of this source/test slice."
+
+  - feature_id: debug.anthropic_response_regression_payload_copy_budget
+    change_risk: low
+    unit:
+      - sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+      - tests/scripts/anthropic-response-regression-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-anthropic-response-regression-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence replays the tracked sample through the compiled Rust native owner and checks the expected Hub tool-call shape."
+      - "Negative evidence rejects structuredClone, the deleted TS response runtime, dist path fallback, and import-time execution."
+      - "The local native blackbox is not installed-runtime, live-provider, concurrency, or RSS evidence."
+
+  - feature_id: debug.v2_consistency_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/v2-consistency/comprehensive-consistency-test.mjs
+      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - scripts/v2-consistency/run-consistency-test.mjs
+      - scripts/v2-consistency/README.md
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check scripts/v2-consistency/comprehensive-consistency-test.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves generated summary ownership is stored once and borrowed by report/display paths."
+      - "Negative evidence rejects JSON round-trip and generic clone helpers in the comprehensive consistency script."
+      - "This is debug script evidence, not live provider/client or installed-runtime RSS evidence."
+
+  - feature_id: debug.provider_golden_capture_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/tools/capture-provider-goldens.mjs
+      - tests/scripts/capture-provider-goldens-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-provider-golden-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - scripts/tools/capture-provider-goldens.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - node --check scripts/tools/capture-provider-goldens.mjs
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves source config isolation, rewritten path ownership, and unchanged nested provider/config reference identity."
+      - "Negative evidence rejects complete JSON/structured/recursive clones and import-time capture execution."
+      - "The capture CLI, provider config IO, network, global runtime, and RSS are not executed by this source/test slice."
+
+  - feature_id: debug.outbound_regression_payload_copy_budget
+    change_risk: low
+    unit:
+      - scripts/outbound-regression-codex-samples.mjs
+      - tests/scripts/outbound-regression-payload-copy-budget.spec.ts
+    contract:
+      - docs/goals/full-pipeline-outbound-regression-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+    integration:
+      - src/providers/core/runtime/provider-factory.ts
+      - scripts/helpers/anthropic-codec-direct-native.mjs
+      - scripts/helpers/responses-codec-direct-native.mjs
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+    notes:
+      - "Positive evidence proves complete structured-clone semantics and caller isolation from provider mutation."
+      - "Negative evidence rejects JSON/original-object fallback and import-time live regression execution."
+      - "Provider regression itself is not executed by this source/test slice."
+
   - feature_id: debug.unified_surface
     change_risk: high
     unit:
@@ -2014,6 +2727,7 @@ verification:
       - docs/audits/2026-06-22-debug-unified-surface-audit.md
     integration:
       - tests/debug/unified-surface.owner.spec.ts
+      - tests/debug/debug-utils-deepclone-removal.spec.ts
       - tests/debug/diag.error-artifact-red.spec.ts
       - tests/debug/snapshot-store-port-isolation.red.spec.ts
       - tests/modules/pipeline/utils/debug-logger.dev-filter.spec.ts
@@ -2031,6 +2745,7 @@ verification:
     notes:
       - "M0 closes only the governance/doc shell. Do not claim src/debug is the sole runtime owner until the per-module migration slices M1-M9 are implemented and verified."
       - "Verification must prove the diagnostics taxonomy boundary: error diag artifacts move under debug, runtime diagnostics remain under their original runtime owner, and usage inline diag moves only with the logger surface."
+      - "Legacy DebugUtils deepClone is physically deleted; sanitizer/logger behavior remains until its own logger migration slice."
 
   - feature_id: debug.pipeline_dry_run_loop
     change_risk: high
@@ -2385,6 +3100,7 @@ verification:
       - "Rust runtime loader must match legacy TS loader blackbox semantics before wiring; after wiring, routecodex-config-loader.ts remains a native host-env shell only."
       - "Rust runtime materialization must remain the only place that normalizes implicit-v2 source, validates/projects v2 source layout, resolves primary routingPolicyGroup, extracts materialized providers, builds VR runtime manifest semantics, and applies manifest output back to userConfig.virtualrouter."
       - "Server runtime route allowlist and route-tier helpers must consume pipelineRuntimeConfig.routingProviderIds/routingTiersByRoute only; tests must reject returning to authoring virtualrouter.routingPolicyGroups reads."
+      - "Runtime materialization tests must prove authoring route pool `id` / `poolId` is stripped from public routing config and never used as the routePolicyGroup source; the compiled internal tier may keep only non-display synthetic IDs such as `default:0`."
 
   - feature_id: config.provider_profile_materialization
     change_risk: high
@@ -2604,9 +3320,10 @@ verification:
     contract:
       - tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
-      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
+      - scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs
+      - scripts/tests/provider-response-errorerr-bypass-closeout-red-fixtures.mjs
     integration:
       - tests/server/runtime/request-executor.unified-semantics.spec.ts
     smoke:
@@ -2614,12 +3331,15 @@ verification:
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
       - npm run test:provider-response-shared-pure-blocks-cargo
+      - npm run verify:provider-response-errorerr-bypass-closeout
+      - npm run test:provider-response-errorerr-bypass-closeout-red-fixtures
     build:
       - npm run build:base
     notes:
       - "Host converter must stay on stream/body capture plus Rust handoff; TS fallback projection must not reappear."
       - "Host converter must only consume protocol truth already fixed by entry and VR metadata; payload-shape protocol inference is forbidden."
       - "Direct Responses prebuilt SSE passthrough gating is Rust-owned through `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`; TS shared blocks may only call the native helper."
+      - "Positive gate forbids TS error classifiers/remappers and normalized error-field writes in provider-response-converter.ts; negative fixtures prove each forbidden revival fails."
 
   - feature_id: hub.provider_response_metadata_sync_effect_plan
     change_risk: high
@@ -2644,12 +3364,15 @@ verification:
   - feature_id: hub.provider_response_servertool_retirement_effect_plan
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge/provider-response-native-calls.ts
       - src/modules/llmswitch/bridge/provider-response-effects.ts
     contract:
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
+      - tests/sharedmodule/stream-pipe-payload-ownership.spec.ts
     integration:
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
     smoke:
@@ -2704,7 +3427,7 @@ verification:
       - npm run build:native-hotpath
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
-      - "Positive locks trimmed canonical codec/requestId plus object payload; negatives lock no-pipe, non-object/missing/empty fields, unknown native action, and TS field-validation/error revival."
+      - "Positive locks metadata-only codec/requestId plus reuse of the top-level HubRespOutbound04ClientSemantic reference; negatives lock effect-owned payload/body revival, no-pipe, malformed/missing/empty fields, unknown native action, and TS field-validation/error revival."
 
   - feature_id: server.response_inspection_helpers
   - feature_id: hub.provider_response_diagnostic_alarm_effect_plan
@@ -2812,6 +3535,7 @@ verification:
     contract:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
       - tests/server/handlers/handler-utils.metadata-contract.spec.ts
+      - tests/server/handlers/handler-utils.metadata-copy-budget.spec.ts
     integration:
       - tests/server/handlers/chat-handler.started-sse-error.spec.ts
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
@@ -2824,6 +3548,7 @@ verification:
       - npm run build:base
     notes:
       - "Server handlers are HTTP transport adapters only; protocol semantics must stay out of server TS."
+      - "Request metadata extraction must avoid JSON deep-copy round trips while whitelist projection remains an independent carrier."
   - feature_id: hub.responses_request_pipeline_metadata_plan
     change_risk: high
     unit:
@@ -2841,6 +3566,7 @@ verification:
     smoke:
       - npm run test:responses-pipeline-metadata-plan-cargo
       - npm run test:responses-pipeline-metadata-plan-bridge
+      - npm run verify:responses-request-bridge-total-plan-shrink
       - npm run verify:function-map-compile-gate
       - npm run verify:hub-pipeline-native-reference-gate
       - npm run verify:llmswitch-rustification-audit
@@ -2869,6 +3595,10 @@ verification:
       - npm run verify:client-response-internal-carrier-surface
       - npm run verify:server-function-map-boundary
       - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:responses-relay-continuation-writer-uniqueness
+      - npm run verify:responses-request-bridge-total-plan-shrink
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
@@ -2879,7 +3609,10 @@ verification:
       - "Request-side tool_calls -> responseId continuation seeding is covered by the same request-bridge gate."
       - "Request-side `/v1/responses*` conversation-management branch checks, `responseIdFromPath` prewrite, and `responsesRequestContext` fallback assembly are covered by the same request-bridge gate."
       - "continuation-expired and resume-client invalid_request_error payload projection is covered by the same request-bridge gate."
-      - "request-side malformed tool-history contract errorsample capture is covered by the same request-bridge gate and bridge unit test."
+      - "request-side malformed tool-history contract errorsample capture is covered by the same request-bridge gate, bridge unit test, and Rust `inbound_tool_history_errorsample_plan` test; TS only executes the returned file write."
+      - "request-side continuation lookup effect args are covered by the same request-bridge gate, bridge unit test, and Rust `continuation_request_action` test; TS only executes the returned continuation-store lookup IO."
+      - "request-side continuation execution is a closed Rust `execute_effect|complete` state machine. Positive tests cover direct, relay, scope, attach, and none; negative tests cover missing response id, missing/unknown owner, malformed effect result, and operation/token mismatch. The residue gate rejects TS response-id/default/owner/payload/result projection."
+      - "request-side resume-error projection is covered by the same request-bridge gate, bridge positive/negative tests, and Rust `responses_resume_error_plan` tests; TS returns the exact `client_error` descriptor or rethrows the original non-client error."
       - "relay-owned request-context normalization is covered by `responses-request-bridge.request-context-normalization.spec.ts`: native req_inbound snapshot must replace raw duplicate tool history, must collapse repeated identical tool-call batches to the latest output per call_id, and orphan tool_result must fail without falling back to raw input."
       - "request-context capture gating, result metadata attach, and tool-call response seeding are covered by the same request-bridge gate and submit_tool_outputs handler regressions."
       - "request-side stream-intent defaults, request-start stream metadata, and port-scope parsing are covered by the same request-bridge gate plus request-start/accept-header/submit_tool_outputs handler regressions."
@@ -2887,6 +3620,7 @@ verification:
       - "request-side request-body metadata strip/read and `clientAbortSignal` extraction are covered by the same request-bridge gate plus request-timeout blackbox regressions."
       - "Validation must prove `runtime_control.providerProtocol` is written into the bound MetadataCenter on the request-executor request-route path; top-level protocol-shell transport may remain transitional, but it is no longer the only owner evidence."
       - "Validation must prove request bridge / req_inbound do not restore or mutate continuation history; they may only capture explicit request evidence and pass opaque MetadataCenter/store inputs to Chat Process owners."
+      - "Validation must prove request bridge and responses-handler cannot own post-pipeline relay response save, response-id parsing, finish_reason detection, or response-side record/finalize orchestration."
   - feature_id: server.responses_sse_bridge_surface
     change_risk: high
     unit:
@@ -3588,3 +4322,46 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive locks carrier attach plus valid provider-request dry-run; negatives lock missing carrier, invalid dry-run, unknown action, and TS fallback revival."
+
+  - feature_id: provider.responses_submit_payload_copy_budget
+    change_risk: high
+    unit:
+      - src/providers/core/runtime/responses-provider-helpers.ts
+    contract:
+      - docs/goals/full-pipeline-provider-submit-payload-copy-budget-test-design.md
+      - tests/providers/core/runtime/responses-provider-submit-payload-copy-budget.spec.ts
+    integration:
+      - tests/providers/core/runtime/responses-provider-helpers.spec.ts
+    smoke:
+      - npm run jest:run -- --runTestsByPath tests/providers/core/runtime/responses-provider-submit-payload-copy-budget.spec.ts --runInBand
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage proves a distinct top-level body and exact nested value/reference preservation."
+      - "Negative coverage rejects JSON round-trip and structuredClone deep-copy regressions."
+      - "The broader helper suite currently contains independent stale provider-failure-policy expectations; its submit-tool-output case must remain green even when that unrelated suite is not."
+
+  - feature_id: provider.anthropic_remote_image_payload_copy_budget
+    change_risk: high
+    unit:
+      - src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts
+    contract:
+      - docs/goals/full-pipeline-anthropic-remote-image-payload-copy-budget-test-design.md
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-remote-image-payload-copy-budget.spec.ts
+    integration:
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts
+    smoke:
+      - npm run jest:run -- --runTestsByPath tests/providers/core/runtime/vercel-ai-sdk-anthropic-remote-image-payload-copy-budget.spec.ts --runInBand
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npx tsc --noEmit --pretty false --skipLibCheck
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive coverage proves provider-wire semantics, caller immutability, path-local copies, and unaffected reference preservation."
+      - "Negative coverage rejects full-body structuredClone/JSON round-trip, partial caller mutation on fetch failure, and no-rewrite copies."
+      - "Remote-image policy and retry/error semantics remain covered by the existing Anthropic transport suite."

@@ -9,8 +9,8 @@ entrypoint:
   wiki_page: null
   call_map_chain_id: servertool.hook_skeleton.mainline
 node_ids:
+  - ChatProcReqContinuation03CanonicalRestored
   - HubReqChatProcess03Governed
-  - HubReqInbound02Standardized
   - HubRespChatProcess03Governed
   - HubRespOutbound04ClientSemantic
   - ServertoolCli04ClientExecuted
@@ -66,10 +66,10 @@ edges:
     binding_pending: null
     split_binding_id: null
   - step_id: sth-req-01
-    from_node: HubReqInbound02Standardized
+    from_node: ChatProcReqContinuation03CanonicalRestored
     to_node: ServertoolReqHook01ResultParsed
     status: anchored
-    owner_feature_id: hub.req_chatprocess_governance
+    owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
   - step_id: sth-req-02

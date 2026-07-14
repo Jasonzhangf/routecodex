@@ -93,7 +93,29 @@ export function isLlmsEngineShadowEnabledForSubpath(config: LlmsEngineShadowConf
   return config.enabled && matchesPrefix(subpath, config.shadowPrefixes) && config.sampleRate > 0;
 }
 
-function diffPayloads(expected: unknown, actual: unknown, p = '<root>'): Array<{ path: string; expected: unknown; actual: unknown }> {
+// feature_id: debug.llms_engine_shadow_payload_copy_budget
+function shouldIgnoreDiffPath(pathValue: string, excludedPaths: ReadonlySet<string>): boolean {
+  for (const excludedPath of excludedPaths) {
+    if (
+      pathValue === excludedPath
+      || pathValue.startsWith(`${excludedPath}.`)
+      || pathValue.startsWith(`${excludedPath}[`)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function diffPayloads(
+  expected: unknown,
+  actual: unknown,
+  p = '<root>',
+  excludedPaths: ReadonlySet<string> = new Set<string>()
+): Array<{ path: string; expected: unknown; actual: unknown }> {
+  if (shouldIgnoreDiffPath(p, excludedPaths)) {
+    return [];
+  }
   if (Object.is(expected, actual)) {
     return [];
   }
@@ -104,7 +126,7 @@ function diffPayloads(expected: unknown, actual: unknown, p = '<root>'): Array<{
     const max = Math.max(expected.length, actual.length);
     const diffs: Array<{ path: string; expected: unknown; actual: unknown }> = [];
     for (let i = 0; i < max; i += 1) {
-      diffs.push(...diffPayloads(expected[i], actual[i], `${p}[${i}]`));
+      diffs.push(...diffPayloads(expected[i], actual[i], `${p}[${i}]`, excludedPaths));
     }
     return diffs;
   }
@@ -115,47 +137,20 @@ function diffPayloads(expected: unknown, actual: unknown, p = '<root>'): Array<{
     const diffs: Array<{ path: string; expected: unknown; actual: unknown }> = [];
     for (const key of keys) {
       const next = p === '<root>' ? key : `${p}.${key}`;
+      if (shouldIgnoreDiffPath(next, excludedPaths)) {
+        continue;
+      }
       if (!(key in actualObj)) {
         diffs.push({ path: next, expected: expectedObj[key], actual: undefined });
       } else if (!(key in expectedObj)) {
         diffs.push({ path: next, expected: undefined, actual: actualObj[key] });
       } else {
-        diffs.push(...diffPayloads(expectedObj[key], actualObj[key], next));
+        diffs.push(...diffPayloads(expectedObj[key], actualObj[key], next, excludedPaths));
       }
     }
     return diffs;
   }
   return [{ path: p, expected, actual }];
-}
-
-function cloneJsonSafe<T>(value: T): T {
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch {
-    return value;
-  }
-}
-
-function deletePath(root: unknown, pathExpr: string): void {
-  if (!root || typeof root !== 'object') {
-    return;
-  }
-  const parts = pathExpr.split('.').filter(Boolean);
-  let cursor: any = root;
-  for (let i = 0; i < parts.length - 1; i += 1) {
-    const key = parts[i]!;
-    if (!cursor || typeof cursor !== 'object') {
-      return;
-    }
-    cursor = cursor[key];
-  }
-  const last = parts[parts.length - 1];
-  if (!last) {
-    return;
-  }
-  if (cursor && typeof cursor === 'object' && Object.prototype.hasOwnProperty.call(cursor, last)) {
-    delete cursor[last];
-  }
 }
 
 const DEFAULT_EXCLUDED_COMPARE_PATHS = [
@@ -181,19 +176,13 @@ export async function recordLlmsEngineShadowDiff(options: {
   const excludedComparePaths = options.excludedComparePaths?.length
     ? options.excludedComparePaths
     : DEFAULT_EXCLUDED_COMPARE_PATHS;
-
-  const prepareForDiff = (value: unknown): unknown => {
-    if (!excludedComparePaths.length) {
-      return value;
-    }
-    const cloned = cloneJsonSafe(value);
-    for (const p of excludedComparePaths) {
-      deletePath(cloned, p);
-    }
-    return cloned;
-  };
-
-  const diffs = diffPayloads(prepareForDiff(options.baselineOut), prepareForDiff(options.candidateOut));
+  const excludedPathSet = new Set(excludedComparePaths.filter(Boolean));
+  const diffs = diffPayloads(
+    options.baselineOut,
+    options.candidateOut,
+    '<root>',
+    excludedPathSet
+  );
   if (!diffs.length) {
     return;
   }

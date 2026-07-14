@@ -6,11 +6,14 @@ echo "🌍 全局安装 routecodex..."
 
 SOURCE_ROOT="$(pwd -P)"
 INSTALL_BUILD_ROOT=""
+source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"
+acquire_routecodex_install_lock
 
 cleanup_isolated_build_root() {
     if [ -n "${INSTALL_BUILD_ROOT:-}" ] && [ "$INSTALL_BUILD_ROOT" != "$SOURCE_ROOT" ] && [ -d "$INSTALL_BUILD_ROOT" ]; then
         rm -rf "$INSTALL_BUILD_ROOT"
     fi
+    release_routecodex_install_lock
 }
 trap cleanup_isolated_build_root EXIT
 
@@ -122,11 +125,20 @@ prepare_isolated_build_root() {
         fi
     }
 
+    copy_agent_collab_contract() {
+        copy_isolated_path ".agent-collab/PROTOCOL.md"
+        copy_isolated_path ".agent-collab/schema"
+        copy_isolated_path ".agent-collab/examples"
+    }
+
     for item in \
         package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
+        .gitignore AGENTS.md \
         src scripts config configsamples docs tests webui vendor; do
         copy_isolated_path "$item"
     done
+    copy_isolated_path ".agents/skills/rcc-dev-skills"
+    copy_agent_collab_contract
     copy_isolated_path "samples/mock-provider"
     copy_llmswitch_core
 
@@ -198,17 +210,17 @@ global_install() {
         fi
     fi
 
-    # 依赖隔离 build root 中已完成的 dist；先 pack 再安装，避免 npm 把临时目录装成全局 symlink。
-    local pack_dir="$INSTALL_BUILD_ROOT/artifacts/pack/install-global"
-    mkdir -p "$pack_dir"
-    local packed_name
-    packed_name="$(cd "$INSTALL_BUILD_ROOT" && npm pack --pack-destination "$pack_dir" --silent | awk '/\.tgz$/ { name=$0 } END { print name }')"
-    local packed_path="$pack_dir/$packed_name"
+    # 依赖隔离 build root 中已完成的 dist；使用 release pack 真源，把 production deps
+    # bundle 进 tarball，避免全局安装阶段联网解析依赖或和 release shim 生命周期互相打架。
+    (cd "$INSTALL_BUILD_ROOT" && RCC_LLMS_INLINE_LOCAL=1 node scripts/pack-mode.mjs --name routecodex --bin routecodex)
+    local packed_path="$INSTALL_BUILD_ROOT/artifacts/pack/routecodex-$(node -p "require('$INSTALL_BUILD_ROOT/package.json').version").tgz"
     if [ ! -f "$packed_path" ]; then
-        echo "❌ 全局安装失败：npm pack 未生成 tarball: $packed_path"
+        echo "❌ 全局安装失败：release pack 未生成 tarball: $packed_path"
         exit 1
     fi
-    npm install -g "$packed_path" --no-audit --no-fund --omit=optional --ignore-scripts
+    # The release shim may predate this install, but no concurrent installer can recreate it after this point.
+    rm -f "$NPM_PREFIX/bin/routecodex"
+    npm install -g "$packed_path" --no-audit --no-fund --omit=optional --ignore-scripts --offline --progress=false --loglevel=warn
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
     node "$INSTALL_BUILD_ROOT/scripts/ensure-cli-executable.mjs" || true

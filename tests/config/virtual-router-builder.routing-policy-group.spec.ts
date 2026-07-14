@@ -65,15 +65,17 @@ describe('virtual-router-builder: routing policy group tagging', () => {
     expect(result.routing.thinking).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 'gateway-priority-5520-thinking',
           routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_priority_5520' }),
         }),
         expect.objectContaining({
-          id: 'gateway-coding-10000-thinking',
           routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_coding_10000' }),
         }),
       ]),
     );
+    for (const pool of result.routing.thinking) {
+      expect(pool).not.toHaveProperty('id');
+      expect(pool).not.toHaveProperty('poolId');
+    }
   });
 
   it('builds a single routing policy group when requested', async () => {
@@ -110,10 +112,11 @@ describe('virtual-router-builder: routing policy group tagging', () => {
 
     expect(result.routing.search).toEqual([
       expect.objectContaining({
-        id: 'gateway-priority-5555-search',
-      routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_priority_5555' }),
+        routeParams: expect.objectContaining({ routePolicyGroup: 'gateway_priority_5555' }),
       }),
     ]);
+    expect(result.routing.search[0]).not.toHaveProperty('id');
+    expect(result.routing.search[0]).not.toHaveProperty('poolId');
   });
 
   it('carries group-level hitLog omit config into the selected virtual router input', async () => {

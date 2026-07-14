@@ -16,6 +16,19 @@ use crate::hub_pipeline_lib::execute_hub_pipeline_json;
 use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
 use serde_json::{json, Value};
 
+fn message_contains_exact_text(message: &Value, expected: &str) -> bool {
+    if message["content"].as_str() == Some(expected) {
+        return true;
+    }
+    message["content"]
+        .as_array()
+        .is_some_and(|parts| {
+            parts
+                .iter()
+                .any(|part| part["text"].as_str() == Some(expected))
+        })
+}
+
 #[test]
 fn test_empty_input_error() {
     let result = run_hub_pipeline_json("".to_string());
@@ -673,10 +686,13 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
         output["payload"]
     );
     assert_eq!(messages[0]["role"], json!("user"));
-    assert_eq!(messages[1]["role"], json!("user"));
-    assert_eq!(
-        messages[1]["content"][0]["text"],
-        json!(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == json!("user")
+                && message_contains_exact_text(message, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
+        }),
+        "provider payload must carry transparent stopless continuation prompt, got: {}",
+        output["payload"]
     );
     let guidance = serde_json::to_string(&output["payload"]).expect("payload json");
     assert!(!guidance.contains("reasoningStop"));

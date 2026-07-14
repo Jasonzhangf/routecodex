@@ -2,13 +2,10 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import { MetadataCenter } from '../../src/server/runtime/http-server/metadata-center/metadata-center.js';
 
-const recordResponsesResponseMock = jest.fn();
-const captureResponsesRequestContextMock = jest.fn();
+const executeResponsesContinuationStoreEffectsMock = jest.fn();
 
 jest.unstable_mockModule('../../src/modules/llmswitch/bridge/responses-conversation-store-host.js', () => ({
-  captureResponsesRequestContext: captureResponsesRequestContextMock,
-  finalizeResponsesConversationRequestRetention: jest.fn(),
-  recordResponsesResponse: recordResponsesResponseMock,
+  executeResponsesContinuationStoreEffects: executeResponsesContinuationStoreEffectsMock,
 }));
 
 const { convertProviderResponse } = await import(
@@ -150,7 +147,7 @@ function buildOpenAiResponsesCompletedStopSse(): string {
 
 describe('provider response Rust native plan', () => {
   beforeEach(() => {
-    recordResponsesResponseMock.mockClear();
+    executeResponsesContinuationStoreEffectsMock.mockClear();
   });
 
   it('uses Rust HubPipeline native response plan for non-side-effect response path', async () => {
@@ -248,7 +245,7 @@ describe('provider response Rust native plan', () => {
     expect((context as Record<string, unknown>)[['__native', 'Response', 'Plan'].join('')]).toBeUndefined();
   });
 
-  it('does not record Responses conversation before handler captures request context', async () => {
+  it('emits no relay continuation store effect when the Responses request has no legal scope', async () => {
     const context: Record<string, unknown> = withMetadataCenter({
       requestId: 'openai-responses-mimo.key2-mimo-v2.5-20260531T215233443-242655-2116',
       entryEndpoint: '/v1/responses',
@@ -273,7 +270,8 @@ describe('provider response Rust native plan', () => {
       wantsStream: false
     });
 
-    expect(recordResponsesResponseMock).not.toHaveBeenCalled();
+    expect(executeResponsesContinuationStoreEffectsMock).toHaveBeenCalledTimes(1);
+    expect(executeResponsesContinuationStoreEffectsMock).toHaveBeenCalledWith([]);
   });
 
   it('records Responses response capture under the active response request id when request truth was rebound', async () => {
@@ -309,12 +307,21 @@ describe('provider response Rust native plan', () => {
       wantsStream: false
     });
 
-    expect(recordResponsesResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
-    }));
-    expect(recordResponsesResponseMock).not.toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-router-gpt-5.5-20260629T203754219-423335-3618'
-    }));
+    expect(executeResponsesContinuationStoreEffectsMock).toHaveBeenCalledTimes(1);
+    expect(executeResponsesContinuationStoreEffectsMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        operation: 'record_response',
+        payload: expect.objectContaining({
+          requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
+        })
+      }),
+      expect.objectContaining({
+        operation: 'finalize_retention',
+        payload: expect.objectContaining({
+          requestId: 'openai-responses-orangeai.key1-glm-5.2-20260629T203754219-423335-3618'
+        })
+      })
+    ]);
   });
 
   it('projects stopless CLI command instead of reentering followup for Anthropic relay stop', async () => {

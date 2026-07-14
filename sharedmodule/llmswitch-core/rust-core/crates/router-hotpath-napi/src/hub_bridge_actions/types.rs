@@ -275,6 +275,8 @@ pub struct ApplyBridgeEnsureToolPlaceholdersOutput {
     pub messages: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_outputs: Option<Vec<Value>>,
+    #[serde(skip)]
+    pub retained_tool_outputs: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Deserialize)]

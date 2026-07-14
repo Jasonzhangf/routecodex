@@ -1457,6 +1457,8 @@ fn with_route_policy_group_tag(route_entry: &Value, group_id: &str) -> Value {
         return route_entry.clone();
     };
     let mut out = record.clone();
+    out.remove("id");
+    out.remove("poolId");
     let mut route_params = out
         .get("routeParams")
         .and_then(Value::as_object)

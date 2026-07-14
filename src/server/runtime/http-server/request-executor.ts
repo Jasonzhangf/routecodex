@@ -33,7 +33,10 @@ import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
-import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
+import {
+  readRuntimeContinuationResponsesResume,
+  readRuntimeControlProjection
+} from './metadata-center/request-truth-readers.js';
 import {
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative
@@ -207,7 +210,11 @@ function readRawEntryPayload(metadata: Record<string, unknown>): Record<string, 
 function buildResponsesRequestContextFromOriginalPayload(
   payload: Record<string, unknown>
 ): Record<string, unknown> | undefined {
-  const input = Array.isArray(payload.input) ? payload.input : undefined;
+  const input =
+    Array.isArray(payload.input)
+    || (typeof payload.input === 'string' && payload.input.length > 0)
+      ? payload.input
+      : undefined;
   const toolsRaw = Array.isArray(payload.tools) ? payload.tools : undefined;
   if (!input && !toolsRaw) {
     return undefined;
@@ -292,7 +299,9 @@ export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntr
   }
   const currentPayload = readRecord(args.input.body);
   const rawEntryPayload = readRawEntryPayload(args.metadata);
-  const payload = rawEntryPayload ?? currentPayload;
+  const payload = readRuntimeContinuationResponsesResume(args.metadata)
+    ? currentPayload
+    : rawEntryPayload ?? currentPayload;
   const context = payload
     ? readContextSnapshot(args.metadata) ?? buildResponsesRequestContextFromOriginalPayload(payload)
     : undefined;

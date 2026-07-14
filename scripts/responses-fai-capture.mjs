@@ -44,21 +44,45 @@ function basePayload() {
   };
 }
 
-function variants(payload) {
-  const v = [];
-  // v1: as-is (short instructions + input[] + tool_choice='auto')
-  v.push(JSON.parse(JSON.stringify(payload)));
-  // v2: tool_choice object
-  { const p = JSON.parse(JSON.stringify(payload)); p.tool_choice = { type:'function', function:{ name:'add' } }; v.push(p); }
-  // v3: remove instructions, keep input[] (some providers complain instructions invalid)
-  { const p = JSON.parse(JSON.stringify(payload)); delete p.instructions; v.push(p); }
-  // v4: keep instructions only, no input[] (some require instructions only)
-  { const p = JSON.parse(JSON.stringify(payload)); delete p.input; v.push(p); }
-  // v5: compact tools (remove description)
-  { const p = JSON.parse(JSON.stringify(payload)); p.tools = p.tools.map(t => ({ type:'function', name:t.name, parameters:t.parameters })); v.push(p); }
-  // v6: chat-style tools nesting (some proxies expect {type:'function', function:{name,parameters}})
-  { const p = JSON.parse(JSON.stringify(payload)); p.tools = p.tools.map(t => ({ type:'function', function:{ name: t.name, description: t.description, parameters: t.parameters } })); v.push(p); }
-  return v;
+export function buildResponseProbeVariants(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('probe payload must be an object');
+  }
+  return (function* responseProbeVariantIterator() {
+    // v1: as-is (short instructions + input[] + tool_choice='auto')
+    yield { ...payload };
+    // v2: tool_choice object
+    yield { ...payload, tool_choice: { type:'function', function:{ name:'add' } } };
+    // v3: remove instructions, keep input[] (some providers complain instructions invalid)
+    { const { instructions: _instructions, ...withoutInstructions } = payload; yield withoutInstructions; }
+    // v4: keep instructions only, no input[] (some require instructions only)
+    { const { input: _input, ...withoutInput } = payload; yield withoutInput; }
+    // v5: compact tools (remove description)
+    yield {
+      ...payload,
+      tools: payload.tools.map(t => ({ type:'function', name:t.name, parameters:t.parameters }))
+    };
+    // v6: chat-style tools nesting (some proxies expect {type:'function', function:{name,parameters}})
+    yield {
+      ...payload,
+      tools: payload.tools.map(t => ({
+        type:'function',
+        function:{ name: t.name, description: t.description, parameters: t.parameters }
+      }))
+    };
+  })();
+}
+
+export function readExplicitSampleBody(samplePath) {
+  if (!samplePath || !fs.existsSync(samplePath)) {
+    throw new Error(`sample not found: ${samplePath || '<empty>'}`);
+  }
+  const obj = JSON.parse(fs.readFileSync(samplePath, 'utf-8'));
+  const body = obj?.data?.body || obj?.body || obj?.data || obj;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error(`invalid sample body: ${samplePath}`);
+  }
+  return body;
 }
 
 async function main() {
@@ -80,26 +104,15 @@ async function main() {
   const client = new HttpClient({ baseUrl, timeout:300000 });
   // Optional: use an exact golden request body ("same request")
   const SAMPLE = process.env.RCC_FAICAP_SAMPLE;
-  let tries;
-  if (SAMPLE && fs.existsSync(SAMPLE)) {
-    try {
-      const obj = JSON.parse(fs.readFileSync(SAMPLE, 'utf-8'));
-      const body = obj?.data?.body || obj?.body || obj?.data || obj;
-      if (!body || typeof body !== 'object') throw new Error('invalid sample body');
-      tries = [body];
-    } catch (e) {
-      console.error('[fai-capture] invalid sample, fallback to variants:', e?.message||String(e));
-      const base = basePayload();
-      tries = variants(base);
-    }
-  } else {
-    const base = basePayload();
-    tries = variants(base);
-  }
+  const tries = SAMPLE
+    ? [readExplicitSampleBody(SAMPLE)]
+    : buildResponseProbeVariants(basePayload());
   let lastErr;
-  for (let i=0;i<tries.length;i++) {
+  let variantIndex = 0;
+  for (const variant of tries) {
+    const i = variantIndex++;
     try {
-      const body = { ...tries[i], model, stream:true };
+      const body = { ...variant, model, stream:true };
       const stream = await client.postStream(endpoint, body, { ...headers, Accept:'text/event-stream' });
       const reqId = `fai_probe_${Date.now()}_${i}`;
       const bodyText = await collectSseBodyText(stream);
@@ -125,4 +138,6 @@ async function main() {
   throw lastErr || new Error('all variants failed');
 }
 
-main().catch(e => { console.error('[fai-capture] failed:', e?.message||String(e)); process.exit(1); });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { console.error('[fai-capture] failed:', e?.message||String(e)); process.exit(1); });
+}

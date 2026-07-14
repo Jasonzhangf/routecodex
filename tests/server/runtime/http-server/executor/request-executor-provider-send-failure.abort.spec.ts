@@ -66,6 +66,20 @@ describe('request executor provider send failure abort handling', () => {
 
     await jest.advanceTimersByTimeAsync(0);
     expect(logStage).toHaveBeenCalledWith(
+      'provider.error_action_backoff_wait',
+      'req_provider_switch_wait',
+      expect.objectContaining({
+        scopeKey: 'port:unknown|spark.key1.gpt-5.3-codex-spark|tools|provider.send',
+        delayMs: 1000
+      })
+    );
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(logStage).toHaveBeenCalledWith(
+      'provider.error_action_backoff_wait.completed',
+      'req_provider_switch_wait',
+      expect.objectContaining({ delayMs: 1000 })
+    );
+    expect(logStage).toHaveBeenCalledWith(
       'provider.switch_backoff_wait',
       'req_provider_switch_wait',
       expect.objectContaining({
@@ -220,7 +234,7 @@ describe('request executor provider send failure abort handling', () => {
     }));
   });
 
-  it('normalizes raw Rust empty OpenAI chat SSE response-processing failures before retry planning', async () => {
+  it('routes raw Rust empty OpenAI chat SSE failures without mutating ErrorErr evidence', async () => {
     const error = new Error('Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain JSON data events');
     const recordAttempt = jest.fn();
     const logProviderRetrySwitch = jest.fn();
@@ -263,23 +277,20 @@ describe('request executor provider send failure abort handling', () => {
       logNonBlockingError: jest.fn(),
       writeProviderSnapshot: jest.fn(async () => undefined),
       extractRetryErrorSnapshot: () => ({ reason: error.message })
-    })).resolves.toMatchObject({
-      lastError: expect.objectContaining({
-        code: 'SSE_DECODE_ERROR',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'provider.sse_decode'
-      })
-    });
+    })).resolves.toMatchObject({ lastError: error });
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+    expect(error).not.toHaveProperty('code');
+    expect(error).not.toHaveProperty('statusCode');
+    expect(error).not.toHaveProperty('retryable');
+    expect(error).not.toHaveProperty('requestExecutorProviderErrorStage');
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
       switchAction: 'exclude_and_reroute',
       stage: 'provider.send'
     }));
   });
 
-  it('normalizes raw Rust empty OpenAI chat SSE choices-array failures before retry planning', async () => {
+  it('routes raw Rust choices-array failures without mutating ErrorErr evidence', async () => {
     const error = new Error('Rust HubPipeline response path failed: hub_pipeline_error: OpenAI chat SSE response did not contain choices array');
     const recordAttempt = jest.fn();
     const logProviderRetrySwitch = jest.fn();
@@ -322,16 +333,13 @@ describe('request executor provider send failure abort handling', () => {
       logNonBlockingError: jest.fn(),
       writeProviderSnapshot: jest.fn(async () => undefined),
       extractRetryErrorSnapshot: () => ({ reason: error.message })
-    })).resolves.toMatchObject({
-      lastError: expect.objectContaining({
-        code: 'SSE_DECODE_ERROR',
-        statusCode: 502,
-        retryable: true,
-        requestExecutorProviderErrorStage: 'provider.sse_decode'
-      })
-    });
+    })).resolves.toMatchObject({ lastError: error });
 
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
+    expect(error).not.toHaveProperty('code');
+    expect(error).not.toHaveProperty('statusCode');
+    expect(error).not.toHaveProperty('retryable');
+    expect(error).not.toHaveProperty('requestExecutorProviderErrorStage');
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
       switchAction: 'exclude_and_reroute',
       stage: 'provider.send'

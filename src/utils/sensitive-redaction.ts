@@ -75,7 +75,7 @@ function maskSecretValue(value: string): string {
 function redactEmbeddedSecrets(text: string): string {
   let out = String(text || '');
   out = out.replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1[REDACTED]');
-  out = out.replace(/\bsk-[A-Za-z0-9]{12,}\b/g, 'sk-[REDACTED]');
+  out = out.replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-[REDACTED]');
   out = out.replace(/(\bapi[_-]?key\b\s*[:=]\s*)(["']?)[^"'\s,;]+(\2)/gi, '$1$2[REDACTED]$3');
   out = out.replace(/(\bpassword\b\s*[:=]\s*)(["']?)[^"'\s,;]+(\2)/gi, '$1$2[REDACTED]$3');
   out = out.replace(/(\bcookie\b\s*[:=]\s*)(["']?)[^"'\n]+(\2)/gi, '$1$2[REDACTED]$3');
@@ -138,4 +138,38 @@ function redactInternal(
 
 export function redactSensitiveData(input: unknown): unknown {
   return redactInternal(input, new WeakSet<object>(), 0);
+}
+
+export function stringifyRedactedJson(input: unknown, space?: number): string {
+  const seen = new WeakSet<object>();
+  const depths = new WeakMap<object, number>();
+  return JSON.stringify(
+    input,
+    function redactingReplacer(this: unknown, key: string, value: unknown): unknown {
+      const parentDepth =
+        this && typeof this === 'object'
+          ? depths.get(this as object)
+          : undefined;
+      const depth = key === '' ? 0 : (parentDepth ?? -1) + 1;
+      if (depth > MAX_DEPTH) {
+        return '[TRUNCATED_DEPTH]';
+      }
+      if (key && isSensitiveKey(key)) {
+        return redactByKey(value);
+      }
+      if (typeof value === 'string') {
+        return redactEmbeddedSecrets(value);
+      }
+      if (!value || typeof value !== 'object') {
+        return value;
+      }
+      if (seen.has(value as object)) {
+        return '[CIRCULAR]';
+      }
+      seen.add(value as object);
+      depths.set(value as object, depth);
+      return value;
+    },
+    space,
+  ) ?? 'null';
 }

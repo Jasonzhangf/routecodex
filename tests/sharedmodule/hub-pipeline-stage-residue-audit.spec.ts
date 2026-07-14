@@ -161,6 +161,43 @@ describe('hub pipeline stage residue audit', () => {
     expect(engineSource).not.toContain('stages/req_outbound');
   });
 
+  it('request-stage route decision path must not clone selected target decisions', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(path.join(crateRoot, 'hub_pipeline_lib/engine.rs'), 'utf8');
+    const outboundSemanticSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs'),
+      'utf8',
+    );
+    const wirePayloadSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/provider_req_outbound_06_wire_payload.rs'),
+      'utf8',
+    );
+    const selectedTargetSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/vr_route_04_selected_target.rs'),
+      'utf8',
+    );
+    const contextMergeSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_req_outbound_context_merge.rs'),
+      'utf8',
+    );
+
+    expect(engineSource).not.toContain('route_decision.clone()');
+    expect(engineSource).not.toContain('vr_route_04.clone().into_decision()');
+    expect(outboundSemanticSource).not.toContain('selected_target.clone().into_decision()');
+    expect(wirePayloadSource).not.toContain('selected_target.clone().into_decision()');
+    expect(selectedTargetSource).toContain('assert_decision_has_no_inline_metadata');
+    expect(`${outboundSemanticSource}\n${wirePayloadSource}\n${selectedTargetSource}`).not.toContain(
+      'clone_object_payload',
+    );
+    expect(engineSource).toContain('apply_req_outbound_context_snapshot_from_refs(payload, snapshot)');
+    expect(engineSource).not.toContain('chat_envelope: Some(payload.clone())');
+    expect(engineSource).not.toContain('snapshot: Some(snapshot.clone())');
+    expect(contextMergeSource).toContain('apply_req_outbound_context_snapshot_from_refs');
+  });
+
   it('req inbound semantic lift must not own continuation or resume restore semantics', () => {
     const crateRoot = path.join(
       process.cwd(),
@@ -604,6 +641,10 @@ describe('hub pipeline stage residue audit', () => {
     const effectPlanRustSource = fs.readFileSync(path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
+    ), 'utf8');
+    const engineRustSource = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
     ), 'utf8');
 
     expect(hostSource).toContain('executeHubPipelineWithNative');
@@ -1090,6 +1131,10 @@ describe('hub pipeline stage residue audit', () => {
 
     expect(executorSource).toContain('../../../modules/llmswitch/bridge/routing-integrations.js');
     expect(executorSource).not.toContain('../../../modules/llmswitch/bridge/native-exports.js');
+    expect(executorSource).toContain('const { body: _nativeInputBody, ...nativeInputWithoutBody } = input;');
+    expect(executorSource).toContain('...nativeInputWithoutBody,');
+    expect(executorSource).not.toContain('...input,\n    id: input.requestId');
+    expect(executorSource).toContain('delete pipelineMetadata.__raw_request_body;');
     expect(routingSource).toContain("from './routing-native-host.js'");
     expect(routingSource).not.toContain("from './native-exports.js'");
     expect(hostSource).toContain("from './native-exports.js'");
@@ -2554,9 +2599,22 @@ describe('hub pipeline stage residue audit', () => {
       path.join(process.cwd(), 'tests/sharedmodule/helpers/request-stage-direct-native.ts'),
       'utf8',
     );
+    const effectPlanRustSource = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
+      ),
+      'utf8',
+    );
     expect(source).toContain('buildRequestStageMetadataDispatchWithNative');
     expect(source).toContain('buildRequestStageRuntimeControlWritePlanWithNative');
     expect(source).toContain('buildRequestStageNativeResultPlanWithNative');
+    expect(effectPlanRustSource).toContain('build_request_stage_native_result_plan_owned');
+    expect(effectPlanRustSource).toMatch(/let output\s*=\s*build_request_stage_native_result_plan_owned\(value\)/);
+    expect(effectPlanRustSource).not.toContain('let output =\n        build_request_stage_native_result_plan(&value)');
+    expect(effectPlanRustSource).toContain('build_request_stage_hub_pipeline_result_owned');
+    expect(effectPlanRustSource).toMatch(/let output\s*=\s*build_request_stage_hub_pipeline_result_owned\(value\)/);
+    expect(effectPlanRustSource).not.toContain('let output =\n        build_request_stage_hub_pipeline_result(&value)');
     const findings = collectMatches(source, [
       { label: 'legacy __metadataCenter fallback residue', pattern: /__metadataCenter/ },
       { label: 'legacy __rt read/write residue', pattern: /metadata\.__rt|__rt\s*=/ },
@@ -2570,6 +2628,247 @@ describe('hub pipeline stage residue audit', () => {
     ]);
 
     expect(findings).toEqual([]);
+  });
+
+  it('request engine must borrow governed request nodes instead of cloning their payloads', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_lib/engine.rs'),
+      'utf8',
+    );
+    const entrypointSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/request_typed_entrypoints.rs'),
+      'utf8',
+    );
+
+    expect(entrypointSource).toMatch(
+      /run_vr_route_04_selected_target_entrypoint\(\s*governed:\s*&HubReqChatProcess03Governed,/,
+    );
+    expect(engineSource).not.toMatch(
+      /run_vr_route_04_selected_target_entrypoint\(\s*req_chatprocess_03\.clone\(\),/,
+    );
+    expect(engineSource).not.toContain(
+      'let governed_processed_request = governed.processed_request.clone();',
+    );
+    expect(engineSource).toMatch(
+      /capture_context_snapshot\(\s*&entry_provider_protocol,\s*&routed\.request,\s*&routed\.normalized_metadata,/,
+    );
+  });
+
+  it('response engine must move payload ownership through adjacent typed nodes', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_lib/engine.rs'),
+      'utf8',
+    );
+    const entrypointSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/response_typed_entrypoints.rs'),
+      'utf8',
+    );
+    const governedSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/hub_resp_chatprocess_03_governed.rs'),
+      'utf8',
+    );
+    const outboundSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/hub_resp_outbound_04_client_semantic.rs'),
+      'utf8',
+    );
+    const inboundSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_types/hub_resp_inbound_02_parsed.rs'),
+      'utf8',
+    );
+
+    expect(engineSource).not.toContain(
+      'run_hub_resp_inbound_02_parsed_entrypoint(canonical_payload.clone())',
+    );
+    expect(engineSource).not.toContain(
+      'let resp_chatprocess_payload = resp_chatprocess_03.payload().clone();',
+    );
+    expect(engineSource).not.toContain('project_normal_response_payload(');
+    expect(engineSource).toContain('let client_payload = resp_outbound_04.into_payload();');
+    expect(entrypointSource).toContain('ResponseAdjacentTransitionError');
+    expect(governedSource).toContain('transform: F');
+    expect(governedSource).toContain('FnOnce(Value) -> Result<Value, E>');
+    expect(outboundSource).toContain('transform: F');
+    expect(outboundSource).toContain('into_object_payload(client_payload');
+    expect(outboundSource).not.toContain('clone_response_object_payload');
+    expect(inboundSource).not.toContain('fn clone_response_object_payload(');
+  });
+
+  it('request semantic lift must borrow the normalized payload instead of cloning it', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_lib/engine.rs'),
+      'utf8',
+    );
+    const semanticLiftSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_req_inbound_semantic_lift.rs'),
+      'utf8',
+    );
+
+    expect(engineSource).toContain('payload: Some(&normalized_payload)');
+    expect(engineSource).not.toContain('payload: Some(normalized_payload.clone())');
+    expect(semanticLiftSource).toMatch(
+      /pub struct ReqInboundSemanticLiftApplyInput<'a>/,
+    );
+    expect(semanticLiftSource).toContain("pub payload: Option<&'a Value>");
+  });
+
+  it('request engine must borrow normal payload while retaining the entry origin owner', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const engineSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_lib/engine.rs'),
+      'utf8',
+    );
+    const standardizerSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_blocks/standardized_request.rs'),
+      'utf8',
+    );
+
+    expect(standardizerSource).toContain(
+      'coerce_standardized_request_from_borrowed_parts',
+    );
+    expect(engineSource).toMatch(
+      /coerce_standardized_request_from_borrowed_parts\(\s*&normal_request_payload,/,
+    );
+    expect(engineSource).not.toContain(
+      'split_normal_payload_and_inline_metadata(normalized_payload.clone())',
+    );
+    expect(engineSource).not.toContain(
+      'let entry_origin_request = normal_request_payload.clone();',
+    );
+  });
+
+  it('request engine must move and release the parsed format envelope payload', () => {
+    const engineSource = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      ),
+      'utf8',
+    );
+
+    expect(engineSource).toContain('format_envelope_into_value(parsed.envelope)');
+    expect(engineSource).toMatch(
+      /format_envelope\.as_object_mut\(\)[\s\S]{0,120}format_envelope\.remove\("payload"\)/,
+    );
+    expect(engineSource).not.toContain('serde_json::to_value(&parsed.envelope)');
+    expect(engineSource).not.toContain('let lifted_envelope =');
+  });
+
+  it('request format parser must move normalized payload ownership forward', () => {
+    const engineSource = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      ),
+      'utf8',
+    );
+
+    expect(engineSource).toContain('raw_request: normalized_payload,');
+    expect(engineSource).toContain(
+      'std::mem::take(&mut parsed.envelope.payload)',
+    );
+    expect(engineSource).not.toMatch(
+      /parse_format_envelope\(FormatParseInput\s*\{\s*raw_request:\s*normalized_payload\.clone\(\)/,
+    );
+  });
+
+  it('request engine must not clone standardized raw payload into unused governance input', () => {
+    const engineSource = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+      ),
+      'utf8',
+    );
+
+    expect(engineSource).not.toContain('standardized_raw_payload.clone()');
+    expect(engineSource).toMatch(
+      /run_hub_req_inbound_02_standardized_entrypoint\(\s*standardized_raw_payload\s*,?\s*\)/,
+    );
+    expect(engineSource).toMatch(
+      /ToolGovernanceInput\s*\{[\s\S]{0,160}raw_payload:\s*Value::Null,/,
+    );
+  });
+
+  it('responses request context capture must borrow bridge input/tools instead of cloning full owners', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const contextCaptureSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_req_inbound_context_capture.rs'),
+      'utf8',
+    );
+    const standardizerSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_pipeline_blocks/standardized_request.rs'),
+      'utf8',
+    );
+    const bridgeInputSource = fs.readFileSync(
+      path.join(crateRoot, 'hub_bridge_actions/bridge_input.rs'),
+      'utf8',
+    );
+
+    expect(bridgeInputSource).toContain('BridgeInputToChatBorrowedInput');
+    expect(bridgeInputSource).toContain('convert_bridge_input_to_chat_messages_borrowed');
+    expect(contextCaptureSource).toContain('convert_bridge_input_to_chat_messages_borrowed');
+    expect(contextCaptureSource).not.toContain('input_array.clone(),');
+    expect(contextCaptureSource).not.toContain('raw_tools.clone(),');
+    expect(standardizerSource).not.toContain('tools: tools.clone(),');
+    expect(standardizerSource).not.toContain('submit_tool_outputs_input.clone()');
+  });
+
+  it('payload size validation must count serialized bytes without allocating a full JSON string', () => {
+    const crateRoot = path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
+    );
+    const sharedSource = fs.readFileSync(
+      path.join(crateRoot, 'shared_json_utils.rs'),
+      'utf8',
+    );
+    const ownerSources = [
+      'hub_req_inbound_format_parse.rs',
+      'hub_req_outbound_format_build.rs',
+      'hub_resp_inbound_format_parse.rs',
+    ].map((relativePath) => ({
+      relativePath,
+      source: fs.readFileSync(path.join(crateRoot, relativePath), 'utf8'),
+    }));
+    const serializedSizeBuilder = ['serialized', 'json', 'size'].join('_');
+
+    expect(sharedSource).toContain('struct CountingWriter');
+    expect(sharedSource).toContain(`pub(crate) fn ${serializedSizeBuilder}`);
+    expect(sharedSource).toContain('serde_json::to_writer');
+    expect(sharedSource).not.toMatch(new RegExp(
+      `fn ${serializedSizeBuilder}[\\s\\S]{0,500}serde_json::to_(?:string|vec)`,
+    ));
+    for (const { relativePath, source } of ownerSources) {
+      expect(source).toContain(
+        `use crate::shared_json_utils::${serializedSizeBuilder};`,
+      );
+      expect(source).toContain(`${serializedSizeBuilder}(`);
+      expect(source).not.toContain(
+        'let payload_str = match serde_json::to_string',
+      );
+      expect(source).not.toMatch(
+        /validate_payload_size[\s\S]{0,500}serde_json::to_string/,
+      );
+      expect(relativePath).toMatch(/format_(?:parse|build)\.rs$/);
+    }
   });
 
   it('legacy TS outbound provider payload orchestration file must be physically removed', () => {
@@ -5889,6 +6188,10 @@ describe('hub pipeline stage residue audit', () => {
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs',
     ), 'utf8');
+    const engineRustSource = fs.readFileSync(path.join(
+      process.cwd(),
+      'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs',
+    ), 'utf8');
     const splitSources = `${hostSource}\n${nativeCallsSource}\n${metadataEffectsSource}\n${effectsSource}`;
     const findings = collectMatches(splitSources, [
       { label: 'uses stale native streamEffect payload after servertool governance', pattern: /streamEffect\.payload/ },
@@ -5902,7 +6205,8 @@ describe('hub pipeline stage residue audit', () => {
     expect(nativeCallsSource).not.toContain('normalizeProviderResponseEffectPlanWithNative');
     expect(nativeCallsSource).toContain('buildProviderResponseMetadataSnapshotWithNative');
     expect(hostSource).toContain('resolveProviderProtocolWithNative');
-    expect(metadataEffectsSource).toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
+    expect(metadataEffectsSource).not.toContain('projectNativeMetadataWritePlanToRuntimeControlWritePlan');
+    expect(nativeCallsSource).not.toContain('projectMetadataWritePlanToRuntimeControlWritePlanWithNative');
     expect(effectsSource).toContain('planProviderResponseStoplessRuntimeControlEffectWithNative');
     expect(effectsSource).not.toContain('if (args.runtimeEffects.stoplessMetadataCenterWrite)');
     expect(effectsSource).not.toContain("reason: 'rust response chatprocess runtime control'");
@@ -5911,7 +6215,9 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).not.toContain('const requestId = readString(streamPipe.requestId)');
     expect(effectsSource).not.toContain('const payload = asRecord(streamPipe.payload)');
     expect(effectsSource).not.toContain('Rust HubPipeline response path returned malformed stream pipe effect');
-    expect(effectsSource).toContain('recordResponsesResponse(plan.recordArgs)');
+    expect(effectsSource).toContain('executeResponsesContinuationStoreEffects(plan.continuationStoreEffects)');
+    expect(effectsSource).not.toContain('recordResponsesResponse(plan.recordArgs)');
+    expect(effectsSource).not.toContain('finalizeResponsesConversationRequestRetention(');
     expect(effectsSource).not.toContain("entryKind: 'responses'");
     expect(effectsSource).not.toContain("continuationOwner: 'relay'");
     expect(effectsSource).not.toContain('allowScopeContinuation: true');
@@ -5923,14 +6229,30 @@ describe('hub pipeline stage residue audit', () => {
     expect(effectsSource).not.toContain('const alarm = readString(details?.alarm)');
     expect(effectsSource).not.toContain('details=${JSON.stringify(details)}');
     expect(effectsSource).not.toContain('try {\n      console.warn');
+    expect(effectPlanRustSource).toContain('materialize_provider_response_outbound_effect_plan_owned');
+    expect(effectPlanRustSource).toContain('let output = materialize_provider_response_outbound_effect_plan_owned(value)');
+    expect(effectPlanRustSource).not.toContain('let output = materialize_provider_response_outbound_effect_plan(&value)');
     expect(nativeCallsSource).toContain('planProviderResponseStageRecorderEffectWithNative');
     expect(hostSource).toContain('planProviderResponseStageRecorderEffectWithNative');
+    expect(engineRustSource).not.toContain('"body": stream_decision.payload.clone()');
+    expect(
+      engineRustSource.match(/"payload": stream_decision\.payload\.clone\(\)/g) ?? []
+    ).toHaveLength(0);
+    expect(engineRustSource).not.toContain('"responseRecord": build_response_record_effect_payload');
+    expect(engineRustSource).not.toContain('fn build_response_record_effect_payload(');
+    expect(effectPlanRustSource).not.toContain('output_record.insert("body".to_string()');
     expect(hostSource).not.toContain("'chat_process.resp.stage9.client_remap'");
     expect(hostSource).not.toContain("'chat_process.resp.stage10.sse_stream'");
     expect(hostSource).not.toContain("protocol: 'native-effect-plan'");
     expect(hostSource).not.toContain('function normalizeRecordPayload');
     expect(hostSource).not.toContain('[hub-pipeline] recordStage failed:');
-    expect(hostSource).toContain('const respProcessEffect = await executeProviderResponseNativeServertoolEffects');
+    expect(hostSource).toContain('await executeProviderResponseNativeServertoolEffects');
+    expect(hostSource).not.toContain('respProcessEffect');
+    expect(hostSource).toContain('const hubRespOutbound04ClientSemantic = outboundEffect.rawPayload');
+    expect(hostSource).toContain('const streamClientSemantic = hubRespOutbound04ClientSemantic');
+    expect(effectsSource).toContain('): Promise<void>');
+    expect(effectsSource).not.toContain("stage: 'HubRespChatProcess03Governed'");
+    expect(effectsSource).not.toContain("stage: 'unchanged'");
     expect(effectPlanRustSource).toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('server-side tool execution has been removed');
     expect(splitSources).not.toContain('planProviderResponseServertoolRuntimeActionsWithNative');

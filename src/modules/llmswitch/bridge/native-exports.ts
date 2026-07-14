@@ -308,8 +308,8 @@ type NativeRouterHotpathJsonBinding = {
   buildResponsesResumeControlForContinuationContextForHttpJson?: (resumeMetaJson: string) => string;
   buildResponsesPipelineMetadataForHttpJson?: (inputJson: string) => string;
   buildResponsesScopeContinuationExpiredErrorForHttpJson?: () => string;
-  buildResponsesResumeClientErrorForHttpJson?: (argsJson: string) => string;
-  shouldProjectResponsesResumeClientErrorForHttpJson?: (origin: string) => boolean;
+  planResponsesResumeErrorForHttpJson?: (inputJson: string) => string;
+  planResponsesInboundToolHistoryErrorsampleForHttpJson?: (inputJson: string) => string;
   planResponsesHandlerStreamForHttpJson?: (
     payloadJson: string,
     acceptsSse: boolean,
@@ -319,7 +319,8 @@ type NativeRouterHotpathJsonBinding = {
   finalizeResponsesHandlerPayloadForHttpJson?: (
     payloadJson: string,
     isSubmitToolOutputs: boolean,
-    outboundStream: boolean
+    outboundStream: boolean,
+    systemPromptOverrideJson: string
   ) => string;
 
   // -- failure_policy batch #2 (error classification) --
@@ -686,17 +687,417 @@ export async function planResponsesRequestContext(input: {
   return assertNativeObject('planResponsesRequestContextJson', parsed);
 }
 
-export async function planResponsesContinuationRequestAction(input: {
-  plannedEntryMode: 'none' | 'submit_tool_outputs' | 'scope_materialize';
-  entryEndpoint: string;
-  responseId?: string;
-  previousResponseId?: string;
-  continuation?: Record<string, unknown> | null;
-}): Promise<AnyRecord> {
+type ResponsesContinuationEntryMode = 'none' | 'submit_tool_outputs' | 'scope_materialize';
+type ResponsesContinuationEffectOperation =
+  | 'lookup_continuation'
+  | 'materialize_provider_owned_submit'
+  | 'resume_relay'
+  | 'materialize_scope';
+type ResponsesContinuationEffect =
+  | {
+      operation: 'lookup_continuation';
+      args: {
+        responseId: string;
+        options: {
+          entryKind: 'responses';
+          matchedPort?: number;
+          routingPolicyGroup?: string;
+        };
+      };
+    }
+  | {
+      operation: 'materialize_provider_owned_submit';
+      args: { payload: AnyRecord };
+    }
+  | {
+      operation: 'resume_relay';
+      args: {
+        responseId: string;
+        payload: AnyRecord;
+        options: {
+          requestId: string;
+          entryKind: 'responses';
+          matchedPort?: number;
+          routingPolicyGroup?: string;
+        };
+      };
+    }
+  | {
+      operation: 'materialize_scope';
+      args: {
+        payload: AnyRecord;
+        requestId: string;
+        sessionId?: string;
+        conversationId?: string;
+        entryKind: 'responses';
+        continuationOwner?: 'relay';
+        matchedPort?: number;
+        routingPolicyGroup?: string;
+      };
+    };
+type ResponsesContinuationCompleteResult =
+  | {
+      kind: 'ok';
+      payload: AnyRecord;
+      pipelineEntryEndpoint: string;
+      plannedEntryMode: ResponsesContinuationEntryMode;
+      isSubmitToolOutputs: boolean;
+      resumeMeta?: AnyRecord;
+    }
+  | { kind: 'scope_continuation_expired' }
+  | {
+      kind: 'client_error';
+      status: number;
+      body: {
+        error: {
+          message: string;
+          type: 'invalid_request_error';
+          code: string;
+          origin: 'client';
+        };
+      };
+    };
+export type ResponsesContinuationRequestActionPlan =
+  | {
+      action: 'execute_effect';
+      effect: ResponsesContinuationEffect;
+      resultPlanInput: AnyRecord;
+    }
+  | {
+      action: 'complete';
+      result: ResponsesContinuationCompleteResult;
+    };
+
+function assertResponsesContinuationString(capability: string, value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`[llmswitch-bridge] ${capability} returned invalid string`);
+  }
+  return value.trim();
+}
+
+function readResponsesContinuationOptionalString(
+  capability: string,
+  value: unknown
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return assertResponsesContinuationString(capability, value);
+}
+
+function readResponsesContinuationOptionalPort(
+  capability: string,
+  value: unknown
+): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`[llmswitch-bridge] ${capability} returned invalid port`);
+  }
+  return value;
+}
+
+function assertResponsesContinuationRequestActionPlan(
+  value: unknown
+): ResponsesContinuationRequestActionPlan {
+  const plan = assertNativeObject('planResponsesContinuationRequestActionJson', value);
+  if (plan.action === 'execute_effect') {
+    const effect = assertNativeObject(
+      'planResponsesContinuationRequestActionJson.effect',
+      plan.effect
+    );
+    const operation = effect.operation;
+    const args = assertNativeObject(
+      'planResponsesContinuationRequestActionJson.effect.args',
+      effect.args
+    );
+    const resultPlanInput = assertNativeObject(
+      'planResponsesContinuationRequestActionJson.resultPlanInput',
+      plan.resultPlanInput
+    );
+    if (resultPlanInput.stage !== operation) {
+      throw new Error(
+        '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned mismatched resultPlanInput stage'
+      );
+    }
+    if (operation === 'lookup_continuation') {
+      const options = assertNativeObject(
+        'planResponsesContinuationRequestActionJson.lookup.options',
+        args.options
+      );
+      if (options.entryKind !== 'responses') {
+        throw new Error(
+          '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid lookup entryKind'
+        );
+      }
+      return {
+        action: 'execute_effect',
+        effect: {
+          operation,
+          args: {
+            responseId: assertResponsesContinuationString(
+              'planResponsesContinuationRequestActionJson.lookup.responseId',
+              args.responseId
+            ),
+            options: {
+              entryKind: 'responses',
+              ...(readResponsesContinuationOptionalPort(
+                'planResponsesContinuationRequestActionJson.lookup.matchedPort',
+                options.matchedPort
+              ) !== undefined
+                ? { matchedPort: options.matchedPort as number }
+                : {}),
+              ...(readResponsesContinuationOptionalString(
+                'planResponsesContinuationRequestActionJson.lookup.routingPolicyGroup',
+                options.routingPolicyGroup
+              )
+                ? { routingPolicyGroup: options.routingPolicyGroup as string }
+                : {}),
+            },
+          },
+        },
+        resultPlanInput,
+      };
+    }
+    if (operation === 'materialize_provider_owned_submit') {
+      return {
+        action: 'execute_effect',
+        effect: {
+          operation,
+          args: {
+            payload: assertNativeObject(
+              'planResponsesContinuationRequestActionJson.materializeProvider.payload',
+              args.payload
+            ),
+          },
+        },
+        resultPlanInput,
+      };
+    }
+    if (operation === 'resume_relay') {
+      const options = assertNativeObject(
+        'planResponsesContinuationRequestActionJson.resumeRelay.options',
+        args.options
+      );
+      if (options.entryKind !== 'responses') {
+        throw new Error(
+          '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid relay entryKind'
+        );
+      }
+      const matchedPort = readResponsesContinuationOptionalPort(
+        'planResponsesContinuationRequestActionJson.resumeRelay.matchedPort',
+        options.matchedPort
+      );
+      const routingPolicyGroup = readResponsesContinuationOptionalString(
+        'planResponsesContinuationRequestActionJson.resumeRelay.routingPolicyGroup',
+        options.routingPolicyGroup
+      );
+      return {
+        action: 'execute_effect',
+        effect: {
+          operation,
+          args: {
+            responseId: assertResponsesContinuationString(
+              'planResponsesContinuationRequestActionJson.resumeRelay.responseId',
+              args.responseId
+            ),
+            payload: assertNativeObject(
+              'planResponsesContinuationRequestActionJson.resumeRelay.payload',
+              args.payload
+            ),
+            options: {
+              requestId: assertResponsesContinuationString(
+                'planResponsesContinuationRequestActionJson.resumeRelay.requestId',
+                options.requestId
+              ),
+              entryKind: 'responses',
+              ...(matchedPort !== undefined ? { matchedPort } : {}),
+              ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+            },
+          },
+        },
+        resultPlanInput,
+      };
+    }
+    if (operation === 'materialize_scope') {
+      if (args.entryKind !== 'responses') {
+        throw new Error(
+          '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid scope entryKind'
+        );
+      }
+      if (args.continuationOwner !== undefined && args.continuationOwner !== 'relay') {
+        throw new Error(
+          '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid scope owner'
+        );
+      }
+      const sessionId = readResponsesContinuationOptionalString(
+        'planResponsesContinuationRequestActionJson.scope.sessionId',
+        args.sessionId
+      );
+      const conversationId = readResponsesContinuationOptionalString(
+        'planResponsesContinuationRequestActionJson.scope.conversationId',
+        args.conversationId
+      );
+      const matchedPort = readResponsesContinuationOptionalPort(
+        'planResponsesContinuationRequestActionJson.scope.matchedPort',
+        args.matchedPort
+      );
+      const routingPolicyGroup = readResponsesContinuationOptionalString(
+        'planResponsesContinuationRequestActionJson.scope.routingPolicyGroup',
+        args.routingPolicyGroup
+      );
+      return {
+        action: 'execute_effect',
+        effect: {
+          operation,
+          args: {
+            payload: assertNativeObject(
+              'planResponsesContinuationRequestActionJson.scope.payload',
+              args.payload
+            ),
+            requestId: assertResponsesContinuationString(
+              'planResponsesContinuationRequestActionJson.scope.requestId',
+              args.requestId
+            ),
+            ...(sessionId ? { sessionId } : {}),
+            ...(conversationId ? { conversationId } : {}),
+            entryKind: 'responses',
+            ...(args.continuationOwner === 'relay' ? { continuationOwner: 'relay' as const } : {}),
+            ...(matchedPort !== undefined ? { matchedPort } : {}),
+            ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+          },
+        },
+        resultPlanInput,
+      };
+    }
+    throw new Error(
+      `[llmswitch-bridge] planResponsesContinuationRequestActionJson returned unsupported effect operation: ${String(operation)}`
+    );
+  }
+  if (plan.action !== 'complete') {
+    throw new Error(
+      `[llmswitch-bridge] planResponsesContinuationRequestActionJson returned unsupported action: ${String(plan.action)}`
+    );
+  }
+  const result = assertNativeObject(
+    'planResponsesContinuationRequestActionJson.result',
+    plan.result
+  );
+  if (result.kind === 'scope_continuation_expired') {
+    return { action: 'complete', result: { kind: 'scope_continuation_expired' } };
+  }
+  if (result.kind === 'ok') {
+    if (
+      result.plannedEntryMode !== 'none'
+      && result.plannedEntryMode !== 'submit_tool_outputs'
+      && result.plannedEntryMode !== 'scope_materialize'
+    ) {
+      throw new Error(
+        '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid completed entry mode'
+      );
+    }
+    if (typeof result.isSubmitToolOutputs !== 'boolean') {
+      throw new Error(
+        '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid submit flag'
+      );
+    }
+    const resumeMeta = result.resumeMeta === undefined
+      ? undefined
+      : assertNativeObject(
+          'planResponsesContinuationRequestActionJson.result.resumeMeta',
+          result.resumeMeta
+        );
+    return {
+      action: 'complete',
+      result: {
+        kind: 'ok',
+        payload: assertNativeObject(
+          'planResponsesContinuationRequestActionJson.result.payload',
+          result.payload
+        ),
+        pipelineEntryEndpoint: assertResponsesContinuationString(
+          'planResponsesContinuationRequestActionJson.result.pipelineEntryEndpoint',
+          result.pipelineEntryEndpoint
+        ),
+        plannedEntryMode: result.plannedEntryMode,
+        isSubmitToolOutputs: result.isSubmitToolOutputs,
+        ...(resumeMeta ? { resumeMeta } : {}),
+      },
+    };
+  }
+  if (result.kind === 'client_error') {
+    if (typeof result.status !== 'number' || !Number.isInteger(result.status)) {
+      throw new Error(
+        '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid client status'
+      );
+    }
+    const body = assertNativeObject(
+      'planResponsesContinuationRequestActionJson.result.body',
+      result.body
+    );
+    const error = assertNativeObject(
+      'planResponsesContinuationRequestActionJson.result.body.error',
+      body.error
+    );
+    if (error.type !== 'invalid_request_error' || error.origin !== 'client') {
+      throw new Error(
+        '[llmswitch-bridge] planResponsesContinuationRequestActionJson returned invalid client error descriptor'
+      );
+    }
+    return {
+      action: 'complete',
+      result: {
+        kind: 'client_error',
+        status: result.status,
+        body: {
+          error: {
+            message: assertResponsesContinuationString(
+              'planResponsesContinuationRequestActionJson.result.error.message',
+              error.message
+            ),
+            type: 'invalid_request_error',
+            code: assertResponsesContinuationString(
+              'planResponsesContinuationRequestActionJson.result.error.code',
+              error.code
+            ),
+            origin: 'client',
+          },
+        },
+      },
+    };
+  }
+  throw new Error(
+    `[llmswitch-bridge] planResponsesContinuationRequestActionJson returned unsupported result kind: ${String(result.kind)}`
+  );
+}
+
+export async function planResponsesContinuationRequestAction(input:
+  | {
+      plannedEntry: {
+        mode: ResponsesContinuationEntryMode;
+        responseId?: string;
+        payload: AnyRecord;
+      };
+      entryEndpoint: string;
+      requestId: string;
+      sessionId?: string;
+      conversationId?: string;
+      matchedPort?: number;
+      routingPolicyGroup?: string;
+    }
+  | {
+      effectResult: {
+        operation: ResponsesContinuationEffectOperation;
+        result: unknown;
+        resultPlanInput: AnyRecord;
+      };
+    }
+): Promise<ResponsesContinuationRequestActionPlan> {
   const parsed = invokeRouterHotpathJsonCapability('planResponsesContinuationRequestActionJson', [
     input,
   ]);
-  return assertNativeObject('planResponsesContinuationRequestActionJson', parsed);
+  return assertResponsesContinuationRequestActionPlan(parsed);
 }
 
 export async function sanitizeProviderOutboundPayload(input: {
@@ -1208,9 +1609,10 @@ export function buildResponsesPipelineMetadataForHttpNative(args: {
 }): {
   metadata: AnyRecord;
   metadataCenterWrites: Array<{
-    family: string;
+    family: 'runtime_control' | 'continuation_context';
     key: string;
     value: unknown;
+    writer: { module: string; symbol: string; stage: string; };
     reason?: string;
   }>;
 } {
@@ -1240,13 +1642,32 @@ export function buildResponsesPipelineMetadataForHttpNative(args: {
         `buildResponsesPipelineMetadataForHttpJson.metadataCenterWrites[${index}]`,
         entry
       );
-      if (typeof write.family !== 'string' || typeof write.key !== 'string') {
+      if (
+        (write.family !== 'runtime_control' && write.family !== 'continuation_context')
+        || typeof write.key !== 'string'
+      ) {
         throw new Error('[llmswitch-bridge] buildResponsesPipelineMetadataForHttpJson returned malformed metadata write');
+      }
+      const writer = assertNativeObject(
+        `buildResponsesPipelineMetadataForHttpJson.metadataCenterWrites[${index}].writer`,
+        write.writer
+      );
+      if (
+        typeof writer.module !== 'string'
+        || typeof writer.symbol !== 'string'
+        || typeof writer.stage !== 'string'
+      ) {
+        throw new Error('[llmswitch-bridge] buildResponsesPipelineMetadataForHttpJson returned malformed metadata write writer');
       }
       return {
         family: write.family,
         key: write.key,
         value: write.value,
+        writer: {
+          module: writer.module,
+          symbol: writer.symbol,
+          stage: writer.stage,
+        },
         ...(typeof write.reason === 'string' ? { reason: write.reason } : {}),
       };
     }),
@@ -1279,14 +1700,10 @@ export function buildResponsesScopeContinuationExpiredErrorForHttpNative(): {
   };
 }
 
-export function buildResponsesResumeClientErrorForHttpNative(args: {
+export function planResponsesResumeErrorForHttpNative(error: Record<string, unknown>): {
+  action: 'rethrow' | 'client_error';
   status?: number;
-  code?: string;
-  origin?: string;
-  message?: string;
-}): {
-  status: number;
-  body: {
+  body?: {
     error: {
       message: string;
       type: 'invalid_request_error';
@@ -1295,44 +1712,88 @@ export function buildResponsesResumeClientErrorForHttpNative(args: {
     };
   };
 } {
-  const fn = getRouterHotpathJsonBindingSync().buildResponsesResumeClientErrorForHttpJson;
+  const capability = 'planResponsesResumeErrorForHttpJson';
+  const fn = getRouterHotpathJsonBindingSync().planResponsesResumeErrorForHttpJson;
   if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] buildResponsesResumeClientErrorForHttpJson not available');
+    throw new Error(`[llmswitch-bridge] ${capability} not available`);
   }
-  const payload: Record<string, unknown> = {};
-  if (typeof args.status === 'number') payload.status = args.status;
-  if (typeof args.code === 'string') payload.code = args.code;
-  if (typeof args.origin === 'string') payload.origin = args.origin;
-  if (typeof args.message === 'string') payload.message = args.message;
-  const parsed = JSON.parse(fn(JSON.stringify(payload))) as unknown;
-  const record = assertNativeObject('buildResponsesResumeClientErrorForHttpJson', parsed);
-  const bodyRecord = assertNativeObject(
-    'buildResponsesResumeClientErrorForHttpJson.body',
-    record.body
-  );
-  const errorRecord = assertNativeObject(
-    'buildResponsesResumeClientErrorForHttpJson.body.error',
-    bodyRecord.error
-  );
+  const parsed = JSON.parse(fn(JSON.stringify(error))) as unknown;
+  const record = assertNativeObject(capability, parsed);
+  if (record.action === 'rethrow') {
+    return { action: 'rethrow' };
+  }
+  if (record.action !== 'client_error') {
+    throw new Error(`[llmswitch-bridge] ${capability} returned unsupported action`);
+  }
+  if (typeof record.status !== 'number' || !Number.isInteger(record.status)) {
+    throw new Error(`[llmswitch-bridge] ${capability} returned invalid status`);
+  }
+  const body = assertNativeObject(`${capability}.body`, record.body);
+  const errorRecord = assertNativeObject(`${capability}.body.error`, body.error);
+  if (
+    typeof errorRecord.message !== 'string'
+    || !errorRecord.message
+    || errorRecord.type !== 'invalid_request_error'
+    || typeof errorRecord.code !== 'string'
+    || !errorRecord.code
+    || typeof errorRecord.origin !== 'string'
+    || !errorRecord.origin
+  ) {
+    throw new Error(`[llmswitch-bridge] ${capability} returned invalid client error`);
+  }
   return {
-    status: typeof record.status === 'number' ? record.status : 422,
+    action: 'client_error',
+    status: record.status,
     body: {
       error: {
-        message: String(errorRecord.message ?? 'Unable to resume Responses conversation'),
+        message: errorRecord.message,
         type: 'invalid_request_error',
-        code: String(errorRecord.code ?? 'responses_resume_failed'),
-        origin: String(errorRecord.origin ?? 'client'),
+        code: errorRecord.code,
+        origin: errorRecord.origin,
       },
     },
   };
 }
 
-export function shouldProjectResponsesResumeClientErrorForHttpNative(origin: string | undefined): boolean {
-  const fn = getRouterHotpathJsonBindingSync().shouldProjectResponsesResumeClientErrorForHttpJson;
+export function planResponsesInboundToolHistoryErrorsampleForHttpNative(input: {
+  requestId: string;
+  entryEndpoint: string;
+  body: unknown;
+  error: unknown;
+}): {
+  action: 'none' | 'write_errorsample';
+  write?: {
+    group: string;
+    kind: string;
+    payload: Record<string, unknown>;
+  };
+} {
+  const fn = getRouterHotpathJsonBindingSync().planResponsesInboundToolHistoryErrorsampleForHttpJson;
   if (typeof fn !== 'function') {
-    throw new Error('[llmswitch-bridge] shouldProjectResponsesResumeClientErrorForHttpJson not available');
+    throw new Error('[llmswitch-bridge] planResponsesInboundToolHistoryErrorsampleForHttpJson not available');
   }
-  return fn(String(origin ?? '')) === true;
+  const parsed = JSON.parse(fn(JSON.stringify(input))) as unknown;
+  const record = assertNativeObject('planResponsesInboundToolHistoryErrorsampleForHttpJson', parsed);
+  const action = record.action === 'write_errorsample' ? 'write_errorsample' : 'none';
+  if (action === 'none') {
+    return { action };
+  }
+  const write = assertNativeObject(
+    'planResponsesInboundToolHistoryErrorsampleForHttpJson.write',
+    record.write
+  );
+  const payload = assertNativeObject(
+    'planResponsesInboundToolHistoryErrorsampleForHttpJson.write.payload',
+    write.payload
+  );
+  return {
+    action,
+    write: {
+      group: String(write.group ?? ''),
+      kind: String(write.kind ?? ''),
+      payload,
+    },
+  };
 }
 
 export function planResponsesHandlerStreamForHttpNative(args: {
@@ -1376,6 +1837,7 @@ export function finalizeResponsesHandlerPayloadForHttpNative(args: {
   payload: AnyRecord;
   isSubmitToolOutputs: boolean;
   outboundStream: boolean;
+  systemPromptOverride?: { source: string; prompt: string } | null;
 }): AnyRecord {
   const fn = getRouterHotpathJsonBindingSync().finalizeResponsesHandlerPayloadForHttpJson;
   if (typeof fn !== 'function') {
@@ -1385,7 +1847,8 @@ export function finalizeResponsesHandlerPayloadForHttpNative(args: {
     fn(
       JSON.stringify(args.payload ?? {}),
       args.isSubmitToolOutputs === true,
-      args.outboundStream === true
+      args.outboundStream === true,
+      JSON.stringify(args.systemPromptOverride ?? null)
     )
   ) as unknown;
   return assertNativeObject('finalizeResponsesHandlerPayloadForHttpJson', parsed);

@@ -154,10 +154,13 @@ jest.unstable_mockModule(
         const pipe = streamPipe as Record<string, unknown>;
         const codec = typeof pipe.codec === 'string' ? pipe.codec.trim() : '';
         const requestId = typeof pipe.requestId === 'string' ? pipe.requestId.trim() : '';
-        if (!codec || !requestId || typeof pipe.payload !== 'object' || pipe.payload === null || Array.isArray(pipe.payload)) {
+        if ('payload' in pipe || 'body' in pipe) {
+          throw new Error('Rust HubPipeline streamPipe effect must not own client payload');
+        }
+        if (!codec || !requestId) {
           throw new Error('Rust HubPipeline response path returned malformed stream pipe effect');
         }
-        return JSON.stringify({ action: 'use_pipe', pipe: { codec, requestId, payload: pipe.payload } });
+        return JSON.stringify({ action: 'use_pipe', pipe: { codec, requestId } });
       },
       planProviderResponseStageRecorderEffectJson: (inputJson: string) => {
         const { clientSemantic, streamPipe } = JSON.parse(inputJson) as {
@@ -196,12 +199,20 @@ jest.unstable_mockModule(
         runtimeStateWriteJson: string,
         entryEndpoint: string
       ) => JSON.stringify({
-        recordArgs: {
-          requestId,
-          response: JSON.parse(responseJson),
-          ...(JSON.parse(contextJson).sessionId ? { sessionId: JSON.parse(contextJson).sessionId } : {}),
-        },
-        finalizeArgs: { requestId, keepForSubmitToolOutputs: false },
+        continuationStoreEffects: [
+          {
+            operation: 'record_response',
+            payload: {
+              requestId,
+              response: JSON.parse(responseJson),
+              ...(JSON.parse(contextJson).sessionId ? { sessionId: JSON.parse(contextJson).sessionId } : {}),
+            },
+          },
+          {
+            operation: 'finalize_retention',
+            payload: { requestId, options: { keepForSubmitToolOutputs: false } },
+          },
+        ],
         usageArgs: { usage: JSON.parse(runtimeStateWriteJson)?.usage },
         entryEndpoint,
       }),
@@ -271,9 +282,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule(
   '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js',
   () => ({
-    captureResponsesRequestContext: jest.fn(),
-    finalizeResponsesConversationRequestRetention: jest.fn(),
-    recordResponsesResponse: jest.fn(),
+    executeResponsesContinuationStoreEffects: jest.fn(),
     getResponsesConversationStoreDebugStats: jest.fn(() => ({})),
   })
 );
@@ -281,7 +290,7 @@ jest.unstable_mockModule(
 const { convertProviderResponse } = await import(
   '../../src/modules/llmswitch/bridge/provider-response-converter-host.js'
 );
-const { recordResponsesResponse } = await import(
+const { executeResponsesContinuationStoreEffects } = await import(
   '../../src/modules/llmswitch/bridge/responses-conversation-store-host.js'
 );
 
@@ -298,7 +307,7 @@ describe('provider response metadata center providerProtocol contract', () => {
     materializeProviderResponseSsePayloadWithNativeMock.mockClear();
     planChatProcessSessionUsageMock.mockClear();
     buildSseFramesFromJsonWithNativeMock.mockClear();
-    recordResponsesResponse.mockClear();
+    executeResponsesContinuationStoreEffects.mockClear();
     executeHubPipelineWithNativeMock.mockReturnValue({
       success: true,
       requestId: 'req_provider_response_center_protocol',
@@ -376,9 +385,15 @@ describe('provider response metadata center providerProtocol contract', () => {
         providerProtocol: 'anthropic-messages',
       })
     }));
-    expect(recordResponsesResponse).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
-    }));
+    expect(executeResponsesContinuationStoreEffects).toHaveBeenCalledWith([
+      expect.objectContaining({
+        operation: 'record_response',
+        payload: expect.objectContaining({
+          requestId: 'openai-responses-provider-20260628T184855563-416867-1902'
+        })
+      }),
+      expect.objectContaining({ operation: 'finalize_retention' })
+    ]);
     expect(result.body?.choices?.[0]?.message?.content).toBe('center protocol wins');
   });
 
@@ -520,8 +535,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       },
       servertoolRuntimeActions: [],
       streamPipe: {
-        codec: 'openai-chat',
-        requestId: 'req_provider_response_malformed_stream_pipe'
+        codec: 'openai-chat'
       }
     });
     const context: Record<string, unknown> = {
@@ -560,14 +574,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       servertoolRuntimeActions: [],
       streamPipe: {
         codec: 'openai-responses',
-        requestId: 'stale_stream_pipe_request_id',
-        payload: {
-          id: 'resp_provider_response_sse_request_id',
-          object: 'response',
-          status: 'completed',
-          model: 'gpt-test',
-          output: [],
-        }
+        requestId: 'stale_stream_pipe_request_id'
       }
     });
     const context: Record<string, unknown> = {
@@ -602,7 +609,7 @@ describe('provider response metadata center providerProtocol contract', () => {
       protocol: 'openai-responses',
       requestId: 'openai-responses-router-gpt-5.5-20260704T082457252-457519-3916',
       response: expect.objectContaining({
-        id: 'resp_provider_response_sse_request_id'
+        id: 'chatcmpl_provider_response_center_protocol'
       })
     }));
     expect(buildSseFramesFromJsonWithNativeMock).not.toHaveBeenCalledWith(expect.objectContaining({

@@ -1611,13 +1611,29 @@ pub(crate) fn apply_bridge_normalize_history(
 pub(crate) fn apply_bridge_capture_tool_results(
     input: ApplyBridgeCaptureToolResultsInput,
 ) -> ApplyBridgeCaptureToolResultsOutput {
-    let stage = input.stage.trim().to_ascii_lowercase();
-    let mut captured_tool_results = input.captured_tool_results.unwrap_or_default();
+    apply_bridge_capture_tool_results_borrowed(
+        input.stage.as_str(),
+        input.captured_tool_results,
+        input.raw_request.as_ref(),
+        input.raw_response.as_ref(),
+        input.metadata,
+    )
+}
+
+pub(crate) fn apply_bridge_capture_tool_results_borrowed(
+    stage: &str,
+    captured_tool_results: Option<Vec<Value>>,
+    raw_request: Option<&Value>,
+    raw_response: Option<&Value>,
+    metadata: Option<Value>,
+) -> ApplyBridgeCaptureToolResultsOutput {
+    let stage = stage.trim().to_ascii_lowercase();
+    let mut captured_tool_results = captured_tool_results.unwrap_or_default();
     if captured_tool_results.is_empty() {
         let source = if stage.starts_with("request") {
-            input.raw_request.as_ref()
+            raw_request
         } else if stage.starts_with("response") {
-            input.raw_response.as_ref()
+            raw_response
         } else {
             None
         };
@@ -1631,7 +1647,10 @@ pub(crate) fn apply_bridge_capture_tool_results(
         }
     }
 
-    let mut metadata = input.metadata.and_then(|value| value.as_object().cloned());
+    let mut metadata = match metadata {
+        Some(Value::Object(map)) => Some(map),
+        _ => None,
+    };
     if stage == "request_outbound" && !captured_tool_results.is_empty() {
         if metadata.is_none() {
             metadata = Some(Map::new());
@@ -1684,20 +1703,37 @@ fn resolve_stage_tool_outputs(
 pub(crate) fn apply_bridge_ensure_tool_placeholders(
     input: ApplyBridgeEnsureToolPlaceholdersInput,
 ) -> ApplyBridgeEnsureToolPlaceholdersOutput {
-    let stage = input.stage.trim().to_ascii_lowercase();
-    let tool_outputs = resolve_stage_tool_outputs(
-        stage.as_str(),
+    apply_bridge_ensure_tool_placeholders_borrowed(
+        input.stage.as_str(),
+        input.messages,
         input.captured_tool_results,
         input.raw_request.as_ref(),
         input.raw_response.as_ref(),
+    )
+}
+
+pub(crate) fn apply_bridge_ensure_tool_placeholders_borrowed(
+    stage: &str,
+    messages: Vec<Value>,
+    captured_tool_results: Option<Vec<Value>>,
+    raw_request: Option<&Value>,
+    raw_response: Option<&Value>,
+) -> ApplyBridgeEnsureToolPlaceholdersOutput {
+    let stage = stage.trim().to_ascii_lowercase();
+    let tool_outputs = resolve_stage_tool_outputs(
+        stage.as_str(),
+        captured_tool_results,
+        raw_request,
+        raw_response,
     );
     let normalized = normalize_tool_session_payload(ToolSessionCompatInput {
-        messages: input.messages,
+        messages,
         tool_outputs,
     });
     ApplyBridgeEnsureToolPlaceholdersOutput {
         messages: normalized.messages,
         tool_outputs: normalized.tool_outputs,
+        retained_tool_outputs: normalized.retained_tool_outputs,
     }
 }
 

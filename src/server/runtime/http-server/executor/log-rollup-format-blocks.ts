@@ -125,8 +125,8 @@ export function normalizeFinishReason(value: unknown): string | undefined {
 // Display formatting
 // ---------------------------------------------------------------------------
 
-export function buildKey(routeName: string, poolId: string, providerKey: string, model: string): string {
-  return `${routeName}\u0000${poolId}\u0000${providerKey}\u0000${model}`;
+export function buildKey(routeName: string, _poolId: string, providerKey: string, model: string): string {
+  return `${routeName}\u0000${providerKey}\u0000${model}`;
 }
 
 export function colorize(text: string, color: string): string {
@@ -153,8 +153,8 @@ export function highlightLogKeyValues(text: string, baseColor: string): string {
   return highlightStandaloneHttpCodeTokens(highlightedKeyValues, baseColor);
 }
 
-export function formatRoutePool(routeName: string, poolId: string): string {
-  return poolId !== '-' ? `${routeName}/${poolId}` : routeName;
+export function formatRoutePool(routeName: string, _poolId: string): string {
+  return routeName;
 }
 
 export function formatRouteName(routeName: string): string {

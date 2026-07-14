@@ -2,6 +2,7 @@ lifecycle_id: servertool.hook_skeleton.mainline
 summary: "Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks."
 owner_feature_id: hub.servertool_stopless_cli_continuation
 owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
+stopless_standalone_entrypoints: 0
 entrypoint:
   node_id: HubRespChatProcess03Governed
   wiki_page: docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md
@@ -19,15 +20,11 @@ node_ids:
   - ServertoolRespHook01Intercepted
   - ServertoolRespHook02SchemaValidated
   - ServertoolRespHook03HookResponseInjected
-  - ServertoolRespHook04FollowupPlanned
-  - ServertoolRespHook05ReenterDispatched
   - ServertoolRespHook06ProjectionFinalized
 step_ids:
   - sth-resp-01
   - sth-resp-02
   - sth-resp-03
-  - sth-resp-04
-  - sth-resp-05
   - sth-resp-06
   - sth-resp-07
   - sth-cli-01
@@ -37,10 +34,10 @@ step_ids:
   - sth-req-04
   - sth-req-05
 edge_status_counts:
-  anchored: 13
+  anchored: 11
   partial: 0
   binding_pending: 0
-  total: 13
+  total: 11
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml
@@ -50,3 +47,4 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-node-id-consistency
+    - npm run verify:servertool-mount-boundary

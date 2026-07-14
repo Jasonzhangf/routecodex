@@ -164,6 +164,41 @@ function validateSourceSplit() {
       failures.push(`${hostFile}: native, metadata, and effect helper clusters must live in split modules`);
     }
   }
+
+  const nativeCallsSource = files.has(requiredModules[0])
+    ? fs.readFileSync(files.get(requiredModules[0]).absPath, 'utf8')
+    : '';
+  const metadataEffectsSource = files.has(requiredModules[1])
+    ? fs.readFileSync(files.get(requiredModules[1]).absPath, 'utf8')
+    : '';
+  const effectsSource = files.has(requiredModules[2])
+    ? fs.readFileSync(files.get(requiredModules[2]).absPath, 'utf8')
+    : '';
+  const retiredSurfaces = [
+    {
+      source: hostSource,
+      pattern: /\brespProcessEffect\b|\.stage\s*===\s*['"]HubRespChatProcess03Governed['"]/u,
+      message: `${hostFile}: retired HubRespChatProcess03Governed host result branch must stay deleted`,
+    },
+    {
+      source: effectsSource,
+      pattern: /stage:\s*['"]HubRespChatProcess03Governed['"]\s*\|\s*['"]unchanged['"]|stage:\s*['"]unchanged['"]/u,
+      message: `${requiredModules[2]}: retired servertool effect stage-result union must stay deleted`,
+    },
+    {
+      source: metadataEffectsSource,
+      pattern: /\bprojectNativeMetadataWritePlanToRuntimeControlWritePlan\b/u,
+      message: `${requiredModules[1]}: zero-caller metadata write projection wrapper must stay deleted`,
+    },
+    {
+      source: nativeCallsSource,
+      pattern: /\bprojectMetadataWritePlanToRuntimeControlWritePlanWithNative\b/u,
+      message: `${requiredModules[0]}: zero-caller metadata write native wrapper and malformed-result fallback must stay deleted`,
+    },
+  ];
+  for (const retired of retiredSurfaces) {
+    if (retired.pattern.test(retired.source)) failures.push(retired.message);
+  }
 }
 
 validateMaps();

@@ -17,10 +17,14 @@ fn plan(input: &Value) -> Value {
 #[napi(js_name = "planProviderDryRunTerminalActionJson")]
 pub fn plan_provider_dry_run_terminal_action_json(input_json: String) -> NapiResult<String> {
     let input: Value = serde_json::from_str(&input_json).map_err(|error| {
-        napi::Error::from_reason(format!("provider dry-run terminal action input parse failed: {error}"))
+        napi::Error::from_reason(format!(
+            "provider dry-run terminal action input parse failed: {error}"
+        ))
     })?;
     serde_json::to_string(&plan(&input)).map_err(|error| {
-        napi::Error::from_reason(format!("provider dry-run terminal action output serialize failed: {error}"))
+        napi::Error::from_reason(format!(
+            "provider dry-run terminal action output serialize failed: {error}"
+        ))
     })
 }
 

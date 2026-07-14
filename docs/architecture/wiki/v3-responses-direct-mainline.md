@@ -39,8 +39,10 @@ flowchart LR
 ```
 
 P0-P5 are anchored through `V3Target10ConcreteProviderSelected` and stop before Provider send.
-P6 transitions `10->11->12->13->14->15->16` remain `binding_pending`. Early Responses direct
-prototype code exists, but prototype symbols/tests are not P6 binding or completion evidence.
+The P6 generic Provider slice source-binds `V3Provider12ResponsesWirePayload`,
+`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw` with controlled-upstream JSON/SSE
+blackbox evidence. `V3ResponsesDirect11Policy`, `V3Resp15ClientPayload`, and
+`V3Server16HttpFrame` remain `binding_pending` for full Server `/v1/responses` usability.
 
 ## Ownership review
 
@@ -100,6 +102,7 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - [x] P3 global Debug logs/snapshots/dry run.
 - [x] P4 global Error and Provider health boundaries.
 - [x] P5 one-hit Virtual Router and Target Interpreter source binding (runtime verification evidence below).
+- [x] P6 generic Rust Responses Provider wire/transport/raw response slice through node 14.
 - [ ] P6 installed-binary Responses direct JSON/SSE evidence.
 
 ## P2 live evidence
@@ -133,6 +136,13 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - The `45454` request traversed `V3Server03HttpRequestRaw -> V3Req04StandardizedResponses -> V3Router05..07 -> V3Target08..10`, hit Router once, skipped one disabled fixture candidate, reselected the next fixture candidate inside Target on attempt 2, and returned `stopped_before_provider_send=true` plus `x-routecodex-v3-no-network-send: true`.
 - The `45455` request hit Router once, expanded one disabled candidate, emitted availability-skip and target-exhausted Debug events, then returned `503 selected_target_exhausted` through the complete six-node Error chain.
 - The exact PTY process received Ctrl-C and both `45454` and `45455` were confirmed closed.
+
+## P6 Provider slice evidence
+
+- `routecodex-v3-provider-responses` owns the generic Responses wire, transport request, and raw response nodes: `V3Provider12ResponsesWirePayload`, `V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`.
+- Controlled upstream tests prove the same implementation serves distinct provider IDs without provider-specific branches, preserves the full request body except selected `model` mapping, resolves env and token-file auth only at send time, and returns typed JSON/SSE raw responses.
+- Negative coverage proves typed missing-auth, HTTP 401/503, connection failure, malformed SSE, and client-disconnect errors. Source and compile gates reject old 07/08/09 node names, Provider routing/Target imports, Server/CLI Provider transport imports, and non-owner construction of nodes 12/13/14.
+- This evidence stops at Provider raw response. It does not prove installed-binary Server `/v1/responses` live integration, client projection completeness, relay, continuation, or servertool behavior.
 
 ## Forbidden shortcuts
 

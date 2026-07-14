@@ -63,8 +63,8 @@ function normalizeText(value) {
   return String(value).replace(/\r\n/g, '\n').trim();
 }
 
-function canonicalizeChat(chat) {
-  const clone = JSON.parse(JSON.stringify(chat || {}));
+export function canonicalizeChat(chat) {
+  const clone = { ...(chat || {}) };
   if (clone.model) clone.model = String(clone.model);
   if ('__rcc_raw_system' in clone) {
     delete clone.__rcc_raw_system;
@@ -72,6 +72,7 @@ function canonicalizeChat(chat) {
   if ('providerType' in clone) delete clone.providerType;
   if ('providerKey' in clone) delete clone.providerKey;
   if (clone.metadata && typeof clone.metadata === 'object') {
+    clone.metadata = { ...clone.metadata };
     if ('__rcc_raw_system' in clone.metadata) {
       delete clone.metadata.__rcc_raw_system;
     }
@@ -84,15 +85,17 @@ function canonicalizeChat(chat) {
       if (tool.type === 'function' && tool.function) {
         const fn = { ...tool.function };
         if (typeof fn.name === 'string') fn.name = fn.name.trim();
-        if (fn.parameters && typeof fn.parameters === 'object') {
-          fn.parameters = JSON.parse(JSON.stringify(fn.parameters));
-        }
         return { type: 'function', function: fn };
       }
       return tool;
     });
   }
-  const messages = Array.isArray(clone.messages) ? clone.messages : [];
+  const messages = Array.isArray(clone.messages)
+    ? clone.messages.map((message) =>
+        message && typeof message === 'object' ? { ...message } : message
+      )
+    : [];
+  clone.messages = messages;
   const idMap = new Map();
   const toolAliasMap = new Map();
   const pendingToolIds = [];
@@ -120,6 +123,16 @@ function canonicalizeChat(chat) {
     }
 
     if (Array.isArray(msg?.tool_calls)) {
+      msg.tool_calls = msg.tool_calls.map((toolCall) =>
+        toolCall && typeof toolCall === 'object'
+          ? {
+              ...toolCall,
+              ...(toolCall.function && typeof toolCall.function === 'object'
+                ? { function: { ...toolCall.function } }
+                : {})
+            }
+          : toolCall
+      );
       for (const tc of msg.tool_calls) {
         const newId = `fc_call_${toolCounter++}`;
         if (tc && typeof tc === 'object') {
@@ -209,76 +222,70 @@ function loadCodexFixtures() {
   return { chatRequest };
 }
 
-const fixtures = loadCodexFixtures();
-if (!fixtures) {
-  console.warn(
-    `⚠️  [cross-protocol-matrix] 缺少 codex 样本目录 (${SAMPLE_BASE}) 或未捕获包含工具调用的 openai-chat 样本，跳过该测试。`
+async function loadProtocolConverters() {
+  const responsesBridge = await import(
+    pathToFileURL(
+      path.join(
+        REPO_ROOT,
+        '..',
+        '..',
+        'dist',
+        'modules',
+        'llmswitch',
+        'bridge',
+        'native-exports.js'
+      )
+    ).href
   );
-  process.exit(0);
+  const {
+    buildResponsesRequestFromChatNative
+  } = await import(
+    pathToFileURL(
+      path.join(
+        REPO_ROOT,
+        '..',
+        '..',
+        'scripts',
+        'helpers',
+        'responses-codec-direct-native.mjs'
+      )
+    ).href
+  );
+  const {
+    buildAnthropicRequestFromOpenAIChat,
+    buildOpenAIChatFromAnthropic
+  } = await import(
+    pathToFileURL(
+      path.join(
+        REPO_ROOT,
+        '..',
+        '..',
+        'scripts',
+        'helpers',
+        'anthropic-codec-direct-native.mjs'
+      )
+    ).href
+  );
+  const { buildOpenAIChatFromGeminiRequest } = await import(
+    pathToFileURL(
+      path.join(
+        REPO_ROOT,
+        '..',
+        '..',
+        'scripts',
+        'helpers',
+        'gemini-codec-direct-native.mjs'
+      )
+    ).href
+  );
+  return {
+    convertResponsesRequestToChatNative: responsesBridge.convertResponsesRequestToChatNative,
+    buildResponsesRequestFromChatNative,
+    buildAnthropicRequestFromOpenAIChat,
+    buildOpenAIChatFromAnthropic,
+    buildOpenAIChatFromGeminiRequest
+  };
 }
-const { chatRequest } = fixtures;
-console.log('🧪 Cross-protocol samples:', { chatRequest: chatRequest.file });
-
-const responsesBridge = await import(
-  pathToFileURL(
-    path.join(
-      REPO_ROOT,
-      '..',
-      '..',
-      'dist',
-      'modules',
-      'llmswitch',
-      'bridge',
-      'native-exports.js'
-    )
-  ).href
-);
-const {
-  convertResponsesRequestToChatNative
-} = responsesBridge;
-const {
-  buildResponsesRequestFromChatNative
-} = await import(
-  pathToFileURL(
-    path.join(
-      REPO_ROOT,
-      '..',
-      '..',
-      'scripts',
-      'helpers',
-      'responses-codec-direct-native.mjs'
-    )
-  ).href
-);
-
-const {
-  buildAnthropicRequestFromOpenAIChat,
-  buildOpenAIChatFromAnthropic
-} = await import(
-  pathToFileURL(
-    path.join(
-      REPO_ROOT,
-      '..',
-      '..',
-      'scripts',
-      'helpers',
-      'anthropic-codec-direct-native.mjs'
-    )
-  ).href
-);
-
-const { buildOpenAIChatFromGeminiRequest } = await import(
-  pathToFileURL(
-    path.join(
-      REPO_ROOT,
-      '..',
-      '..',
-      'scripts',
-      'helpers',
-      'gemini-codec-direct-native.mjs'
-    )
-  ).href
-);
 
 function buildGeminiRequestFromChat(chat) {
   const messages = Array.isArray(chat?.messages) ? chat.messages : [];
@@ -393,7 +400,14 @@ function stringify(obj) {
 
 const SKIP_GEMINI = process.env.CROSS_SKIP_GEMINI !== '0';
 
-function runRequestChain() {
+function runRequestChain(chatRequest, converters) {
+  const {
+    convertResponsesRequestToChatNative,
+    buildResponsesRequestFromChatNative,
+    buildAnthropicRequestFromOpenAIChat,
+    buildOpenAIChatFromAnthropic,
+    buildOpenAIChatFromGeminiRequest
+  } = converters;
   const chat = chatRequest.payload;
   const canonical = canonicalizeChat(chat);
 
@@ -448,10 +462,32 @@ function runRequestChain() {
   );
 }
 
-try {
-  runRequestChain();
+export async function main() {
+  const fixtures = loadCodexFixtures();
+  if (!fixtures) {
+    console.warn(
+      `⚠️  [cross-protocol-matrix] 缺少 codex 样本目录 (${SAMPLE_BASE}) 或未捕获包含工具调用的 openai-chat 样本，跳过该测试。`
+    );
+    return;
+  }
+  const { chatRequest } = fixtures;
+  console.log('🧪 Cross-protocol samples:', { chatRequest: chatRequest.file });
+  const converters = await loadProtocolConverters();
+  runRequestChain(chatRequest, converters);
   console.log('✅ cross-protocol matrix completed');
-} catch (err) {
-  console.error('❌ cross-protocol matrix failed:', err);
-  process.exit(1);
+}
+
+const isDirectCliEntry = (() => {
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectCliEntry) {
+  main().catch((err) => {
+    console.error('❌ cross-protocol matrix failed:', err);
+    process.exit(1);
+  });
 }

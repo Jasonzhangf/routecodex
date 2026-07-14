@@ -4,7 +4,12 @@ use serde_json::{json, Value};
 
 // feature_id: hub.router_direct_eligibility_plan
 fn text(input: &Value, key: &str) -> Option<String> {
-    input.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
 }
 
 fn plan(input: &Value) -> Value {
@@ -38,10 +43,14 @@ fn plan(input: &Value) -> Value {
 
 #[napi(js_name = "planDirectRouteEligibilityJson")]
 pub fn plan_direct_route_eligibility_json(input_json: String) -> NapiResult<String> {
-    let input: Value = serde_json::from_str(&input_json)
-        .map_err(|error| napi::Error::from_reason(format!("direct eligibility input parse failed: {error}")))?;
-    serde_json::to_string(&plan(&input))
-        .map_err(|error| napi::Error::from_reason(format!("direct eligibility output serialize failed: {error}")))
+    let input: Value = serde_json::from_str(&input_json).map_err(|error| {
+        napi::Error::from_reason(format!("direct eligibility input parse failed: {error}"))
+    })?;
+    serde_json::to_string(&plan(&input)).map_err(|error| {
+        napi::Error::from_reason(format!(
+            "direct eligibility output serialize failed: {error}"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -50,15 +59,34 @@ mod tests {
 
     #[test]
     fn plans_router_default_direct_through_provider_resolution_and_protocol_match() {
-        assert_eq!(plan(&json!({"mode":"router"}))["action"], "resolve_provider");
-        assert_eq!(plan(&json!({"mode":"router","providerFound":true,"inboundProtocol":"openai-chat","providerProtocol":"openai-chat"}))["action"], "execute_direct");
+        assert_eq!(
+            plan(&json!({"mode":"router"}))["action"],
+            "resolve_provider"
+        );
+        assert_eq!(
+            plan(
+                &json!({"mode":"router","providerFound":true,"inboundProtocol":"openai-chat","providerProtocol":"openai-chat"})
+            )["action"],
+            "execute_direct"
+        );
     }
 
     #[test]
     fn rejects_non_router_relay_missing_provider_and_protocol_mismatch() {
-        assert_eq!(plan(&json!({"mode":"provider"}))["reason"], "not a router-mode port");
-        assert_eq!(plan(&json!({"mode":"router","sameProtocolBehavior":"relay"}))["eligible"], false);
-        assert!(plan(&json!({"mode":"router","providerFound":false,"runtimeKey":"missing"}))["reason"].as_str().unwrap().contains("missing"));
+        assert_eq!(
+            plan(&json!({"mode":"provider"}))["reason"],
+            "not a router-mode port"
+        );
+        assert_eq!(
+            plan(&json!({"mode":"router","sameProtocolBehavior":"relay"}))["eligible"],
+            false
+        );
+        assert!(
+            plan(&json!({"mode":"router","providerFound":false,"runtimeKey":"missing"}))["reason"]
+                .as_str()
+                .unwrap()
+                .contains("missing")
+        );
         assert!(plan(&json!({"mode":"router","providerFound":true,"inboundProtocol":"openai-chat","providerProtocol":"anthropic-messages"}))["reason"].as_str().unwrap().contains("protocol mismatch"));
     }
 }

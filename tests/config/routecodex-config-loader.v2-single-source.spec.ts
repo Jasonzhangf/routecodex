@@ -257,7 +257,10 @@ describe('loadRouteCodexConfig v2 single-source layout', () => {
 
     expect(after).toBe(before);
     expect(loaded.userConfig.virtualrouterMode).toBe('v2');
-    expect((loaded.userConfig.virtualrouter as any).routing.default[0].id).toBe('canary-primary');
+    expect((loaded.userConfig.virtualrouter as any).routing.default[0]).not.toHaveProperty('id');
+    expect((loaded.userConfig.virtualrouter as any).routing.default[0].targets).toEqual([
+      'ali-coding-plan.qwen3.5-plus'
+    ]);
   });
 
   it('reads provider configs from explicit ROUTECODEX_PROVIDER_DIR without mutating config.toml', async () => {

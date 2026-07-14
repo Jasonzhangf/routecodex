@@ -372,7 +372,7 @@ fn expected_nodes_for_phase(
 fn expected_nodes_for_req_phase(phase: &ServertoolReqHookPhase) -> (&'static str, &'static str) {
     match phase {
         ServertoolReqHookPhase::ServertoolReqHook01ResultParsed => (
-            "HubReqInbound02Standardized",
+            "ChatProcReqContinuation03CanonicalRestored",
             "ServertoolReqHook01ResultParsed",
         ),
         ServertoolReqHookPhase::ServertoolReqHook02TextRewritten => (
@@ -505,6 +505,55 @@ mod tests {
         assert_eq!(projection.phase, "ServertoolReqHook03ToolInjected");
         assert_eq!(projection.input_node, "ServertoolReqHook02TextRewritten");
         assert_eq!(projection.output_node, "ServertoolReqHook03ToolInjected");
+    }
+
+    #[test]
+    fn request_result_parse_starts_after_canonical_continuation_restore() {
+        let spec = ServertoolHookSpec {
+            id: "stop_message_auto".to_string(),
+            direction: ServertoolHookDirection::Request,
+            req_phase: Some(ServertoolReqHookPhase::ServertoolReqHook01ResultParsed),
+            resp_phase: None,
+            requiredness: ServertoolHookRequiredness::Required,
+            priority: 10,
+            order: 0,
+            owner_feature: "hub.servertool_stopless_cli_continuation".to_string(),
+            input_node: "ChatProcReqContinuation03CanonicalRestored".to_string(),
+            output_node: "ServertoolReqHook01ResultParsed".to_string(),
+            effect_kind: "stopless_request_result_governance".to_string(),
+            enabled: true,
+        };
+
+        let projection = validate_servertool_hook_spec(&spec).expect("projection");
+        assert_eq!(
+            projection.input_node,
+            "ChatProcReqContinuation03CanonicalRestored"
+        );
+        assert_eq!(projection.output_node, "ServertoolReqHook01ResultParsed");
+    }
+
+    #[test]
+    fn request_result_parse_rejects_pre_restore_inbound_entry() {
+        let spec = ServertoolHookSpec {
+            id: "stop_message_auto".to_string(),
+            direction: ServertoolHookDirection::Request,
+            req_phase: Some(ServertoolReqHookPhase::ServertoolReqHook01ResultParsed),
+            resp_phase: None,
+            requiredness: ServertoolHookRequiredness::Required,
+            priority: 10,
+            order: 0,
+            owner_feature: "hub.servertool_stopless_cli_continuation".to_string(),
+            input_node: "HubReqInbound02Standardized".to_string(),
+            output_node: "ServertoolReqHook01ResultParsed".to_string(),
+            effect_kind: "stopless_request_result_governance".to_string(),
+            enabled: true,
+        };
+
+        let err = validate_servertool_hook_spec(&spec).expect_err("must fail");
+        assert_eq!(
+            err.to_string(),
+            "SERVERTOOL_HOOK_SKELETON_INVALID_FIELD: inputNode"
+        );
     }
 
     #[test]

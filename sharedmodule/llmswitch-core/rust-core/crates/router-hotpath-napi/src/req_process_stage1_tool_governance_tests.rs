@@ -896,7 +896,8 @@ fn test_req_process_prefers_metadata_center_snapshot_for_stop_message_injection(
     assert!(!instructions.contains("直接收尾"));
     assert!(!result.processed_request["tools"]
         .as_array()
-        .unwrap()
+        .cloned()
+        .unwrap_or_default()
         .iter()
         .any(|tool| {
             tool.get("function")
@@ -2363,8 +2364,8 @@ fn test_captured_tool_results_alone_no_longer_strip_reasoning_stop_controls() {
         .unwrap_or_default();
     let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
-        tool_names.contains("reasoningStop"),
-        "legacy captured tool results alone must not strip reasoningStop"
+        !tool_names.contains("reasoningStop"),
+        "provider request must not expose reasoningStop even when legacy captured tool results are ignored"
     );
 }
 

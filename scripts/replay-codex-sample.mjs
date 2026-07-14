@@ -161,24 +161,33 @@ export function stripReplayOnlyClientHeadersFromBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return body;
   }
-  const cloned = JSON.parse(JSON.stringify(body));
-  const metadata = cloned?.metadata;
+  const metadata = body.metadata;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return cloned;
+    return body;
   }
+  const nextMetadata = {};
+  let changed = false;
   for (const key of Object.keys(metadata)) {
     if (key === 'clientHeaders') {
-      delete metadata.clientHeaders;
+      changed = true;
       continue;
     }
     if (!CLIENT_REPLAY_METADATA_ALLOWLIST.has(key)) {
-      delete metadata[key];
+      changed = true;
+      continue;
     }
+    nextMetadata[key] = metadata[key];
   }
-  if (Object.keys(metadata).length === 0) {
-    delete cloned.metadata;
+  if (!changed) {
+    return body;
   }
-  return cloned;
+  const nextBody = { ...body };
+  if (Object.keys(nextMetadata).length === 0) {
+    delete nextBody.metadata;
+  } else {
+    nextBody.metadata = nextMetadata;
+  }
+  return nextBody;
 }
 
 function isProviderRequestShape(body) {
@@ -211,12 +220,11 @@ function normalizeResponsesContentBlock(role, value) {
   return null;
 }
 
-function buildReplayInputFromProviderRequest(body, endpoint) {
-  const cloned = JSON.parse(JSON.stringify(body));
+export function buildReplayInputFromProviderRequest(body, endpoint) {
   if (!endpoint.includes('/v1/responses')) {
-    return cloned;
+    return body;
   }
-  const messages = Array.isArray(cloned.messages) ? cloned.messages : [];
+  const messages = Array.isArray(body.messages) ? body.messages : [];
   const input = messages.map((message) => {
     const role = typeof message?.role === 'string' ? message.role : 'user';
     const content = Array.isArray(message?.content)
@@ -226,11 +234,11 @@ function buildReplayInputFromProviderRequest(body, endpoint) {
   }).filter((entry) => entry.content.length > 0);
 
   return {
-    model: cloned.model,
+    model: body.model,
     input,
-    ...(Array.isArray(cloned.tools) ? { tools: cloned.tools } : {}),
-    ...(cloned.metadata && typeof cloned.metadata === 'object' ? { metadata: cloned.metadata } : {}),
-    ...(cloned.stream === true ? { stream: true } : {})
+    ...(Array.isArray(body.tools) ? { tools: body.tools } : {}),
+    ...(body.metadata && typeof body.metadata === 'object' ? { metadata: body.metadata } : {}),
+    ...(body.stream === true ? { stream: true } : {})
   };
 }
 

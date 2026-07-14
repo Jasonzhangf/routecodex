@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -241,19 +241,25 @@ function normalizeProviderIdentifiers(body, providerId, sanitizedId) {
   return JSON.parse(json.split(sanitizedId).join(providerId));
 }
 
-function buildDerivedConfig(baseDoc, providerId, providerConfig, portOverride, overrideProviderId) {
-  const clone = JSON.parse(JSON.stringify(baseDoc));
+export function buildDerivedConfig(baseDoc, providerId, providerConfig, portOverride, overrideProviderId) {
   const providerKey = overrideProviderId ?? providerId;
-  const providerClone = JSON.parse(JSON.stringify(providerConfig));
-  providerClone.id = providerKey;
-  clone.virtualrouter.providers = { [providerKey]: providerClone };
   const model = pickModel(providerConfig);
   if (!model) throw new Error(`Provider ${providerId} missing models list`);
-  clone.virtualrouter.routing = { default: [`${providerKey}.${model}`] };
-  clone.httpserver = clone.httpserver || {};
-  clone.httpserver.host = '127.0.0.1';
-  clone.httpserver.port = portOverride;
-  return clone;
+  return {
+    ...baseDoc,
+    virtualrouter: {
+      ...baseDoc.virtualrouter,
+      providers: {
+        [providerKey]: { ...providerConfig, id: providerKey }
+      },
+      routing: { default: [`${providerKey}.${model}`] }
+    },
+    httpserver: {
+      ...baseDoc.httpserver,
+      host: '127.0.0.1',
+      port: portOverride
+    }
+  };
 }
 
 async function waitForHealth(port, timeoutMs = 20000) {
@@ -560,7 +566,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[capture] failed:', error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error('[capture] failed:', error);
+    process.exit(1);
+  });
+}

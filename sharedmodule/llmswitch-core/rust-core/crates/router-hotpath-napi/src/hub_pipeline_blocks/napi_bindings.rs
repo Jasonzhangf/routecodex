@@ -1,8 +1,6 @@
 use serde_json::Value;
 
-use super::protocol::{
-    resolve_hub_client_protocol, resolve_provider_protocol_from_metadata_snapshot,
-};
+use super::protocol::resolve_provider_protocol_from_metadata_snapshot;
 
 fn as_object_map(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
     value.and_then(Value::as_object)
@@ -79,21 +77,19 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
                 .cloned()
         });
     let explicit_provider_protocol = read_trimmed_string(row.get("providerProtocol"));
-    let flat_metadata_provider_protocol = read_trimmed_string(metadata.get("providerProtocol"));
     let snapshot_provider_protocol =
         read_snapshot_provider_protocol(metadata_center_snapshot.as_ref());
     let provider_protocol = if direction == "response" {
-        snapshot_provider_protocol
-            .or(explicit_provider_protocol)
-            .or(flat_metadata_provider_protocol)
-            .ok_or_else(|| {
-                "Rust HubPipeline materialized request plan missing providerProtocol".to_string()
-            })?
+        snapshot_provider_protocol.ok_or_else(|| {
+            "Rust HubPipeline materialized request plan missing providerProtocol".to_string()
+        })?
     } else {
-        explicit_provider_protocol
-            .or(flat_metadata_provider_protocol)
-            .unwrap_or_else(|| resolve_hub_client_protocol(&entry_endpoint))
+        explicit_provider_protocol.ok_or_else(|| {
+            "Rust HubPipeline materialized request plan missing explicit client protocol"
+                .to_string()
+        })?
     };
+    let retry_exclusion_set = normalize_retry_exclusion_set(row.get("retryExclusionSet"))?;
     let stage = match read_trimmed_lower_string(metadata.get("stage")).as_deref() {
         Some("outbound") => "outbound",
         _ => "inbound",
@@ -128,10 +124,6 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
         "entryEndpoint".to_string(),
         Value::String(entry_endpoint.clone()),
     );
-    output_metadata.insert(
-        "providerProtocol".to_string(),
-        Value::String(provider_protocol.clone()),
-    );
     output_metadata.insert("stream".to_string(), Value::Bool(stream));
     output_metadata.insert("processMode".to_string(), Value::String("chat".to_string()));
     output_metadata.insert(
@@ -160,6 +152,9 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     );
     output.insert("stage".to_string(), Value::String(stage.to_string()));
     output.insert("stream".to_string(), Value::Bool(stream));
+    if let Some(retry_exclusion_set) = retry_exclusion_set {
+        output.insert("retryExclusionSet".to_string(), retry_exclusion_set);
+    }
     output.insert(
         "disableSnapshots".to_string(),
         Value::Bool(disable_snapshots),
@@ -180,19 +175,36 @@ pub fn build_hub_pipeline_materialized_request_plan(input: &Value) -> Result<Val
     Ok(Value::Object(output))
 }
 
-fn normalize_string_array(value: Option<&Value>) -> Option<Value> {
-    let array = value?.as_array()?;
-    let normalized: Vec<Value> = array
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| Value::String(value.to_string()))
-        .collect();
+fn normalize_retry_exclusion_set(value: Option<&Value>) -> Result<Option<Value>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let array = value
+        .as_array()
+        .ok_or_else(|| "Rust retryExclusionSet must be an array".to_string())?;
+    let mut normalized = Vec::with_capacity(array.len());
+    for entry in array {
+        let provider_key = entry
+            .as_str()
+            .map(str::trim)
+            .filter(|provider_key| !provider_key.is_empty())
+            .ok_or_else(|| {
+                "Rust retryExclusionSet entries must be non-empty strings".to_string()
+            })?;
+        if normalized
+            .iter()
+            .any(|existing: &Value| existing.as_str() == Some(provider_key))
+        {
+            return Err(format!(
+                "Rust retryExclusionSet contains duplicate provider key: {provider_key}"
+            ));
+        }
+        normalized.push(Value::String(provider_key.to_string()));
+    }
     if normalized.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(Value::Array(normalized))
+        Ok(Some(Value::Array(normalized)))
     }
 }
 
@@ -248,14 +260,16 @@ pub fn build_request_stage_metadata_dispatch(input: &Value) -> Result<Value, Str
             Value::Object(snapshot_runtime_control),
         );
     }
-    if let Some(excluded_provider_keys) = normalize_string_array(row.get("excludedProviderKeys")) {
-        snapshot.insert("excludedProviderKeys".to_string(), excluded_provider_keys);
-    }
+    let retry_exclusion_set = normalize_retry_exclusion_set(row.get("retryExclusionSet"))?;
 
-    Ok(serde_json::json!({
+    let mut output = serde_json::json!({
         "metadata": Value::Object(metadata_base),
         "metadataCenterSnapshot": if snapshot.is_empty() { Value::Null } else { Value::Object(snapshot) }
-    }))
+    });
+    if let Some(retry_exclusion_set) = retry_exclusion_set {
+        output["retryExclusionSet"] = retry_exclusion_set;
+    }
+    Ok(output)
 }
 
 fn optional_non_empty_object(value: Option<&Value>) -> Option<Value> {
@@ -503,8 +517,7 @@ mod responses_direct_route_decision_tests {
                 "runtime_control": {
                     "preselectedRoute": { "target": "payload" },
                     "retryProviderKey": "payload.retry"
-                },
-                "excludedProviderKeys": [" provider.a ", "", 9, "provider.b"]
+                }
             },
             "requestTruth": { "sessionId": "sess-1" },
             "continuationContext": { "responsesResume": { "responseId": "resp-1" } },
@@ -512,12 +525,13 @@ mod responses_direct_route_decision_tests {
                 "retryProviderKey": "center.retry"
             },
             "providerProtocol": " openai-responses ",
-            "excludedProviderKeys": [" provider.a ", "", 9, "provider.b"]
+            "retryExclusionSet": [" provider.a ", "provider.b"]
         }))
         .unwrap();
 
         assert!(output["metadata"].get("__rt").is_none());
         assert!(output["metadata"].get("__metadataCenter").is_none());
+        assert!(output["metadata"].get("excludedProviderKeys").is_none());
         assert_eq!(
             output["metadata"]["runtime_control"]["preselectedRoute"],
             serde_json::json!({ "target": "payload" })
@@ -534,9 +548,12 @@ mod responses_direct_route_decision_tests {
                 "runtimeControl": {
                     "retryProviderKey": "center.retry",
                     "providerProtocol": "openai-responses"
-                },
-                "excludedProviderKeys": ["provider.a", "provider.b"]
+                }
             })
+        );
+        assert_eq!(
+            output["retryExclusionSet"],
+            serde_json::json!(["provider.a", "provider.b"])
         );
     }
 
@@ -544,9 +561,14 @@ mod responses_direct_route_decision_tests {
     fn builds_hub_pipeline_materialized_request_plan_in_rust() {
         let output = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
             "endpoint": "/v1/chat/completions",
-            "providerProtocol": "openai-responses",
+            "providerProtocol": "openai-chat",
             "payloadStream": false,
             "payload": { "stream": true },
+            "metadataCenterSnapshot": {
+                "runtimeControl": {
+                    "providerProtocol": "openai-responses"
+                }
+            },
             "metadata": {
                 "endpoint": " /v1/responses ",
                 "entryEndpoint": " /v1/responses ",
@@ -589,10 +611,10 @@ mod responses_direct_route_decision_tests {
     }
 
     #[test]
-    fn materialized_request_plan_derives_request_protocol_from_entry_endpoint_before_route_selection(
-    ) {
+    fn materialized_request_plan_preserves_explicit_request_protocol() {
         let output = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
             "endpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
             "payloadStream": false,
             "payload": { "model": "gpt-test" },
             "metadata": {
@@ -607,10 +629,43 @@ mod responses_direct_route_decision_tests {
             output["providerProtocol"],
             serde_json::json!("openai-responses")
         );
-        assert_eq!(
-            output["metadata"]["providerProtocol"],
-            serde_json::json!("openai-responses")
-        );
+        assert!(output["metadata"].get("providerProtocol").is_none());
+    }
+
+    #[test]
+    fn materialized_request_plan_rejects_endpoint_only_client_protocol() {
+        let error = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
+            "endpoint": "/v1/responses",
+            "payloadStream": false,
+            "payload": { "model": "gpt-test" },
+            "metadata": {
+                "entryEndpoint": "/v1/responses",
+                "direction": "request",
+                "stage": "inbound"
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("missing explicit client protocol"));
+    }
+
+    #[test]
+    fn materialized_request_plan_rejects_malformed_retry_exclusion_set() {
+        let error = build_hub_pipeline_materialized_request_plan(&serde_json::json!({
+            "endpoint": "/v1/responses",
+            "providerProtocol": "openai-responses",
+            "retryExclusionSet": ["provider.a", ""],
+            "payloadStream": false,
+            "payload": { "model": "gpt-test" },
+            "metadata": {
+                "entryEndpoint": "/v1/responses",
+                "direction": "request",
+                "stage": "inbound"
+            }
+        }))
+        .unwrap_err();
+
+        assert!(error.contains("entries must be non-empty strings"));
     }
 
     #[test]

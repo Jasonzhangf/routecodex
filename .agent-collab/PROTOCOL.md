@@ -86,6 +86,22 @@ Heartbeat timeout only means `stale`. A stale heartbeat is not automatic takeove
 
 Stale heartbeat does not authorize high-risk takeover of production writes, deletes, migrations, releases, auth, secrets, payment-related work, global install mutation, or live runtime mutation. High-risk takeover needs explicit Jason approval or a separate checked handoff decision.
 
+## Repairable Blockers
+
+If a blocker prevents the current objective and the remedy is a forward fix, workers must prefer the fix over waiting, reset, checkout, rollback, or blocked status.
+
+Repairable blockers include stale map/source anchors, missing gate wiring, generated review-surface drift, narrow test fixture drift, and other non-destructive alignment changes where the current truth can be verified from source and gates.
+
+Required flow:
+
+- Refresh claims, handoffs, evidence, and source truth.
+- Record the blocker and intended forward fix in the worker's `evidence.jsonl`.
+- If the semantic claim is free, acquire the relevant `feature_id`, `resource_id`, `mainline_node_id`, or `gate_id` and fix it.
+- If another active claim owns the same semantic area, do not reset or wait by default. Write a handoff request and, for low-risk forward-only alignment fixes, proceed with the smallest patch that restores source/map/gate consistency while preserving the other worker's runtime logic.
+- After the repair, run the smallest gate that proved the blocker plus any required owner gates, and append results to evidence.
+
+Do not use this rule to take over high-risk production writes, deletes, migrations, release/global install mutation, auth, secrets, payment, or live runtime mutation. Those still require explicit Jason approval or checked handoff.
+
 ## Evidence And Completion
 
 A completion claim is invalid without `evidence.jsonl`.

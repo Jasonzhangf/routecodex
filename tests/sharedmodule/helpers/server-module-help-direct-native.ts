@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-const nodeRequire = createRequire(__filename);
+const nodeRequire = createRequire(import.meta.url);
 const nativeBinding = nodeRequire(
   path.resolve(process.cwd(), 'sharedmodule/llmswitch-core/dist/native/router_hotpath_napi.node')
 ) as Record<string, unknown>;

@@ -106,9 +106,12 @@ const createNativeHostFunctionMocks = () => ({
     validateCanonicalClientToolCallJson: jest.fn(() => JSON.stringify({ ok: true }))
   })),
   extractSessionIdentifiersFromMetadataNative: jest.fn(() => ({})),
+  buildChoicesArrayBridgeDebugDetailsWithNative: jest.fn((input: Record<string, unknown>) => input),
+  buildProviderResponseTimingBreakdownWithNative: jest.fn((input: Record<string, unknown>) => input),
   hasRequestedToolsInSemanticsNative: jest.fn(() => false),
   isProviderNativeResumeContinuationNative: jest.fn(() => false),
   isRequiredToolCallTurnNative: jest.fn(() => false),
+  isToolCallContinuationResponseNative: jest.fn(() => false),
   isToolResultFollowupTurnNative: jest.fn(() => false),
   mergeObservedRoutePoolChainNative: jest.fn((current: unknown, explicit: unknown) => {
     const currentList = Array.isArray(current) ? current : [];
@@ -195,7 +198,21 @@ const mockRouteAvailabilityHostModule = () => ({
 });
 
 const mockErrorExecutionDecisionHostModule = () => ({
+  classifyErrorErr02HostCapturedNative: jest.fn(() => ({
+    clientDisconnect: false,
+    networkTransportLike: false,
+  })),
   isRateLimitLikeErrorNative: jest.fn(() => false),
+  resolveErrorErr05ExecutionDecisionNative: jest.fn(() => ({
+    shouldRetry: false,
+    excludedCurrentProvider: false,
+    allowRetryBeyondAttemptBudget: false,
+    routePoolRemainingAfterExclusion: [],
+    defaultPoolAvailable: true,
+    policyExhausted: false,
+    mayProject: false,
+    excludedProviderKeys: [],
+  })),
   resolveErrorErr05RouteAvailabilityDecisionNative:
     mockNativeBridgeFunctions.resolveErrorErr05RouteAvailabilityDecisionNative,
   resolveProviderRetryExecutionPolicyNative:
@@ -206,6 +223,10 @@ const mockProviderResponseConverterHostModule = () => ({
   asFlatRecord: jest.fn(asRecordOrUndefined),
   containsBroadKillCommand: jest.fn(() => false),
   convertProviderResponse: jest.fn(async (args: { response?: unknown; body?: unknown }) => args.response ?? args.body ?? {}),
+  buildChoicesArrayBridgeDebugDetailsWithNative:
+    mockNativeBridgeFunctions.buildChoicesArrayBridgeDebugDetailsWithNative,
+  buildProviderResponseTimingBreakdownWithNative:
+    mockNativeBridgeFunctions.buildProviderResponseTimingBreakdownWithNative,
   detectRetryableEmptyAssistantResponseNative:
     mockNativeBridgeFunctions.detectRetryableEmptyAssistantResponseNative,
   detectToolExecutionFailuresNative:
@@ -225,6 +246,7 @@ const mockProviderResponseConverterHostModule = () => ({
     mockNativeBridgeFunctions.isProviderNativeResumeContinuationNative,
   isRequiredToolCallTurnNative: mockNativeBridgeFunctions.isRequiredToolCallTurnNative,
   isRetryableNetworkSseWrapperError: jest.fn(() => false),
+  shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative: jest.fn(() => false),
   isToolCallContinuationResponseNative:
     mockNativeBridgeFunctions.isToolCallContinuationResponseNative,
   isToolResultFollowupTurnNative:
@@ -678,6 +700,34 @@ describe('request-executor metadata center contract', () => {
     });
   });
 
+  it('captures valid Responses string input without requiring a debug context snapshot', () => {
+    const metadata: Record<string, unknown> = {
+      routecodexRoutingPolicyGroup: 'gateway_priority_5555',
+      portScope: '5555'
+    };
+    const input = 'continue';
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses',
+        requestId: 'req_string_input_capture_1',
+        body: {
+          model: 'gpt-5.5',
+          input
+        }
+      },
+      metadata,
+      providerKey: 'provider.key.model'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'req_string_input_capture_1',
+      context: { input },
+      providerKey: 'provider.key.model',
+      entryKind: 'responses'
+    });
+  });
+
   it('preserves raw Responses request body in executor metadata before Hub rewrites provider payload', () => {
     const inputBody = {
       model: 'gpt-5.5',
@@ -790,6 +840,88 @@ describe('request-executor metadata center contract', () => {
       entryKind: 'responses',
       routingPolicyGroup: 'gateway_priority_5555'
     });
+  });
+
+  it('captures materialized submit_tool_outputs payload instead of replacing it with the raw HTTP body', () => {
+    const materializedInput = [
+      { type: 'function_call', id: 'fc_stopless_1', call_id: 'call_stopless_1', name: 'exec_command', arguments: '{}' },
+      { type: 'function_call_output', id: 'fco_stopless_1', call_id: 'call_stopless_1', output: '{"ok":true}' }
+    ];
+    const materializedTools = [{ type: 'function', name: 'exec_command' }];
+    const metadata: Record<string, unknown> = {
+      __raw_request_body: {
+        tool_outputs: [{
+          tool_call_id: 'call_stopless_1',
+          output: '{"ok":true}'
+        }]
+      },
+      contextSnapshot: {
+        input: materializedInput,
+        toolsRaw: materializedTools
+      }
+    };
+    MetadataCenter.attach(metadata).writeContinuationContext(
+      'responsesResume',
+      {
+        continuationOwner: 'relay',
+        responseId: 'resp_stopless_1'
+      },
+      {
+        module: 'test',
+        symbol: 'captures materialized submit_tool_outputs payload instead of replacing it with the raw HTTP body',
+        stage: 'test'
+      },
+      'test relay continuation restore'
+    );
+
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/responses.submit_tool_outputs',
+        requestId: 'req_stopless_submit_capture_1',
+        body: {
+          model: 'gpt-5.5',
+          input: materializedInput,
+          tools: materializedTools,
+          previous_response_id: 'resp_stopless_1'
+        }
+      },
+      metadata,
+      providerKey: 'orangeai.key1.gpt-5.5'
+    });
+
+    expect(args).toMatchObject({
+      requestId: 'req_stopless_submit_capture_1',
+      payload: expect.objectContaining({
+        model: 'gpt-5.5',
+        previous_response_id: 'resp_stopless_1'
+      }),
+      context: metadata.contextSnapshot,
+      providerKey: 'orangeai.key1.gpt-5.5',
+      entryKind: 'responses'
+    });
+    expect(args?.payload).not.toHaveProperty('tool_outputs');
+  });
+
+  it('does not capture continuation state for non-Responses entrypoints', () => {
+    const args = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry({
+      input: {
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req_chat_no_responses_capture_1',
+        body: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'hi' }]
+        }
+      },
+      metadata: {
+        __raw_request_body: {
+          model: 'gpt-5.5',
+          messages: [{ role: 'user', content: 'hi' }]
+        }
+      },
+      providerKey: 'orangeai.key1.gpt-5.5'
+    });
+
+    expect(args).toBeNull();
   });
 
   it('fails before provider send when Responses raw entry payload is already missing after provider wire rewrite', () => {

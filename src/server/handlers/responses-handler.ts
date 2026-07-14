@@ -23,7 +23,6 @@ import {
   buildResponsesPipelineMetadataForHttp,
   captureResponsesInboundToolHistoryErrorsampleForHttp,
   clearResponsesConversationOnHandlerFailureForHttp,
-  finalizeResponsesPipelineResultForHttp,
   planResponsesHandlerStreamForHttp,
   prepareResponsesRequestBodyForHttp,
   prepareResponsesHandlerRuntimeForHttp,
@@ -422,56 +421,6 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
-    const finalizeRouteHint = (() => {
-      const md = isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined;
-      if (md) {
-        if (typeof md.routeName === 'string' && md.routeName.trim()) return md.routeName.trim();
-        const usage = md.usageLogInfo;
-        if (usage && typeof usage === 'object' && typeof (usage as Record<string, unknown>).routeName === 'string'
-          && ((usage as Record<string, unknown>).routeName as string).trim()) {
-          return ((usage as Record<string, unknown>).routeName as string).trim();
-        }
-      }
-      const usageTop = (result as { usageLogInfo?: { routeName?: unknown } }).usageLogInfo;
-      if (usageTop && typeof usageTop.routeName === 'string' && usageTop.routeName.trim()) {
-        return usageTop.routeName.trim();
-      }
-      return undefined;
-    })();
-    const finalizeProviderKey = (() => {
-      if (typeof resumeMeta?.providerKey === 'string' && resumeMeta.providerKey.trim()) {
-        return resumeMeta.providerKey.trim();
-      }
-      const usageTop = (result as { usageLogInfo?: { providerKey?: unknown } }).usageLogInfo;
-      if (usageTop && typeof usageTop.providerKey === 'string' && usageTop.providerKey.trim()) {
-        return usageTop.providerKey.trim();
-      }
-      const md = isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined;
-      if (md && typeof md.providerKey === 'string' && md.providerKey.trim()) {
-        return md.providerKey.trim();
-      }
-      return undefined;
-    })();
-    const finalizeRequestId = (() => {
-      const usageTop = (result as { usageLogInfo?: { inputRequestId?: unknown; providerRequestId?: unknown } }).usageLogInfo;
-      if (typeof usageTop?.inputRequestId === 'string' && usageTop.inputRequestId.trim()) {
-        return usageTop.inputRequestId.trim();
-      }
-      if (typeof usageTop?.providerRequestId === 'string' && usageTop.providerRequestId.trim()) {
-        return usageTop.providerRequestId.trim();
-      }
-      return effectiveRequestId;
-    })();
-    result.metadata = await finalizeResponsesPipelineResultForHttp({
-      entryEndpoint: pipelineEntryEndpoint,
-      requestId: finalizeRequestId,
-      body: result.body,
-      resultMetadata: isRecord(result.metadata) ? result.metadata as Record<string, unknown> : undefined,
-      requestContext,
-      providerKey: finalizeProviderKey,
-      ...(finalizeRouteHint ? { routeHint: finalizeRouteHint } : {}),
-      continuationOwner: result.continuationOwner
-    });
     if (result.sseStream === undefined) {
       logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
         preserveTimingForUsage: true

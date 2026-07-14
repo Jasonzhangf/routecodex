@@ -7,6 +7,7 @@ import {
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
+  getSystemPromptOverride: jest.fn(() => null),
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
@@ -56,34 +57,8 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  }) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message:
-          typeof args.message === 'string' && args.message.trim()
-            ? args.message
-            : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code:
-          typeof args.code === 'string' && args.code.trim()
-            ? args.code
-            : 'responses_resume_failed',
-        origin:
-          typeof args.origin === 'string' && args.origin.trim()
-            ? args.origin
-            : 'client',
-      },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
-    (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
-  ),
+  planResponsesResumeErrorForHttpNative: jest.fn(() => ({ action: 'rethrow' })),
+  planResponsesInboundToolHistoryErrorsampleForHttpNative: jest.fn(() => ({ action: 'none' })),
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),
@@ -118,10 +93,6 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
   }),
 }));
 
-jest.unstable_mockModule('../../../../src/server/utils/finish-reason.js', () => ({
-  deriveFinishReason: jest.fn(() => 'stop'),
-}));
-
 jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
   writeErrorsampleJson: jest.fn(),
 }));
@@ -129,10 +100,8 @@ jest.unstable_mockModule('../../../../src/utils/errorsamples.js', () => ({
 let buildResponsesPipelineMetadataForHttp: any;
 let planResponsesHandlerStreamForHttp: any;
 let buildResponsesConversationPortScopeForHttp: any;
-let finalizeResponsesPipelineResultForHttp: any;
 let MetadataCenter: any;
 let readRuntimeControlProjection: any;
-let runtimeIntegrations: any;
 let responsesRequestHandlerHost: any;
 
 beforeAll(async () => {
@@ -140,9 +109,7 @@ beforeAll(async () => {
     buildResponsesPipelineMetadataForHttp,
     planResponsesHandlerStreamForHttp,
     buildResponsesConversationPortScopeForHttp,
-    finalizeResponsesPipelineResultForHttp
   } = await import('../../../../src/modules/llmswitch/bridge/responses-request-bridge.js'));
-  runtimeIntegrations = await import('../../../../src/modules/llmswitch/bridge/runtime-integrations.js');
   responsesRequestHandlerHost = await import(
     '../../../../src/modules/llmswitch/bridge/responses-request-handler-host.js'
   );
@@ -256,66 +223,6 @@ describe('responses-request-bridge metadata center projection', () => {
       streamIntent: 'stream',
       clientAbort: false
     });
-  });
-
-  it('does not write response-side request context attachment into metadata center during finalize', async () => {
-    runtimeIntegrations.captureResponsesRequestContextForRequest.mockClear();
-    runtimeIntegrations.recordResponsesResponseForRequest.mockClear();
-    const requestContext = {
-      payload: { model: 'gpt-5.4', input: [] },
-      context: { input: [] },
-      sessionId: 'sess-resp-2',
-      conversationId: 'conv-resp-2'
-    };
-
-    const nextMetadata = await finalizeResponsesPipelineResultForHttp({
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-no-context-attach',
-      body: { id: 'resp-no-context-attach', status: 'completed' },
-      resultMetadata: {},
-      requestContext
-    });
-
-    const center = MetadataCenter.read(nextMetadata);
-    expect(center).toBeUndefined();
-    expect(nextMetadata?.responsesRequestContext).toBeUndefined();
-    expect(runtimeIntegrations.captureResponsesRequestContextForRequest).not.toHaveBeenCalled();
-    expect(runtimeIntegrations.recordResponsesResponseForRequest).not.toHaveBeenCalled();
-  });
-
-  it('does not let handler finalize overwrite router-direct continuation state', async () => {
-    runtimeIntegrations.captureResponsesRequestContextForRequest.mockClear();
-    runtimeIntegrations.recordResponsesResponseForRequest.mockClear();
-    const requestContext = {
-      payload: { model: 'gpt-5.4', input: [] },
-      context: { input: [] },
-      sessionId: 'sess-direct-finalize',
-      matchedPort: 5555,
-      routingPolicyGroup: 'gateway_priority_5555'
-    };
-
-    await finalizeResponsesPipelineResultForHttp({
-      entryEndpoint: '/v1/responses',
-      requestId: 'req-direct-finalize',
-      body: {
-        id: 'resp-direct-finalize',
-        output: [
-          {
-            type: 'function_call',
-            call_id: 'call_direct_finalize',
-            name: 'lookup',
-            arguments: '{}'
-          }
-        ]
-      },
-      resultMetadata: {},
-      requestContext,
-      providerKey: 'p1.key1',
-      continuationOwner: 'direct'
-    });
-
-    expect(runtimeIntegrations.captureResponsesRequestContextForRequest).not.toHaveBeenCalled();
-    expect(runtimeIntegrations.recordResponsesResponseForRequest).not.toHaveBeenCalled();
   });
 
   it('relay submit_tool_outputs pipeline metadata must not carry route pin in continuation context', () => {

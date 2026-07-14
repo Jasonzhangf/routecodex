@@ -18,10 +18,6 @@ const nativeReqOutboundUrl = pathToFileURL(
   )
 ).href;
 
-function stableJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 async function importFresh(url, tag) {
   return import(`${url}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 }
@@ -102,7 +98,7 @@ async function main() {
     adapterContext
   });
 
-  assert.deepEqual(stableJson(nativeResult), stableJson(tsResult));
+  assert.deepEqual(nativeResult, tsResult);
 
   const minimalStd = {
     model: 'qwen3.5-plus',
@@ -115,7 +111,7 @@ async function main() {
     request: minimalStd,
     adapterContext: { requestId: 'r2' }
   });
-  assert.deepEqual(stableJson(nativeResult2), stableJson(tsResult2));
+  assert.deepEqual(nativeResult2, tsResult2);
 
   console.log('ok');
 }

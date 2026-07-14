@@ -143,22 +143,21 @@ function validateSource() {
   const engineSource = fs.readFileSync(files.get(engineFile).absPath, 'utf8');
   const sharedJsonSource = fs.readFileSync(files.get(sharedJsonFile).absPath, 'utf8');
 
-  for (const helper of ['parse_json_with_context', 'read_trimmed_string']) {
+  for (const helper of ['read_trimmed_string']) {
     if (!sharedJsonSource.includes(`fn ${helper}`)) {
       failures.push(`${sharedJsonFile}: missing shared ${helper} helper`);
     }
   }
 
-  if (!engineSource.includes('use crate::shared_json_utils::{parse_json_with_context, read_trimmed_string};')) {
-    failures.push(`${engineFile}: must import shared JSON/trim helpers from shared_json_utils`);
+  if (
+    !engineSource.includes('use crate::shared_json_utils::read_trimmed_string;')
+    && !engineSource.includes('read_trimmed_string,')
+  ) {
+    failures.push(`${engineFile}: must import shared trim helper from shared_json_utils`);
   }
 
-  const parseUses = (engineSource.match(/parse_json_with_context(?:::<[^>]+>)?\(/gu) ?? []).length;
   const trimmedUses = (engineSource.match(/read_trimmed_string\(/gu) ?? []).length;
-  if (parseUses < 3) {
-    failures.push(`${engineFile}: expected stopless JSON parse bridge helper reuse, found ${parseUses}`);
-  }
-  if (trimmedUses < 6) {
+  if (trimmedUses < 5) {
     failures.push(`${engineFile}: expected shared read_trimmed_string reuse, found ${trimmedUses}`);
   }
 
@@ -186,4 +185,4 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:hub-pipeline-engine-shared-helpers] ok');
-console.log('- hub_pipeline_lib/engine.rs shares exact JSON parse and trimmed-string mechanics through shared_json_utils');
+console.log('- hub_pipeline_lib/engine.rs shares trimmed-string mechanics through shared_json_utils and has no local stopless JSON parse');

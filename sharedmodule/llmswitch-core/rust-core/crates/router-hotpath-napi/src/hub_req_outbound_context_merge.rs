@@ -225,6 +225,13 @@ pub fn apply_req_outbound_context_snapshot(
 ) -> ReqOutboundContextSnapshotApplyOutput {
     let chat_envelope = input.chat_envelope.as_ref().unwrap_or(&Value::Null);
     let snapshot = input.snapshot.as_ref().unwrap_or(&Value::Null);
+    apply_req_outbound_context_snapshot_from_refs(chat_envelope, snapshot)
+}
+
+pub fn apply_req_outbound_context_snapshot_from_refs(
+    chat_envelope: &Value,
+    snapshot: &Value,
+) -> ReqOutboundContextSnapshotApplyOutput {
     let existing_tool_outputs = resolve_existing_tool_outputs_from_chat_envelope(chat_envelope);
     let has_existing_tools = resolve_has_existing_tools_from_chat_envelope(chat_envelope);
 
@@ -238,5 +245,42 @@ pub fn apply_req_outbound_context_snapshot(
     ReqOutboundContextSnapshotApplyOutput {
         tool_outputs,
         tools,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn borrowed_context_snapshot_apply_matches_owned_wrapper() {
+        let chat_envelope = json!({
+            "toolOutputs": [{"tool_call_id": "call_existing", "content": "old"}],
+            "tools": []
+        });
+        let snapshot = json!({
+            "tool_outputs": [
+                {"tool_call_id": "call_existing", "output": "duplicate"},
+                {"tool_call_id": "call_new", "output": {"ok": true}}
+            ],
+            "toolsNormalized": [{
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "parameters": {"type": "object", "properties": {}}
+                }
+            }]
+        });
+        let owned = apply_req_outbound_context_snapshot(&ReqOutboundContextSnapshotApplyInput {
+            chat_envelope: Some(chat_envelope.clone()),
+            snapshot: Some(snapshot.clone()),
+        });
+        let borrowed = apply_req_outbound_context_snapshot_from_refs(&chat_envelope, &snapshot);
+
+        assert_eq!(
+            serde_json::to_value(borrowed).unwrap(),
+            serde_json::to_value(owned).unwrap()
+        );
     }
 }

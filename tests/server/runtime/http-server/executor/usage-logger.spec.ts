@@ -207,12 +207,13 @@ describe('usage logger timing summary', () => {
       logSessionColorKey: 'usage-vr-same-session'
     });
     const routerHitLine = colorizeVirtualRouterHitLogLine(
-      `${routeColor}[virtual-router-hit]\x1b[0m \x1b[90m16:21:36\x1b[0m req=${requestId} ${routeColor}longcontext/gateway-priority-5555-priority-longcontext -> orangeai[key1].glm-5.2 reason=longcontext:token-threshold\x1b[0m`
+      `${routeColor}[virtual-router-hit]\x1b[0m \x1b[90m16:21:36\x1b[0m req=${requestId} ${routeColor}longcontext -> orangeai[key1].glm-5.2 reason=longcontext:token-threshold\x1b[0m`
     );
     expect(expectedColor).toBeDefined();
     expect(routerHitLine.startsWith(String(expectedColor))).toBe(true);
     expect(routerHitLine.startsWith(routeColor)).toBe(false);
-    expect(routerHitLine.replace(/\u001b\[[0-9;]*m/g, '')).toContain('longcontext/gateway-priority-5555-priority-longcontext');
+    expect(routerHitLine.replace(/\u001b\[[0-9;]*m/g, '')).toContain('longcontext -> orangeai[key1].glm-5.2');
+    expect(routerHitLine.replace(/\u001b\[[0-9;]*m/g, '')).not.toContain('gateway-priority-5555-priority-longcontext');
 
     logUsageSummary(requestId, {
       providerKey: 'orangeai.key1',
@@ -819,7 +820,8 @@ describe('usage logger timing summary', () => {
     expect(lines.some((line) => line.includes('req=req_rollup_1'))).toBe(true);
     expect(lines.some((line) => line.includes('req=req_rollup_2'))).toBe(true);
     expect(lines.some((line) => line.includes('[usage][1m]'))).toBe(true);
-    expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(true);
+    expect(lines.some((line) => line.includes('default'))).toBe(true);
+    expect(lines.some((line) => line.includes('default/tools-primary'))).toBe(false);
     expect(lines.some((line) => line.includes('provider=provider-a.1.model-a'))).toBe(true);
     expect(lines.some((line) => line.includes('calls=2'))).toBe(true);
     expect(lines.some((line) => line.includes('avg.total=1100ms'))).toBe(true);

@@ -14,6 +14,7 @@ node_ids:
   - HubRespInbound02Parsed
   - OpenAiChatCanonical
   - ResponsesContinuationStore
+  - ResponsesRequestInbound
   - ServertoolOutcome
 step_ids:
   - stage-a-p0-01
@@ -21,11 +22,12 @@ step_ids:
   - stage-a-p0-03
   - stage-a-p0-04
   - stage-a-p0-05
+  - stage-a-p0-06
 edge_status_counts:
-  anchored: 5
+  anchored: 6
   partial: 0
   binding_pending: 0
-  total: 5
+  total: 6
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

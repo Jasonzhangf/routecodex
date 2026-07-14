@@ -65,14 +65,6 @@ export function shouldCaptureVisionDebug(
   };
 }
 
-function safeClone<T>(value: T): T | undefined {
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch {
-    return undefined;
-  }
-}
-
 function pickMessages(source?: UnknownObject): unknown[] | undefined {
   if (!source || typeof source !== 'object') {
     return undefined;
@@ -137,21 +129,17 @@ export function summarizeVisionMessages(source?: UnknownObject): string {
   return tokens.join(' | ');
 }
 
+// feature_id: debug.vision_snapshot_payload_copy_budget
 export function buildVisionSnapshotPayload(
   payload: UnknownObject,
   extras?: Record<string, unknown>
 ): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {
-    summary: summarizeVisionMessages(payload)
+    summary: summarizeVisionMessages(payload),
+    payload
   };
-  const cloned = safeClone(payload);
-  if (cloned !== undefined) {
-    snapshot.payload = cloned;
-  } else {
-    snapshot.payloadError = 'unserializable';
-  }
   if (extras) {
-    snapshot.extras = safeClone(extras) ?? extras;
+    snapshot.extras = extras;
   }
   return snapshot;
 }

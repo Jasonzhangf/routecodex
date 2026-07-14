@@ -6,8 +6,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-reques
   captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
   clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
   clearResponsesConversationByRequestIdForHttp: jest.fn(),
-  captureResponsesRequestContextForHttp: jest.fn(),
-  recordResponsesResponseForHttp: jest.fn(),
   finalizeResponsesHandlerPayloadForHttp: jest.fn((args: { payload: Record<string, unknown> }) => args.payload),
   prepareResponsesHandlerEntryForHttp: jest.fn(),
   buildResponsesScopeContinuationExpiredErrorForHttp: jest.fn(() => ({
@@ -17,12 +15,6 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge/responses-reques
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttp: jest.fn(() => ({
-    status: 422,
-    body: { error: { message: 'Unable to resume Responses conversation' } },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttp: jest.fn(() => true),
-  finalizeResponsesPipelineResultForHttp: jest.fn((args: { result: unknown }) => args.result),
   planResponsesHandlerStreamForHttp: jest.fn(() => ({
     originalStream: false,
     outboundStream: false,

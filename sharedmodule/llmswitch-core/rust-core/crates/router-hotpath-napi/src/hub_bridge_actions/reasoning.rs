@@ -354,16 +354,26 @@ fn extract_output_segments(source: &Value, items_key: &str) -> (Vec<String>, Vec
 pub(crate) fn apply_bridge_responses_output_reasoning(
     input: ApplyBridgeResponsesOutputReasoningInput,
 ) -> ApplyBridgeResponsesOutputReasoningOutput {
-    let mut messages = input.messages;
-    let id_prefix = input
-        .id_prefix
+    apply_bridge_responses_output_reasoning_borrowed(
+        input.messages,
+        input.raw_response.as_ref(),
+        input.id_prefix,
+    )
+}
+
+pub(crate) fn apply_bridge_responses_output_reasoning_borrowed(
+    mut messages: Vec<Value>,
+    raw_response: Option<&Value>,
+    id_prefix: Option<String>,
+) -> ApplyBridgeResponsesOutputReasoningOutput {
+    let id_prefix = id_prefix
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "responses_response_output".to_string());
-    let Some(raw_response) = input.raw_response else {
+    let Some(raw_response) = raw_response else {
         return ApplyBridgeResponsesOutputReasoningOutput { messages };
     };
-    let (text_parts, reasoning_parts) = extract_output_segments(&raw_response, "output");
+    let (text_parts, reasoning_parts) = extract_output_segments(raw_response, "output");
     if text_parts.is_empty() && reasoning_parts.is_empty() {
         return ApplyBridgeResponsesOutputReasoningOutput { messages };
     }

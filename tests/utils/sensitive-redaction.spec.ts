@@ -1,5 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
-import { redactSensitiveData } from '../../src/utils/sensitive-redaction.js';
+import {
+  redactSensitiveData,
+  stringifyRedactedJson,
+} from '../../src/utils/sensitive-redaction.js';
 
 describe('sensitive redaction', () => {
   it('redacts sensitive key fields but preserves safe references', () => {
@@ -35,5 +38,19 @@ describe('sensitive redaction', () => {
     expect(note).not.toContain('sk-test-token');
     expect(note).toContain('[REDACTED]');
     expect((output.usage as Record<string, unknown>).total_tokens).toBe(42);
+  });
+
+  it('serializes equivalent redacted semantics without an intermediate object graph', () => {
+    const shared = {
+      apiKey: 'sk-user-1234567890abcdef',
+      note: 'Bearer abcdefghijklmnop',
+    };
+    const input = {
+      first: shared,
+      repeated: shared,
+      password: 'super-secret-password',
+    };
+
+    expect(JSON.parse(stringifyRedactedJson(input))).toEqual(redactSensitiveData(input));
   });
 });

@@ -98,6 +98,34 @@ const cases = [
   runVerifier('missing-package-script', ({ packageJson }) => {
     delete packageJson.scripts['verify:provider-response-host-split'];
   }, 'package.json missing script'),
+
+  runVerifier('revived-host-stage-result-branch', () => {
+    writeFile(
+      'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
+      "import './provider-response-native-calls.js';\nimport './provider-response-metadata-effects.js';\nimport './provider-response-effects.js';\nexport async function convertProviderResponse() { const respProcessEffect = { stage: 'HubRespChatProcess03Governed' }; return respProcessEffect.stage === 'HubRespChatProcess03Governed' ? {} : {}; }\n"
+    );
+  }, 'retired HubRespChatProcess03Governed host result branch must stay deleted'),
+
+  runVerifier('revived-servertool-stage-result-union', () => {
+    writeFile(
+      'src/modules/llmswitch/bridge/provider-response-effects.ts',
+      "export async function executeProviderResponseNativeServertoolEffects(): Promise<{ stage: 'HubRespChatProcess03Governed' | 'unchanged' }> { return { stage: 'unchanged' }; }\n"
+    );
+  }, 'retired servertool effect stage-result union must stay deleted'),
+
+  runVerifier('revived-metadata-write-projection-wrapper', () => {
+    writeFile(
+      'src/modules/llmswitch/bridge/provider-response-metadata-effects.ts',
+      "export function projectNativeMetadataWritePlanToRuntimeControlWritePlan() { return {}; }\n"
+    );
+  }, 'zero-caller metadata write projection wrapper must stay deleted'),
+
+  runVerifier('revived-native-metadata-write-wrapper-fallback', () => {
+    writeFile(
+      'src/modules/llmswitch/bridge/provider-response-native-calls.ts',
+      "export function projectMetadataWritePlanToRuntimeControlWritePlanWithNative() { const parsed = null; return typeof parsed === 'object' && parsed !== null ? parsed : {}; }\n"
+    );
+  }, 'zero-caller metadata write native wrapper and malformed-result fallback must stay deleted'),
 ];
 
 console.log('[test:provider-response-host-split-red-fixtures] ok');

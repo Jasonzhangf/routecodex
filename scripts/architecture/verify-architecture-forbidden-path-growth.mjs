@@ -82,6 +82,23 @@ function listFiles(relPath) {
 const failures = [];
 let checkedFeatures = 0;
 
+function isIdentifierChar(value) {
+  return /[A-Za-z0-9_]/.test(value);
+}
+
+function containsIdentifier(source, pattern) {
+  let index = source.indexOf(pattern);
+  while (index !== -1) {
+    const before = index > 0 ? source[index - 1] : '';
+    const after = index + pattern.length < source.length ? source[index + pattern.length] : '';
+    if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
+      return true;
+    }
+    index = source.indexOf(pattern, index + pattern.length);
+  }
+  return false;
+}
+
 for (const owner of parseOwners(mapText)) {
   checkedFeatures += 1;
   const patterns = [...owner.canonicalTypes, ...owner.canonicalBuilders];
@@ -91,7 +108,7 @@ for (const owner of parseOwners(mapText)) {
     for (const relPath of owner.forbiddenPaths) {
       for (const file of listFiles(relPath)) {
         const relFile = path.relative(root, file);
-        if (fs.readFileSync(file, 'utf8').includes(pattern)) {
+        if (containsIdentifier(fs.readFileSync(file, 'utf8'), pattern)) {
           failures.push(`${owner.featureId}: "${pattern}" found in forbidden path ${relFile}`);
           break;
         }

@@ -22,6 +22,8 @@
 - `snapshot-stage-contract.md`
 - `responses-direct-tool-shape-rustification-plan.md`
 - `responses-request-compat-rustification-plan.md`
+  - `v3-resource-operation-map.yml` / `v3-mainline-call-map.yml` / `v3-verification-map.yml`
+    - RouteCodex V3 Responses direct MVP 的 draft machine-readable 架构面；V3 是项目级 Rust-only 架构，不是 llmswitch-core 子版本
   - 定义 `--snap` 默认边界四件套、`--snap-stages` 选择器、模块级 snap 命名族、路径归档与最小测试覆盖
 
 ## 文件职责
@@ -108,6 +110,10 @@
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`
   - 用于改动前后快速确定必须跑哪些验证
+
+- `v3-resource-operation-map.yml` / `v3-mainline-call-map.yml` / `v3-verification-map.yml`
+  - 记录 V3 Responses direct MVP 的 Rust-only config/server/runtime/provider/CLI 资源、主线和验证设计
+  - 当前状态是 `draft_architecture`；用于先锁合同，再进入 `v3/` Rust source implementation
 
 - `scripts/architecture/verify-architecture-templates.mjs`
   - 检查架构模板文件是否存在、非空、最小字段齐全

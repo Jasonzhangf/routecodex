@@ -9,6 +9,7 @@ const mockWriteErrorsampleJson = jest.fn(async () => '/tmp/errorsample.json');
 
 jest.unstable_mockModule('../../../../src/utils/system-prompt-loader.js', () => ({
   applySystemPromptOverride: jest.fn(),
+  getSystemPromptOverride: jest.fn(() => null),
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
@@ -40,34 +41,38 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/responses-req
       code: 'responses_continuation_expired',
     },
   })),
-  buildResponsesResumeClientErrorForHttpNative: jest.fn((args: {
-    status?: number;
-    code?: string;
-    origin?: string;
-    message?: string;
-  }) => ({
-    status: typeof args.status === 'number' ? args.status : 422,
-    body: {
-      error: {
-        message:
-          typeof args.message === 'string' && args.message.trim()
-            ? args.message
-            : 'Unable to resume Responses conversation',
-        type: 'invalid_request_error',
-        code:
-          typeof args.code === 'string' && args.code.trim()
-            ? args.code
-            : 'responses_resume_failed',
-        origin:
-          typeof args.origin === 'string' && args.origin.trim()
-            ? args.origin
-            : 'client',
+  planResponsesResumeErrorForHttpNative: jest.fn(() => ({ action: 'rethrow' })),
+  planResponsesInboundToolHistoryErrorsampleForHttpNative: jest.fn((input: {
+    requestId: string;
+    entryEndpoint: string;
+    body: unknown;
+    error: Record<string, unknown>;
+  }) => {
+    if (
+      input.error?.code !== 'MALFORMED_REQUEST'
+      || (
+        typeof input.error?.message === 'string'
+          && !input.error.message.includes('Tool history contract violated')
+          && !(input.error.details as Record<string, unknown> | undefined)?.toolHistoryContractViolation
+      )
+    ) {
+      return { action: 'none' };
+    }
+    return {
+      action: 'write_errorsample',
+      write: {
+        group: 'payload-contract-error',
+        kind: 'responses.inbound_tool_history_contract',
+        payload: {
+          kind: 'responses.inbound_tool_history_contract',
+          requestId: input.requestId,
+          entryEndpoint: input.entryEndpoint,
+          body: input.body,
+          error: input.error,
+        },
       },
-    },
-  })),
-  shouldProjectResponsesResumeClientErrorForHttpNative: jest.fn(
-    (origin?: string) => typeof origin === 'string' && origin.trim() === 'client'
-  ),
+    };
+  }),
   buildResponsesResumeControlForContinuationContextForHttpNative: jest.fn(
     buildResponsesResumeControlForContinuationContextForHttpFake
   ),

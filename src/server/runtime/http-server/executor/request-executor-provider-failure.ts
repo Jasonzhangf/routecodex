@@ -1,8 +1,4 @@
 import {
-  isSseDecodeRateLimitError,
-  isSseDecodeRetryableNetworkError
-} from './request-retry-helpers.js';
-import {
   extractStatusCodeFromError
 } from './utils.js';
 import {
@@ -65,11 +61,9 @@ export function resolveRequestExecutorProviderErrorReportPlan(args: {
         ? 'provider.http'
         : args.stage === 'host.response_contract'
           ? 'host.response_contract'
-          : (isSseDecodeRateLimitError(args.error, statusCode) || isSseDecodeRetryableNetworkError(args.error, statusCode))
-            ? 'provider.sse_decode'
-            : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode))
-              ? 'provider.followup'
-              : 'provider.send');
+          : (isServerToolFollowupErrorCode(errorCode) || isServerToolFollowupErrorCode(upstreamCode))
+            ? 'provider.followup'
+            : 'provider.send');
   return {
     ...(errorCode ? { errorCode } : {}),
     ...(upstreamCode ? { upstreamCode } : {}),

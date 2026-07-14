@@ -6,10 +6,6 @@ use crate::shared_json_utils::{
     args_contain_direct_or_nested_key, read_optional_bool, read_string_array_command,
     read_trimmed_string, read_workdir_from_args,
 };
-use crate::stopless_current_turn::{
-    is_stopless_transparent_continuation_prompt, scan_stopless_current_turn_slice,
-    StoplessCurrentTurnScan, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
-};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -1584,361 +1580,7 @@ fn normalize_responses_history_items(items: Vec<Value>) -> Vec<Value> {
 }
 
 pub(crate) fn normalize_responses_request_input_for_chat_codec(items: Vec<Value>) -> Vec<Value> {
-    collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(items))
-}
-
-const STOP_HOOK_COMMAND_MARKERS: &[&str] = &[
-    "routecodex hook run stop_message_auto",
-    "routecodex servertool run stop_message_auto",
-    "routecodex hook run reasoningStop",
-    "routecodex servertool run reasoningStop",
-];
-
-fn build_responses_text_guidance_input_item(text: String) -> Value {
-    serde_json::json!({
-        "type": "message",
-        "role": "user",
-        "content": [{ "type": "input_text", "text": text }]
-    })
-}
-
-fn is_shell_like_tool_name(raw_name: &str) -> bool {
-    matches!(
-        raw_name.trim().to_ascii_lowercase().as_str(),
-        "exec_command"
-            | "run_command"
-            | "bash"
-            | "sh"
-            | "zsh"
-            | "terminal"
-            | "shell"
-            | "write_stdin"
-    )
-}
-
-fn read_exec_command_cmd(arguments: Option<&Value>) -> Option<String> {
-    let raw = match arguments {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Object(obj)) => obj
-            .get("cmd")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| {
-                obj.get("command")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-            })?,
-        _ => return None,
-    };
-    if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&raw) {
-        return obj
-            .get("cmd")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| {
-                obj.get("command")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-            });
-    }
-    Some(raw)
-}
-
-fn parse_stopless_tool_output_payload(value: &Value) -> Option<Map<String, Value>> {
-    match value {
-        Value::Object(row) => Some(row.clone()),
-        Value::String(text) => serde_json::from_str::<Value>(text)
-            .ok()
-            .and_then(|parsed| parsed.as_object().cloned()),
-        _ => None,
-    }
-}
-
-fn is_normalized_stop_hook_name(raw_name: &str) -> bool {
-    crate::stopless_current_turn::is_stopless_internal_tool_name(raw_name)
-}
-
-fn is_stopless_tool_output_record(row: &Map<String, Value>) -> bool {
-    let tool_name = read_trimmed_string(row.get("toolName"))
-        .or_else(|| read_trimmed_string(row.get("tool_name")))
-        .or_else(|| read_trimmed_string(row.get("tool")))
-        .or_else(|| read_trimmed_string(row.get("kind")));
-    if tool_name.as_deref() == Some("stop_message_auto") {
-        return true;
-    }
-    read_trimmed_string(row.get("flowId"))
-        .or_else(|| read_trimmed_string(row.get("flow_id")))
-        .is_some_and(|flow_id| flow_id == "stop_message_flow")
-        && (row.contains_key("continuationPrompt")
-            || row.contains_key("continuation_prompt")
-            || row.contains_key("repeatCount")
-            || row.contains_key("repeat_count")
-            || row.contains_key("schemaFeedback")
-            || row.contains_key("schema_feedback")
-            || row.contains_key("schemaGuidance")
-            || row.contains_key("schema_guidance"))
-}
-
-fn is_stop_hook_function_call(row: &Map<String, Value>) -> bool {
-    let item_type = read_trimmed_string(row.get("type"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if item_type != "function_call" && item_type != "tool_call" {
-        return false;
-    }
-    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
-    if is_normalized_stop_hook_name(name.as_str()) {
-        return true;
-    }
-    if !is_shell_like_tool_name(name.as_str()) {
-        return false;
-    }
-    let Some(cmd) = read_exec_command_cmd(row.get("arguments")) else {
-        return false;
-    };
-    STOP_HOOK_COMMAND_MARKERS
-        .iter()
-        .any(|marker| cmd.contains(marker))
-}
-
-fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if let Some(row) = parse_stopless_tool_output_payload(&Value::String(trimmed.to_string())) {
-        if is_stopless_tool_output_record(&row) {
-            if let Some(prompt) = read_continue_next_step_prompt(&row) {
-                return prompt;
-            }
-            return STOPLESS_TRANSPARENT_CONTINUATION_PROMPT.to_string();
-        }
-    }
-    trimmed.to_string()
-}
-
-fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
-    let feedback = row
-        .get("schemaFeedback")
-        .or_else(|| row.get("schema_feedback"))?
-        .as_object()?;
-    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
-        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
-    if reason_code != "stop_schema_continue_next_step" {
-        return None;
-    }
-    read_trimmed_string(row.get("continuationPrompt"))
-        .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
-}
-
-fn is_stopless_guidance_message(entry: &Value) -> bool {
-    let Some(row) = entry.as_object() else {
-        return false;
-    };
-    if let Some(item_type) = row.get("type").and_then(Value::as_str) {
-        if item_type != "message" {
-            return false;
-        }
-    }
-    if row.get("type").is_none() && !row.contains_key("content") {
-        return false;
-    }
-    if row.get("role").and_then(Value::as_str) != Some("user") {
-        return false;
-    }
-    let Some(text) = row.get("content").and_then(|content| {
-        content.as_str().or_else(|| {
-            let parts = content.as_array()?;
-            if parts.len() != 1 {
-                return None;
-            }
-            parts[0].get("text").and_then(Value::as_str)
-        })
-    }) else {
-        return false;
-    };
-    is_stopless_transparent_continuation_prompt(text)
-        || text.contains("上一轮执行结果：repeatCount=")
-        || text.contains("按下面 schema 补齐缺失字段")
-        || text.contains("收尾时至少带上这些字段")
-        || text.contains("stopreason")
-            && (text.contains("finished")
-                || text.contains("blocked")
-                || text.contains("continue_needed")
-                || text.contains("收尾时至少带上这些字段"))
-}
-
-fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
-    let stop_hook_call_ids: HashSet<String> = items
-        .iter()
-        .filter_map(Value::as_object)
-        .filter(|row| is_stop_hook_function_call(row))
-        .filter_map(read_bridge_function_call_id)
-        .collect();
-    let is_stop_hook_output_call = |row: &Map<String, Value>| -> Option<String> {
-        let item_type = read_trimmed_string(row.get("type"))
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if !is_bridge_tool_output_item_type(item_type.as_str()) {
-            return None;
-        }
-        let call_id = read_bridge_function_call_id(row)?;
-        if !stop_hook_call_ids.contains(call_id.as_str()) {
-            return None;
-        }
-        Some(call_id)
-    };
-    let completed_stopless_call_ids: HashSet<String> = items
-        .iter()
-        .filter_map(Value::as_object)
-        .filter_map(is_stop_hook_output_call)
-        .collect();
-    let latest_stopless_call_id =
-        match scan_stopless_current_turn_slice(&items, |row| is_stop_hook_output_call(row)) {
-            StoplessCurrentTurnScan::Evidence(call_id) => Some(call_id),
-            StoplessCurrentTurnScan::ResetByUserTurn | StoplessCurrentTurnScan::None => None,
-        };
-    let latest_stopless_guidance = latest_stopless_call_id.as_ref().and_then(|latest_call_id| {
-        items
-            .iter()
-            .rev()
-            .filter_map(Value::as_object)
-            .find_map(|row| {
-                let item_type = read_trimmed_string(row.get("type"))
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                if !is_bridge_tool_output_item_type(item_type.as_str()) {
-                    return None;
-                }
-                let call_id = read_bridge_function_call_id(row)?;
-                if call_id != *latest_call_id {
-                    return None;
-                }
-                if !stop_hook_call_ids.contains(call_id.as_str()) {
-                    return None;
-                }
-                let output = row.get("output")?;
-                let output_text = match output {
-                    Value::String(text) => text.clone(),
-                    other => serde_json::to_string(other).ok()?,
-                };
-                Some(build_responses_text_guidance_input_item(
-                    build_stop_hook_guidance_text_from_output(&output_text),
-                ))
-            })
-    });
-    let mut normalized = Vec::<Value>::with_capacity(items.len());
-    let mut guidance_injected = false;
-    let mut pending_stop_hook_call_id: Option<String> = None;
-    for item in items {
-        let Some(row) = item.as_object() else {
-            normalized.push(item);
-            continue;
-        };
-        if is_stopless_guidance_message(&item) {
-            if latest_stopless_guidance.is_none() {
-                normalized.push(item);
-            }
-            continue;
-        }
-        let item_type = read_trimmed_string(row.get("type"))
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if item_type == "function_call" || item_type == "tool_call" {
-            let Some(call_id) = read_bridge_function_call_id(row) else {
-                normalized.push(item);
-                continue;
-            };
-            if completed_stopless_call_ids.contains(call_id.as_str()) {
-                pending_stop_hook_call_id = Some(call_id);
-                continue;
-            }
-            pending_stop_hook_call_id = if is_stop_hook_function_call(row) {
-                Some(call_id.clone())
-            } else {
-                None
-            };
-            normalized.push(item);
-            continue;
-        }
-        if item_type == "message"
-            && row.get("role").and_then(Value::as_str) == Some("assistant")
-            && pending_stop_hook_call_id.is_some()
-        {
-            continue;
-        }
-        if is_bridge_tool_output_item_type(item_type.as_str()) {
-            let call_id = read_bridge_function_call_id(row).unwrap_or_default();
-            let is_stop_hook_output = stop_hook_call_ids.contains(call_id.as_str());
-            if is_stop_hook_output && completed_stopless_call_ids.contains(call_id.as_str()) {
-                if !guidance_injected
-                    && latest_stopless_call_id.as_deref() == Some(call_id.as_str())
-                {
-                    if let Some(guidance) = latest_stopless_guidance.clone() {
-                        normalized.push(guidance);
-                    }
-                    guidance_injected = true;
-                }
-                if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                    pending_stop_hook_call_id = None;
-                }
-                continue;
-            }
-            if is_stop_hook_output
-                && latest_stopless_call_id.as_deref() == Some(call_id.as_str())
-                && !guidance_injected
-            {
-                if let Some(guidance) = latest_stopless_guidance.clone() {
-                    normalized.push(guidance);
-                }
-                guidance_injected = true;
-                if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                    pending_stop_hook_call_id = None;
-                }
-                continue;
-            }
-            if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                pending_stop_hook_call_id = None;
-            }
-        }
-        normalized.push(item);
-    }
-    normalized
-}
-
-fn remove_auto_stop_hook_assistant_echoes_in_history(items: Vec<Value>) -> Vec<Value> {
-    let mut normalized = Vec::<Value>::with_capacity(items.len());
-    let mut pending_stop_hook_call_id: Option<String> = None;
-    for item in items {
-        let Some(row) = item.as_object() else {
-            normalized.push(item);
-            continue;
-        };
-        let item_type = read_trimmed_string(row.get("type"))
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if item_type == "function_call" || item_type == "tool_call" {
-            pending_stop_hook_call_id = if is_stop_hook_function_call(row) {
-                read_bridge_function_call_id(row)
-            } else {
-                None
-            };
-            normalized.push(item);
-            continue;
-        }
-        if item_type == "message"
-            && row.get("role").and_then(Value::as_str) == Some("assistant")
-            && pending_stop_hook_call_id.is_some()
-        {
-            continue;
-        }
-        if is_bridge_tool_output_item_type(item_type.as_str()) {
-            if let Some(call_id) = read_bridge_function_call_id(row) {
-                if pending_stop_hook_call_id.as_deref() == Some(call_id.as_str()) {
-                    pending_stop_hook_call_id = None;
-                }
-            }
-        }
-        normalized.push(item);
-    }
-    normalized
+    normalize_responses_history_items(items)
 }
 
 fn normalize_message_content_part_for_request_history(part: &Value) -> Option<Value> {
@@ -2472,102 +2114,492 @@ fn strip_request_metadata_from_payload(payload: &Value) -> Value {
     Value::Object(out)
 }
 
-fn plan_responses_continuation_request_action(input: &Value) -> Value {
-    let input_obj = input.as_object().cloned().unwrap_or_default();
-    let planned_entry_mode = read_trimmed_string(input_obj.get("plannedEntryMode"))
-        .unwrap_or_else(|| "none".to_string());
-    let entry_endpoint = read_trimmed_string(input_obj.get("entryEndpoint"))
-        .unwrap_or_else(|| "/v1/responses".to_string());
-    let response_id = read_trimmed_string(input_obj.get("responseId"));
-    let previous_response_id = read_trimmed_string(input_obj.get("previousResponseId"));
-    let continuation = input_obj.get("continuation").and_then(Value::as_object);
-    let continuation_owner = continuation
-        .and_then(|row| read_trimmed_string(row.get("continuationOwner")))
-        .filter(|owner| owner == "direct" || owner == "relay");
-    let provider_key = continuation.and_then(|row| read_trimmed_string(row.get("providerKey")));
-    let previous_request_id =
-        continuation.and_then(|row| read_trimmed_string(row.get("requestId")));
+fn responses_continuation_client_error(message: &str, code: &str) -> Value {
+    serde_json::json!({
+        "action": "complete",
+        "result": {
+            "kind": "client_error",
+            "status": 400,
+            "body": {
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error",
+                    "code": code,
+                    "origin": "client"
+                }
+            }
+        }
+    })
+}
 
-    let build_resume_meta = |id: &str, owner: &str, restored: bool| {
-        let mut meta = Map::new();
-        meta.insert("responseId".to_string(), Value::String(id.to_string()));
-        meta.insert("restored".to_string(), Value::Bool(restored));
-        meta.insert(
-            "continuationOwner".to_string(),
-            Value::String(owner.to_string()),
-        );
-        if let Some(provider_key) = provider_key.clone() {
+fn responses_continuation_ok_result(
+    payload: Value,
+    entry_endpoint: &str,
+    planned_entry_mode: &str,
+    resume_meta: Option<Value>,
+) -> Value {
+    let mut result = Map::new();
+    result.insert("kind".to_string(), Value::String("ok".to_string()));
+    result.insert("payload".to_string(), payload);
+    result.insert(
+        "pipelineEntryEndpoint".to_string(),
+        Value::String(entry_endpoint.to_string()),
+    );
+    result.insert(
+        "plannedEntryMode".to_string(),
+        Value::String(planned_entry_mode.to_string()),
+    );
+    result.insert(
+        "isSubmitToolOutputs".to_string(),
+        Value::Bool(planned_entry_mode == "submit_tool_outputs"),
+    );
+    if let Some(resume_meta) = resume_meta {
+        result.insert("resumeMeta".to_string(), resume_meta);
+    }
+    serde_json::json!({
+        "action": "complete",
+        "result": Value::Object(result)
+    })
+}
+
+fn responses_continuation_effect(operation: &str, args: Value, result_plan_input: Value) -> Value {
+    serde_json::json!({
+        "action": "execute_effect",
+        "effect": {
+            "operation": operation,
+            "args": args
+        },
+        "resultPlanInput": result_plan_input
+    })
+}
+
+fn copy_responses_continuation_scope(source: &Map<String, Value>, target: &mut Map<String, Value>) {
+    for key in [
+        "requestId",
+        "sessionId",
+        "conversationId",
+        "matchedPort",
+        "routingPolicyGroup",
+    ] {
+        if let Some(value) = source.get(key) {
+            target.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+fn copy_responses_continuation_port_scope(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+) {
+    for key in ["matchedPort", "routingPolicyGroup"] {
+        if let Some(value) = source.get(key) {
+            target.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+fn build_responses_continuation_resume_meta(
+    response_id: &str,
+    owner: &str,
+    continuation: &Map<String, Value>,
+) -> Value {
+    let mut meta = Map::new();
+    meta.insert(
+        "responseId".to_string(),
+        Value::String(response_id.to_string()),
+    );
+    meta.insert("restored".to_string(), Value::Bool(false));
+    meta.insert(
+        "continuationOwner".to_string(),
+        Value::String(owner.to_string()),
+    );
+    if owner == "direct" {
+        if let Some(provider_key) = read_trimmed_string(continuation.get("providerKey")) {
             meta.insert("providerKey".to_string(), Value::String(provider_key));
         }
-        if let Some(previous_request_id) = previous_request_id.clone() {
-            meta.insert(
-                "previousRequestId".to_string(),
-                Value::String(previous_request_id),
-            );
+    }
+    if let Some(previous_request_id) = read_trimmed_string(continuation.get("requestId")) {
+        meta.insert(
+            "previousRequestId".to_string(),
+            Value::String(previous_request_id),
+        );
+    }
+    Value::Object(meta)
+}
+
+fn continue_responses_continuation_request_effect(
+    effect_result: &Map<String, Value>,
+) -> Result<Value, String> {
+    let operation = read_trimmed_string(effect_result.get("operation"))
+        .ok_or_else(|| "Responses continuation effect result missing operation".to_string())?;
+    let state = effect_result
+        .get("resultPlanInput")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            "Responses continuation effect result missing resultPlanInput".to_string()
+        })?;
+    let stage = read_trimmed_string(state.get("stage"))
+        .ok_or_else(|| "Responses continuation resultPlanInput missing stage".to_string())?;
+    if stage != operation {
+        return Err(format!(
+            "Responses continuation effect operation mismatch: expected {stage}, received {operation}"
+        ));
+    }
+    let result = effect_result
+        .get("result")
+        .ok_or_else(|| "Responses continuation effect result missing result".to_string())?;
+    let planned_entry_mode =
+        read_trimmed_string(state.get("plannedEntryMode")).ok_or_else(|| {
+            "Responses continuation resultPlanInput missing plannedEntryMode".to_string()
+        })?;
+    let entry_endpoint = read_trimmed_string(state.get("entryEndpoint")).ok_or_else(|| {
+        "Responses continuation resultPlanInput missing entryEndpoint".to_string()
+    })?;
+    let payload = state
+        .get("payload")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| "Responses continuation resultPlanInput missing payload".to_string())?;
+
+    match operation.as_str() {
+        "lookup_continuation" => {
+            let response_id = read_trimmed_string(state.get("responseId")).ok_or_else(|| {
+                "Responses continuation lookup state missing responseId".to_string()
+            })?;
+            let continuation = match result {
+                Value::Object(record) => record,
+                Value::Null => {
+                    return Ok(responses_continuation_client_error(
+                        "Responses continuation was not found for the supplied response id",
+                        "responses_continuation_not_found",
+                    ));
+                }
+                _ => {
+                    return Err(
+                        "Responses continuation lookup returned malformed continuation".to_string(),
+                    );
+                }
+            };
+            let owner = read_trimmed_string(continuation.get("continuationOwner"));
+            let Some(owner) = owner.filter(|owner| owner == "direct" || owner == "relay") else {
+                return Ok(responses_continuation_client_error(
+                    "Responses continuation owner is missing or invalid",
+                    "responses_continuation_owner_invalid",
+                ));
+            };
+            let resume_meta =
+                build_responses_continuation_resume_meta(&response_id, &owner, continuation);
+
+            if planned_entry_mode == "submit_tool_outputs" && owner == "direct" {
+                let mut direct_payload = payload.as_object().cloned().unwrap_or_default();
+                if read_trimmed_string(direct_payload.get("previous_response_id")).is_none() {
+                    direct_payload.insert(
+                        "previous_response_id".to_string(),
+                        Value::String(response_id.clone()),
+                    );
+                }
+                let direct_payload = Value::Object(direct_payload);
+                if direct_payload
+                    .get("input")
+                    .and_then(Value::as_array)
+                    .is_some_and(|items| !items.is_empty())
+                {
+                    return Ok(responses_continuation_ok_result(
+                        direct_payload,
+                        &entry_endpoint,
+                        &planned_entry_mode,
+                        Some(resume_meta),
+                    ));
+                }
+                return Ok(responses_continuation_effect(
+                    "materialize_provider_owned_submit",
+                    serde_json::json!({ "payload": direct_payload }),
+                    serde_json::json!({
+                        "stage": "materialize_provider_owned_submit",
+                        "plannedEntryMode": planned_entry_mode,
+                        "entryEndpoint": entry_endpoint,
+                        "payload": direct_payload,
+                        "resumeMeta": resume_meta
+                    }),
+                ));
+            }
+
+            if planned_entry_mode == "submit_tool_outputs" && owner == "relay" {
+                let mut options = Map::new();
+                options.insert(
+                    "entryKind".to_string(),
+                    Value::String("responses".to_string()),
+                );
+                for key in ["requestId", "matchedPort", "routingPolicyGroup"] {
+                    if let Some(value) = state.get(key) {
+                        options.insert(key.to_string(), value.clone());
+                    }
+                }
+                return Ok(responses_continuation_effect(
+                    "resume_relay",
+                    serde_json::json!({
+                        "responseId": response_id,
+                        "payload": payload,
+                        "options": Value::Object(options)
+                    }),
+                    serde_json::json!({
+                        "stage": "resume_relay",
+                        "plannedEntryMode": planned_entry_mode,
+                        "entryEndpoint": "/v1/responses",
+                        "payload": payload
+                    }),
+                ));
+            }
+
+            if planned_entry_mode == "scope_materialize" && owner == "relay" {
+                let mut args = payload.as_object().map(|_| Map::new()).ok_or_else(|| {
+                    "Responses scope materialize state missing payload".to_string()
+                })?;
+                args.insert("payload".to_string(), payload.clone());
+                args.insert(
+                    "entryKind".to_string(),
+                    Value::String("responses".to_string()),
+                );
+                args.insert(
+                    "continuationOwner".to_string(),
+                    Value::String("relay".to_string()),
+                );
+                copy_responses_continuation_scope(state, &mut args);
+                return Ok(responses_continuation_effect(
+                    "materialize_scope",
+                    Value::Object(args),
+                    serde_json::json!({
+                        "stage": "materialize_scope",
+                        "plannedEntryMode": planned_entry_mode,
+                        "entryEndpoint": entry_endpoint,
+                        "payload": payload
+                    }),
+                ));
+            }
+
+            Ok(responses_continuation_ok_result(
+                payload,
+                &entry_endpoint,
+                &planned_entry_mode,
+                Some(resume_meta),
+            ))
         }
-        Value::Object(meta)
-    };
+        "materialize_provider_owned_submit" => {
+            let materialized = result.as_object().ok_or_else(|| {
+                "Responses provider-owned submit materialization returned malformed result"
+                    .to_string()
+            })?;
+            let materialized_input = materialized
+                .get("payload")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("input"))
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| {
+                    "Responses provider-owned submit materialization missing payload.input"
+                        .to_string()
+                })?;
+            let mut final_payload = payload.as_object().cloned().unwrap_or_default();
+            final_payload.insert("input".to_string(), Value::Array(materialized_input));
+            let resume_meta = state
+                .get("resumeMeta")
+                .filter(|value| value.is_object())
+                .cloned()
+                .ok_or_else(|| {
+                    "Responses provider-owned submit state missing resumeMeta".to_string()
+                })?;
+            Ok(responses_continuation_ok_result(
+                Value::Object(final_payload),
+                &entry_endpoint,
+                &planned_entry_mode,
+                Some(resume_meta),
+            ))
+        }
+        "resume_relay" => {
+            let resumed = result
+                .as_object()
+                .ok_or_else(|| "Responses relay resume returned malformed result".to_string())?;
+            let resumed_payload = resumed
+                .get("payload")
+                .filter(|value| value.is_object())
+                .cloned()
+                .ok_or_else(|| "Responses relay resume missing payload".to_string())?;
+            let resume_meta = resumed
+                .get("meta")
+                .filter(|value| value.is_object())
+                .cloned()
+                .ok_or_else(|| "Responses relay resume missing meta".to_string())?;
+            Ok(responses_continuation_ok_result(
+                resumed_payload,
+                &entry_endpoint,
+                &planned_entry_mode,
+                Some(resume_meta),
+            ))
+        }
+        "materialize_scope" => {
+            if result.is_null() {
+                return Ok(serde_json::json!({
+                    "action": "complete",
+                    "result": { "kind": "scope_continuation_expired" }
+                }));
+            }
+            let materialized = result.as_object().ok_or_else(|| {
+                "Responses scope materialization returned malformed result".to_string()
+            })?;
+            let materialized_payload = materialized
+                .get("payload")
+                .filter(|value| value.is_object())
+                .cloned()
+                .ok_or_else(|| "Responses scope materialization missing payload".to_string())?;
+            let resume_meta = materialized
+                .get("meta")
+                .filter(|value| value.is_object())
+                .cloned()
+                .ok_or_else(|| "Responses scope materialization missing meta".to_string())?;
+            Ok(responses_continuation_ok_result(
+                materialized_payload,
+                &entry_endpoint,
+                &planned_entry_mode,
+                Some(resume_meta),
+            ))
+        }
+        _ => Err(format!(
+            "Unsupported Responses continuation effect operation: {operation}"
+        )),
+    }
+}
+
+fn plan_responses_continuation_request_action(input: &Value) -> Result<Value, String> {
+    let input_obj = input
+        .as_object()
+        .ok_or_else(|| "Responses continuation planner input must be an object".to_string())?;
+    if let Some(effect_result) = input_obj.get("effectResult") {
+        let effect_result = effect_result
+            .as_object()
+            .ok_or_else(|| "Responses continuation effectResult must be an object".to_string())?;
+        return continue_responses_continuation_request_effect(effect_result);
+    }
+
+    let planned_entry = input_obj
+        .get("plannedEntry")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Responses continuation planner missing plannedEntry".to_string())?;
+    let planned_entry_mode = read_trimmed_string(planned_entry.get("mode"))
+        .ok_or_else(|| "Responses continuation plannedEntry missing mode".to_string())?;
+    if !matches!(
+        planned_entry_mode.as_str(),
+        "none" | "submit_tool_outputs" | "scope_materialize"
+    ) {
+        return Err(format!(
+            "Responses continuation plannedEntry has unsupported mode: {planned_entry_mode}"
+        ));
+    }
+    let entry_endpoint = read_trimmed_string(input_obj.get("entryEndpoint"))
+        .ok_or_else(|| "Responses continuation planner missing entryEndpoint".to_string())?;
+    let payload = planned_entry
+        .get("payload")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| "Responses continuation plannedEntry missing payload".to_string())?;
+    let response_id = read_trimmed_string(planned_entry.get("responseId"));
+    let previous_response_id = read_trimmed_string(
+        payload
+            .as_object()
+            .and_then(|row| row.get("previous_response_id")),
+    );
+
+    let mut state = Map::new();
+    state.insert(
+        "plannedEntryMode".to_string(),
+        Value::String(planned_entry_mode.clone()),
+    );
+    state.insert(
+        "entryEndpoint".to_string(),
+        Value::String(entry_endpoint.clone()),
+    );
+    state.insert("payload".to_string(), payload.clone());
+    copy_responses_continuation_scope(input_obj, &mut state);
 
     if planned_entry_mode == "submit_tool_outputs" {
         let Some(response_id) = response_id else {
-            return serde_json::json!({
-                "action": "client_error",
-                "status": 400,
-                "code": "bad_request",
-                "origin": "client",
-                "message": "response_id is required for submit_tool_outputs"
-            });
+            return Ok(responses_continuation_client_error(
+                "response_id is required for submit_tool_outputs",
+                "bad_request",
+            ));
         };
-        if continuation_owner.as_deref() == Some("direct") {
-            return serde_json::json!({
-                "action": "direct_submit",
+        let mut options = Map::new();
+        options.insert(
+            "entryKind".to_string(),
+            Value::String("responses".to_string()),
+        );
+        copy_responses_continuation_port_scope(input_obj, &mut options);
+        state.insert(
+            "stage".to_string(),
+            Value::String("lookup_continuation".to_string()),
+        );
+        state.insert("responseId".to_string(), Value::String(response_id.clone()));
+        return Ok(responses_continuation_effect(
+            "lookup_continuation",
+            serde_json::json!({
                 "responseId": response_id,
-                "pipelineEntryEndpoint": entry_endpoint,
-                "resumeMeta": build_resume_meta(&response_id, "direct", false),
-                "materializeProviderOwnedSubmitContext": true
-            });
-        }
-        return serde_json::json!({
-            "action": "relay_submit",
-            "responseId": response_id,
-            "pipelineEntryEndpoint": "/v1/responses"
-        });
+                "options": Value::Object(options)
+            }),
+            Value::Object(state),
+        ));
     }
 
     if entry_endpoint == "/v1/responses" {
-        if let Some(previous_response_id) = previous_response_id.as_deref() {
-            if continuation_owner.as_deref() == Some("relay")
-                && planned_entry_mode == "scope_materialize"
-            {
-                return serde_json::json!({
-                    "action": "relay_scope_materialize",
+        if let Some(previous_response_id) = previous_response_id {
+            let mut options = Map::new();
+            options.insert(
+                "entryKind".to_string(),
+                Value::String("responses".to_string()),
+            );
+            copy_responses_continuation_port_scope(input_obj, &mut options);
+            state.insert(
+                "stage".to_string(),
+                Value::String("lookup_continuation".to_string()),
+            );
+            state.insert(
+                "responseId".to_string(),
+                Value::String(previous_response_id.clone()),
+            );
+            return Ok(responses_continuation_effect(
+                "lookup_continuation",
+                serde_json::json!({
                     "responseId": previous_response_id,
-                    "pipelineEntryEndpoint": entry_endpoint,
-                    "continuationOwner": "relay"
-                });
-            }
-            if let Some(owner) = continuation_owner.as_deref() {
-                return serde_json::json!({
-                    "action": "attach_resume_meta",
-                    "responseId": previous_response_id,
-                    "pipelineEntryEndpoint": entry_endpoint,
-                    "resumeMeta": build_resume_meta(previous_response_id, owner, false)
-                });
-            }
+                    "options": Value::Object(options)
+                }),
+                Value::Object(state),
+            ));
         }
     }
 
     if planned_entry_mode == "scope_materialize" {
-        return serde_json::json!({
-            "action": "scope_materialize",
-            "pipelineEntryEndpoint": entry_endpoint
-        });
+        let mut args = Map::new();
+        args.insert("payload".to_string(), payload.clone());
+        args.insert(
+            "entryKind".to_string(),
+            Value::String("responses".to_string()),
+        );
+        copy_responses_continuation_scope(input_obj, &mut args);
+        state.insert(
+            "stage".to_string(),
+            Value::String("materialize_scope".to_string()),
+        );
+        return Ok(responses_continuation_effect(
+            "materialize_scope",
+            Value::Object(args),
+            Value::Object(state),
+        ));
     }
 
-    serde_json::json!({
-        "action": "none",
-        "pipelineEntryEndpoint": entry_endpoint
-    })
+    Ok(responses_continuation_ok_result(
+        payload,
+        &entry_endpoint,
+        &planned_entry_mode,
+        None,
+    ))
 }
 
 fn plan_responses_handler_entry(
@@ -2716,8 +2748,8 @@ fn prepare_responses_conversation_entry(payload: &Value, context: &Value) -> Val
         base_payload.insert("stream".to_string(), Value::Bool(stream));
     }
 
-    let input = collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(
-        clone_array(context.as_object().and_then(|row| row.get("input"))),
+    let input = normalize_responses_history_items(clone_array(
+        context.as_object().and_then(|row| row.get("input")),
     ));
     let tools = normalize_responses_tool_definitions(
         payload
@@ -3841,7 +3873,11 @@ impl ResponsesConversationStoreState {
         let release_plan = plan_responses_release_request_payload(&entry);
         if let Some(row) = entry.as_object_mut() {
             if let Some(plan_obj) = release_plan.as_object() {
-                for key in ["releasedInputPrefix", "basePayload", "releasedPendingToolCallIds"] {
+                for key in [
+                    "releasedInputPrefix",
+                    "basePayload",
+                    "releasedPendingToolCallIds",
+                ] {
                     if let Some(value) = plan_obj.get(key).cloned() {
                         row.insert(key.to_string(), value);
                     }
@@ -4569,8 +4605,7 @@ fn resume_responses_conversation_payload(
     } else {
         direct_input
     };
-    merged_input =
-        collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(merged_input));
+    merged_input = normalize_responses_history_items(merged_input);
     let tool_outputs = clone_array(
         submit_payload
             .as_object()
@@ -4580,9 +4615,7 @@ fn resume_responses_conversation_payload(
     let (normalized_items, submitted_details) =
         normalize_submitted_tool_outputs(&tool_outputs, &merged_input)?;
     merged_input.extend(normalized_items);
-    let full_input = remove_auto_stop_hook_assistant_echoes_in_history(
-        collapse_auto_stop_hook_pairs_in_history(normalize_responses_history_items(merged_input)),
-    );
+    let full_input = normalize_responses_history_items(merged_input);
     payload.insert("input".to_string(), Value::Array(full_input.clone()));
 
     let stream = submit_payload
@@ -5584,10 +5617,27 @@ fn responses_pipeline_metadata_write(
     output.insert("family".to_string(), Value::String(family.to_string()));
     output.insert("key".to_string(), Value::String(key.to_string()));
     output.insert("value".to_string(), value);
+    output.insert(
+        "writer".to_string(),
+        responses_pipeline_metadata_writer(family),
+    );
     if let Some(reason) = reason {
         output.insert("reason".to_string(), Value::String(reason.to_string()));
     }
     Value::Object(output)
+}
+
+fn responses_pipeline_metadata_writer(family: &str) -> Value {
+    let stage = if family == "continuation_context" {
+        "MetaReq03ContinuationAttached"
+    } else {
+        "MetaReq04RuntimeControlBound"
+    };
+    serde_json::json!({
+        "module": "src/modules/llmswitch/bridge/responses-request-bridge.ts",
+        "symbol": "buildResponsesPipelineMetadataForHttp",
+        "stage": stage
+    })
 }
 
 // feature_id: hub.responses_request_pipeline_metadata_plan
@@ -5713,38 +5763,89 @@ pub fn build_responses_scope_continuation_expired_error_for_http_json() -> NapiR
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi_derive::napi(js_name = "buildResponsesResumeClientErrorForHttpJson")]
-pub fn build_responses_resume_client_error_for_http_json(args_json: String) -> NapiResult<String> {
-    let args: Value =
-        serde_json::from_str(&args_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let obj = args
-        .as_object()
-        .ok_or_else(|| napi::Error::from_reason("args must be object"))?;
-    let get_str = |key: &str, fallback: &str| -> String {
-        obj.get(key)
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| fallback.to_string())
+fn plan_responses_resume_error_for_http(input: &Value) -> Value {
+    let Some(error) = input.as_object() else {
+        return serde_json::json!({ "action": "rethrow" });
     };
-    let status = obj.get("status").and_then(|v| v.as_i64()).unwrap_or(422);
-    let output = serde_json::json!({
+    let origin = read_trimmed_string(error.get("origin")).unwrap_or_default();
+    if origin != "client" {
+        return serde_json::json!({ "action": "rethrow" });
+    }
+    let status = error.get("status").and_then(Value::as_i64).unwrap_or(422);
+    let code = read_trimmed_string(error.get("code"))
+        .unwrap_or_else(|| "responses_resume_failed".to_string());
+    let message = read_trimmed_string(error.get("message"))
+        .unwrap_or_else(|| "Unable to resume Responses conversation".to_string());
+    serde_json::json!({
+        "action": "client_error",
         "status": status,
         "body": {
             "error": {
-                "message": get_str("message", "Unable to resume Responses conversation"),
+                "message": message,
                 "type": "invalid_request_error",
-                "code": get_str("code", "responses_resume_failed"),
-                "origin": get_str("origin", "client")
+                "code": code,
+                "origin": origin
             }
         }
-    });
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+    })
 }
 
-#[napi_derive::napi(js_name = "shouldProjectResponsesResumeClientErrorForHttpJson")]
-pub fn should_project_responses_resume_client_error_for_http_json(origin: String) -> bool {
-    origin.trim() == "client"
+#[napi_derive::napi(js_name = "planResponsesResumeErrorForHttpJson")]
+pub fn plan_responses_resume_error_for_http_json(input_json: String) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    serde_json::to_string(&plan_responses_resume_error_for_http(&input))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn plan_responses_inbound_tool_history_errorsample_for_http(input: &Value) -> Value {
+    let input_obj = input.as_object().cloned().unwrap_or_default();
+    let error = input_obj.get("error").cloned().unwrap_or(Value::Null);
+    let error_obj = error.as_object();
+    let code = error_obj
+        .and_then(|record| read_trimmed_string(record.get("code")))
+        .unwrap_or_default();
+    if code != "MALFORMED_REQUEST" {
+        return serde_json::json!({ "action": "none" });
+    }
+
+    let message = error_obj
+        .and_then(|record| read_trimmed_string(record.get("message")))
+        .unwrap_or_default();
+    let details_has_violation = error_obj
+        .and_then(|record| record.get("details"))
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("toolHistoryContractViolation"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !message.contains("Tool history contract violated") && !details_has_violation {
+        return serde_json::json!({ "action": "none" });
+    }
+
+    serde_json::json!({
+        "action": "write_errorsample",
+        "write": {
+            "group": "payload-contract-error",
+            "kind": "responses.inbound_tool_history_contract",
+            "payload": {
+                "kind": "responses.inbound_tool_history_contract",
+                "requestId": input_obj.get("requestId").cloned().unwrap_or(Value::Null),
+                "entryEndpoint": input_obj.get("entryEndpoint").cloned().unwrap_or(Value::Null),
+                "body": input_obj.get("body").cloned().unwrap_or(Value::Null),
+                "error": error
+            }
+        }
+    })
+}
+
+#[napi_derive::napi(js_name = "planResponsesInboundToolHistoryErrorsampleForHttpJson")]
+pub fn plan_responses_inbound_tool_history_errorsample_for_http_json(
+    input_json: String,
+) -> NapiResult<String> {
+    let input: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = plan_responses_inbound_tool_history_errorsample_for_http(&input);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[napi_derive::napi(js_name = "planResponsesHandlerStreamForHttpJson")]
@@ -5791,9 +5892,12 @@ pub fn finalize_responses_handler_payload_for_http_json(
     payload_json: String,
     is_submit_tool_outputs: bool,
     outbound_stream: bool,
+    system_prompt_override_json: String,
 ) -> NapiResult<String> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let system_prompt_override: Value = serde_json::from_str(&system_prompt_override_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let mut output = payload.as_object().cloned().unwrap_or_default();
     if !is_submit_tool_outputs
         && outbound_stream
@@ -5801,8 +5905,35 @@ pub fn finalize_responses_handler_payload_for_http_json(
     {
         output.insert("stream".to_string(), Value::Bool(true));
     }
+    if !is_submit_tool_outputs {
+        if let Some(prompt) = system_prompt_override
+            .as_object()
+            .and_then(|row| row.get("prompt"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            let existing = output.get("instructions").and_then(Value::as_str);
+            output.insert(
+                "instructions".to_string(),
+                Value::String(merge_responses_instructions(existing, prompt)),
+            );
+        }
+    }
     serde_json::to_string(&Value::Object(output))
         .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+fn merge_responses_instructions(existing: Option<&str>, override_prompt: &str) -> String {
+    let normalized_override = override_prompt.trim();
+    let normalized_existing = existing.unwrap_or("").trim();
+    if normalized_existing.is_empty() {
+        return normalized_override.to_string();
+    }
+    if normalized_existing.contains(normalized_override) {
+        return normalized_existing.to_string();
+    }
+    format!("{normalized_override}\n\n{normalized_existing}")
 }
 
 #[napi_derive::napi(js_name = "shouldAllowResponsesConversationContinuationJson")]
@@ -6027,7 +6158,8 @@ pub fn plan_responses_request_context_json(input_json: String) -> NapiResult<Str
 pub fn plan_responses_continuation_request_action_json(input_json: String) -> NapiResult<String> {
     let input: Value =
         serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = plan_responses_continuation_request_action(&input);
+    let output =
+        plan_responses_continuation_request_action(&input).map_err(napi::Error::from_reason)?;
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -6151,8 +6283,8 @@ pub fn publish_responses_record_plan_json(
         entry_endpoint == "/v1/responses" || entry_endpoint == "/v1/responses.submit_tool_outputs";
     let has_scope = session_id.is_some() || conversation_id.is_some();
 
-    let record_args = if should_record && has_scope {
-        serde_json::json!({
+    let continuation_store_effects = if should_record && has_scope {
+        let record_payload = serde_json::json!({
             "requestId": entry_request_id,
             "response": response,
             "sessionId": session_id.clone().unwrap_or_default(),
@@ -6164,23 +6296,29 @@ pub fn publish_responses_record_plan_json(
             "routingPolicyGroup": routing_policy_group.clone().unwrap_or_default(),
             "allowScopeContinuation": true,
             "routeHint": route_hint.clone().unwrap_or_default(),
-        })
-    } else {
-        Value::Null
-    };
-
-    let finalize_args = if should_record && has_scope {
-        serde_json::json!({
+        });
+        let finalize_payload = serde_json::json!({
             "requestId": entry_request_id,
-            "keepForSubmitToolOutputs": keep_for_submit_tool_outputs.unwrap_or(false),
-        })
+            "options": {
+                "keepForSubmitToolOutputs": keep_for_submit_tool_outputs.unwrap_or(false),
+            },
+        });
+        serde_json::json!([
+            {
+                "operation": "record_response",
+                "payload": record_payload,
+            },
+            {
+                "operation": "finalize_retention",
+                "payload": finalize_payload,
+            },
+        ])
     } else {
-        Value::Null
+        Value::Array(Vec::new())
     };
 
     let usage_args = if usage.is_some() {
         serde_json::json!({
-            "capturedChatRequest": context.get("capturedChatRequest").cloned().unwrap_or(Value::Null),
             "usage": usage.cloned().unwrap_or(Value::Null),
         })
     } else {
@@ -6188,10 +6326,7 @@ pub fn publish_responses_record_plan_json(
     };
 
     let output = serde_json::json!({
-        "shouldRecord": should_record,
-        "hasScope": has_scope,
-        "recordArgs": record_args,
-        "finalizeArgs": finalize_args,
+        "continuationStoreEffects": continuation_store_effects,
         "usageArgs": usage_args,
     });
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
@@ -6203,30 +6338,85 @@ mod tests {
         build_responses_conversation_port_scope_for_http_json,
         build_responses_conversation_scope_plan, build_responses_pipeline_metadata_for_http_json,
         build_responses_resume_control_for_continuation_context_for_http_json,
-        build_stop_hook_guidance_text_from_output, convert_responses_output_to_input_items,
+        convert_responses_output_to_input_items,
         execute_responses_conversation_store_operation,
         finalize_responses_handler_payload_for_http_json,
         materialize_provider_owned_submit_context, materialize_responses_continuation_payload,
-        plan_responses_attach_entry_scopes, plan_responses_capture_pending_cleanup,
-        plan_responses_captured_entry, plan_responses_continuation_lookup_by_response_id,
-        plan_responses_continuation_meta, plan_responses_continuation_request_action,
-        plan_responses_conversation_persistence_eligibility, plan_responses_conversation_preflight,
-        plan_responses_conversation_resume_entry_match, plan_responses_conversation_retention,
-        plan_responses_handler_entry, plan_responses_handler_stream_for_http_json,
-        plan_responses_persisted_entry, plan_responses_rebind_request_id,
-        plan_responses_record_continuation_flag, plan_responses_record_scope_cleanup,
-        plan_responses_record_scope_entry_match, plan_responses_release_request_payload,
-        plan_responses_request_body_for_http, plan_responses_request_context,
+        normalize_responses_request_input_for_chat_codec, plan_responses_attach_entry_scopes,
+        plan_responses_capture_pending_cleanup, plan_responses_captured_entry,
+        plan_responses_continuation_lookup_by_response_id, plan_responses_continuation_meta,
+        plan_responses_continuation_request_action,
+        plan_responses_conversation_persistence_eligibility,
+        plan_responses_conversation_preflight, plan_responses_conversation_resume_entry_match,
+        plan_responses_conversation_retention, plan_responses_handler_entry,
+        plan_responses_handler_stream_for_http_json,
+        plan_responses_inbound_tool_history_errorsample_for_http, plan_responses_persisted_entry,
+        plan_responses_rebind_request_id, plan_responses_record_continuation_flag,
+        plan_responses_record_scope_cleanup, plan_responses_record_scope_entry_match,
+        plan_responses_release_request_payload, plan_responses_request_body_for_http,
+        plan_responses_request_context, plan_responses_resume_error_for_http,
         plan_responses_scope_continuation_match, plan_responses_store_sweep,
         plan_responses_store_tokens, prepare_responses_conversation_entry,
         publish_responses_record_plan_json, restore_responses_continuation_payload,
         resume_responses_conversation_payload,
     };
-    use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
     use serde_json::{json, Value};
     use std::sync::{LazyLock, Mutex};
 
     static RESPONSES_STORE_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn responses_resume_error_plan_projects_complete_client_descriptor() {
+        assert_eq!(
+            plan_responses_resume_error_for_http(&json!({
+                "origin": " client ",
+                "status": 409,
+                "code": " continuation_conflict ",
+                "message": " Cannot resume "
+            })),
+            json!({
+                "action": "client_error",
+                "status": 409,
+                "body": {
+                    "error": {
+                        "message": "Cannot resume",
+                        "type": "invalid_request_error",
+                        "code": "continuation_conflict",
+                        "origin": "client"
+                    }
+                }
+            })
+        );
+        assert_eq!(
+            plan_responses_resume_error_for_http(&json!({ "origin": "client" })),
+            json!({
+                "action": "client_error",
+                "status": 422,
+                "body": {
+                    "error": {
+                        "message": "Unable to resume Responses conversation",
+                        "type": "invalid_request_error",
+                        "code": "responses_resume_failed",
+                        "origin": "client"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn responses_resume_error_plan_rethrows_non_client_and_malformed_errors() {
+        for input in [
+            json!({ "origin": "provider", "status": 503 }),
+            json!({ "status": 422 }),
+            json!("not-an-error-record"),
+        ] {
+            assert_eq!(
+                plan_responses_resume_error_for_http(&input),
+                json!({ "action": "rethrow" })
+            );
+        }
+    }
 
     fn responses_store_operation_for_test(
         persistence_file_path: &str,
@@ -6310,21 +6500,85 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            planned["recordArgs"]["requestId"],
+            planned["continuationStoreEffects"][0]["operation"],
+            json!("record_response")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][0]["payload"]["requestId"],
             json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(
-            planned["finalizeArgs"]["requestId"],
-            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
+            planned["continuationStoreEffects"][0]["payload"]["matchedPort"],
+            json!(5555)
         );
-        assert_eq!(planned["recordArgs"]["matchedPort"], json!(5555));
-        assert_eq!(planned["recordArgs"]["entryKind"], json!("responses"));
-        assert_eq!(planned["recordArgs"]["continuationOwner"], json!("relay"));
-        assert_eq!(planned["recordArgs"]["allowScopeContinuation"], json!(true));
         assert_eq!(
-            planned["recordArgs"]["routingPolicyGroup"],
+            planned["continuationStoreEffects"][0]["payload"]["entryKind"],
+            json!("responses")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][0]["payload"]["continuationOwner"],
+            json!("relay")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][0]["payload"]["allowScopeContinuation"],
+            json!(true)
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][0]["payload"]["routingPolicyGroup"],
             json!("gateway-priority-5555")
         );
+        assert_eq!(
+            planned["continuationStoreEffects"][1]["operation"],
+            json!("finalize_retention")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][1]["payload"]["requestId"],
+            json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][1]["payload"]["options"]
+                ["keepForSubmitToolOutputs"],
+            json!(true)
+        );
+        assert!(planned.get("recordArgs").is_none());
+        assert!(planned.get("finalizeArgs").is_none());
+    }
+
+    #[test]
+    fn publish_responses_record_plan_emits_no_store_effect_outside_scoped_responses() {
+        for (entry_endpoint, request_truth) in [
+            (
+                "/v1/chat/completions",
+                json!({ "sessionId": "sess_non_responses" }),
+            ),
+            ("/v1/responses", json!({})),
+        ] {
+            let planned: Value = serde_json::from_str(
+                &publish_responses_record_plan_json(
+                    "req_no_store_effect".to_string(),
+                    serde_json::to_string(&json!({
+                        "id": "resp_no_store_effect",
+                        "object": "response",
+                        "status": "completed",
+                        "output": []
+                    }))
+                    .unwrap(),
+                    serde_json::to_string(&json!({
+                        "requestTruth": request_truth,
+                        "runtimeControl": {}
+                    }))
+                    .unwrap(),
+                    serde_json::to_string(&json!({})).unwrap(),
+                    entry_endpoint.to_string(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+            assert_eq!(planned["continuationStoreEffects"], json!([]));
+            assert!(planned.get("recordArgs").is_none());
+            assert!(planned.get("finalizeArgs").is_none());
+        }
     }
 
     #[test]
@@ -6347,11 +6601,9 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            error
-                .reason
-                .contains("runtime state write must be an object or null")
-        );
+        assert!(error
+            .reason
+            .contains("runtime state write must be an object or null"));
     }
 
     #[test]
@@ -7050,11 +7302,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            planned["recordArgs"]["requestId"],
+            planned["continuationStoreEffects"][0]["operation"],
+            json!("record_response")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][0]["payload"]["requestId"],
             json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
         assert_eq!(
-            planned["finalizeArgs"]["requestId"],
+            planned["continuationStoreEffects"][1]["operation"],
+            json!("finalize_retention")
+        );
+        assert_eq!(
+            planned["continuationStoreEffects"][1]["payload"]["requestId"],
             json!("openai-responses-orangeai.key1-glm-5.2-20260703T120957051-453706-103")
         );
     }
@@ -7262,74 +7522,351 @@ mod tests {
 
     #[test]
     fn continuation_request_action_routes_direct_submit_in_rust() {
-        let planned = plan_responses_continuation_request_action(&json!({
-            "plannedEntryMode": "submit_tool_outputs",
+        let lookup = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_direct_1",
+                "payload": {
+                    "response_id": "resp_direct_1",
+                    "tool_outputs": [{ "call_id": "call_direct_1", "output": "ok" }]
+                }
+            },
             "entryEndpoint": "/v1/responses.submit_tool_outputs",
-            "responseId": "resp_direct_1",
-            "continuation": {
-                "continuationOwner": "direct",
-                "providerKey": "provider.key1",
-                "requestId": "req_prev_1"
+            "requestId": "req_direct_1"
+        }))
+        .unwrap();
+        let materialize = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "result": {
+                    "continuationOwner": "direct",
+                    "providerKey": "provider.key1",
+                    "requestId": "req_prev_1"
+                },
+                "resultPlanInput": lookup["resultPlanInput"]
             }
-        }));
+        }))
+        .unwrap();
 
-        assert_eq!(planned["action"], json!("direct_submit"));
-        assert_eq!(planned["responseId"], json!("resp_direct_1"));
+        assert_eq!(materialize["action"], json!("execute_effect"));
         assert_eq!(
-            planned["pipelineEntryEndpoint"],
-            json!("/v1/responses.submit_tool_outputs")
+            materialize["effect"]["operation"],
+            json!("materialize_provider_owned_submit")
         );
-        assert_eq!(planned["resumeMeta"]["continuationOwner"], json!("direct"));
-        assert_eq!(planned["resumeMeta"]["providerKey"], json!("provider.key1"));
         assert_eq!(
-            planned["materializeProviderOwnedSubmitContext"],
-            json!(true)
+            materialize["effect"]["args"]["payload"]["previous_response_id"],
+            json!("resp_direct_1")
+        );
+        let complete = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "materialize_provider_owned_submit",
+                "result": {
+                    "payload": {
+                        "input": [
+                            { "type": "function_call_output", "call_id": "call_direct_1", "output": "ok" }
+                        ]
+                    },
+                    "context": { "input": [] }
+                },
+                "resultPlanInput": materialize["resultPlanInput"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(complete["action"], json!("complete"));
+        assert_eq!(complete["result"]["kind"], json!("ok"));
+        assert_eq!(
+            complete["result"]["resumeMeta"]["continuationOwner"],
+            json!("direct")
+        );
+        assert_eq!(
+            complete["result"]["resumeMeta"]["providerKey"],
+            json!("provider.key1")
+        );
+        assert_eq!(
+            complete["result"]["payload"]["input"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn continuation_request_action_plans_lookup_effect_args_in_rust() {
+        let planned = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_lookup_1",
+                "payload": { "response_id": "resp_lookup_1", "tool_outputs": [] }
+            },
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "requestId": "req_lookup_1",
+            "matchedPort": 5555,
+            "routingPolicyGroup": "gateway_priority_5555"
+        }))
+        .unwrap();
+
+        assert_eq!(planned["action"], json!("execute_effect"));
+        assert_eq!(planned["effect"]["operation"], json!("lookup_continuation"));
+        assert_eq!(
+            planned["effect"]["args"]["responseId"],
+            json!("resp_lookup_1")
+        );
+        assert_eq!(
+            planned["effect"]["args"]["options"],
+            json!({
+                "entryKind": "responses",
+                "matchedPort": 5555,
+                "routingPolicyGroup": "gateway_priority_5555"
+            })
         );
     }
 
     #[test]
     fn continuation_request_action_routes_relay_submit_in_rust() {
-        let planned = plan_responses_continuation_request_action(&json!({
-            "plannedEntryMode": "submit_tool_outputs",
+        let lookup = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_relay_1",
+                "payload": { "response_id": "resp_relay_1", "tool_outputs": [] }
+            },
             "entryEndpoint": "/v1/responses.submit_tool_outputs",
-            "responseId": "resp_relay_1",
-            "continuation": {
-                "continuationOwner": "relay",
-                "requestId": "req_prev_2"
+            "requestId": "req_relay_1",
+            "matchedPort": 5555
+        }))
+        .unwrap();
+        let planned = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "result": { "continuationOwner": "relay", "requestId": "req_prev_2" },
+                "resultPlanInput": lookup["resultPlanInput"]
             }
-        }));
+        }))
+        .unwrap();
 
-        assert_eq!(planned["action"], json!("relay_submit"));
-        assert_eq!(planned["responseId"], json!("resp_relay_1"));
-        assert_eq!(planned["pipelineEntryEndpoint"], json!("/v1/responses"));
+        assert_eq!(planned["action"], json!("execute_effect"));
+        assert_eq!(planned["effect"]["operation"], json!("resume_relay"));
+        assert_eq!(
+            planned["effect"]["args"]["responseId"],
+            json!("resp_relay_1")
+        );
+        assert_eq!(
+            planned["effect"]["args"]["options"]["requestId"],
+            json!("req_relay_1")
+        );
+        assert_eq!(
+            planned["effect"]["args"]["options"]["matchedPort"],
+            json!(5555)
+        );
+        let complete = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "resume_relay",
+                "result": {
+                    "payload": { "previous_response_id": "resp_relay_1", "input": [] },
+                    "meta": { "restored": true, "continuationOwner": "relay" }
+                },
+                "resultPlanInput": planned["resultPlanInput"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            complete["result"]["pipelineEntryEndpoint"],
+            json!("/v1/responses")
+        );
+        assert_eq!(complete["result"]["resumeMeta"]["restored"], json!(true));
     }
 
     #[test]
     fn continuation_request_action_routes_scope_materialize_in_rust() {
-        let planned = plan_responses_continuation_request_action(&json!({
-            "plannedEntryMode": "scope_materialize",
+        let lookup = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "scope_materialize",
+                "payload": {
+                    "previous_response_id": "resp_scope_1",
+                    "input": [{ "type": "function_call_output", "call_id": "call_scope_1", "output": "ok" }]
+                }
+            },
             "entryEndpoint": "/v1/responses",
-            "previousResponseId": "resp_scope_1",
-            "continuation": {
-                "continuationOwner": "relay"
+            "requestId": "req_scope_1",
+            "sessionId": "sess_scope_1",
+            "conversationId": "conv_scope_1",
+            "matchedPort": 5555,
+            "routingPolicyGroup": "gateway_priority_5555"
+        }))
+        .unwrap();
+        let planned = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "result": { "continuationOwner": "relay" },
+                "resultPlanInput": lookup["resultPlanInput"]
             }
-        }));
+        }))
+        .unwrap();
 
-        assert_eq!(planned["action"], json!("relay_scope_materialize"));
-        assert_eq!(planned["responseId"], json!("resp_scope_1"));
-        assert_eq!(planned["continuationOwner"], json!("relay"));
+        assert_eq!(planned["effect"]["operation"], json!("materialize_scope"));
+        assert_eq!(
+            planned["effect"]["args"]["continuationOwner"],
+            json!("relay")
+        );
+        assert_eq!(
+            planned["effect"]["args"]["sessionId"],
+            json!("sess_scope_1")
+        );
+        assert_eq!(
+            planned["effect"]["args"]["routingPolicyGroup"],
+            json!("gateway_priority_5555")
+        );
+        let expired = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "materialize_scope",
+                "result": null,
+                "resultPlanInput": planned["resultPlanInput"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            expired["result"]["kind"],
+            json!("scope_continuation_expired")
+        );
     }
 
     #[test]
     fn continuation_request_action_rejects_submit_without_response_id() {
         let planned = plan_responses_continuation_request_action(&json!({
-            "plannedEntryMode": "submit_tool_outputs",
-            "entryEndpoint": "/v1/responses.submit_tool_outputs"
+            "plannedEntry": {
+                "mode": "submit_tool_outputs",
+                "payload": { "tool_outputs": [] }
+            },
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "requestId": "req_missing_id"
+        }))
+        .unwrap();
+
+        assert_eq!(planned["action"], json!("complete"));
+        assert_eq!(planned["result"]["kind"], json!("client_error"));
+        assert_eq!(planned["result"]["status"], json!(400));
+        assert_eq!(
+            planned["result"]["body"]["error"]["code"],
+            json!("bad_request")
+        );
+    }
+
+    #[test]
+    fn continuation_request_action_rejects_unknown_owner_and_malformed_effect_result() {
+        let lookup = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "submit_tool_outputs",
+                "responseId": "resp_unknown_owner",
+                "payload": { "response_id": "resp_unknown_owner", "tool_outputs": [] }
+            },
+            "entryEndpoint": "/v1/responses.submit_tool_outputs",
+            "requestId": "req_unknown_owner"
+        }))
+        .unwrap();
+        let unknown_owner = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "result": { "continuationOwner": "unknown" },
+                "resultPlanInput": lookup["resultPlanInput"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            unknown_owner["result"]["body"]["error"]["code"],
+            json!("responses_continuation_owner_invalid")
+        );
+
+        let malformed = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "resultPlanInput": lookup["resultPlanInput"]
+            }
+        }));
+        assert!(malformed.is_err());
+    }
+
+    #[test]
+    fn continuation_request_action_completes_attach_and_none_paths_in_rust() {
+        let lookup = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "none",
+                "payload": { "previous_response_id": "resp_attach_1", "input": [] }
+            },
+            "entryEndpoint": "/v1/responses",
+            "requestId": "req_attach_1"
+        }))
+        .unwrap();
+        let attached = plan_responses_continuation_request_action(&json!({
+            "effectResult": {
+                "operation": "lookup_continuation",
+                "result": {
+                    "continuationOwner": "direct",
+                    "providerKey": "provider.key1"
+                },
+                "resultPlanInput": lookup["resultPlanInput"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(attached["action"], json!("complete"));
+        assert_eq!(
+            attached["result"]["resumeMeta"]["continuationOwner"],
+            json!("direct")
+        );
+
+        let none = plan_responses_continuation_request_action(&json!({
+            "plannedEntry": {
+                "mode": "none",
+                "payload": { "model": "gpt-5.5", "input": [] }
+            },
+            "entryEndpoint": "/v1/responses",
+            "requestId": "req_none_1"
+        }))
+        .unwrap();
+        assert_eq!(none["action"], json!("complete"));
+        assert_eq!(none["result"]["kind"], json!("ok"));
+        assert!(none["result"].get("resumeMeta").is_none());
+    }
+
+    #[test]
+    fn inbound_tool_history_errorsample_plan_writes_only_for_contract_violation() {
+        let planned = plan_responses_inbound_tool_history_errorsample_for_http(&json!({
+            "requestId": "req_tool_history_plan_1",
+            "entryEndpoint": "/v1/responses",
+            "body": {
+                "previous_response_id": "resp_tool_history_plan_1"
+            },
+            "error": {
+                "name": "Error",
+                "message": "Tool history contract violated: tool_result must reference an open tool call",
+                "code": "MALFORMED_REQUEST"
+            }
         }));
 
-        assert_eq!(planned["action"], json!("client_error"));
-        assert_eq!(planned["status"], json!(400));
-        assert_eq!(planned["code"], json!("bad_request"));
+        assert_eq!(planned["action"], json!("write_errorsample"));
+        assert_eq!(
+            planned["write"]["kind"],
+            json!("responses.inbound_tool_history_contract")
+        );
+        assert_eq!(
+            planned["write"]["payload"]["requestId"],
+            json!("req_tool_history_plan_1")
+        );
+        assert_eq!(
+            planned["write"]["payload"]["body"]["previous_response_id"],
+            json!("resp_tool_history_plan_1")
+        );
+
+        let unrelated = plan_responses_inbound_tool_history_errorsample_for_http(&json!({
+            "requestId": "req_tool_history_plan_2",
+            "entryEndpoint": "/v1/responses",
+            "body": {},
+            "error": {
+                "message": "model is required",
+                "code": "MALFORMED_REQUEST",
+                "details": {}
+            }
+        }));
+        assert_eq!(unrelated["action"], json!("none"));
     }
 
     #[test]
@@ -7653,7 +8190,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_collapses_auto_projected_stopless_pairs_into_guidance_only() {
+    fn prepare_preserves_auto_projected_stopless_pairs_as_canonical_history() {
         let entry = prepare_responses_conversation_entry(
             &json!({
                 "model": "gpt-5.5",
@@ -7671,78 +8208,58 @@ mod tests {
                         "id": "fc_third_round_1",
                         "call_id": "call_third_round_1",
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":1,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3}'\"}"
                     },
                     {
                         "type": "function_call_output",
                         "id": "fc_third_round_1",
                         "call_id": "call_third_round_1",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
-                    },
-                    {
-                        "type": "function_call",
-                        "id": "fc_third_round_2",
-                        "call_id": "call_third_round_2",
-                        "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":2,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
-                    },
-                    {
-                        "type": "function_call_output",
-                        "id": "fc_third_round_2",
-                        "call_id": "call_third_round_2",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":3,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3}"
                     }
                 ]
             }),
         );
 
         let input = entry.get("input").and_then(Value::as_array).unwrap();
-        assert_eq!(input.len(), 2);
-        assert_eq!(input[0]["type"], json!("message"));
-        assert_eq!(input[1]["type"], json!("message"));
+        assert_eq!(input.len(), 3);
         let serialized = serde_json::to_string(input).unwrap();
-        assert!(!serialized.contains("reasoningStop"));
-        assert!(!serialized.contains("stop_message_auto"));
-        let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
-        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(!guidance.contains("repeatCount"));
-        assert!(!guidance.contains("stopreason"));
+        assert!(serialized.contains("reasoningStop"));
+        assert!(serialized.contains("stop_message_auto"));
+        assert!(!serialized.contains("继续处理当前任务"));
     }
 
     #[test]
-    fn continuation_history_preserves_real_user_continue_after_stopless_pair() {
-        let input =
-            crate::shared_responses_conversation_utils::collapse_auto_stop_hook_pairs_in_history(
-                vec![
-                    json!({
-                        "type": "function_call",
-                        "call_id": "call_stopless_before_real_continue",
-                        "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
-                    }),
-                    json!({
-                        "type": "function_call_output",
-                        "call_id": "call_stopless_before_real_continue",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}"
-                    }),
-                    json!({
-                        "type": "message",
-                        "role": "user",
-                        "content": [{ "type": "input_text", "text": "继续执行" }]
-                    }),
-                ],
-            );
+    fn continuation_history_preserves_real_user_continue_and_stopless_pair() {
+        let input = normalize_responses_request_input_for_chat_codec(vec![
+            json!({
+                "type": "function_call",
+                "call_id": "call_stopless_before_real_continue",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_stopless_before_real_continue",
+                "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}"
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "继续执行" }]
+            }),
+        ]);
 
-        assert_eq!(input.len(), 1);
-        assert_eq!(input[0]["role"], json!("user"));
-        assert_eq!(input[0]["content"][0]["text"], json!("继续执行"));
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[2]["role"], json!("user"));
+        assert_eq!(input[2]["content"][0]["text"], json!("继续执行"));
         let serialized = serde_json::to_string(&input).unwrap();
-        assert!(!serialized.contains("call_stopless_before_real_continue"));
-        assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
+        assert!(serialized.contains("call_stopless_before_real_continue"));
+        assert!(serialized.contains("stop_message_auto"));
+        assert!(!serialized.contains("继续处理当前任务"));
     }
 
     #[test]
-    fn resume_does_not_replay_auto_projected_stopless_pairs_from_canonical_history() {
+    fn resume_preserves_auto_projected_stopless_pairs_from_canonical_history() {
         let entry = prepare_responses_conversation_entry(
             &json!({
                 "model": "gpt-5.5",
@@ -7760,25 +8277,20 @@ mod tests {
                         "id": "fc_third_round_1",
                         "call_id": "call_third_round_1",
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":1,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\"maxRepeats\\\":3}'\"}"
                     },
                     {
                         "type": "function_call_output",
                         "id": "fc_third_round_1",
                         "call_id": "call_third_round_1",
-                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3}"
                     },
                     {
                         "type": "function_call",
                         "id": "fc_third_round_2",
                         "call_id": "call_third_round_2",
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json \\\"{\\\\\\\"flowId\\\\\\\":\\\\\\\"stop_message_flow\\\\\\\",\\\\\\\"repeatCount\\\\\\\":2,\\\\\\\"maxRepeats\\\\\\\":3}\\\"\"}"
-                    },
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{ "type": "output_text", "text": "继续执行中" }]
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\"maxRepeats\\\":3}'\"}"
                     }
                 ]
             }),
@@ -7795,7 +8307,7 @@ mod tests {
             &json!({
                 "tool_outputs": [{
                     "tool_call_id": "call_third_round_2",
-                    "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":3,\"maxRepeats\":3,\"schemaGuidance\":{\"requiredFields\":[\"stopreason\",\"reason\",\"next_step\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
+                    "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"continuationPrompt\":\"继续。\",\"repeatCount\":3,\"maxRepeats\":3}"
                 }],
                 "stream": false
             }),
@@ -7805,110 +8317,18 @@ mod tests {
 
         let payload = resumed.get("payload").and_then(Value::as_object).unwrap();
         let input = payload.get("input").and_then(Value::as_array).unwrap();
-        assert_eq!(input.len(), 2);
-        assert_eq!(input[0]["type"], json!("message"));
-        assert_eq!(input[1]["type"], json!("message"));
         let serialized = serde_json::to_string(input).unwrap();
-        assert!(!serialized.contains("call_third_round_1"));
-        assert!(!serialized.contains("call_third_round_2"));
-        assert!(!serialized.contains("继续执行中"));
-        assert!(!serialized.contains("\"type\":\"function_call_output\""));
-        let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
-        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(!guidance.contains("repeatCount"));
-        assert!(!guidance.contains("stopreason"));
+        assert!(serialized.contains("call_third_round_1"));
+        assert!(serialized.contains("call_third_round_2"));
+        assert!(serialized.contains("function_call_output"));
+        assert!(serialized.contains("stop_message_auto"));
+        assert!(!serialized.contains("继续处理当前任务"));
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
-        assert_eq!(full_input.len(), 2);
-        assert_eq!(full_input[0]["type"], json!("message"));
-        assert_eq!(full_input[1]["type"], json!("message"));
         let full_input_serialized = serde_json::to_string(full_input).unwrap();
-        assert!(!full_input_serialized.contains("call_third_round_1"));
-        assert!(!full_input_serialized.contains("call_third_round_2"));
-        assert!(!full_input_serialized.contains("继续执行中"));
-    }
-
-    #[test]
-    fn stopless_resume_guidance_for_first_missing_schema_round_stays_short() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-    }
-
-    #[test]
-    fn stopless_resume_guidance_for_first_invalid_schema_round_renders_feedback() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-    }
-
-    #[test]
-    fn stopless_resume_guidance_accepts_continue_next_step_with_empty_missing_fields() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_continue_next_step\",\"missingFields\":[]},\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"non_terminal_schema\"}}"
-        );
-        assert_eq!(text, "继续。");
-        assert!(!text.contains("任务还没收尾，继续执行你给出的 next_step"));
-        assert!(
-            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
-            "continue_next_step with empty missing fields is legal: {text}"
-        );
-    }
-
-    #[test]
-    fn stopless_resume_guidance_accepts_minimal_no_schema_cli_output_without_malformed_warning() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(
-            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
-            "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
-        );
-    }
-
-    #[test]
-    fn stopless_resume_guidance_accepts_minimal_non_terminal_schema_cli_output() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"继续\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"sessionId\":\"stopless-live-1782780421308\",\"requestId\":\"openai-responses-XLC.key1-glm-5.2-20260630T084701341-424854-5137\",\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"non_terminal_schema\"}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(
-            !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
-            "minimal non_terminal_schema CLI output is legal and must not be treated as malformed: {text}"
-        );
-    }
-
-    #[test]
-    fn stopless_resume_guidance_for_second_missing_schema_round_must_expand_branching() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"sample\":\"{\\\"stopreason\\\":2,\\\"reason\\\":\\\"当前状态\\\",\\\"current_goal\\\":\\\"当前目标\\\",\\\"has_evidence\\\":0,\\\"evidence\\\":\\\"\\\",\\\"next_step\\\":\\\"下一步动作\\\",\\\"needs_user_input\\\":false}\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-    }
-
-    #[test]
-    fn stopless_resume_guidance_rejects_unknown_feedback_without_default_guidance() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_unknown_future_reason\",\"missingFields\":[\"next_step\"]}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(!text.contains("triggerHint"));
-        assert!(!text.contains("no_schema"));
-        assert!(!text.contains("本轮缺失字段：stopreason, reason, has_evidence"));
-    }
-
-    #[test]
-    fn stopless_resume_guidance_rejects_incomplete_feedback_without_default_guidance() {
-        let text = build_stop_hook_guidance_text_from_output(
-            "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[]}}"
-        );
-        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
-        assert!(!text.contains("no_schema"));
-        assert!(!text.contains("本轮缺失字段：stopreason, reason, has_evidence"));
+        assert!(full_input_serialized.contains("stop_message_auto"));
+        assert!(!full_input_serialized.contains("继续处理当前任务"));
     }
 
     #[test]
@@ -9658,6 +10078,7 @@ mod tests {
                 json!({ "model": "gpt-5.5", "stream": false, "input": [] }).to_string(),
                 false,
                 true,
+                "null".to_string(),
             )
             .expect("finalized payload"),
         )
@@ -9670,6 +10091,7 @@ mod tests {
                 json!({ "response_id": "resp_1", "stream": false }).to_string(),
                 true,
                 true,
+                serde_json::json!({ "prompt": "SYSTEM OVERRIDE" }).to_string(),
             )
             .expect("submit payload"),
         )
@@ -9681,11 +10103,27 @@ mod tests {
                 json!({ "model": "gpt-5.5" }).to_string(),
                 false,
                 false,
+                "null".to_string(),
             )
             .expect("non-stream payload"),
         )
         .expect("non-stream payload json");
         assert!(non_stream.get("stream").is_none());
+
+        let prompted: Value = serde_json::from_str(
+            &finalize_responses_handler_payload_for_http_json(
+                json!({ "model": "gpt-5.5", "instructions": "Keep this." }).to_string(),
+                false,
+                false,
+                serde_json::json!({ "source": "codex", "prompt": "SYSTEM OVERRIDE" }).to_string(),
+            )
+            .expect("prompted payload"),
+        )
+        .expect("prompted payload json");
+        assert_eq!(
+            prompted["instructions"],
+            json!("SYSTEM OVERRIDE\n\nKeep this.")
+        );
     }
 
     #[test]

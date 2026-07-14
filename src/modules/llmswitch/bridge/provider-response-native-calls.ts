@@ -1,4 +1,5 @@
 import { getProviderResponseNativeBindingSync } from './provider-response-native-host.js';
+import type { ResponsesContinuationStoreEffect } from './responses-conversation-store-host.js';
 import {
   assertNativeObject,
   callNativeJsonCapability,
@@ -57,7 +58,7 @@ export type ProviderResponseStreamPipeEffectPlan =
   | { action: 'no_pipe' }
   | {
       action: 'use_pipe';
-      pipe: { codec: string; requestId: string; payload: Record<string, unknown> };
+      pipe: { codec: string; requestId: string };
     };
 
 export type ProviderResponseStageRecorderEffectPlan = {
@@ -65,23 +66,7 @@ export type ProviderResponseStageRecorderEffectPlan = {
 };
 
 export type PublishResponsesRecordPlan = {
-  recordArgs: {
-    requestId: string;
-    response: Record<string, unknown>;
-    sessionId?: string;
-    conversationId?: string;
-    providerKey?: string;
-    entryKind: 'responses';
-    continuationOwner: 'relay';
-    matchedPort?: number;
-    routingPolicyGroup?: string;
-    allowScopeContinuation: true;
-    routeHint?: string;
-  } | null;
-  finalizeArgs: {
-    requestId: string;
-    keepForSubmitToolOutputs: boolean;
-  } | null;
+  continuationStoreEffects: ResponsesContinuationStoreEffect[];
   usageArgs: {
     usage?: unknown;
   } | null;
@@ -466,20 +451,6 @@ export function ensureRuntimeMetadataWithNative(carrier: Record<string, unknown>
     [carrier],
     { label }
   );
-}
-
-export function projectMetadataWritePlanToRuntimeControlWritePlanWithNative(plan: unknown): {
-  runtimeControl?: Record<string, unknown>;
-} {
-  const parsed = callNativeJsonCapability(
-    getProviderResponseNativeBindingSync,
-    'projectMetadataWritePlanToRuntimeControlWritePlanJson',
-    [{ plan }],
-    { label }
-  );
-  return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-    ? parsed as { runtimeControl?: Record<string, unknown> }
-    : {};
 }
 
 export function buildProviderSseStreamReadErrorDescriptorWithNative(input: {

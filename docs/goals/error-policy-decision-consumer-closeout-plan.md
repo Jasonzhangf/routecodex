@@ -87,7 +87,7 @@ Add or update tests so they fail on the current implementation before code chang
 
 ### Red Test Group D: Wait and Cooldown Policy
 
-- Error action queue exposes the target wait sequence. If current target is `1s -> 3s -> 5s`, tests must assert exactly that sequence.
+- Error action queue exposes the target wait sequence. Current target is `1s -> 2s -> 3s`; tests must assert exactly that sequence.
 - Rust VR health/policy must prove three consecutive provider failures trip the provider into 30-minute cooldown.
 - Success resets consecutive failure state.
 - Cooldown expiry makes provider eligible again.
@@ -166,7 +166,7 @@ Invalid options:
 ### Phase 5: Wait and Cooldown Alignment
 
 1. Decide target wait sequence from current product rule:
-   - If target is `1s -> 3s -> 5s`, update code, docs, tests, and server contract output.
+   - For target `1s -> 2s -> 3s`, update code, docs, tests, and server contract output together.
    - If keeping `1s -> 2s -> 3s`, update product doc and confirm with Jason before implementation.
 2. Keep provider cooldown in Rust VR health/policy, not TS action queue.
 3. Verify:

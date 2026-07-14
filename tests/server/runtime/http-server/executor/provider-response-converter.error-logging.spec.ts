@@ -7,6 +7,42 @@ const logStageSpy = jest.fn();
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/provider-response-converter-host.js', () => ({
   convertProviderResponse: mockConvertProviderResponse,
+  asFlatRecord: jest.fn((value) => (
+    value && typeof value === 'object' && !Array.isArray(value) ? value : undefined
+  )),
+  buildChoicesArrayBridgeDebugDetailsWithNative: jest.fn((args) => {
+    const seed = args?.bridgeSeed as Record<string, unknown> | undefined;
+    const payload = args?.bridgePayload as Record<string, unknown> | undefined;
+    const data = payload?.data as Record<string, unknown> | undefined;
+    return {
+      bridgeProviderProtocol: args?.bridgeProviderProtocol,
+      bridgePayloadHasChoices: Array.isArray(payload?.choices),
+      bridgePayloadHasDataChoices: Array.isArray(data?.choices),
+      bridgeSeedKeys: seed ? Object.keys(seed) : [],
+      bridgePayloadKeys: payload ? Object.keys(payload) : [],
+    };
+  }),
+  buildProviderResponseTimingBreakdownWithNative: jest.fn((value) => value),
+  extractBridgeProviderResponsePayload: jest.fn((value) => {
+    const record = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined;
+    return record?.data && typeof record.data === 'object' && !Array.isArray(record.data)
+      ? record.data
+      : undefined;
+  }),
+  extractContentTextForStoplessScan: jest.fn(() => ''),
+  extractFirstBalancedJsonObject: jest.fn(() => undefined),
+  extractLatestUserTextForStoplessScan: jest.fn(() => ''),
+  findNestedErrorMarker: jest.fn(() => undefined),
+  findNestedRawString: jest.fn(() => undefined),
+  hasStoplessDirectiveInRequestPayload: jest.fn(() => false),
+  isContextLengthExceededError: jest.fn(() => false),
+  isGenericBridgeResponseContractError: jest.fn(() => false),
+  isRetryableNetworkSseWrapperError: jest.fn(() => false),
+  shouldAllowDirectResponsesPrebuiltSsePassthroughWithNative: jest.fn(() => false),
+  tryParseJsonLikeString: jest.fn(() => undefined),
+  validateCanonicalClientToolCall: jest.fn(() => true),
 }));
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge/snapshot-recorder.js', () => ({
@@ -74,15 +110,28 @@ describe('provider-response-converter error logging', () => {
         executeNested: async () => ({ body: { ok: true } } as any)
       }
     )).rejects.toMatchObject({
-      code: 'HTTP_502',
-      upstreamCode: 'UPSTREAM_UNAVAILABLE',
-      statusCode: 502
+      message: 'Upstream SSE error event [UPSTREAM_UNAVAILABLE]: gateway unavailable',
+      response: {
+        status: 503,
+        data: {
+          error: {
+            code: 'UPSTREAM_UNAVAILABLE',
+            message: 'gateway unavailable',
+            status: 503
+          }
+        }
+      },
+      details: {
+        source: 'provider_response_sse_wrapper',
+        rawCode: 'UPSTREAM_UNAVAILABLE',
+        rawStatusCode: 503
+      }
     });
 
     expect(mockConvertProviderResponse).not.toHaveBeenCalled();
   });
 
-  it('applies provider configured error mapping before throwing SSE wrapper errors', async () => {
+  it('does not apply provider configured error mapping before ErrorErr capture', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -149,35 +198,28 @@ describe('provider-response-converter error logging', () => {
         executeNested: async () => ({ body: { ok: true } } as any)
       }
     )).rejects.toMatchObject({
-      code: 'HTTP_429',
-      upstreamCode: 'HTTP_400',
-      status: 429,
-      statusCode: 429,
-      message: 'All available accounts exhausted',
+      message: 'Upstream SSE error event [HTTP_400]: All available accounts exhausted',
       response: {
-        status: 429,
+        status: 400,
         data: {
           error: {
-            code: 'HTTP_429',
-            status: 429,
+            code: 'HTTP_400',
+            status: 400,
             message: 'All available accounts exhausted'
           }
         }
       },
       details: {
-        providerErrorMapping: {
-          originalStatus: 400,
-          originalCode: 'SSE_DECODE_ERROR',
-          mappedStatus: 429,
-          mappedCode: 'HTTP_429'
-        }
+        source: 'provider_response_sse_wrapper',
+        rawCode: 'HTTP_400',
+        rawStatusCode: 400
       }
     });
 
     expect(mockConvertProviderResponse).not.toHaveBeenCalled();
   });
 
-  it('does not map SSE wrapper errors without provider runtime errorMapping', async () => {
+  it('preserves the same raw wrapper evidence without provider runtime mapping', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
@@ -221,10 +263,7 @@ describe('provider-response-converter error logging', () => {
         executeNested: async () => ({ body: { ok: true } } as any)
       }
     )).rejects.toMatchObject({
-      code: 'SSE_DECODE_ERROR',
-      upstreamCode: 'HTTP_400',
-      status: 400,
-      statusCode: 400,
+      message: 'Upstream SSE error event [HTTP_400]: All available accounts exhausted',
       response: {
         status: 400,
         data: {
@@ -234,6 +273,11 @@ describe('provider-response-converter error logging', () => {
             message: 'All available accounts exhausted'
           }
         }
+      },
+      details: {
+        source: 'provider_response_sse_wrapper',
+        rawCode: 'HTTP_400',
+        rawStatusCode: 400
       }
     });
 

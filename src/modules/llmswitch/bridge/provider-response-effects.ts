@@ -18,8 +18,7 @@ import {
   writeRustStopGatewayContextToMetadataCenter,
 } from './provider-response-metadata-effects.js';
 import {
-  finalizeResponsesConversationRequestRetention,
-  recordResponsesResponse,
+  executeResponsesContinuationStoreEffects,
 } from './responses-conversation-store-host.js';
 
 type AdapterContext = Record<string, unknown>;
@@ -61,14 +60,13 @@ export function executeProviderResponseNativeOutboundEffects(args: {
 }
 
 export async function executeProviderResponseNativeServertoolEffects(args: {
-  payload: JsonObject;
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
   context: AdapterContext;
   requestId: string;
   entryEndpoint: string;
   providerProtocol: ProviderProtocol;
   stageRecorder?: StageRecorder;
-}): Promise<{ payload: JsonObject; stage: 'HubRespChatProcess03Governed' | 'unchanged' }> {
+}): Promise<void> {
   void args.requestId;
   void args.entryEndpoint;
   void args.providerProtocol;
@@ -77,7 +75,7 @@ export async function executeProviderResponseNativeServertoolEffects(args: {
     servertoolRuntimeActions: args.runtimeEffects.servertoolRuntimeActions,
   });
   if (plan.action === 'continue') {
-    return { payload: args.payload, stage: 'unchanged' };
+    return;
   }
   if (plan.action === 'reject_legacy_actions') {
     if (plan.stopGatewayWrite) {
@@ -126,15 +124,7 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
     entryEndpoint: args.entryEndpoint,
   });
 
-  if (plan.recordArgs) {
-    recordResponsesResponse(plan.recordArgs);
-  }
-  if (plan.finalizeArgs) {
-    finalizeResponsesConversationRequestRetention(
-      plan.finalizeArgs.requestId,
-      { keepForSubmitToolOutputs: plan.finalizeArgs.keepForSubmitToolOutputs }
-    );
-  }
+  executeResponsesContinuationStoreEffects(plan.continuationStoreEffects);
   if (plan.usageArgs) {
     planChatProcessSessionUsageWithNative({
       context: args.context as unknown as Record<string, unknown>,
@@ -145,7 +135,7 @@ export function executeProviderResponseNativeRuntimeStateEffect(args: {
 
 export function readProviderResponseNativeStreamPipe(args: {
   runtimeEffects: ProviderResponseRuntimeEffectPlan;
-}): { codec: NativeSseRuntimeProtocol | string; requestId: string; payload: JsonObject } | null {
+}): { codec: NativeSseRuntimeProtocol | string; requestId: string } | null {
   const plan = planProviderResponseStreamPipeEffectWithNative({
     streamPipe: args.runtimeEffects.streamPipe,
   });

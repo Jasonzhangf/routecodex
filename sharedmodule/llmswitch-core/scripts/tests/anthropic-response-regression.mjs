@@ -8,14 +8,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const SAMPLE_PATH = path.join(PROJECT_ROOT, 'test', 'samples', 'chat-blackbox', 'anthropic', 'anthropic-response.json');
-
-function resolveDistPath(...segments) {
-  const direct = path.join(PROJECT_ROOT, ...segments);
-  if (fs.existsSync(direct)) {
-    return direct;
-  }
-  return path.join(PROJECT_ROOT, 'sharedmodule', 'llmswitch-core', ...segments);
-}
+const NATIVE_NODE_PATH = path.join(PROJECT_ROOT, 'dist', 'native', 'router_hotpath_napi.node');
+const NATIVE_RESP_SEMANTICS_FACADE_PATH = path.join(
+  PROJECT_ROOT,
+  'dist',
+  'native',
+  'router-hotpath',
+  'native-hub-pipeline-resp-semantics.js'
+);
 
 function loadSample() {
   const raw = fs.readFileSync(SAMPLE_PATH, 'utf-8');
@@ -52,21 +52,38 @@ function assertHubAnthropicToolCallShape(chat) {
   }
 }
 
+export async function buildAnthropicRegressionProjectionWithNative(payload) {
+  if (!fs.existsSync(NATIVE_NODE_PATH)) {
+    throw new Error(`required native artifact missing: ${NATIVE_NODE_PATH}`);
+  }
+  process.env.ROUTECODEX_LLMS_ROUTER_NATIVE_PATH = NATIVE_NODE_PATH;
+  const nativeMod = await import(
+    pathToFileURL(NATIVE_RESP_SEMANTICS_FACADE_PATH).href
+  );
+  const { buildOpenAIChatFromAnthropicMessageFullWithNative } = nativeMod;
+  if (typeof buildOpenAIChatFromAnthropicMessageFullWithNative !== 'function') {
+    throw new Error('buildOpenAIChatFromAnthropicMessageFullWithNative missing from native facade');
+  }
+  const raw = buildOpenAIChatFromAnthropicMessageFullWithNative({
+    payload: JSON.stringify(payload),
+  });
+  const envelope = JSON.parse(raw);
+  if (!envelope || typeof envelope !== 'object' || typeof envelope.result !== 'string') {
+    throw new Error('native Anthropic response projection returned malformed envelope');
+  }
+  return JSON.parse(envelope.result);
+}
+
 async function main() {
   const sample = loadSample();
-  const runtimeMod = await import(
-    pathToFileURL(resolveDistPath('dist', 'conversion', 'hub', 'response', 'response-runtime-anthropic.js')).href
-  );
-  const { buildOpenAIChatFromAnthropicMessage } = runtimeMod;
-  if (typeof buildOpenAIChatFromAnthropicMessage !== 'function') {
-    throw new Error('buildOpenAIChatFromAnthropicMessage missing from dist build');
-  }
-  const chat = buildOpenAIChatFromAnthropicMessage(structuredClone(sample.payload));
+  const chat = await buildAnthropicRegressionProjectionWithNative(sample.payload);
   assertHubAnthropicToolCallShape(chat);
   console.log('[anthropic-response-regression] Hub Anthropic response mapping matches Rust-owned shape.');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

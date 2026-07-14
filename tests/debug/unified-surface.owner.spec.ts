@@ -21,7 +21,8 @@ describe('debug unified surface owner gate M0/M1', () => {
     expect(diagIndex).toMatch(/from\s+'\.\/error-artifact\.js'/);
     expect(diagIndex).toMatch(/readDebugErrorDiagArtifactInternal\s+as\s+readDebugErrorDiagArtifact/);
     expect(diagIndex).toMatch(/writeDebugErrorDiagArtifactInternal\s+as\s+writeDebugErrorDiagArtifact/);
+    expect(debugIndex).toContain('export async function readDebugErrorDiagArtifact');
+    expect(debugIndex).toContain('export async function writeDebugErrorDiagArtifact');
     expect(verifyScript).toContain('writeDebugErrorDiagArtifact');
-    expect(verifyScript).toContain('readDebugErrorDiagArtifact');
   });
 });

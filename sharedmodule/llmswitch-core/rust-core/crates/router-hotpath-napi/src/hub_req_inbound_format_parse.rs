@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::shared_json_utils::serialized_json_size;
+
 const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,16 +29,13 @@ pub struct FormatParseOutput {
 }
 
 fn validate_payload_size(raw_request: &Value) -> Result<(), String> {
-    let payload_str = match serde_json::to_string(raw_request) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("Failed to serialize payload for size check: {}", e)),
-    };
+    let payload_size = serialized_json_size(raw_request)
+        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
 
-    if payload_str.len() > MAX_PAYLOAD_SIZE_BYTES {
+    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
         return Err(format!(
             "Payload size {} exceeds maximum allowed {} bytes",
-            payload_str.len(),
-            MAX_PAYLOAD_SIZE_BYTES
+            payload_size, MAX_PAYLOAD_SIZE_BYTES
         ));
     }
 

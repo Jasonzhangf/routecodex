@@ -378,17 +378,21 @@ mod tests {
 
     #[test]
     fn runtime_metadata_effect_requires_carrier_and_projects_only_valid_dry_run() {
-        let control = serde_json::json!({"enabled":true,"kind":"provider_request","requestId":"dry-1"});
+        let control =
+            serde_json::json!({"enabled":true,"kind":"provider_request","requestId":"dry-1"});
         let attach = plan_router_direct_runtime_metadata_effect(&serde_json::json!({
             "runtimeMetadataPresent":true,
             "pipelineMetadata":{"__rccDryRunSerialized":control,"payload":{"secret":true}}
         }));
         assert_eq!(attach["action"], "attach");
         assert_eq!(attach["dryRunControl"]["requestId"], "dry-1");
-        assert_eq!(plan_router_direct_runtime_metadata_effect(&serde_json::json!({
-            "runtimeMetadataPresent":false,
-            "pipelineMetadata":{"__rccDryRunSerialized":control}
-        }))["action"], "skip");
+        assert_eq!(
+            plan_router_direct_runtime_metadata_effect(&serde_json::json!({
+                "runtimeMetadataPresent":false,
+                "pipelineMetadata":{"__rccDryRunSerialized":control}
+            }))["action"],
+            "skip"
+        );
         assert!(plan_router_direct_runtime_metadata_effect(&serde_json::json!({
             "runtimeMetadataPresent":true,
             "pipelineMetadata":{"__rccDryRunSerialized":{"enabled":false,"kind":"provider_request"}}

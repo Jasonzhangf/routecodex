@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::hub_req_chatprocess_03_governed::HubReqChatProcess03Governed;
-use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, clone_object_payload};
+use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, into_object_payload};
 use super::meta_error_carriers::assert_payload_has_no_meta_or_error_carrier;
 use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
 use super::vr_route_04_selected_target::VrRoute04SelectedTarget;
@@ -33,10 +33,8 @@ pub(crate) fn build_hub_req_outbound_05_from_vr_route_04_selected_target(
         governed.payload(),
         "HubReqOutbound05ProviderSemantic.source",
     )?;
-    assert_no_inline_metadata(
-        &selected_target.clone().into_decision(),
-        "HubReqOutbound05ProviderSemantic.route",
-    )?;
+    selected_target
+        .assert_decision_has_no_inline_metadata("HubReqOutbound05ProviderSemantic.route")?;
     assert_no_inline_metadata(&outbound_payload, "HubReqOutbound05ProviderSemantic")?;
     assert_payload_has_no_meta_or_error_carrier(
         &outbound_payload,
@@ -47,7 +45,7 @@ pub(crate) fn build_hub_req_outbound_05_from_vr_route_04_selected_target(
         "HubReqOutbound05ProviderSemantic",
         ToolNamespacePolicy::AllowSemanticNamespace,
     )?;
-    let payload = clone_object_payload(&outbound_payload, "HubReqOutbound05ProviderSemantic")?;
+    let payload = into_object_payload(outbound_payload, "HubReqOutbound05ProviderSemantic")?;
     Ok(HubReqOutbound05ProviderSemantic { payload })
 }
 

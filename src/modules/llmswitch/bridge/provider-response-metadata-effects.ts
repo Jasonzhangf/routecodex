@@ -1,7 +1,6 @@
 import {
   buildProviderResponseMetadataSnapshotWithNative,
   ensureRuntimeMetadataWithNative,
-  projectMetadataWritePlanToRuntimeControlWritePlanWithNative,
 } from './provider-response-native-calls.js';
 
 type JsonObject = Record<string, unknown>;
@@ -129,12 +128,6 @@ export function applyNativeRuntimeControlWritePlan(args: {
       reason: args.reason,
     });
   }
-}
-
-export function projectNativeMetadataWritePlanToRuntimeControlWritePlan(plan: unknown): {
-  runtimeControl?: Record<string, unknown>;
-} {
-  return projectMetadataWritePlanToRuntimeControlWritePlanWithNative(plan);
 }
 
 export function readMetadataCenterSnapshotForRust(context: Record<string, unknown>): Record<string, unknown> | null {

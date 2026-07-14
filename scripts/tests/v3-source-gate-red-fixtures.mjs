@@ -32,6 +32,18 @@ const fixtures = [
     diagnostic: /generic Responses Provider contains deployment provider identity branch/,
   },
   {
+    name: 'obsolete provider prototype node',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    mutation: '\ntype ForbiddenOldProviderNode = V3Provider07ResponsesWirePayload;\n',
+    diagnostic: /obsolete Provider prototype node name is forbidden/,
+  },
+  {
+    name: 'provider imports target interpreter',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    mutation: '\nuse routecodex_v3_target::V3TargetInterpreter;\n',
+    diagnostic: /generic Responses Provider cannot import or interpret Router\/Target\/Forwarder resources/,
+  },
+  {
     name: 'repair or fallback semantics',
     file: 'v3/crates/routecodex-v3-runtime/src/lib.rs',
     mutation: '\nfn forbidden_response_repair() {}\n',

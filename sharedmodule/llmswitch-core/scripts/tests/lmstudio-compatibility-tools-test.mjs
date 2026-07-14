@@ -251,7 +251,7 @@ async function getAvailableModels() {
 
 // 模拟兼容性处理（基于我们实现的逻辑）
 function applyLMStudioCompatibility(request) {
-  const processed = JSON.parse(JSON.stringify(request)); // 深拷贝
+  const processed = { ...request };
   processed.parameters = { ...processed };
 
   // tool_choice 规范化
@@ -508,4 +508,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 }
 
-export { main as runLMStudioCompatibilityToolsTest };
+export { main as runLMStudioCompatibilityToolsTest, applyLMStudioCompatibility };

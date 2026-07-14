@@ -176,7 +176,7 @@ resources:
     forbidden_writers: [V3Resp15ClientPayload, V3Server16HttpFrame, V3DebugArtifact]
     may_enter_provider_body: true
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.provider.transport_request
     resource_kind: transport
     lifecycle: v3.responses_direct.mainline
@@ -188,7 +188,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, V3Resp15ClientPayload]
     may_enter_provider_body: true
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.response.provider_raw
     resource_kind: provider_response
     lifecycle: v3.responses_direct.mainline
@@ -200,7 +200,7 @@ resources:
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.response.client_payload
     resource_kind: normal_payload
     lifecycle: v3.responses_direct.mainline

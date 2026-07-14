@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { registerDefaultMiddleware } from '../../../src/server/runtime/http-server/middleware.js';
 import { registerHttpRoutes } from '../../../src/server/runtime/http-server/routes.js';
 import { serializeTomlRecord } from '../../../src/config/toml-basic.js';
+import { initializeRouteErrorHub } from '../../../src/error-handling/route-error-hub.js';
 
 // Canonical builder trace for server.models_capability_contract:
 // buildCodexModelMetadata / buildCodexAdvancedModelMetadata / collectConfiguredModelItems
@@ -61,6 +62,15 @@ function readModelsPayload(body: any): any[] {
 }
 
 describe('http routes invalid json handling', () => {
+  beforeAll(() => {
+    initializeRouteErrorHub({
+      errorHandlingCenter: {
+        async initialize() {},
+        async handleError() {},
+      } as never
+    });
+  });
+
   it('returns structured json instead of express html stack for malformed json bodies', async () => {
     const app = express();
     registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);

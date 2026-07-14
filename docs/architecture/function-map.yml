@@ -125,6 +125,59 @@ owners:
       - "This feature is a collaboration governance contract only; it must not alter runtime request/response/provider behavior."
       - "Claims are semantic IDs and evidence-backed; stale heartbeat is not takeover permission."
 
+  - feature_id: architecture.mainline_chain_manifest_payload_copy_budget
+    status: active
+    summary: "mainline chain manifest generation reuses one authoritative projection without JSON round-trip cloning"
+    owner_kind: architecture_generator
+    owner_scope: "architecture review-surface manifest projection only; no runtime payload ownership"
+    owner_module: scripts/architecture/generate-mainline-chain-manifests.mjs
+    canonical_types:
+      - MainlineChainManifestProjection
+    canonical_builders:
+      - buildMainlineChainManifest
+      - generateMainlineChainManifests
+    allowed_paths:
+      - scripts/architecture/generate-mainline-chain-manifests.mjs
+      - tests/architecture/mainline-chain-manifests-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-mainline-chain-manifest-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/manifests
+      - docs/architecture/wiki
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/architecture/mainline-chain-manifests-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-mainline-chain-manifest-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: none
+    resource_bindings:
+      writes:
+        - architecture.mainline_chain_manifest_projection@ArchitectureManifestProjection
+      reads:
+        - architecture.mainline_chain_manifest_projection@ArchitectureReviewSurface
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    notes:
+      - "The generator builds one manifest projection per chain and passes that object directly to YAML serialization."
+      - "Importing the generator is side-effect free; direct CLI execution is the only repository-write entry."
+      - "This architecture projection cannot become runtime request, response, provider, config, or MetadataCenter truth."
+
   - feature_id: hub.servertool_followup
     status: active
     summary: "servertool followup orchestration and governed response truth"
@@ -329,6 +382,7 @@ owners:
       - npm run verify:stopless-invalid-schema-blackbox
       - npm run verify:servertool-cli-binary-blackbox
       - npm run verify:servertool-rust-only
+      - npm run verify:servertool-mount-boundary
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
@@ -1365,7 +1419,7 @@ owners:
       - npm run verify:resource-operation-map
     migration_target: rust
     notes:
-      - "Error storm prevention waits are fixed blocking waits: 1s -> 3s -> 5s -> repeat."
+      - "Error storm prevention waits are fixed blocking waits: 1s -> 2s -> 3s -> repeat."
       - "Categories are global_error, session_storm, and servertool_followup."
       - "Provider error switching uses the global_error queue with a routing-group/route scoped provider-switch key; each exclude_and_reroute must wait before the next provider is selected so priority/weighted pools have recovery time instead of storm-scanning the whole pool."
       - "Provider traffic saturation no longer enters this queue; governor must raise saturation immediately so upper layers can switch provider without blocking wait."
@@ -1426,8 +1480,7 @@ owners:
     owner_scope: "VR shared helper placement for exact duplicate string/list mechanics and tool-detection constant reuse only; no route-selection, availability, forwarder, provider, or payload semantic movement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
     canonical_types:
-      - Value
-      - HashSet
+      - serde_json::Value
     canonical_builders:
       - trim_nonempty_str
       - push_unique_trimmed
@@ -1527,6 +1580,64 @@ owners:
     notes:
       - "TS request-stage shell may transport runtime_control and invoke native ingress, but it must not guess route policy, revive legacy `__rt` route pins, or fabricate VrRoute04 contract state."
       - "Runtime route selection may stay split from typed route application, but req-03 must remain queryable through the Rust typed entrypoint instead of `binding pending` prose."
+
+  - feature_id: hub.pipeline_engine_failfast_closeout
+    status: active
+    summary: "Hub Pipeline Rust engine single-source and fail-fast closeout gate"
+    owner_kind: gate_doc
+    owner_scope: "architecture gate for typed request identity/protocol ingress, canonical retry exclusions, MetadataCenter-only stopless activation, required terminal response output, and explicit clock failure"
+    owner_module: scripts/architecture/verify-hub-pipeline-engine-failfast-closeout.mjs
+    resource_bindings:
+      reads:
+        - request.protocol_context@ServerReqInbound01ClientRaw
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - route.retry_exclusion_set@ErrorErr05ExecutionDecision
+      forbidden:
+        - request.normal_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+    canonical_types:
+      - HubPipelineEngineFailfastViolation
+      - RouteRetryExclusionSet
+    canonical_builders:
+      - collectHubPipelineEngineFailfastViolations
+    allowed_paths:
+      - scripts/architecture/verify-hub-pipeline-engine-failfast-closeout.mjs
+      - scripts/tests/hub-pipeline-engine-failfast-closeout-red-fixtures.mjs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/types.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/napi_bindings.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/router_metadata_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/protocol.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/tests.rs
+      - src/server/runtime/http-server/executor-pipeline.ts
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+      - docs/goals/hub-pipeline-engine-failfast-closeout-test-design.md
+      - docs/goals/hubpipeline-full-rust-closeout-plan.md
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/verification-map.yml
+      - package.json
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - provider configuration
+    required_tests:
+      - scripts/architecture/verify-hub-pipeline-engine-failfast-closeout.mjs
+      - scripts/tests/hub-pipeline-engine-failfast-closeout-red-fixtures.mjs
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+      - docs/goals/hub-pipeline-engine-failfast-closeout-test-design.md
+    required_gates:
+      - npm run verify:hub-pipeline-engine-failfast-closeout
+      - npm run test:hub-pipeline-engine-failfast-closeout-red-fixtures
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "This feature owns the closeout verifier and test contract, not a second runtime engine."
+      - "Runtime source remains Rust-owned. The gate must stay red until fixed request ids, endpoint/flat protocol inference, exclusion mirrors, multi-source stopless activation, terminal semantic fallbacks, and timestamp-zero recovery are removed."
 
   - feature_id: hub.req_outbound_provider_semantic
     status: active
@@ -1771,9 +1882,55 @@ owners:
     migration_target: rust
     notes:
       - "Hit-log projection is diagnostic output, not route selection. It must not reselect routes, patch provider payloads, or infer provider policy."
+      - "Human-visible hit-log route labels and telemetry `pool` projection must show the route classification only (`routeName`); standalone authoring/runtime pool names must not appear in the emitted line or telemetry event."
       - "Retired TS `runtime/virtual-router-hit-log.ts` facade is physically deleted; stop-message summary, provider key parsing, color selection, hit reason, and telemetry projection are Rust-owned through direct NAPI exports."
       - "Runtime route host-effects planning/finalization is Rust-owned; `routing-integrations.ts` may only call `planVirtualRouterRouteHostEffectsJson` / `finalizeVirtualRouterRouteHostEffectsJson`, apply returned `cleanedRequest`, and emit returned log lines."
       - "Session log color helpers must reach Rust through `src/modules/llmswitch/bridge/session-log-color-host.ts`; TS may not keep local color hashing or broad bridge ownership."
+
+  - feature_id: log.virtual_router_rollup_projection
+    status: active
+    summary: "Virtual Router log rollup route display and aggregation keys use route classification only"
+    owner_kind: ts_projection_shell
+    owner_scope: "server log rollup display and aggregation for Virtual Router hit/usage rows; consumes Rust telemetry but does not own VR selection or hit-log projection semantics"
+    owner_module: src/server/runtime/http-server/executor/log-rollup-format-blocks.ts
+    resource_bindings:
+      writes:
+        - vr.telemetry_projection@ServerRespOutbound05ClientFrame
+      reads:
+        - vr.telemetry_projection@VrHitLog04TelemetryProjection
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - RouterHitRollupEvent
+      - VirtualRouterHitAgg
+      - UsageRollupAgg
+    canonical_builders:
+      - formatRoutePool
+      - buildKey
+    allowed_paths:
+      - src/server/runtime/http-server/executor/log-rollup-format-blocks.ts
+      - src/server/runtime/http-server/executor/log-rollup.ts
+      - src/server/runtime/http-server/executor/usage-logger.ts
+      - tests/server/runtime/http-server/executor/log-rollup.spec.ts
+      - tests/server/runtime/http-server/executor/usage-logger.spec.ts
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine
+      - src/providers
+      - src/client
+    required_tests:
+      - tests/server/runtime/http-server/executor/log-rollup.spec.ts
+      - tests/server/runtime/http-server/executor/usage-logger.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
+    migration_target: none
+    notes:
+      - "Rollup grouping and printed route pool text must ignore `poolId`; classification is `routeName` only."
+      - "This owner may format already-produced telemetry for logs, but must not infer routing policy, rewrite route decisions, or reintroduce standalone pool names."
 
   - feature_id: vr.route_host_effects
     status: active
@@ -2502,6 +2659,8 @@ owners:
     canonical_builders:
       - verifyHubPipelineNativeReferenceGate
     allowed_paths:
+      - scripts/architecture/verify-architecture-thin-wrapper-only.mjs
+      - scripts/tests/architecture-thin-wrapper-only-red-fixtures.mjs
       - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
       - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
       - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
@@ -2528,11 +2687,15 @@ owners:
       - direct-native
       - HubPipeline
     required_tests:
+      - scripts/tests/architecture-thin-wrapper-only-red-fixtures.mjs
+      - scripts/architecture/verify-architecture-thin-wrapper-only.mjs
       - scripts/tests/hub-pipeline-native-reference-gate-red-fixtures.mjs
       - scripts/architecture/verify-hub-pipeline-native-reference-gate.mjs
       - docs/goals/hub-pipeline-rust-residual-reference-closeout-plan.md
       - docs/architecture/wiki/hub-pipeline-rust-reference-closeout.md
     required_gates:
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:hub-pipeline-native-reference-gate
       - npm run test:hub-pipeline-native-reference-gate-red-fixtures
       - npm run verify:function-map-compile-gate
@@ -2543,6 +2706,7 @@ owners:
     migration_target: rust
     notes:
       - "This is a gate/doc/test-design owner, not a runtime behavior owner."
+      - "The thin-wrapper gate must scan the root bridge/handler/converter/executor host surface and fail when rootHostCheckedFiles is zero; sharedmodule-only checked files are not completion evidence."
       - "Broad `native-exports.ts` may remain a private loader for owner-specific narrow hosts, but must not be a runtime semantic caller seam or doc/wiki owner surface."
       - "White-box host wiring tests must mock owner-specific narrow hosts or owner-specific test fakes, never broad `llmswitch-native-exports-fake` or `native-exports`."
       - "Only pure Rust/NAPI black-box evidence may use direct-native helpers."
@@ -2621,6 +2785,7 @@ owners:
       - scripts/architecture/verify-provider-response-host-split.mjs
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
+      - docs/goals/provider-response-dead-legacy-host-surface-test-design.md
       - docs/goals/hub-pipeline-shared-library-simplification-plan.md
       - package.json
     forbidden_paths:
@@ -2638,6 +2803,7 @@ owners:
       - scripts/tests/provider-response-host-split-red-fixtures.mjs
       - scripts/architecture/verify-provider-response-host-split.mjs
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
     required_gates:
       - npm run test:provider-response-host-split-red-fixtures
       - npm run verify:provider-response-host-split
@@ -2651,6 +2817,8 @@ owners:
       - "This owner only governs TS host file shape and shared helper placement; Rust remains semantic owner for provider response materialization, Hub response pipeline, context helpers, and client projection."
       - "The host file must remain below the split gate line threshold and must import native-call, metadata-effect, and runtime-effect helpers instead of growing local helper clusters."
       - "Red fixtures must fail when native call wrappers, MetadataCenter write helpers, or runtime effect executors are reintroduced into provider-response-converter-host.ts."
+      - "Retired servertool action execution is void-or-fail-fast: the host must not branch on a `HubRespChatProcess03Governed|unchanged` stage result. The Rust-materialized top-level `rawPayload` is the sole full client-response owner for both body and stream delivery; StreamPipe carries transport metadata only."
+      - "The zero-production-caller `projectNativeMetadataWritePlanToRuntimeControlWritePlan` and root `projectMetadataWritePlanToRuntimeControlWritePlanWithNative` wrapper/fallback are physically deleted and locked by the host-split verifier. Rust projector contract tests remain authoritative."
 
   - feature_id: hub.rust_napi_json_wrapper_helper
     status: active
@@ -2757,8 +2925,7 @@ owners:
     owner_scope: "shared helper placement for exact duplicate pure mechanics only; no Responses continuation/store or exec_command semantic movement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
     canonical_types:
-      - Map
-      - Value
+      - serde_json::Map<String, Value>
     canonical_builders:
       - args_contain_direct_or_nested_key
     allowed_paths:
@@ -2807,8 +2974,7 @@ owners:
     owner_scope: "shared helper placement for JSON parse/stringify bridge mechanics only; no servertool contract or NAPI public JSON semantic movement"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
     canonical_types:
-      - DeserializeOwned
-      - Serialize
+      - serde_json::Value
     canonical_builders:
       - parse_json_with_context
       - stringify_json_with_context
@@ -2860,7 +3026,7 @@ owners:
     owner_scope: "shared helper placement for exact JSON parse error-context and trimmed-string mechanics only; HubPipeline engine remains the orchestration facade and semantic owner for route, stopless, continuation, context, and effect flow"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
     canonical_types:
-      - Value
+      - serde_json::Value
     canonical_builders:
       - read_trimmed_string
     allowed_paths:
@@ -3175,7 +3341,6 @@ owners:
       - sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response-helpers.ts
     required_tests:
       - tests/server/handlers/responses-handler.anthropic-response-remap.blackbox.spec.ts
-      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
@@ -3278,6 +3443,177 @@ owners:
       - "Duplicate/orphan tool-history truth belongs to Rust req_inbound capture, not TS request bridge or server handler."
       - "If identical duplicate `function_call` batches repeat, normalized relay context must collapse same-call outputs to the latest output for that call_id before reuse."
       - "TS bridge may only call native capture and reuse the normalized snapshot; it must not locally reserialize raw duplicate tool history or repair orphan tool_result ordering."
+
+  - feature_id: request.payload_copy_budget
+    status: active
+    summary: "Request-scoped payload ownership budget that prevents eager retry snapshots and duplicate standardization/raw/native-argument/bridge-input serialization"
+    owner_kind: mixed_boundary_contract
+    owner_scope: "request payload owner/borrow/move/materialize contract across RequestExecutor retry seed, executor Hub native input, Rust req_inbound capture, bridge input conversion, and Hub standardization"
+    owner_module: src/server/runtime/http-server/executor/retry-payload-snapshot.ts
+    resource_bindings:
+      writes:
+        - request.payload_ownership@RequestPayloadOwnershipBudget
+      reads:
+        - request.normal_payload@ServerReqInbound01ClientRaw
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - RetryPayloadSeed
+    canonical_builders:
+      - prepareRequestPayloadRetrySeed
+      - restoreRequestPayloadFromRetrySeed
+      - resolveOriginalRequestForResponseConversion
+    allowed_paths:
+      - src/server/runtime/http-server/executor/retry-payload-snapshot.ts
+      - src/server/runtime/http-server/executor-pipeline.ts
+      - tests/server/runtime/http-server/executor/retry-payload-snapshot.spec.ts
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+      - tests/server/runtime/http-server/request-executor.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_context_merge.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_inbound_02_standardized.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/vr_route_04_selected_target.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - docs/architecture
+      - docs/design/request-payload-copy-budget.md
+      - .agents/skills/rcc-dev-skills
+    forbidden_paths:
+      - src/server/handlers/responses-handler.ts
+      - src/modules/llmswitch/bridge/responses-request-bridge.ts
+      - src/providers
+      - config
+      - configsamples
+    required_tests:
+      - tests/server/runtime/http-server/executor/retry-payload-snapshot.spec.ts
+      - tests/server/runtime/http-server/executor/executor-pipeline.stage-recorder.spec.ts
+      - tests/server/runtime/http-server/request-executor.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_context_capture.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_semantic_lift.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/standardized_request.rs
+    required_gates:
+      - npm run verify:request-payload-copy-budget
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "The budget reduces internal ownership copies only; it must not trim, summarize, or semantically alter client/provider payloads."
+      - "Retry seed may borrow the current request object and materialize a clone only at actual retry/reentry restore."
+      - "Rust req_inbound should move raw request ownership into normalized request ownership instead of holding raw and normalized full-payload copies simultaneously."
+      - "Responses context capture and standardization must call the borrowed bridge-input converter instead of cloning complete input/tools owners merely to derive chat messages."
+      - "Hub engine must call the owned standardizer path instead of wrapping payload in a temporary JSON object that forces a second payload clone."
+      - "Executor Hub native input must omit top-level `body`; Rust HubPipelineRequest consumes `payload`, and retaining both fields duplicates the same current request at the JSON boundary."
+      - "Executor Hub native metadata must omit `__raw_request_body`; the source metadata keeps the same request-scoped reference for Responses capture and client restoration, but Rust has no consumer for that full raw-entry mirror."
+
+  - feature_id: hub.bridge_action_payload_copy_budget
+    status: active
+    summary: "Rust Hub bridge action orchestration borrows read-only payloads and moves mutating state without per-action full payload clones"
+    owner_kind: rust_ssot
+    owner_scope: "transient ownership inside ordered Hub bridge actions; action policy and protocol projection remain with their existing Rust owners"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/pipeline.rs
+    resource_bindings:
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+        - response.hub_semantic@HubRespChatProcess03Governed
+      forbidden:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - BridgeActionPipelineInput
+      - BridgeActionState
+    canonical_builders:
+      - run_bridge_action_pipeline
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/pipeline.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/history.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/metadata.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/reasoning.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/types.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs
+      - tests/sharedmodule/hub-bridge-action-payload-copy-budget.spec.ts
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/goals/full-pipeline-hub-bridge-action-payload-copy-budget-test-design.md
+      - docs/architecture
+    forbidden_paths:
+      - src/server
+      - src/providers
+      - config
+      - configsamples
+    required_tests:
+      - tests/sharedmodule/hub-bridge-action-payload-copy-budget.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_tool_session_compat.rs
+    required_gates:
+      - npm run verify:hub-response-responses-chat-projection
+      - npm run verify:request-payload-copy-budget
+      - npm run verify:function-map-compile-gate
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This feature does not create a second payload resource; it only governs borrow/take/write-back lifetime for existing request and response truth."
+      - "Owned N-API action wrappers must delegate to the same borrowed core so external JSON contracts remain unchanged."
+
+  - feature_id: hub.payload_size_validation_budget
+    status: active
+    summary: "Shared allocation-free serialized JSON byte counting for Hub request and response size validation"
+    owner_kind: rust_helper
+    owner_scope: "shared exact serialized-byte measurement only; format nodes retain their existing size limits, payload ownership, error contracts, and protocol semantics"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+    resource_bindings:
+      writes:
+        - pipeline.payload_serialized_size@PayloadSizeValidationBudget
+      reads:
+        - request.normal_payload@HubReqInbound02Standardized
+        - request.provider_semantic@HubReqOutbound05ProviderSemantic
+        - response.provider_raw@HubRespInbound02Parsed
+      forbidden:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - CountingWriter
+    canonical_builders:
+      - serialized_json_size
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/goals/full-pipeline-payload-size-validation-test-design.md
+      - docs/architecture
+    forbidden_paths:
+      - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/executor
+      - src/server/handlers
+      - src/providers
+      - provider configuration
+    required_tests:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
+    required_gates:
+      - npm run verify:payload-size-validation
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "The counting writer must preserve serde_json UTF-8 byte length exactly without retaining serialized payload bytes."
+      - "The three format nodes remain semantic owners of their existing 50 MiB validation and error text."
 
   - feature_id: hub.req_chatprocess_governance
     status: active
@@ -3421,6 +3757,154 @@ owners:
       - "Provider wire and retry guidance must converge on one raw `patch` string with workspace-relative paths embedded in patch headers."
       - "GNU line-number hunks with inline context trailers must be canonicalized into executable apply_patch `@@` hunks inside Rust before client/server execution."
 
+  - feature_id: debug.errorsample_payload_copy_budget
+    status: active
+    summary: "Errorsample observations serialize with inline redaction and bounded final-string ownership"
+    owner_kind: ts_debug_io_contract
+    owner_scope: "debug-only errorsample redaction, serialized-size budget, queue ownership, persistence, and release; never live error or payload truth"
+    owner_module: src/debug/errorsamples.ts
+    resource_bindings:
+      writes:
+        - debug.errorsample_payload_budget@ErrorsamplePayloadOwnershipBudget
+      reads:
+        - error.chain@ErrorErr01SourceRaised
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - ErrorsampleQueueItem
+      - ErrorsampleGroupBudget
+    canonical_builders:
+      - serializePayloadForWrite
+      - enqueueErrorsampleItem
+      - writeErrorsampleJson
+    allowed_paths:
+      - src/debug/errorsamples.ts
+      - src/utils/errorsamples.ts
+      - src/utils/sensitive-redaction.ts
+      - tests/utils/errorsamples.spec.ts
+      - tests/utils/errorsamples-payload-copy-budget.spec.ts
+      - tests/utils/sensitive-redaction.spec.ts
+      - docs/goals/full-pipeline-errorsample-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server/error-handling-center
+      - config
+      - configsamples
+    required_tests:
+      - tests/utils/errorsamples.spec.ts
+      - tests/utils/errorsamples-payload-copy-budget.spec.ts
+      - tests/utils/sensitive-redaction.spec.ts
+    required_gates:
+      - npm run verify:errorsample-payload-copy-budget
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: none
+    notes:
+      - "Only debug/errorsample copies may be truncated; live request/response and ErrorErr semantics must remain untouched."
+      - "Normal mode must not construct a complete redacted object graph and both pretty and compact full JSON strings."
+      - "The bounded queue owns only the final serialized diagnostic string."
+
+  - feature_id: debug.contract_observation_payload_budget
+    status: active
+    summary: "Payload-contract errorsample observations use bounded summaries instead of serializing full provider request and response bodies"
+    owner_kind: ts_debug_io_contract
+    owner_scope: "debug-only provider request/response contract observation summarization before errorsample serialization; ErrorErr projection and forced provider snapshots remain unchanged"
+    owner_module: src/server/runtime/http-server/executor/request-executor-runtime-blocks.ts
+    resource_bindings:
+      writes:
+        - debug.contract_observation_payload_budget@ContractObservationPayloadBudget
+      reads:
+        - error.chain@ErrorErr01SourceRaised
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - ContractObservationPayloadBudget
+    canonical_builders:
+      - summarizePayloadContractObservationForErrorsample
+      - queueRequestExecutorPayloadContractErrorsample
+    allowed_paths:
+      - src/server/runtime/http-server/executor/request-executor-runtime-blocks.ts
+      - tests/server/runtime/http-server/executor/request-executor-contract-observation-payload-budget.spec.ts
+      - docs/goals/full-pipeline-contract-observation-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - config
+      - configsamples
+    required_tests:
+      - tests/server/runtime/http-server/executor/request-executor-contract-observation-payload-budget.spec.ts
+    required_gates:
+      - npm run verify:contract-observation-payload-copy-budget
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: none
+    notes:
+      - "This feature budgets errorsample observations only. `persistPayloadContractProviderSnapshots` remains the explicit full diagnostic snapshot path."
+      - "The summary must preserve status/header/key/count shape evidence while excluding full prompt, tool, normalized body, and converted body strings."
+      - "Summarized observations must never feed ErrorErr policy, provider request payloads, or client response projection."
+
+  - feature_id: snapshot.payload_copy_budget
+    status: active
+    summary: "Snapshot and errorsample payloads move through bounded diagnostic ownership without clone-then-discard copies"
+    owner_kind: rust_ownership_contract
+    owner_scope: "diagnostic-only snapshot payload move, queue, persistence, and release budget; live request/response semantics remain outside this owner"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
+    resource_bindings:
+      writes:
+        - snapshot.payload_copy_budget@SnapshotPayloadOwnershipBudget
+      reads:
+        - snapshot.stage_selector_contract@SnapshotStageSelector
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - SnapshotHookOptions
+    canonical_builders:
+      - enqueue_snapshot_job
+      - write_snapshot_via_hooks_sync
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
+      - src/modules/llmswitch/bridge/snapshot-recorder.ts
+      - tests/sharedmodule/snapshot-payload-copy-budget.spec.ts
+      - tests/sharedmodule/snapshot-recorder-native-plan.spec.ts
+      - docs/goals/full-pipeline-snapshot-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - config
+      - configsamples
+      - sharedmodule/llmswitch-core/src/conversion/hub/snapshot-recorder.ts
+    required_tests:
+      - tests/sharedmodule/snapshot-payload-copy-budget.spec.ts
+      - tests/sharedmodule/snapshot-recorder-native-plan.spec.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs
+    required_gates:
+      - npm run verify:snapshot-payload-copy-budget
+      - npm run verify:architecture-snapshot-stage-contract
+      - npm run verify:architecture-snapshot-stage-owners
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Diagnostic snapshot payloads may be budgeted, but this owner must never trim or mutate live client/provider payload truth."
+      - "Disabled snapshot and trace-payload capture paths must not serialize the complete stage payload."
+      - "The bounded Rust queue and synchronous writer move SnapshotHookOptions ownership forward and must not clone the full diagnostic payload."
+
   - feature_id: snapshot.stage_contract
     status: active
     summary: "--snap defaults, module snap selectors, and snapshot path naming must stay explicitly gated and queryable"
@@ -3562,6 +4046,899 @@ owners:
       - "This feature is debug-only observation surface; it must not become a normal response metadata owner."
       - "Example hooks may inspect or append debug metadata, but protocol-bearing client/provider payload semantics stay outside this owner."
 
+  - feature_id: provider.debug_example_hooks_payload_copy_budget
+    status: active
+    summary: "provider debug hooks estimate payload size and retain dataFlow observations without full-payload serialization or deep clones"
+    owner_kind: ts_debug_owner
+    owner_scope: "debug-only payload size estimation, bounded dataFlow snapshot projection, and bounded oversized-output preview"
+    owner_module: src/debug/hooks
+    resource_bindings:
+      writes:
+        - provider.debug_hook_payload_copy_budget@HookExecutionContext
+      observes:
+        - provider.debug_hook_observation@HookExecutionContext
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - DebugPayloadBudgetOptions
+      - DataFlowSnapshot
+    canonical_builders:
+      - estimateDebugPayloadSize
+      - buildDebugDataSnapshot
+      - buildDebugPayloadPreview
+    allowed_paths:
+      - src/debug/hooks
+      - src/providers/core/hooks
+      - src/providers/core/config/provider-debug-output-utils.ts
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+      - docs/architecture
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/goals/full-pipeline-provider-debug-hooks-payload-copy-budget-test-design.md
+    forbidden_paths:
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+      - provider configuration
+    required_tests:
+      - tests/providers/core/hooks/debug-example-hooks.spec.ts
+      - docs/goals/full-pipeline-provider-debug-hooks-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "Hook callbacks continue to receive the original complete current object; only debug observations are budgeted."
+      - "The payload size metric is diagnostic estimation, not a protocol byte-count truth and must not be reused for Hub payload-size validation."
+      - "Bounded snapshots and previews may summarize debug-only observations but cannot feed provider/client payloads, routing, retry, errors, or MetadataCenter."
+
+  - feature_id: debug.llms_engine_shadow_payload_copy_budget
+    status: active
+    summary: "LLMS engine shadow comparison ignores configured paths without cloning or mutating complete debug payloads"
+    owner_kind: ts_debug_owner
+    owner_scope: "debug-only baseline/candidate comparison and shadow diff artifact projection"
+    owner_module: src/utils
+    resource_bindings:
+      writes:
+        - debug.llms_engine_shadow_diff_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - LlmsEngineShadowConfig
+    canonical_builders:
+      - recordLlmsEngineShadowDiff
+    allowed_paths:
+      - src/utils
+      - src/utils/llms-engine-shadow.ts
+      - src/utils/llms-engine-shadow.js
+      - tests/utils/llms-engine-shadow-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-llms-engine-shadow-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+    required_tests:
+      - tests/utils/llms-engine-shadow-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-llms-engine-shadow-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "Ignored compare paths are skipped during recursive comparison; they are not removed from cloned payloads."
+      - "A real non-ignored difference still persists the original complete baseline and candidate outputs in the debug artifact."
+      - "This diagnostic owner cannot write normal provider/client payloads or MetadataCenter."
+
+  - feature_id: debug.unified_hub_shadow_compare_payload_copy_budget
+    status: active
+    summary: "Unified Hub shadow compare script diffs baseline and candidate outputs without JSON-cloning complete debug payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only black-box Hub shadow comparison script and diff projection"
+    owner_module: scripts/unified-hub-shadow-compare.mjs
+    resource_bindings:
+      writes:
+        - debug.unified_hub_shadow_compare_diff_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - unified-hub-shadow-diff
+    canonical_builders:
+      - diffPayloads
+      - writeCompareErrorSample
+    allowed_paths:
+      - scripts/unified-hub-shadow-compare.mjs
+      - tests/scripts/unified-hub-shadow-compare-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-unified-hub-shadow-compare-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+      - provider configuration
+    required_tests:
+      - tests/scripts/unified-hub-shadow-compare-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-unified-hub-shadow-compare-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "The script still borrows complete baseline and candidate objects for recursive comparison; it only removes the pre-diff JSON clone."
+      - "A real difference still writes complete baseline and candidate debug outputs for audit."
+      - "This diagnostic script cannot write provider/client payloads, routing truth, or MetadataCenter."
+
+  - feature_id: debug.responses_provider_replay_payload_copy_budget
+    status: active
+    summary: "Responses provider replay script prepares captured chat samples without JSON-cloning complete payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only provider replay sample projection and CLI script ownership"
+    owner_module: scripts/tools/responses-provider-replay.mjs
+    resource_bindings:
+      writes:
+        - debug.responses_provider_replay_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - responses-provider-replay-chat
+    canonical_builders:
+      - createReplayChatOwner
+      - ensureReplayChatModel
+      - replaceSystemMessages
+    allowed_paths:
+      - scripts/tools/responses-provider-replay.mjs
+      - tests/scripts/responses-provider-replay-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-provider-replay-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+    required_tests:
+      - tests/scripts/responses-provider-replay-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-provider-replay-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "The script creates only a shallow top-level replay owner before model defaulting or system prompt replacement."
+      - "Nested messages/tools/metadata stay borrowed; the CLI still serializes at native/provider IO boundaries when explicitly executed."
+      - "This does not remove the separate provider harness mutation-isolation copy and cannot write provider/client payload truth or MetadataCenter."
+
+  - feature_id: debug.replay_codex_sample_payload_copy_budget
+    status: active
+    summary: "Codex sample replay prepares diagnostic requests without JSON-cloning complete payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only codex sample replay request preparation and local dry-run probe projection"
+    owner_module: scripts/replay-codex-sample.mjs
+    resource_bindings:
+      writes:
+        - debug.replay_codex_sample_request_projection@DebugDryRun03CapturedRequestReplay
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+        - dryrun.provider_request_probe@DebugDryRun02InternalControlCarrier
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - replay-codex-sample-request-projection
+    canonical_builders:
+      - stripReplayOnlyClientHeadersFromBody
+      - buildReplayInputFromProviderRequest
+    allowed_paths:
+      - scripts/replay-codex-sample.mjs
+      - tests/scripts/replay-codex-sample.spec.ts
+      - docs/goals/full-pipeline-replay-codex-sample-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/replay-codex-sample.spec.ts
+      - docs/goals/full-pipeline-replay-codex-sample-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "Replay-only metadata stripping shallow-copies only rewritten top-level owners and preserves nested request/tool/content identity."
+      - "Provider-request replay conversion builds a client request envelope by borrowing typed content, tools, metadata, and stream intent."
+      - "This debug replay helper cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.responses_fai_capture_payload_copy_budget
+    status: active
+    summary: "Responses FAI capture probe lazily projects compatibility variants without deep-cloning complete payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only FAI-compatible Responses golden sample probe/capture variant projection"
+    owner_module: scripts/responses-fai-capture.mjs
+    resource_bindings:
+      writes:
+        - debug.responses_fai_capture_variant_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.responses_fai_capture_variant_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - responses-fai-capture-variant
+    canonical_builders:
+      - buildResponseProbeVariants
+      - readExplicitSampleBody
+    allowed_paths:
+      - scripts/responses-fai-capture.mjs
+      - tests/scripts/responses-fai-capture-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-fai-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/responses-fai-capture-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-fai-capture-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:architecture-fallback-denylist
+    migration_target: ts
+    notes:
+      - "The script yields compatibility variants lazily so only the current probe request is projected."
+      - "Unchanged tools/input/content/parameter branches stay borrowed; tool-shape variants allocate only replacement tools wrappers."
+      - "Explicit sample mode fails fast on missing or invalid sample bodies and must not fall back to generated variants."
+      - "This debug script cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.responses_sse_capture_payload_copy_budget
+    status: active
+    summary: "Responses SSE capture script shallow-owns top-level capture overrides without deep-cloning complete requests"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only Responses SSE capture request projection and CLI ownership"
+    owner_module: scripts/responses-sse-capture.mjs
+    resource_bindings:
+      writes:
+        - debug.responses_sse_capture_request_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - responses-sse-capture-request
+    canonical_builders:
+      - createResponsesCaptureRequestOwner
+    allowed_paths:
+      - scripts/responses-sse-capture.mjs
+      - tests/scripts/responses-sse-capture-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-sse-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/responses-sse-capture-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-sse-capture-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "The script creates one shallow top-level capture owner before applying model/tool/instructions/stream overrides."
+      - "Unchanged input/tools/metadata/schema/extension branches stay borrowed until explicit provider or artifact serialization."
+      - "Importing the script cannot read provider config, initialize a provider, call the network, or write artifacts."
+      - "This debug script cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.responses_sse_utils_payload_copy_budget
+    status: active
+    summary: "Responses SSE golden-roundtrip borrows completed response objects without JSON-cloning full payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only Responses SSE completed-response extraction and golden-roundtrip projection"
+    owner_module: sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs
+    resource_bindings:
+      writes:
+        - debug.responses_sse_completed_response_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.responses_sse_completed_response_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - responses-sse-completed-response-projection
+    canonical_builders:
+      - convertEventsToResponsesJson
+      - extractResponseFromEvents
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs
+      - tests/scripts/responses-sse-utils-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-sse-utils-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/responses-sse-utils-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-responses-sse-utils-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "A complete response.completed event is already the debug projection source, so the golden-roundtrip utility borrows the response object and preserves nested reference identity."
+      - "The internal aggregator only runs when no completed response exists; duplicate completed-response clone branches are forbidden."
+      - "This debug utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.cross_protocol_matrix_payload_copy_budget
+    status: active
+    summary: "Cross-protocol parity matrix canonicalizes chat samples without JSON-cloning complete payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only cross-protocol matrix canonical chat projection"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+    resource_bindings:
+      writes:
+        - debug.cross_protocol_matrix_chat_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.cross_protocol_matrix_chat_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - cross-protocol-canonical-chat-projection
+    canonical_builders:
+      - canonicalizeChat
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+      - tests/scripts/cross-protocol-matrix-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-cross-protocol-matrix-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/cross-protocol-matrix-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-cross-protocol-matrix-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "The canonicalizer creates only path-local owners for top-level, metadata, messages, tool-call wrappers, and function-tool wrappers before normalization."
+      - "Unchanged tool parameter schemas retain exact reference identity; the source chat graph remains untouched."
+      - "This debug utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.coverage_hub_standardized_payload_copy_budget
+    status: active
+    summary: "Hub standardized coverage helper compares TS/native projections without JSON round-trip object clones"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only standardized request parity coverage between TS and native projections"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
+    resource_bindings:
+      writes:
+        - debug.coverage_hub_standardized_parity_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.coverage_hub_standardized_parity_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - coverage-hub-standardized-parity-projection
+    canonical_builders:
+      - chatEnvelopeToStandardizedWithNative
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
+      - tests/scripts/coverage-hub-chat-envelope-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-coverage-hub-standardized-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/coverage-hub-chat-envelope-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-coverage-hub-standardized-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "The helper now compares the TS and native parsed outputs directly instead of creating two extra JSON-cloned comparison graphs."
+      - "The native invocation still uses the current JSON-string JS/Rust boundary; that boundary is inventoried separately and is not changed by this diagnostic slice."
+      - "This debug coverage utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.coverage_hub_chat_projection_payload_copy_budget
+    status: active
+    summary: "Hub standardized-to-chat coverage helper compares TS/native projections without JSON round-trip object clones"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only standardized-to-chat TS/native parity comparison"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+    resource_bindings:
+      writes:
+        - debug.coverage_hub_chat_projection_parity@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.coverage_hub_chat_projection_parity@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - coverage-hub-chat-projection-parity
+    canonical_builders:
+      - standardizedToChatEnvelopeWithNative
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+      - tests/scripts/coverage-hub-standardized-to-chat-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-coverage-hub-chat-projection-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/coverage-hub-standardized-to-chat-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-coverage-hub-chat-projection-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "The helper compares already materialized TS/native chat projections directly instead of creating two extra JSON-cloned comparison graphs."
+      - "The conversion and native JSON-string boundary remain unchanged and separately classified."
+      - "This coverage utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.hub_chain_equivalence_payload_copy_budget
+    status: active
+    summary: "Hub chain equivalence diagnostic sanitization removes debug-only fields without deep-cloning complete protocol payloads"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only hub chain equivalence sanitized comparison projection"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+    resource_bindings:
+      writes:
+        - debug.hub_chain_equivalence_sanitized_payload@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.hub_chain_equivalence_sanitized_payload@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - hub-chain-equivalence-sanitized-payload
+    canonical_builders:
+      - sanitizePayload
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+      - tests/scripts/hub-chain-equivalence-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-hub-chain-equivalence-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/hub-chain-equivalence-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-hub-chain-equivalence-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "sanitizePayload now shallow-owns only top-level and metadata paths when it removes debug-only comparison fields."
+      - "Unchanged messages, tools, content, and extension branches remain borrowed until the diagnostic diff/JSON comparison boundary."
+      - "This diagnostic projection cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.lmstudio_compat_tools_payload_copy_budget
+    status: active
+    summary: "LM Studio compatibility debug projection owns only rewritten request parameters and tool wrappers"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only LM Studio compatibility tool request projection"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+    resource_bindings:
+      writes:
+        - debug.lmstudio_compat_tools_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.lmstudio_compat_tools_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - lmstudio-compat-tools-projection
+    canonical_builders:
+      - applyLMStudioCompatibility
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+      - tests/scripts/lmstudio-compatibility-tools-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-lmstudio-compat-tools-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/lmstudio-compatibility-tools-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-lmstudio-compat-tools-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "applyLMStudioCompatibility shallow-owns the top-level debug request and parameters projection; normalized tool wrappers are independently allocated."
+      - "Unchanged messages, top-level tools, parameter schemas, content, and extension branches remain borrowed until explicit debug network/report serialization."
+      - "This debug projection cannot write live provider/client payload truth, route selection truth, MetadataCenter, provider configuration, config.toml, or ~/.rcc."
+
+  - feature_id: debug.anthropic_response_regression_payload_copy_budget
+    status: active
+    summary: "Anthropic response regression binds the Rust native projection owner without cloning the sample payload"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only Anthropic response projection regression"
+    owner_module: sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+    resource_bindings:
+      writes:
+        - debug.anthropic_response_regression_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.anthropic_response_regression_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - native-anthropic-response-regression-envelope
+    canonical_builders:
+      - buildAnthropicRegressionProjectionWithNative
+    allowed_paths:
+      - sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+      - tests/scripts/anthropic-response-regression-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-anthropic-response-regression-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/anthropic-response-regression-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-anthropic-response-regression-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust_native_owner_ts_debug_shell
+    notes:
+      - "The script serializes the tracked sample once at the required JS/Rust boundary and never deep-clones its object graph."
+      - "Anthropic response semantics remain owned by buildOpenAIChatFromAnthropicMessageFullWithNative; the script only validates the native result."
+      - "This diagnostic projection cannot write live payload, routing, metadata, provider configuration, config.toml, or ~/.rcc truth."
+
+  - feature_id: debug.v2_consistency_payload_copy_budget
+    status: active
+    summary: "V2 comprehensive consistency reporting reuses one authoritative summary without JSON round-trip clones"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only V2 consistency summary generation, persistence, and display"
+    owner_module: scripts/v2-consistency/comprehensive-consistency-test.mjs
+    resource_bindings:
+      writes:
+        - debug.v2_consistency_summary_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.v2_consistency_summary_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - v2-consistency-summary-projection
+    canonical_builders:
+      - runAllTests
+    allowed_paths:
+      - scripts/v2-consistency/comprehensive-consistency-test.mjs
+      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "runAllTests writes the generated summary once into this.testResults.summary; report persistence and display borrow that same diagnostic owner."
+      - "JSON.stringify remains only at the report file IO boundary and no parse/stringify comparison or clone loop remains."
+      - "This debug reporting utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+
+  - feature_id: debug.provider_golden_capture_payload_copy_budget
+    status: active
+    summary: "Provider golden capture derives temporary configs with path-local owners instead of deep-cloning complete config graphs"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only temporary provider golden capture config projection and CLI ownership"
+    owner_module: scripts/tools/capture-provider-goldens.mjs
+    resource_bindings:
+      writes:
+        - debug.provider_golden_capture_config_projection@DebugObs07ReplayedOrInspected
+      reads:
+        - debug.provider_golden_capture_config_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - provider-golden-capture-config-projection
+    canonical_builders:
+      - buildDerivedConfig
+    allowed_paths:
+      - scripts/tools/capture-provider-goldens.mjs
+      - tests/scripts/capture-provider-goldens-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-provider-golden-capture-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/capture-provider-goldens-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-provider-golden-capture-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "buildDerivedConfig owns only the top-level, virtualrouter, providers, routing, provider wrapper, and httpserver paths it rewrites."
+      - "Unchanged provider models/auth/headers/extensions and unrelated config branches remain borrowed until the temporary config file serialization boundary."
+      - "This debug projection cannot modify live provider configuration, provider/client payload truth, route selection truth, MetadataCenter, config.toml, or ~/.rcc."
+
+  - feature_id: debug.outbound_regression_payload_copy_budget
+    status: active
+    summary: "Outbound provider regression keeps exactly one structured-clone execution graph without fallback cloning"
+    owner_kind: ts_debug_script
+    owner_scope: "debug-only provider regression execution isolation and CLI ownership"
+    owner_module: scripts/outbound-regression-codex-samples.mjs
+    resource_bindings:
+      writes:
+        - debug.outbound_regression_execution_copy@DebugObs05HarnessExecuted
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - outbound-regression-execution-payload
+    canonical_builders:
+      - cloneOutboundRegressionExecutionPayload
+    allowed_paths:
+      - scripts/outbound-regression-codex-samples.mjs
+      - tests/scripts/outbound-regression-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-outbound-regression-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/providers
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core/rust-core
+      - provider configuration
+      - config.toml
+      - ~/.rcc
+    required_tests:
+      - tests/scripts/outbound-regression-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-outbound-regression-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: ts
+    notes:
+      - "Provider converters/runtimes may mutate their input, so one independent per-attempt execution graph is required."
+      - "Node structuredClone is the sole clone contract; JSON compatibility and original-object fallback paths are forbidden."
+      - "Importing the script cannot scan samples/config, initialize providers, rate-wait, call the network, or write artifacts."
+      - "This debug execution graph cannot become provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or process-global retained state."
+
+  - feature_id: debug.vision_snapshot_payload_copy_budget
+    status: active
+    summary: "Vision debug projection borrows payloads until the unified snapshot writer creates one independent redacted graph"
+    owner_kind: ts_debug_projection
+    owner_scope: "debug-only vision snapshot wrapper before snapshot stage selection, redaction, queueing, and persistence"
+    owner_module: src/providers/core/runtime/vision-debug-utils.ts
+    resource_bindings:
+      writes:
+        - debug.vision_snapshot_projection@DebugObs07ReplayedOrInspected
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+    canonical_types:
+      - DebugFallback
+    canonical_builders:
+      - buildVisionSnapshotPayload
+    allowed_paths:
+      - src/providers/core/runtime/vision-debug-utils.ts
+      - tests/providers/core/runtime/vision-debug-utils.payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/vision-debug-utils.snapshot-entry-port.spec.ts
+      - docs/goals/full-pipeline-vision-debug-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+      - provider configuration
+    required_tests:
+      - tests/providers/core/runtime/vision-debug-utils.payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/vision-debug-utils.snapshot-entry-port.spec.ts
+      - docs/goals/full-pipeline-vision-debug-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: ts
+    notes:
+      - "The vision wrapper may borrow payload/extras only until writeProviderSnapshot returns."
+      - "The unified snapshot writer remains the single synchronous redaction/materialization owner before asynchronous queueing."
+      - "Disabled snapshot stages must not pay a vision pre-writer deep-clone cost."
+
+  - feature_id: debug.harness_replay_payload_copy_budget
+    status: active
+    summary: "Provider debug replay creates exactly one independent execution copy before provider mutation"
+    owner_kind: ts_debug_owner
+    owner_scope: "debug.unified_surface M6 provider harness replay input isolation and execution-copy lifetime"
+    owner_module: src/debug/harness
+    resource_bindings:
+      writes:
+        - debug.harness_replay_execution_copy@DebugObs05HarnessExecuted
+      reads:
+        - snapshot.debug_sample@DebugDryRun03CapturedRequestReplay
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - ProviderHarnessExecuteInput
+      - ProviderHarnessResult
+      - ProviderPreprocessHarness
+    canonical_builders:
+      - cloneProviderReplayInput
+    allowed_paths:
+      - src/debug/harness
+      - src/debug/types.ts
+      - tests/debug/harness-provider-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-debug-harness-replay-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/client
+      - src/server/runtime/http-server
+      - sharedmodule/llmswitch-core
+      - provider configuration
+    required_tests:
+      - tests/debug/harness-provider-payload-copy-budget.spec.ts
+      - docs/goals/full-pipeline-debug-harness-replay-payload-copy-budget-test-design.md
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:debug-unified-surface
+    migration_target: ts
+    notes:
+      - "Provider preprocess/postprocess may mutate the execution copy; captured replay input and its runtime metadata must remain unchanged."
+      - "Node.js >=20 provides the single structuredClone contract; JSON compatibility cloning is forbidden because it changes replay semantics."
+      - "The copy may be removed only after ProviderHarnessExecuteInput carries a verifiable unique-ownership transfer contract for every direct and ReplayRunner caller."
+
   - feature_id: debug.unified_surface
     status: active
     summary: "debug/diag/snapshot/logger/harness/replay/policy migration must converge on one queryable authoring surface under src/debug with per-module closeout and explicit diagnostics taxonomy"
@@ -3610,11 +4987,13 @@ owners:
       - src/modules/pipeline/utils/debug-logger.ts
     required_tests:
       - tests/debug/unified-surface.owner.spec.ts
+      - tests/debug/debug-utils-deepclone-removal.spec.ts
       - tests/debug/diag.error-artifact-red.spec.ts
       - tests/debug/snapshot-store-port-isolation.red.spec.ts
       - tests/modules/pipeline/utils/debug-logger.dev-filter.spec.ts
       - tests/modules/pipeline/utils/debug-logger.release.spec.ts
       - tests/providers/core/hooks/debug-example-hooks.spec.ts
+      - docs/goals/full-pipeline-debug-utils-deepclone-removal-test-design.md
     required_gates:
       - npm run verify:debug-unified-surface
       - npm run verify:function-map-compile-gate
@@ -3792,6 +5171,7 @@ owners:
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:servertool-mount-boundary
       - npm run verify:architecture-mainline-node-id-consistency
     migration_target: ts
     notes:
@@ -4417,6 +5797,7 @@ owners:
       - "src/config/user-config-loader.ts remains a lower-level TS helper shell for direct materialization callers; implicit-v2 normalization, collectV2ConfigSourceErrors, primary routingPolicyGroup selection, materialized virtualrouter.providers extraction, and final virtualrouter materialized assignment must delegate to native."
       - "Server runtime carries the Rust-compiled RouteCodexRuntimeManifest from bootstrap into HubPipeline pipelineRuntimeConfig through a non-enumerable carrier; it must not recompile or consume VR-only bootstrap input."
       - "Router-port allowedProviders and primary-exhausted/default-pool route tiers must come from Rust pipelineRuntimeConfig routing artifacts, not from TS reads of authoring virtualrouter.routingPolicyGroups."
+      - "Authoring route pool `id` / `poolId` is not part of the compiled runtime display contract. Rust materialization strips those fields from public routing config, and route isolation must come only from `routeParams.routePolicyGroup`."
       - "TS config loader is IO/profile shell only; no TS fallback materialization path is allowed."
 
   - feature_id: config.provider_profile_materialization
@@ -4960,34 +6341,34 @@ owners:
       - plan_runtime_restart_request_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
-      - src/cli/commands/port-group-resolver.ts
       - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
+      - src/cli/commands/port-group-resolver.ts
       - src/cli/commands/restart.ts
       - src/cli/register/restart-command.ts
       - src/cli.ts
       - src/server/runtime/http-server/daemon-admin/restart-handler.ts
       - tests/cli/restart-command.spec.ts
+      - tests/cli/restart-command.probe-host.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
       - scripts/install-release.sh
       - docs/goals/runtime-aggregate-restart-test-design.md
-      - tests/cli/restart-command.probe-host.spec.ts
       - docs
     forbidden_paths:
       - src/providers
       - src/server/runtime/http-server/executor
     required_tests:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
-      - tests/scripts/install-release-dependencies.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
+      - tests/scripts/install-release-dependencies.spec.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     migration_target: rust
-      - "Restart identity is the aggregate listener PID set. `--port` is only a locator; configured members sharing that identity receive one restart request and must all recover before success."
-      - "Different non-empty listener PID sets must fail as multiple instances. Looping restart once per member port is forbidden."
     notes:
       - "Rust plan chooses the restart transport. TS may call /daemon/restart-process or send SIGUSR2 to the target pid only as instructed; it must not spawn a detached start --restart takeover path."
+      - "Restart identity is the aggregate listener PID set. `--port` is only a locator; configured members sharing that identity receive one restart request and must all recover before success."
+      - "Different non-empty listener PID sets must fail as multiple instances. Looping restart once per member port is forbidden."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
       - "Default start and explicit `start --restart` must not be used as restart-command bypasses. If an existing listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`; only explicit `--exclusive` remains a destructive takeover path."
   - feature_id: runtime.lifecycle.start_command
@@ -5142,9 +6523,11 @@ owners:
       - src/server/runtime/http-server/executor/provider-response-converter.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
-      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
+      - scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs
+      - scripts/tests/provider-response-errorerr-bypass-closeout-red-fixtures.mjs
+      - docs/goals/provider-response-errorerr-bypass-closeout-test-design.md
       - docs
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/conversion
@@ -5153,17 +6536,19 @@ owners:
     required_tests:
       - tests/server/runtime/http-server/executor/provider-response-converter.contract.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.unified-semantics.spec.ts
-      - tests/server/runtime/http-server/executor/provider-response-converter-empty-sse.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-converter.prebuilt-sse-passthrough.spec.ts
       - tests/server/runtime/http-server/executor/provider-response-shared-pure-blocks.spec.ts
     required_gates:
       - npm run verify:architecture-ci
       - npm run verify:function-map-compile-gate
       - npm run test:provider-response-shared-pure-blocks-cargo
+      - npm run verify:provider-response-errorerr-bypass-closeout
+      - npm run test:provider-response-errorerr-bypass-closeout-red-fixtures
     migration_target: rust
     notes:
       - "This host shell may only capture transport payloads, call Rust/bridge planners, and execute followup IO; it must not restore TS response-conversion fallback or custom projection semantics."
       - "Direct Responses prebuilt SSE passthrough gating is Rust-owned through `shouldAllowDirectResponsesPrebuiltSsePassthroughJson`; TS shared blocks may only call the native helper."
+      - "Provider-response wrapper/conversion errors remain raw evidence in this Node host; code/status/statusCode/retryable/upstreamCode classification and provider-configured/message-based remapping must not run here."
   - feature_id: hub.provider_response_metadata_sync_effect_plan
     status: active
     summary: "Rust-owned provider-response MetadataCenter bind/merge/write effect plan"
@@ -5305,7 +6690,7 @@ owners:
     status: active
     summary: "Rust-owned provider-response stream-pipe effect plan"
     owner_kind: rust_runtime_owner
-    owner_scope: "validate streamPipe presence and canonical codec/requestId/payload shape, then select no_pipe/use_pipe; TS only consumes the returned pipe for Node stream IO"
+    owner_scope: "validate metadata-only streamPipe presence and canonical codec/requestId shape, reject effect-owned payload/body, then select no_pipe/use_pipe; TS reuses the top-level client semantic reference for Node stream IO"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
     resource_bindings:
       reads:
@@ -5319,31 +6704,36 @@ owners:
     canonical_builders:
       - plan_provider_response_stream_pipe_effect
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge/provider-response-native-calls.ts
       - src/modules/llmswitch/bridge/provider-response-effects.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - tests/sharedmodule/stream-pipe-payload-ownership.spec.ts
       - docs
       - scripts
     forbidden_paths:
       - src/server
       - src/providers
-      - src/modules/llmswitch/bridge/provider-response-converter-host.ts
     required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
+      - tests/sharedmodule/stream-pipe-payload-ownership.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:hub-pipeline-native-reference-gate
       - npm run verify:llmswitch-rustification-audit
     migration_target: rust
     notes:
-      - "TS may preserve and operate Node stream references after this plan, but it may not validate or normalize codec/requestId/payload or own malformed-shape errors."
+      - "The top-level HubRespOutbound04ClientSemantic/rawPayload is the sole full response owner. StreamPipe effects contain only codec/requestId and must fail fast if legacy payload/body fields reappear."
+      - "TS may preserve and operate Node stream references and reuse the existing top-level client semantic reference after this plan, but it may not copy the full response, validate or normalize codec/requestId, or own malformed-shape errors."
 
   - feature_id: hub.provider_response_diagnostic_alarm_effect_plan
     status: active
@@ -5597,6 +6987,7 @@ owners:
       - src/providers/core/runtime
     required_tests:
       - tests/server/handlers/handler-metadata-boundary.spec.ts
+      - tests/server/handlers/handler-utils.metadata-copy-budget.spec.ts
       - tests/server/handlers/chat-handler.started-sse-error.spec.ts
       - tests/server/handlers/messages-handler.started-sse-error.spec.ts
     required_gates:
@@ -5606,6 +6997,7 @@ owners:
     notes:
       - "HTTP transport adapters only: request read/write, timeout, abort, headers, status, and logging are allowed."
       - "Server handlers must do no protocol parsing, protocol conversion, protocol repair, or protocol projection; those belong to Hub Pipeline only."
+      - "Request body metadata is borrowed for whitelist projection; handlers must not JSON round-trip the metadata object before building the independent transport carrier."
   - feature_id: hub.responses_request_pipeline_metadata_plan
     status: active
     summary: "Rust-owned /v1/responses request pipeline metadata and MetadataCenter write plan"
@@ -5625,8 +7017,10 @@ owners:
         - request.normal_payload@HubReqChatProcess03Governed
     canonical_types:
       - ResponsesPipelineMetadataPlan
+      - ResponsesResumeErrorPlan
     canonical_builders:
       - build_responses_pipeline_metadata_for_http_json
+      - plan_responses_resume_error_for_http_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
@@ -5638,6 +7032,9 @@ owners:
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-handler-host-fake.ts
       - docs/architecture
+      - docs/goals/responses-request-bridge-total-plan-shrink-test-design.md
+      - scripts/architecture/verify-responses-request-bridge-total-plan-shrink.mjs
+      - scripts/tests/responses-request-bridge-total-plan-shrink-red-fixtures.mjs
     forbidden_paths:
       - src/server/handlers
       - src/server/runtime/http-server/executor
@@ -5651,12 +7048,14 @@ owners:
     required_gates:
       - npm run test:responses-pipeline-metadata-plan-cargo
       - npm run test:responses-pipeline-metadata-plan-bridge
+      - npm run verify:responses-request-bridge-total-plan-shrink
       - npm run build:native-hotpath
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
       - "TS may pass non-serializable clientConnectionState as Node-side metadata reference and may apply returned MetadataCenter slot writes; it must not decide streamIntent/providerProtocol/clientAbort/continuation provider pin locally."
       - "Rust plan reuses the same sanitized resume control builder so relay continuations cannot leak providerKey/routeHint/session payload mirrors into request metadata."
+      - "Rust `plan_responses_resume_error_for_http` is the only owner of resume-error client projection, status/code/message defaults, and the complete HTTP error descriptor; TS serializes the thrown error, executes `client_error`, or rethrows the original error."
   - feature_id: server.responses_request_handler_bridge_surface
     status: active
     summary: "/v1/responses request handler uses one opaque request facade only; protocol semantics stay in Hub Pipeline/native owner"
@@ -5679,37 +7078,34 @@ owners:
       - finalizeResponsesHandlerPayloadForHttp
       - shouldManageResponsesConversationForHttp
       - buildResponsesRequestContextForHttp
-      - finalizeResponsesPipelineResultForHttp
       - prepareResponsesHandlerEntryForHttp
-      - captureResponsesRequestContextForHttp
-      - recordResponsesResponseForHttp
-      - seedResponsesToolCallResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - captureResponsesInboundToolHistoryErrorsampleForHttp
-      - readResponsesResponseIdFromHttp
       - buildResponsesConversationPortScopeForHttp
       - planResponsesHandlerStreamForHttp
       - prepareResponsesRequestBodyForHttp
       - prepareResponsesHandlerRuntimeForHttp
       - buildResponsesScopeContinuationExpiredErrorForHttp
-      - buildResponsesResumeClientErrorForHttp
-      - shouldProjectResponsesResumeClientErrorForHttp
     allowed_paths:
       - src/modules/llmswitch/bridge/responses-request-bridge.ts
       - src/modules/llmswitch/bridge/responses-request-handler-host.ts
+      - src/modules/llmswitch/bridge/native-exports.ts
+      - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - src/server/handlers/responses-handler.ts
       - docs/architecture
+      - docs/goals/responses-request-bridge-total-plan-shrink-test-design.md
       - scripts/architecture/verify-responses-handler-single-bridge-surface.mjs
       - scripts/architecture/verify-server-function-map-boundary.mjs
+      - scripts/architecture/verify-responses-request-bridge-total-plan-shrink.mjs
+      - scripts/tests/responses-request-bridge-total-plan-shrink-red-fixtures.mjs
     forbidden_paths:
       - src/server/handlers/handler-response-utils.ts
       - src/providers/core/runtime
       - sharedmodule/llmswitch-core/rust-core
     forbidden_mentions_allowlist:
       - captureResponsesRequestContextForHttp
-      - recordResponsesResponseForHttp
       - clearResponsesConversationOnHandlerFailureForHttp
       - clearResponsesConversationByRequestIdForHttp
       - finalizeResponsesHandlerPayloadForHttp
@@ -5717,8 +7113,6 @@ owners:
       - buildResponsesConversationPortScopeForHttp
       - planResponsesHandlerStreamForHttp
       - buildResponsesScopeContinuationExpiredErrorForHttp
-      - buildResponsesResumeClientErrorForHttp
-      - shouldProjectResponsesResumeClientErrorForHttp
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.metadata-center.spec.ts
@@ -5726,7 +7120,11 @@ owners:
       - tests/modules/llmswitch/bridge/responses-request-bridge.tool-history-errorsample.spec.ts
     required_gates:
       - npm run verify:server-function-map-boundary
+      - npm run verify:responses-request-bridge-total-plan-shrink
       - npm run verify:responses-handler-single-bridge-surface
+      - npm run verify:responses-relay-continuation-writer-uniqueness
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
@@ -5738,9 +7136,11 @@ owners:
       - "Responses handler must not keep local tool_calls -> responseId seed orchestration; that continuation seeding must stay behind the single request bridge surface."
       - "Responses handler must not keep local `/v1/responses*` conversation-management branch checks, local `responseIdFromPath -> payload.response_id` prewrite, or local `responsesRequestContext` fallback assembly; those request-side continuation/context helpers must stay behind the single request bridge surface."
       - "Responses handler must not keep local continuation-expired or resume-client invalid_request_error payload shapes; those request-side resume error projections must stay behind the single request bridge surface."
-      - "Responses handler must not locally classify `Tool history contract violated` malformed-request errors or write `responses.inbound_tool_history_contract` errorsamples; that request-side contract capture must stay behind the single request bridge surface."
+      - "Responses handler/bridge must not locally classify `Tool history contract violated` malformed-request errors; Rust `planResponsesInboundToolHistoryErrorsampleForHttp` returns the only errorsample write plan, and TS only executes file IO."
       - "Relay-owned request context must come from native req_inbound normalized snapshot, not raw HTTP `payload.input` / `payload.tools`; duplicate or orphan tool history must fail at the bridge owner instead of being silently reserialized by the handler."
       - "Responses handler must not locally orchestrate request-context capture gating, result metadata attach, or tool-call response seeding; those request-side lifecycle hooks must stay behind the single request bridge surface."
+      - "Responses handler/bridge must not locally choose continuation lookup response ids or scope options; Rust `planResponsesContinuationRequestAction` must emit `lookup_continuation` with complete lookup IO args before TS performs continuation-store lookup."
+      - "Responses handler/bridge must not locally branch on direct/relay/scope actions, mutate `previous_response_id`, select endpoint/defaults, parse resume metadata, or merge effect results. Rust `planResponsesContinuationRequestAction` emits the closed `execute_effect|complete` contract; TS may only execute the validated effect args and pass the opaque `resultPlanInput` plus IO result back to Rust."
       - "Responses handler must not keep local stream-intent derivation, request-start stream metadata assembly, or port-scope parsing; those request-side stream/scope decisions must stay behind the single request bridge surface."
       - "Responses handler must not locally assemble protocol-scoped pipeline metadata (`providerProtocol`, `responsesResume`, stream-intent carrier, client abort, or direct continuation provider pin); Rust owner `hub.responses_request_pipeline_metadata_plan` builds the plan and this bridge only applies MetadataCenter writes."
       - "Responses handler must not locally read/strip request-body `metadata` or introspect `clientAbortSignal`; request-body preprocessing and abort-signal extraction must stay behind the single request bridge surface."
@@ -5748,6 +7148,7 @@ owners:
       - "Current repo truth: request-executor request-route owner writes `runtime_control.providerProtocol`; Rust mainline readers with `metadataCenterSnapshot` must prefer `runtimeControl.providerProtocol`, while top-level `providerProtocol` remains a transitional transport shell where no center input is available yet."
       - "Request bridge and req_inbound may capture explicit current-request evidence and do non-destructive entry normalization only; they must not restore, convert, clean, or patch continuation history before request Chat Process entry."
       - "Control-plane values such as continuation owner, route/protocol pins, stream intent, and port/group/request truth must be written to MetadataCenter families, never into request payload or restored history."
+      - "Request bridge must not own post-pipeline relay response save, response-id parsing, finish_reason detection, or response-side record/finalize orchestration; Rust provider-response record effects are the only relay save writer."
 
   - feature_id: hub.chat_process_responses_continuation
     status: active
@@ -5778,6 +7179,7 @@ owners:
       - ChatProcRespContinuation06ResponseGoverned
       - ChatProcRespContinuation07CanonicalSaved
       - ChatProcRespContinuation08Released
+      - ResponsesContinuationRequestActionPlan
     canonical_builders:
       - resume_responses_conversation_payload
       - plan_responses_scope_continuation_match
@@ -5789,10 +7191,12 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
       - src/modules/llmswitch/bridge/provider-response-converter-host.ts
       - src/modules/llmswitch/bridge
+      - src/server/runtime/http-server/request-executor.ts
       - docs/architecture
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
       - tests/sharedmodule/responses-json-client-projection-direct-native.spec.ts
+      - tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
       - tests/servertool/servertool-cli-native-bridge.spec.ts
     forbidden_paths:
@@ -5802,35 +7206,43 @@ owners:
     required_tests:
       - tests/sharedmodule/responses-continuation-store.spec.ts
       - tests/modules/llmswitch/bridge/responses-request-bridge.request-context-normalization.spec.ts
+      - tests/server/runtime/http-server/request-executor.metadata-center.contract.spec.ts
       - tests/servertool/stopless-metadata-center.spec.ts
     required_gates:
       - npm run verify:responses-history-protocol-contract
+      - npm run verify:responses-relay-continuation-writer-uniqueness
+      - npm run verify:architecture-thin-wrapper-only
+      - npm run test:architecture-thin-wrapper-only-red-fixtures
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
       - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:servertool-mount-boundary
     migration_target: rust
     notes:
       - "This continuation block is `/v1/responses`-only. Other protocols must skip it entirely and continue through their normal Chat Process path."
       - "Request-side continuation restore is positioned after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`."
+      - "At request-executor Chat Process capture, requests without `MetadataCenter.continuation_context.responsesResume` retain raw entry evidence; restored/materialized continuation requests must capture the current Chat Process payload. Raw HTTP `tool_outputs` must never replace the restored model/base payload for the next continuation round."
       - "Response-side continuation save is positioned after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`."
       - "Req/Resp inbound and outbound are normalization/projection-only nodes; all continuation, tool governance, and semantic recovery must happen in Chat Process before save/restore."
       - "Tool governance, tool result governance, stopless hook restore/projection, and CLI result restoration belong to Chat Process. Handler/SSE code must not implement them."
       - "SSE is transport-only. No continuation probe, required_action detection, terminal repair, save/restore, tool injection, or stopless schema logic may live in `handler-response-sse.ts`."
       - "Responses handler/bridge may prepare request body and continuation carrier IO, but must not synthesize stopless instructions or request-side governance text. Chat Process Rust remains the semantic owner."
       - "Request-context restore planning now belongs to Rust `planResponsesRequestContext`; TS may call native and attach HTTP/session IO only."
+      - "Request-side lookup, direct provider-owned submit materialization, relay resume, scope materialization, client-error projection, payload mutation, endpoint selection, and effect-result projection are one Rust state machine in `plan_responses_continuation_request_action`; TS switches only on the validated effect operation and carries the opaque result token unchanged."
       - "Continuation is a `/v1/responses` save/restore boundary only. It must not own response governance, request governance, history conversion, stopless/schema judgment, tool governance, SSE transport, or provider/client projection."
       - "After response Chat Process saves canonical continuation truth and before the next request Chat Process restores it, no layer may mutate request/response history: no cleanup, conversion, reordering, shape patching, semantic repair, or lossy normalization."
       - "All response/request content-changing logic must happen before continuation save in response Chat Process or after continuation restore in request Chat Process."
       - "Continuation store save/restore may persist and return canonical truth, but must not rewrite it to compensate for downstream shape expectations."
       - "Control semantics required across the boundary must be carried in MetadataCenter; payload/history are data-plane truth and must not receive route/provider/protocol/control pins."
       - "Response save must use the current active provider request label passed to `publishResponsesRecordPlanJson` before any stale `requestTruth.requestId`; provider request-id rebind must not record under the old router id."
-      - "`publishResponsesRecordPlanJson` owns the complete record effect contract, including entryKind=responses, continuationOwner=relay, allowScopeContinuation=true, and optional scope/provider/route fields. TS must pass recordArgs directly to store IO without rebuilding or filtering them."
+      - "Handler/SSE/resp_outbound must not persist or rebuild canonical continuation truth."
+      - "`publishResponsesRecordPlanJson` owns the complete ordered continuation store effect contract, including record_response/finalize_retention operation order, entryKind=responses, continuationOwner=relay, allowScopeContinuation=true, and optional scope/provider/route fields. TS must pass continuationStoreEffects directly to store IO without rebuilding or filtering them."
       - "`publishResponsesRecordPlanJson` also owns runtimeStateWrite outer-shape validation and fail-fast. TS must pass the Rust effect value unchanged (or null when absent), never coerce malformed arrays/scalars to null with `asRecord`."
       - "Handler response-store integration tests are not continuation owner gates. Stale tests that expect `sendPipelineResponse` or SSE transport to save continuation must be migrated to bridge/Rust owner tests or deleted, not greened by adding handler-side save logic."
 
   - feature_id: server.responses_sse_bridge_surface
     status: active
-    summary: "/v1/responses SSE path is a handler transport facade only: frame write, keepalive, timeout, and closeout only; Rust/NAPI owns frame projection semantics"
+    summary: "/v1/responses SSE path is an opaque SSE/body handoff facade only: frame write, keepalive, timeout, and closeout only; Rust/NAPI owns frame projection semantics"
     owner_kind: ts_transport
     owner_scope: "/v1/responses SSE path writes frames, manages stream transport, and calls Rust/NAPI projection wrappers without owning schema/tool/metadata/terminal business semantics"
     owner_module: src/server/handlers/handler-response-sse.ts
@@ -5887,7 +7299,7 @@ owners:
       - "Force-SSE JSON/chat body fallback is physically deleted from handler and SSE bridge; server frame writing must consume a Rust/Hub-produced `sseStream` or fail fast with the missing-stream error path."
   - feature_id: server.responses_response_handler_bridge_surface
     status: active
-    summary: "/v1/responses response dispatch is handler-local HTTP IO plus Rust/NAPI response projection; duplicate response bridge facade is deleted"
+    summary: "/v1/responses response dispatch is an opaque response projection/conversation facade for handler-local HTTP IO plus Rust/NAPI response projection; duplicate response bridge facade is deleted"
     owner_kind: handler_io_plus_rust_ssot
     owner_scope: "file-scoped /v1/responses response dispatch is handler-local HTTP IO plus Rust/NAPI response projection; continuation save truth lives in core Chat Process closeout"
     owner_module: src/server/handlers/handler-response-utils.ts
@@ -6410,9 +7822,11 @@ owners:
     resource_bindings:
       writes:
         - error.chain@ErrorErr05ExecutionDecision
+        - route.retry_exclusion_set@ErrorErr05ExecutionDecision
       reads:
         - error.chain@ErrorErr04RouterPolicyApplied
         - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - route.retry_exclusion_set@ErrorErr05ExecutionDecision
       forbidden:
         - request.normal_payload@HubReqInbound02Standardized
         - provider.wire_payload@ProviderReqOutbound06WirePayload
@@ -6642,6 +8056,94 @@ owners:
     migration_target: rust
     notes:
       - "TS layer only thin wrappers; all semantics must live in Rust crate per ARCH-OWN-1."
+
+  - feature_id: conversion.openai_request_filter_payload_copy_budget
+    status: active
+    summary: "OpenAI-to-OpenAI request filtering must consume the already-owned payload without an internal JSON round-trip or full payload clone"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust owner for OpenAI request filter materialization and payload-copy budget"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters.rs
+    resource_bindings:
+      writes:
+        - protocol.openai_chat_request_filter_projection@OpenAiOpenAiRequestCodecOutput
+      reads:
+        - request.normal_payload@OpenAiChatInbound
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    canonical_types:
+      - PruneChatRequestPayloadInput
+    canonical_builders:
+      - prune_chat_request_payload_owned
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters/tests.rs
+      - tests/sharedmodule/openai-request-filter-payload-copy-budget.spec.ts
+      - tests/sharedmodule/helpers/openai-codec-direct-native.ts
+    forbidden_paths:
+      - src/providers/core/runtime
+      - src/server/runtime/http-server
+      - src/modules/llmswitch
+      - docs/config.toml
+      - config.toml
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_chat_request_filters.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs
+      - tests/sharedmodule/openai-request-filter-payload-copy-budget.spec.ts
+    required_gates:
+      - npm run build:native-hotpath
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "The outer JS/Rust JSON-string N-API boundary remains a contract limit; this feature removes only the nested Rust stringify/parse wrapper and borrowed full-payload clone."
+      - "Provider configuration, Virtual Router semantics, retry, continuation, MetadataCenter, and response paths are forbidden owners for this request filter copy-budget slice."
+      - "The external `prune_chat_request_payload_json` N-API helper remains available only as a thin parse -> owned transform -> serialize wrapper."
+
+  - feature_id: conversion.glm_tool_schema_payload_copy_budget
+    status: active
+    summary: "GLM tool schema sanitizer consumes owned provider-wire payload branches instead of cloning full objects before small field edits"
+    owner_kind: rust_ssot
+    owner_scope: "file-scoped Rust owner for GLM tool schema sanitizer payload-copy budget"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+    resource_bindings:
+      writes:
+        - protocol.glm_tool_schema_projection@ProviderReqOutbound06WirePayload
+      reads:
+        - request.normal_payload@OpenAiChatInbound
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    canonical_types:
+      - serde_json::Value
+    canonical_builders:
+      - sanitize_glm_tools_schema_owned
+      - sanitize_tool_schema_glm_shell_json
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+      - docs/goals/full-pipeline-glm-tool-schema-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - src/server/runtime/http-server
+      - src/server/handlers
+      - src/modules/llmswitch/bridge
+      - config.toml
+      - configsamples
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/compat_tool_schema.rs
+    required_gates:
+      - npm run build:native-hotpath
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "The outer JSON-string N-API boundary remains a contract limit; this feature removes only internal provider-wire branch clones."
+      - "Provider configuration, Virtual Router semantics, retry, continuation, MetadataCenter, and response paths are forbidden owners for this copy-budget slice."
 
   - feature_id: conversion.shared.anthropic
     status: active
@@ -7069,6 +8571,7 @@ owners:
     notes:
       - "Provider wire uses configured canonical modelId; client response restores the original alias."
       - "Rust payloadChanged is the only decision used by TS to preserve direct passthrough object identity."
+      - "Future classification input must come from `VrDirect03ResolvedSemantics`; this projector must not read provider config, route config, MetadataCenter, or infer semantic class from payload changes."
 
   - feature_id: hub.router_direct_response_error_projection
     status: active
@@ -7286,7 +8789,7 @@ owners:
 
   - feature_id: hub.router_direct_runtime_metadata_effect_plan
     status: active
-    summary: "router-direct runtime metadata carrier attach and provider-request dry-run propagation are Rust-planned"
+    summary: "router-direct carrier attach and provider-request dry-run propagation are Rust-planned"
     owner_kind: rust_ssot
     owner_scope: "Rust selects skip/attach and validates/projects the optional provider-request dry-run control; TS preserves opaque carrier fields and executes symbol attachment"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_runtime_metadata_projection.rs
@@ -7326,3 +8829,94 @@ owners:
     notes:
       - "Opaque carrier keys remain TS-preserved IO; Rust receives only carrier existence and cycle-safe pipeline metadata facts."
       - "Unknown actions fail-fast; missing carrier or invalid dry-run never becomes an attach fallback."
+
+  - feature_id: provider.responses_submit_payload_copy_budget
+    status: active
+    summary: "Responses provider submit_tool_outputs transport projection removes endpoint ids without deep-cloning the complete wire payload"
+    owner_kind: ts_provider_transport_projection
+    owner_scope: "provider-runtime-only top-level submit endpoint/body split after Hub provider wire build; nested protocol values remain exact and are never mutated"
+    owner_module: src/providers/core/runtime/responses-provider-helpers.ts
+    resource_bindings:
+      writes:
+        - provider.responses_submit_wire_payload@ProviderReqOutbound07TransportRequest
+      reads:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - metadata.request_truth@MetaReq02TruthMaterialized
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - continuation.scope_state@ChatProcReqContinuation02OwnerResolved
+    canonical_types:
+      - SubmitToolOutputsPayload
+    canonical_builders:
+      - extractSubmitToolOutputsPayload
+    allowed_paths:
+      - src/providers/core/runtime/responses-provider-helpers.ts
+      - src/providers/core/runtime/responses-provider.ts
+      - tests/providers/core/runtime/responses-provider-submit-payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/responses-provider-helpers.spec.ts
+      - docs/goals/full-pipeline-provider-submit-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib
+      - src/server/handlers
+      - src/server/runtime/http-server
+      - config
+      - configsamples
+    required_tests:
+      - tests/providers/core/runtime/responses-provider-submit-payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/responses-provider-helpers.spec.ts
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: none
+    notes:
+      - "The projector may create one shallow top-level object because response_id/responseId are transport endpoint selectors and must not be deleted from the caller-owned input."
+      - "Nested tool outputs, tools, metadata, extensions, and other protocol fields are shared immutable references; the submit transport must not mutate them."
+      - "No live payload field is trimmed except the two endpoint-routing ids already excluded by the existing provider contract."
+
+  - feature_id: provider.anthropic_remote_image_payload_copy_budget
+    status: active
+    summary: "Anthropic provider remote-image inlining copies only rewritten image ancestors instead of deep-cloning the complete wire payload"
+    owner_kind: ts_provider_transport_projection
+    owner_scope: "provider-runtime-only remote URL to base64 image source projection with copy-on-write ownership"
+    owner_module: src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts
+    resource_bindings:
+      writes:
+        - provider.anthropic_remote_image_wire_projection@ProviderReqOutbound07TransportRequest
+      reads:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+      forbidden:
+        - route.selection@VrRoute04SelectedTarget
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - InlineRemoteAnthropicImageOptions
+    canonical_builders:
+      - inlineRemoteAnthropicImageUrls
+    allowed_paths:
+      - src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-remote-image.ts
+      - src/providers/core/runtime/vercel-ai-sdk/anthropic-sdk-transport.ts
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-remote-image-payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts
+      - docs/goals/full-pipeline-anthropic-remote-image-payload-copy-budget-test-design.md
+      - docs/design/payload-copy-hotspot-inventory.md
+      - docs/architecture
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - src/server/handlers
+      - src/server/runtime/http-server
+      - config
+      - configsamples
+    required_tests:
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-remote-image-payload-copy-budget.spec.ts
+      - tests/providers/core/runtime/vercel-ai-sdk-anthropic-transport.spec.ts
+    required_gates:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+    migration_target: none
+    notes:
+      - "Provider-specific fetch, media detection, and wire source replacement stay in Provider Runtime; Hub Pipeline and Virtual Router must not gain Anthropic image branches."
+      - "A successful rewrite creates only the top-level body/messages/message/content/block/source path. Unaffected protocol values retain exact references."
+      - "Fetch failure must not mutate caller-owned input; no-rewrite returns the original body reference."

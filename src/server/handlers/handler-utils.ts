@@ -928,11 +928,7 @@ export function readRequestBodyMetadata(payload: unknown): Record<string, unknow
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return undefined;
   }
-  try {
-    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
-  } catch {
-    return { ...(raw as Record<string, unknown>) };
-  }
+  return raw as Record<string, unknown>;
 }
 
 export function stripRequestBodyMetadataForPipeline<T>(payload: T): T {

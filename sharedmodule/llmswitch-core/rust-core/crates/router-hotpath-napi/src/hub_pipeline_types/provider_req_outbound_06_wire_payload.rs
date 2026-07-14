@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, clone_object_payload};
+use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, into_object_payload};
 use super::hub_req_outbound_05_provider_semantic::HubReqOutbound05ProviderSemantic;
 use super::meta_error_carriers::assert_payload_has_no_meta_or_error_carrier;
 use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
@@ -27,10 +27,8 @@ pub(crate) fn build_provider_req_outbound_06_from_hub_req_outbound_05(
     selected_target: &VrRoute04SelectedTarget,
     semantic: HubReqOutbound05ProviderSemantic,
 ) -> Result<ProviderReqOutbound06WirePayload, String> {
-    assert_no_inline_metadata(
-        &selected_target.clone().into_decision(),
-        "ProviderReqOutbound06WirePayload.route",
-    )?;
+    selected_target
+        .assert_decision_has_no_inline_metadata("ProviderReqOutbound06WirePayload.route")?;
     let payload = semantic.into_payload();
     assert_no_inline_metadata(&payload, "ProviderReqOutbound06WirePayload")?;
     assert_payload_has_no_meta_or_error_carrier(&payload, "ProviderReqOutbound06WirePayload")?;
@@ -41,7 +39,7 @@ pub(crate) fn build_provider_req_outbound_06_from_hub_req_outbound_05(
         "ProviderReqOutbound06WirePayload",
         ToolNamespacePolicy::ForbidProviderWireNamespace,
     )?;
-    let payload = clone_object_payload(&payload, "ProviderReqOutbound06WirePayload")?;
+    let payload = into_object_payload(payload, "ProviderReqOutbound06WirePayload")?;
     Ok(ProviderReqOutbound06WirePayload { payload })
 }
 

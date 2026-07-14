@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::hub_req_inbound_02_standardized::assert_no_inline_metadata;
 use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePolicy};
@@ -8,6 +8,12 @@ use super::tool_surface_contract::{assert_tool_surface_contract, ToolNamespacePo
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HubRespInbound02Parsed {
     payload: Value,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum ResponseAdjacentTransitionError<E> {
+    Contract(String),
+    Transform(E),
 }
 
 impl HubRespInbound02Parsed {
@@ -48,16 +54,6 @@ pub(super) fn assert_not_success_error_payload(
         ));
     }
     Ok(())
-}
-
-pub(super) fn clone_response_object_payload(
-    value: &Value,
-    node_name: &str,
-) -> Result<Map<String, Value>, String> {
-    value
-        .as_object()
-        .cloned()
-        .ok_or_else(|| format!("{node_name} payload must be an object"))
 }
 
 #[cfg(test)]

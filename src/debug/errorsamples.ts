@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRccPath } from '../config/user-data-paths.js';
-import { redactSensitiveData } from '../utils/sensitive-redaction.js';
+import { stringifyRedactedJson } from '../utils/sensitive-redaction.js';
 
 const KB = 1024;
 const MB = 1024 * KB;
@@ -194,48 +194,30 @@ function shouldWriteFullErrorsamplePayload(): boolean {
   return parseEnvBool(['ROUTECODEX_SNAPSHOT', 'RCC_SNAPSHOT'], false);
 }
 
+// feature_id: debug.errorsample_payload_copy_budget
 function serializePayloadForWrite(payload: unknown, maxSampleBytes: number): string {
-  if (shouldWriteFullErrorsamplePayload()) {
-    try {
-      return JSON.stringify(payload, null, 2);
-    } catch {
-      return JSON.stringify(
-        {
-          truncated: true,
-          reason: 'payload_unserializable',
-          preview: String(payload)
-        },
-        null,
-        2
-      );
-    }
-  }
+  const writeFullPayload = shouldWriteFullErrorsamplePayload();
   const maxBytes = Math.max(1024, Math.floor(maxSampleBytes));
-  let pretty = '';
+  let serialized = '';
   try {
-    pretty = JSON.stringify(payload, null, 2);
+    serialized = stringifyRedactedJson(payload, writeFullPayload ? 2 : undefined);
   } catch {
-    pretty = JSON.stringify(
+    serialized = stringifyRedactedJson(
       {
         truncated: true,
         reason: 'payload_unserializable',
         preview: String(payload)
       },
-      null,
       2
     );
   }
-  if (Buffer.byteLength(pretty, 'utf8') <= maxBytes) {
-    return pretty;
+  if (writeFullPayload) {
+    return serialized;
   }
-
-  let compact = '';
-  try {
-    compact = JSON.stringify(payload);
-  } catch {
-    compact = '';
+  const originalBytes = Buffer.byteLength(serialized, 'utf8');
+  if (originalBytes <= maxBytes) {
+    return serialized;
   }
-  const originalBytes = Buffer.byteLength(compact || pretty, 'utf8');
   let previewChars = Math.max(512, Math.floor(maxBytes * 0.6));
 
   while (previewChars >= 256) {
@@ -245,7 +227,7 @@ function serializePayloadForWrite(payload: unknown, maxSampleBytes: number): str
         reason: 'payload_too_large',
         maxBytes,
         originalBytes,
-        preview: (compact || pretty).slice(0, previewChars)
+        preview: serialized.slice(0, previewChars)
       },
       null,
       2
@@ -541,8 +523,7 @@ export async function writeErrorsampleJson(options: {
     dir,
     `${safeName(options.kind)}-${safeStamp()}-${Math.random().toString(16).slice(2)}.json`
   );
-  const sanitizedPayload = redactSensitiveData(options.payload);
-  const serialized = serializePayloadForWrite(sanitizedPayload, budget.maxSampleBytes);
+  const serialized = serializePayloadForWrite(options.payload, budget.maxSampleBytes);
   const sizeBytes = Math.max(1, Buffer.byteLength(serialized, 'utf8'));
 
   return enqueueErrorsampleItem({

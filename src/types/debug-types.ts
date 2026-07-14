@@ -602,11 +602,6 @@ export interface DebugUtils {
   calculateDataSize(data: unknown): number;
 
   /**
-   * Deep clone data
-   */
-  deepClone<T>(data: T): T;
-
-  /**
    * Generate unique identifier
    */
   generateId(prefix?: string): string;

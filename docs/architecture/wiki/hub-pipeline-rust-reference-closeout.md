@@ -41,6 +41,20 @@ flowchart LR
 | Doc owner surface naming broad native owner | forbidden | docs must say private loader/forbidden legacy if mentioned | gate fails stale owner wording |
 | Rust `hub_pipeline_` symbol/module | allowed | Rust is semantic truth | inventory classifies as legitimate |
 
+## Root Host Thin-Wrapper Gate
+
+`verify:architecture-thin-wrapper-only` scans the root Hub host surface, not only the retired sharedmodule TS directories:
+
+- `src/modules/llmswitch/bridge/**`
+- `src/server/runtime/http-server/executor-pipeline.ts`
+- `src/server/runtime/http-server/request-executor.ts`
+- `src/server/runtime/http-server/executor/provider-response-converter.ts`
+- `src/server/runtime/http-server/executor/request-executor-provider-*.ts`
+- `src/server/handlers/responses-handler.ts`
+
+The gate fails when `rootHostCheckedFiles` is zero. Allowed host work is limited to NAPI/JSON boundaries, Node IO, HTTP/SSE/stream transport, logging/diagnostics, MetadataCenter transport, and exact Rust effect execution.
+The paired red fixtures reject handler/request-bridge continuation writers, TS ErrorErr classification, flat metadata protocol/exclusion fallback, semantic payload fallback, malformed native-plan downgrade, broad native facade imports, and deleted wrapper revival.
+
 ## Owner Matrix
 
 | Feature | Owner surface | Current action |
@@ -63,10 +77,14 @@ hub-rust-ref-gap-02: Several broad native references are legitimate private-load
 
 hub-rust-ref-gap-03: Runtime refactor is not started by this slice. This page only closes the first gate/doc/test-design convergence layer.
 
+hub-rust-ref-gap-04: The former thin-wrapper gate passed with `checked files: 0`; the root host scan and zero-count failure now close that evidence gap at source-gate level.
+
 ## Verification
 
 - `npm run verify:hub-pipeline-native-reference-gate`
 - `npm run test:hub-pipeline-native-reference-gate-red-fixtures`
+- `npm run verify:architecture-thin-wrapper-only`
+- `npm run test:architecture-thin-wrapper-only-red-fixtures`
 - `npm run verify:function-map-compile-gate`
 - `npm run verify:architecture-wiki-sync`
 - `npm run verify:architecture-wiki-html-sync`

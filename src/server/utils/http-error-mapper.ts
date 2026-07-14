@@ -33,7 +33,7 @@ export const ERROR_CLIENT_PROJECTION_FEATURE_ID = 'feature_id: error.client_proj
  * ProviderRetryExecutionPlan is the canonical type; this view exists only
  * here so the projection gate can be unit-tested without a full executor.
  */
-export type ErrorErr05ExecutionDecision = {
+export type ClientProjectionDecisionView = {
   mayProject: boolean;
   policyExhausted: boolean;
   routePoolRemainingAfterExclusion: readonly string[];
@@ -44,7 +44,7 @@ export type ErrorErr05ExecutionDecision = {
  * Locked by docs/goals/provider-error-reroutable-until-pool-and-default-empty.md §2.1.
  * This is a pure type-guard; it never inspects error message / status / code.
  */
-export function callerMayProject(decision: ErrorErr05ExecutionDecision | null | undefined): boolean {
+export function callerMayProject(decision: ClientProjectionDecisionView | null | undefined): boolean {
   if (!decision || typeof decision !== 'object') {
     return false;
   }
@@ -59,8 +59,8 @@ export function callerMayProject(decision: ErrorErr05ExecutionDecision | null | 
 export class EarlyProjectionBlockedError extends Error {
   readonly code = 'EARLY_PROJECTION_BLOCKED';
   readonly statusCode = 500;
-  readonly decision: ErrorErr05ExecutionDecision;
-  constructor(decision: ErrorErr05ExecutionDecision) {
+  readonly decision: ClientProjectionDecisionView;
+  constructor(decision: ClientProjectionDecisionView) {
     super('ErrorErr05 decision is not projectable: route pool or default pool still has remaining candidates');
     this.name = 'EarlyProjectionBlockedError';
     this.decision = decision;
@@ -662,7 +662,7 @@ function isClientDisconnectLikeForProjection(args: {
 }
 
 export function project_error_err_06_client_from_error_err_05_execution_decision(
-  decision: ErrorErr05ExecutionDecision
+  decision: ClientProjectionDecisionView
 ): ErrorErr06ClientProjected {
   if (!callerMayProject(decision)) {
     throw new EarlyProjectionBlockedError(decision);

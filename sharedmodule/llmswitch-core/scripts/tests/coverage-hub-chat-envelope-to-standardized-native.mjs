@@ -12,10 +12,6 @@ const standardizedBridgeUrl = pathToFileURL(
   path.join(repoRoot, 'dist', 'conversion', 'hub', 'standardized-bridge.js')
 ).href;
 
-function stableJson(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 async function importFresh(url, tag) {
   return import(`${url}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 }
@@ -112,7 +108,7 @@ async function main() {
     requestId: adapterContext.requestId
   });
 
-  assert.deepEqual(stableJson(nativeResult), stableJson(tsResult));
+  assert.deepEqual(nativeResult, tsResult);
 
   const chatWithoutTools = {
     messages: [{ role: 'user', content: 'plain text' }],
@@ -132,7 +128,7 @@ async function main() {
     endpoint: adapterContext.entryEndpoint
   });
 
-  assert.deepEqual(stableJson(nativeResult2), stableJson(tsResult2));
+  assert.deepEqual(nativeResult2, tsResult2);
   console.log('ok');
 }
 

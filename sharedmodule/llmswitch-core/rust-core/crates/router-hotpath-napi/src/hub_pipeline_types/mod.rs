@@ -31,6 +31,7 @@ pub(crate) use hub_resp_chatprocess_03_governed::{
 };
 pub(crate) use hub_resp_inbound_02_parsed::{
     parse_hub_resp_inbound_02_from_provider_resp_inbound_01, HubRespInbound02Parsed,
+    ResponseAdjacentTransitionError,
 };
 pub(crate) use hub_resp_outbound_04_client_semantic::{
     project_hub_resp_outbound_04_from_hub_resp_chatprocess_03, HubRespOutbound04ClientSemantic,

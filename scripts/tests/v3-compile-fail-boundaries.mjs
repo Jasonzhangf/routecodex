@@ -162,6 +162,40 @@ for (const fixture of [
   }
 }
 
+for (const fixture of [
+  {
+    name: 'wire node private constructor',
+    code: 'use routecodex_v3_provider_responses::V3Provider12ResponsesWirePayload;\nfn main() { let _ = V3Provider12ResponsesWirePayload { request_id: String::new(), target: todo!(), stream_intent: todo!(), body: todo!() }; }\n',
+  },
+  {
+    name: 'transport request private constructor',
+    code: 'use routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest;\nfn main() { let _ = V3Transport13ResponsesHttpRequest { request_id: String::new(), provider_id: String::new(), url: todo!(), auth: todo!(), stream_intent: todo!(), body: todo!(), cancellation: None }; }\n',
+  },
+  {
+    name: 'provider raw private constructor',
+    code: 'use routecodex_v3_provider_responses::V3ProviderResp14Raw;\nfn main() { let _ = V3ProviderResp14Raw { request_id: String::new(), provider_id: String::new(), status: 200, headers: Vec::new(), body: todo!() }; }\n',
+  },
+]) {
+  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-provider-node-compile-fail-'));
+  const sourceDir = join(root, 'src');
+  try {
+    mkdirSync(sourceDir);
+    writeFileSync(
+      join(root, 'Cargo.toml'),
+      `[package]\nname = "v3-provider-private-node-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-provider-responses')}" }\n`,
+    );
+    writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
+    const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
+      encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(root, 'target') },
+    });
+    const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status === 0) fail(`${fixture.name} unexpectedly constructed a provider node outside its owner`);
+    else if (!/private field|private fields|E0451/.test(diagnostic)) fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-600)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 if (failures.length) {
   console.error('[test:v3-compile-fail] failed');
   for (const failure of failures) console.error('- ' + failure);

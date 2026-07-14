@@ -4,14 +4,16 @@ use std::mem;
 use crate::shared_json_utils::read_object_trimmed_string;
 
 use super::history::{
-    apply_bridge_capture_tool_results, apply_bridge_ensure_tool_placeholders,
+    apply_bridge_capture_tool_results_borrowed, apply_bridge_ensure_tool_placeholders_borrowed,
     apply_bridge_normalize_history, ensure_bridge_output_fields,
 };
 use super::metadata::{
-    apply_bridge_ensure_system_instruction, apply_bridge_inject_system_instruction,
+    apply_bridge_ensure_system_instruction, apply_bridge_inject_system_instruction_borrowed,
     apply_bridge_metadata_action,
 };
-use super::reasoning::{apply_bridge_reasoning_extract, apply_bridge_responses_output_reasoning};
+use super::reasoning::{
+    apply_bridge_reasoning_extract, apply_bridge_responses_output_reasoning_borrowed,
+};
 use super::tool_ids::apply_bridge_normalize_tool_identifiers;
 use super::types::*;
 
@@ -83,13 +85,11 @@ pub(crate) fn run_bridge_action_pipeline(
         let options_ref = options.as_ref();
         match name {
             "messages.inject-system-instruction" => {
-                let output = apply_bridge_inject_system_instruction(
-                    ApplyBridgeInjectSystemInstructionInput {
-                        stage: stage.clone(),
-                        options: options.clone().map(Value::Object),
-                        messages: mem::take(&mut state.messages),
-                        raw_request: state.raw_request.clone(),
-                    },
+                let output = apply_bridge_inject_system_instruction_borrowed(
+                    stage.as_str(),
+                    options_ref,
+                    mem::take(&mut state.messages),
+                    state.raw_request.as_ref(),
                 );
                 state.messages = output.messages;
             }
@@ -114,44 +114,33 @@ pub(crate) fn run_bridge_action_pipeline(
                 state.messages = output.messages;
             }
             "tools.ensure-response-placeholders" | "tools.ensure-placeholders" => {
-                let output =
-                    apply_bridge_ensure_tool_placeholders(ApplyBridgeEnsureToolPlaceholdersInput {
-                        stage: stage.clone(),
-                        messages: mem::take(&mut state.messages),
-                        captured_tool_results: state.captured_tool_results.clone(),
-                        raw_request: state.raw_request.clone(),
-                        raw_response: state.raw_response.clone(),
-                    });
+                let output = apply_bridge_ensure_tool_placeholders_borrowed(
+                    stage.as_str(),
+                    mem::take(&mut state.messages),
+                    state.captured_tool_results.take(),
+                    state.raw_request.as_ref(),
+                    state.raw_response.as_ref(),
+                );
                 state.messages = output.messages;
-                if let Some(tool_outputs) = output.tool_outputs {
-                    state.captured_tool_results = Some(tool_outputs);
-                }
+                state.captured_tool_results = output.tool_outputs.or(output.retained_tool_outputs);
             }
             "messages.ensure-system-instruction" => {
                 let output = apply_bridge_ensure_system_instruction(
                     ApplyBridgeEnsureSystemInstructionInput {
                         stage: stage.clone(),
                         messages: mem::take(&mut state.messages),
-                        metadata: state.metadata.clone(),
+                        metadata: state.metadata.take(),
                     },
                 );
                 state.messages = output.messages;
-                if let Some(metadata) = output.metadata {
-                    state.metadata = Some(metadata);
-                }
+                state.metadata = output.metadata;
             }
             "messages.normalize-history" => {
                 if stage == "request_outbound" {
-                    let tools = state
-                        .raw_request
-                        .as_ref()
-                        .and_then(|value| value.get("tools"))
-                        .and_then(|value| value.as_array())
-                        .map(|items| items.clone());
                     let output =
                         apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
                             messages: mem::take(&mut state.messages),
-                            tools,
+                            tools: None,
                             allow_pending_terminal_tool_call: Some(true),
                         })?;
                     state.messages = output.messages;
@@ -177,20 +166,23 @@ pub(crate) fn run_bridge_action_pipeline(
                 }
             }
             "tools.capture-results" => {
-                let output =
-                    apply_bridge_capture_tool_results(ApplyBridgeCaptureToolResultsInput {
-                        stage: stage.clone(),
-                        captured_tool_results: state.captured_tool_results.clone(),
-                        raw_request: state.raw_request.clone(),
-                        raw_response: state.raw_response.clone(),
-                        metadata: state.metadata.clone(),
-                    });
-                if let Some(results) = output.captured_tool_results {
-                    state.captured_tool_results = Some(results);
-                }
-                if let Some(metadata) = output.metadata {
-                    state.metadata = Some(metadata);
-                }
+                let captured_tool_results_was_some = state.captured_tool_results.is_some();
+                let metadata = state.metadata.take();
+                let (metadata_for_action, metadata_fallback) = match metadata {
+                    Some(Value::Object(map)) => (Some(Value::Object(map)), None),
+                    other => (None, other),
+                };
+                let output = apply_bridge_capture_tool_results_borrowed(
+                    stage.as_str(),
+                    state.captured_tool_results.take(),
+                    state.raw_request.as_ref(),
+                    state.raw_response.as_ref(),
+                    metadata_for_action,
+                );
+                state.captured_tool_results = output
+                    .captured_tool_results
+                    .or_else(|| captured_tool_results_was_some.then(Vec::new));
+                state.metadata = output.metadata.or(metadata_fallback);
             }
             "reasoning.attach-output" | "responses.output-reasoning" => {
                 if stage == "response_inbound" {
@@ -199,12 +191,10 @@ pub(crate) fn run_bridge_action_pipeline(
                         protocol.clone().unwrap_or_else(|| "responses".to_string()),
                         stage
                     );
-                    let output = apply_bridge_responses_output_reasoning(
-                        ApplyBridgeResponsesOutputReasoningInput {
-                            messages: mem::take(&mut state.messages),
-                            raw_response: state.raw_response.clone(),
-                            id_prefix: Some(id_prefix),
-                        },
+                    let output = apply_bridge_responses_output_reasoning_borrowed(
+                        mem::take(&mut state.messages),
+                        state.raw_response.as_ref(),
+                        Some(id_prefix),
                     );
                     state.messages = output.messages;
                 }
@@ -217,37 +207,27 @@ pub(crate) fn run_bridge_action_pipeline(
                         protocol: protocol.clone(),
                         module_type: module_type.clone(),
                         messages: mem::take(&mut state.messages),
-                        raw_request: state.raw_request.clone(),
-                        captured_tool_results: state.captured_tool_results.clone(),
+                        raw_request: state.raw_request.take(),
+                        captured_tool_results: state.captured_tool_results.take(),
                         id_prefix: Some(id_prefix),
                     },
                 );
                 state.messages = output.messages;
-                if let Some(raw_request) = output.raw_request {
-                    state.raw_request = Some(raw_request);
-                }
-                if let Some(captured) = output.captured_tool_results {
-                    state.captured_tool_results = Some(captured);
-                }
+                state.raw_request = output.raw_request;
+                state.captured_tool_results = output.captured_tool_results;
             }
             "metadata.extra-fields" | "metadata.provider-field" | "metadata.provider-sentinel" => {
                 let output = apply_bridge_metadata_action(ApplyBridgeMetadataActionInput {
                     action_name: name.to_string(),
                     stage: stage.clone(),
                     options: options.clone().map(Value::Object),
-                    raw_request: state.raw_request.clone(),
-                    raw_response: state.raw_response.clone(),
-                    metadata: state.metadata.clone(),
+                    raw_request: state.raw_request.take(),
+                    raw_response: state.raw_response.take(),
+                    metadata: state.metadata.take(),
                 });
-                if let Some(raw_request) = output.raw_request {
-                    state.raw_request = Some(raw_request);
-                }
-                if let Some(raw_response) = output.raw_response {
-                    state.raw_response = Some(raw_response);
-                }
-                if let Some(metadata) = output.metadata {
-                    state.metadata = Some(metadata);
-                }
+                state.raw_request = output.raw_request;
+                state.raw_response = output.raw_response;
+                state.metadata = output.metadata;
             }
             _ => {
                 // Unknown action: skip (custom actions handled in TS).

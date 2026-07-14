@@ -11,6 +11,10 @@ import {
   outputDebugInfo,
   outputFinalDebugInfo
 } from '../../providers/core/config/provider-debug-output-utils.js';
+import {
+  buildDebugDataSnapshot,
+  estimateDebugPayloadSize,
+} from './payload-budget.js';
 
 /**
  * Hook执行上下文 - 包含完整的执行信息
@@ -295,7 +299,7 @@ export class BidirectionalHookManager {
     if (debugEnabled) {
       dataFlow.push({
         stage,
-        data: this.cloneData(currentData),
+        data: this.captureDataFlowSnapshot(currentData),
         changes: [],
         timestamp: Date.now(),
         dataSize: this.calculateDataSize(currentData)
@@ -374,7 +378,7 @@ export class BidirectionalHookManager {
           if (debugEnabled) {
             dataFlow.push({
               stage,
-              data: this.cloneData(currentData),
+              data: this.captureDataFlowSnapshot(currentData),
               changes: hookChanges,
               timestamp: Date.now(),
               dataSize: this.calculateDataSize(currentData)
@@ -466,14 +470,18 @@ export class BidirectionalHookManager {
    * 计算数据大小
    */
   private static calculateDataSize(data: UnknownObject): number {
-    return JSON.stringify(data).length;
+    return estimateDebugPayloadSize(data);
   }
 
   /**
-   * 克隆数据（深拷贝）
+   * 捕获有界调试快照，避免让 dataFlow 持有完整请求/响应副本。
    */
-  private static cloneData(data: UnknownObject): UnknownObject {
-    return JSON.parse(JSON.stringify(data));
+  private static captureDataFlowSnapshot(data: UnknownObject): UnknownObject {
+    const snapshot = buildDebugDataSnapshot(data);
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+      return snapshot as UnknownObject;
+    }
+    return { value: snapshot };
   }
 
 }

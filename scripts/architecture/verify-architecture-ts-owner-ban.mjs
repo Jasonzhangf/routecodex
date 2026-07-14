@@ -54,6 +54,16 @@ const TS_OWNER_WHITELIST = new Set([
   'debug.pipeline_dry_run_loop', // local-only dry-run diagnostic loop; runtime semantics are gated by black-box fixtures
   'debug.internal_error_numbering', // debug-only internal error registry surface, not runtime/provider payload truth
   'manager.health_runtime', // TS provider-error diagnostics bridge only; cooldown persistence is forbidden
+  'log.virtual_router_rollup_projection', // TS log formatting projection only
+  'request.payload_copy_budget', // TS executor payload-copy budget guard; Rust owns Hub semantics
+  'debug.errorsample_payload_copy_budget', // debug-only errorsample payload-copy budget guard
+  'debug.contract_observation_payload_budget', // TS contract-observation copy budget guard
+  'provider.debug_example_hooks_payload_copy_budget', // debug hook copy budget guard
+  'debug.llms_engine_shadow_payload_copy_budget', // debug-only shadow compare copy budget guard
+  'debug.vision_snapshot_payload_copy_budget', // debug-only vision snapshot copy budget guard
+  'debug.harness_replay_payload_copy_budget', // debug harness replay copy budget guard
+  'provider.responses_submit_payload_copy_budget', // provider IO submit copy budget guard
+  'provider.anthropic_remote_image_payload_copy_budget', // provider IO remote image copy budget guard
 ]);
 
 const COOLDOWN_PERSISTENCE_FORBIDDEN = [

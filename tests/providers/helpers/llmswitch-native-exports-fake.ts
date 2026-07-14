@@ -194,7 +194,25 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
         },
       };
     },
-    planResponsesContinuationRequestAction: async () => ({}),
+    planResponsesContinuationRequestAction: async (input: AnyRecord = {}) => {
+      const plannedEntry = input.plannedEntry && typeof input.plannedEntry === 'object'
+        ? input.plannedEntry as AnyRecord
+        : {};
+      return {
+        action: 'complete',
+        result: {
+          kind: 'ok',
+          payload: plannedEntry.payload && typeof plannedEntry.payload === 'object'
+            ? plannedEntry.payload
+            : {},
+          pipelineEntryEndpoint: typeof input.entryEndpoint === 'string'
+            ? input.entryEndpoint
+            : '/v1/responses',
+          plannedEntryMode: typeof plannedEntry.mode === 'string' ? plannedEntry.mode : 'none',
+          isSubmitToolOutputs: plannedEntry.mode === 'submit_tool_outputs',
+        },
+      };
+    },
     planResponsesHandlerEntry: async () => ({}),
     planResponsesJsonClientDispatchNative: () => ({}),
     planResponsesRequestContext: async () => ({}),
@@ -225,33 +243,21 @@ export function buildLlmswitchNativeExportsFake(overrides: AnyRecord = {}): AnyR
         code: 'responses_continuation_expired',
       },
     }),
-    buildResponsesResumeClientErrorForHttpNative: (args: {
-      status?: number;
-      code?: string;
-      origin?: string;
-      message?: string;
-    } = {}) => ({
-      status: typeof args.status === 'number' ? args.status : 422,
-      body: {
-        error: {
-          message:
-            typeof args.message === 'string' && args.message.trim()
-              ? args.message
-              : 'Unable to resume Responses conversation',
-          type: 'invalid_request_error',
-          code:
-            typeof args.code === 'string' && args.code.trim()
-              ? args.code
-              : 'responses_resume_failed',
-          origin:
-            typeof args.origin === 'string' && args.origin.trim()
-              ? args.origin
-              : 'client',
-        },
-      },
-    }),
-    shouldProjectResponsesResumeClientErrorForHttpNative: (origin?: string) =>
-      typeof origin === 'string' && origin.trim() === 'client',
+    planResponsesResumeErrorForHttpNative: (error: Record<string, unknown>) =>
+      error.origin === 'client'
+        ? {
+            action: 'client_error',
+            status: typeof error.status === 'number' ? error.status : 422,
+            body: {
+              error: {
+                message: typeof error.message === 'string' ? error.message : 'resume failed',
+                type: 'invalid_request_error',
+                code: typeof error.code === 'string' ? error.code : 'resume_failed',
+                origin: 'client',
+              },
+            },
+          }
+        : { action: 'rethrow' },
     projectResponsesClientPayloadForClientNative: () => ({}),
     projectResponsesSseFrameForClientNative: () => '',
     projectSseErrorEventPayloadNative: () => ({}),

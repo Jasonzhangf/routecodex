@@ -2486,7 +2486,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_responses_context_restores_stopless_cli_pair_into_reasoning_stop_and_guidance() {
+    fn capture_responses_context_preserves_stopless_cli_pair_as_data_before_chatprocess_hook() {
         let input = ResponsesContextCaptureInput {
             raw_request: json!({
                 "model": "gpt-5.5",
@@ -2526,17 +2526,16 @@ mod tests {
         let captured = capture_req_inbound_responses_context_snapshot(input)
             .expect("stopless context capture");
         let input_items = captured["input"].as_array().expect("captured input");
-        assert_eq!(input_items.len(), 2);
+        assert_eq!(input_items.len(), 3);
         assert_eq!(input_items[0]["role"], json!("user"));
-        assert_eq!(input_items[1]["role"], json!("user"));
-        let guidance = input_items[1]["content"][0]["text"]
-            .as_str()
-            .expect("guidance text");
-        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
+        assert_eq!(input_items[1]["type"], json!("function_call"));
+        assert_eq!(input_items[1]["name"], json!("exec_command"));
+        assert_eq!(input_items[2]["type"], json!("function_call_output"));
         let serialized = serde_json::to_string(input_items).unwrap();
-        assert!(!serialized.contains("reasoningStop"));
-        assert!(!serialized.contains("stop_message_auto"));
-        assert!(!serialized.contains("function_call_output"));
-        assert!(!serialized.contains("repeatCount"));
+        assert!(serialized.contains("reasoningStop"));
+        assert!(serialized.contains("stop_message_auto"));
+        assert!(serialized.contains("function_call_output"));
+        assert!(serialized.contains("repeatCount"));
+        assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
     }
 }

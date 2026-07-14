@@ -32,7 +32,7 @@ export function isRateLimitLikeErrorNative(message: string, ...codes: Array<stri
   return parsed.result;
 }
 
-export type ErrorErr02HostCapturedInput = {
+export type HostCapturedErrorBridgeInput = {
   stage?: string;
   statusCode?: number;
   errorCode?: string;
@@ -50,21 +50,21 @@ export type ErrorErr02HostCapturedInput = {
   providerStatusCode?: number;
 };
 
-export type ErrorErr03RuntimeClassifiedDecision = {
+export type RuntimeClassificationBridgeResult = {
   classification?: 'recoverable' | 'unrecoverable';
   clientDisconnect: boolean;
   networkTransportLike: boolean;
 };
 
 export function classifyErrorErr02HostCapturedNative(
-  input: ErrorErr02HostCapturedInput
-): ErrorErr03RuntimeClassifiedDecision {
+  input: HostCapturedErrorBridgeInput
+): RuntimeClassificationBridgeResult {
   const fn = getRouterHotpathJsonBindingSync().classifyErrorErr02HostCapturedJson;
   if (typeof fn !== 'function') {
     throw new Error('[error-execution-decision-host] classifyErrorErr02HostCapturedJson not available');
   }
-  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ErrorErr03RuntimeClassifiedDecision> & {
-    classification?: ErrorErr03RuntimeClassifiedDecision['classification'] | null;
+  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<RuntimeClassificationBridgeResult> & {
+    classification?: RuntimeClassificationBridgeResult['classification'] | null;
   };
   if (
     (parsed.classification !== undefined
@@ -83,9 +83,9 @@ export function classifyErrorErr02HostCapturedNative(
   };
 }
 
-export type ErrorErr05ExecutionDecisionInput = {
+export type ExecutionDecisionBridgeInput = {
   classification?: 'recoverable' | 'unrecoverable';
-  errorErr02HostCaptured?: ErrorErr02HostCapturedInput;
+  errorErr02HostCaptured?: HostCapturedErrorBridgeInput;
   stage?: string;
   errorCode?: string;
   upstreamCode?: string;
@@ -105,7 +105,7 @@ export type ErrorErr05ExecutionDecisionInput = {
   isStreamingRequest?: boolean;
 };
 
-export type ErrorErr05ExecutionDecisionNative = {
+export type ExecutionDecisionBridgeResult = {
   shouldRetry: boolean;
   excludedCurrentProvider: boolean;
   allowRetryBeyondAttemptBudget: boolean;
@@ -124,13 +124,13 @@ export type ErrorErr05ExecutionDecisionNative = {
 };
 
 export function resolveErrorErr05ExecutionDecisionNative(
-  input: ErrorErr05ExecutionDecisionInput
-): ErrorErr05ExecutionDecisionNative {
+  input: ExecutionDecisionBridgeInput
+): ExecutionDecisionBridgeResult {
   const fn = getRouterHotpathJsonBindingSync().resolveErrorErr05ExecutionDecisionJson;
   if (typeof fn !== 'function') {
     throw new Error('[error-execution-decision-host] resolveErrorErr05ExecutionDecisionJson not available');
   }
-  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ErrorErr05ExecutionDecisionNative>;
+  const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ExecutionDecisionBridgeResult>;
   if (
     typeof parsed.shouldRetry !== 'boolean'
     || typeof parsed.excludedCurrentProvider !== 'boolean'
@@ -143,5 +143,5 @@ export function resolveErrorErr05ExecutionDecisionNative(
   ) {
     throw new Error('[error-execution-decision-host] resolveErrorErr05ExecutionDecisionJson returned invalid result');
   }
-  return parsed as ErrorErr05ExecutionDecisionNative;
+  return parsed as ExecutionDecisionBridgeResult;
 }

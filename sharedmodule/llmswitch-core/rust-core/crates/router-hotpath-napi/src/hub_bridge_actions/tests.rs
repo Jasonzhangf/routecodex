@@ -15,6 +15,7 @@ use super::metadata::{
     apply_bridge_ensure_system_instruction, apply_bridge_inject_system_instruction,
     apply_bridge_metadata_action,
 };
+use super::pipeline::run_bridge_action_pipeline;
 use super::reasoning::{apply_bridge_reasoning_extract, apply_bridge_responses_output_reasoning};
 use super::tool_ids::{apply_bridge_normalize_tool_identifiers, normalize_bridge_tool_call_ids};
 use super::*;
@@ -3035,4 +3036,199 @@ fn responses_submit_tool_outputs_preserves_tool_stdout_with_image_like_paths() {
         .as_str()
         .unwrap_or_default()
         .contains("[Image omitted]"));
+}
+
+fn bridge_action(name: &str, options: Option<Value>) -> BridgeActionDescriptor {
+    BridgeActionDescriptor {
+        name: name.to_string(),
+        options: options.and_then(|value| value.as_object().cloned()),
+    }
+}
+
+fn bridge_action_state(
+    messages: Vec<Value>,
+    raw_request: Option<Value>,
+    raw_response: Option<Value>,
+    captured_tool_results: Option<Vec<Value>>,
+    metadata: Option<Value>,
+) -> BridgeActionState {
+    BridgeActionState {
+        messages,
+        required_action: None,
+        captured_tool_results,
+        raw_request,
+        raw_response,
+        metadata,
+    }
+}
+
+#[test]
+fn bridge_action_pipeline_reuses_raw_request_across_read_only_actions() {
+    let raw_request = json!({"instructions": "keep this instruction"});
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "request_inbound".to_string(),
+        actions: Some(vec![
+            bridge_action("messages.inject-system-instruction", None),
+            bridge_action("messages.inject-system-instruction", None),
+        ]),
+        protocol: Some("openai-responses".to_string()),
+        module_type: None,
+        request_id: None,
+        state: bridge_action_state(
+            vec![json!({"role": "user", "content": "hello"})],
+            Some(raw_request.clone()),
+            None,
+            None,
+            None,
+        ),
+    })
+    .unwrap();
+
+    assert_eq!(output.raw_request, Some(raw_request));
+    assert_eq!(output.messages[0]["content"], "keep this instruction");
+    assert_eq!(output.messages[1]["content"], "keep this instruction");
+}
+
+#[test]
+fn bridge_action_pipeline_reuses_raw_response_across_read_only_actions() {
+    let raw_response = json!({
+        "output": [
+            {"type": "output_text", "text": "answer"},
+            {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "reason"}]}
+        ]
+    });
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "response_inbound".to_string(),
+        actions: Some(vec![
+            bridge_action("responses.output-reasoning", None),
+            bridge_action("responses.output-reasoning", None),
+        ]),
+        protocol: Some("openai-responses".to_string()),
+        module_type: None,
+        request_id: None,
+        state: bridge_action_state(
+            vec![json!({"role": "assistant", "content": ""})],
+            None,
+            Some(raw_response.clone()),
+            None,
+            None,
+        ),
+    })
+    .unwrap();
+
+    assert_eq!(output.raw_response, Some(raw_response));
+    assert_eq!(output.messages[0]["content"], "answer");
+    assert_eq!(output.messages[0]["reasoning_content"], "reason");
+}
+
+#[test]
+fn bridge_action_pipeline_returns_mutated_state_to_the_next_action() {
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "request_inbound".to_string(),
+        actions: Some(vec![
+            bridge_action(
+                "metadata.extra-fields",
+                Some(json!({"allowedKeys": ["model", "provider_meta"]})),
+            ),
+            bridge_action(
+                "metadata.provider-field",
+                Some(json!({"field": "provider_meta", "target": "providerMetadata"})),
+            ),
+        ]),
+        protocol: Some("openai-responses".to_string()),
+        module_type: None,
+        request_id: None,
+        state: bridge_action_state(
+            vec![],
+            Some(json!({
+                "model": "gpt",
+                "extension": {"nested": true},
+                "provider_meta": {"trace": "keep"}
+            })),
+            None,
+            None,
+            None,
+        ),
+    })
+    .unwrap();
+
+    assert_eq!(
+        output.metadata,
+        Some(json!({
+            "extraFields": {"extension": {"nested": true}},
+            "providerMetadata": {"trace": "keep"}
+        }))
+    );
+    assert_eq!(
+        output.raw_request.unwrap()["provider_meta"]["trace"],
+        "keep"
+    );
+}
+
+#[test]
+fn bridge_action_pipeline_preserves_empty_capture_and_non_object_metadata() {
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "request_inbound".to_string(),
+        actions: Some(vec![bridge_action("tools.capture-results", None)]),
+        protocol: Some("openai-responses".to_string()),
+        module_type: None,
+        request_id: None,
+        state: bridge_action_state(vec![], None, None, Some(vec![]), Some(json!("opaque"))),
+    })
+    .unwrap();
+
+    assert_eq!(output.captured_tool_results, Some(vec![]));
+    assert_eq!(output.metadata, Some(json!("opaque")));
+}
+
+#[test]
+fn bridge_action_pipeline_restores_unmatched_placeholder_capture_owner() {
+    let captured = vec![json!({
+        "tool_call_id": "call_missing",
+        "output": "keep"
+    })];
+    let output = run_bridge_action_pipeline(BridgeActionPipelineInput {
+        stage: "response_inbound".to_string(),
+        actions: Some(vec![bridge_action("tools.ensure-placeholders", None)]),
+        protocol: Some("openai-responses".to_string()),
+        module_type: None,
+        request_id: None,
+        state: bridge_action_state(
+            vec![json!({"role": "assistant", "content": "done"})],
+            None,
+            None,
+            Some(captured.clone()),
+            None,
+        ),
+    })
+    .unwrap();
+
+    assert_eq!(output.captured_tool_results, Some(captured));
+}
+
+#[test]
+fn bridge_action_pipeline_json_does_not_expose_internal_retained_owner() {
+    let output_json = run_bridge_action_pipeline_json(
+        json!({
+            "stage": "response_inbound",
+            "actions": [{"name": "tools.ensure-placeholders"}],
+            "protocol": "openai-responses",
+            "state": {
+                "messages": [{"role": "assistant", "content": "done"}],
+                "capturedToolResults": [{
+                    "tool_call_id": "call_missing",
+                    "output": "keep"
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let output: Value = serde_json::from_str(&output_json).unwrap();
+
+    assert_eq!(
+        output["capturedToolResults"],
+        json!([{"tool_call_id": "call_missing", "output": "keep"}])
+    );
+    assert!(output.get("retainedToolOutputs").is_none());
 }

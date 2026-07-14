@@ -22,6 +22,7 @@ function parseOwners(text) {
         canonicalBuilders: [],
         allowedPaths: [],
         forbiddenPaths: [],
+        forbiddenMentionsAllowlist: [],
       };
       section = null;
       continue;
@@ -39,6 +40,10 @@ function parseOwners(text) {
     }
     if (trimmed === 'forbidden_paths:') {
       section = 'forbiddenPaths';
+      continue;
+    }
+    if (trimmed === 'forbidden_mentions_allowlist:') {
+      section = 'forbiddenMentionsAllowlist';
       continue;
     }
     if (/^[A-Za-z_]+:/.test(trimmed) && !trimmed.startsWith('- ')) {
@@ -114,7 +119,8 @@ for (const owner of owners) {
       failures.push(`${owner.featureId}: canonical builder not found in allowed_paths: ${builder}`);
     }
 
-    const hitInForbidden = owner.forbiddenPaths.some((relPath) => {
+    const hitInForbidden = !owner.forbiddenMentionsAllowlist.includes(builder)
+      && owner.forbiddenPaths.some((relPath) => {
       return listFiles(relPath).some((file) => fs.readFileSync(file, 'utf8').includes(builder));
     });
     if (hitInForbidden) {

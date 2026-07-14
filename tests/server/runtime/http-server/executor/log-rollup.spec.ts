@@ -24,6 +24,14 @@ describe('log rollup', () => {
     jest.resetModules();
   });
 
+  it('renders route classification without standalone pool names', async () => {
+    const { formatRoutePool } = await import(
+      '../../../../../src/server/runtime/http-server/executor/log-rollup-format-blocks.js'
+    );
+
+    expect(formatRoutePool('thinking', 'gateway-priority-5555-thinking-free')).toBe('thinking');
+  });
+
   it('flushes 1-minute virtual-router and usage summaries', async () => {
     process.env.ROUTECODEX_LOG_ROLLUP = '1';
     process.env.ROUTECODEX_LOG_ROLLUP_REALTIME = '0';

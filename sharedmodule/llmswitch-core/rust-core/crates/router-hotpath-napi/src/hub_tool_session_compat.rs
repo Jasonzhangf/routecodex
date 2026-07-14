@@ -28,6 +28,8 @@ pub struct ToolSessionCompatOutput {
     pub messages: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_outputs: Option<Vec<Value>>,
+    #[serde(skip)]
+    pub retained_tool_outputs: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -486,32 +488,36 @@ fn collect_valid_call_ids(messages: &[Value]) -> HashSet<String> {
 fn filter_tool_outputs(
     tool_outputs: Option<Vec<Value>>,
     valid_call_ids: &HashSet<String>,
-) -> Option<Vec<Value>> {
+) -> (Option<Vec<Value>>, Option<Vec<Value>>) {
     let Some(entries) = tool_outputs else {
-        return None;
+        return (None, None);
     };
     if entries.is_empty() {
-        return None;
+        return (None, Some(entries));
     }
     let mut filtered: Vec<Value> = Vec::new();
+    let mut retained_if_no_match: Vec<Value> = Vec::new();
     for entry in entries {
-        let Some(row) = entry.as_object() else {
-            continue;
-        };
-        let Some(call_id) =
-            read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"])
-        else {
-            continue;
-        };
-        if !valid_call_ids.contains(call_id.as_str()) {
+        let is_valid = entry
+            .as_object()
+            .and_then(|row| {
+                read_first_object_trimmed_string(row, &["tool_call_id", "call_id", "id"])
+            })
+            .map(|call_id| valid_call_ids.contains(call_id.as_str()))
+            .unwrap_or(false);
+        if is_valid {
+            filtered.push(entry);
+            retained_if_no_match.clear();
             continue;
         }
-        filtered.push(Value::Object(row.clone()));
+        if filtered.is_empty() {
+            retained_if_no_match.push(entry);
+        }
     }
     if filtered.is_empty() {
-        None
+        (None, Some(retained_if_no_match))
     } else {
-        Some(filtered)
+        (Some(filtered), None)
     }
 }
 
@@ -524,10 +530,12 @@ pub(crate) fn normalize_tool_session_payload(
     merge_consecutive_assistant_tool_call_messages(&mut messages);
     normalize_tool_call_ordering(&mut messages, &tool_output_lookup);
     let valid_call_ids = collect_valid_call_ids(&messages);
-    let tool_outputs = filter_tool_outputs(input.tool_outputs, &valid_call_ids);
+    let (tool_outputs, retained_tool_outputs) =
+        filter_tool_outputs(input.tool_outputs, &valid_call_ids);
     ToolSessionCompatOutput {
         messages,
         tool_outputs,
+        retained_tool_outputs,
     }
 }
 

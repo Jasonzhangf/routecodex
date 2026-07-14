@@ -16,6 +16,19 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:agent-collab-protocol, npm run test:agent-collab-protocol-red-fixtures, npm run verify:function-map-build-wiring]
 
+  - resource_id: architecture.mainline_chain_manifest_projection
+    resource_kind: architecture_manifest
+    lifecycle: architecture.review_surface
+    identity: [chainId, mainlineMapVersion]
+    owner_feature_id: architecture.mainline_chain_manifest_payload_copy_budget
+    owner_node: ArchitectureManifestProjection
+    allowed_readers: [ArchitectureReviewSurface, ArchitectureMainlineManifestSync]
+    allowed_writers: [buildMainlineChainManifest, generateMainlineChainManifests]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:architecture-mainline-manifest-sync, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
   - resource_id: request.normal_payload
     resource_kind: normal_payload
     lifecycle: request.mainline
@@ -28,6 +41,32 @@ resources:
     may_enter_provider_body: true
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: request.payload_ownership
+    resource_kind: ownership_contract
+    lifecycle: request.mainline
+    identity: [requestId, pipelineId, attempt, entryEndpoint, portScope]
+    owner_feature_id: request.payload_copy_budget
+    owner_node: RequestPayloadOwnershipBudget
+    allowed_readers: [ServerReqInbound01ClientRaw, HubReqInbound02Standardized, HubReqChatProcess03Governed, RequestExecutorRetryRestore]
+    allowed_writers: [RequestPayloadOwnershipBudget]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:request-payload-copy-budget]
+
+  - resource_id: pipeline.payload_serialized_size
+    resource_kind: derived_measurement
+    lifecycle: request_response.mainline
+    identity: [pipelineId, stageNode, payloadOwner]
+    owner_feature_id: hub.payload_size_validation_budget
+    owner_node: PayloadSizeValidationBudget
+    allowed_readers: [HubReqInbound02Standardized, HubReqOutbound05ProviderSemantic, HubRespInbound02Parsed]
+    allowed_writers: [PayloadSizeValidationBudget]
+    forbidden_writers: [MetadataCenter, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:payload-size-validation, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
   - resource_id: request.protocol_context
     resource_kind: protocol_context
@@ -67,6 +106,32 @@ resources:
     may_enter_provider_body: true
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map]
+
+  - resource_id: provider.responses_submit_wire_payload
+    resource_kind: provider_wire_projection
+    lifecycle: request.mainline
+    identity: [requestId, providerKey, responseId]
+    owner_feature_id: provider.responses_submit_payload_copy_budget
+    owner_node: ProviderReqOutbound07TransportRequest
+    allowed_readers: [ProviderReqOutbound07TransportRequest]
+    allowed_writers: [extractSubmitToolOutputsPayload]
+    forbidden_writers: [HubReqInbound02Standardized, HubRespOutbound04ClientSemantic, MetadataCenter, snapshot.debug_sample]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: provider.anthropic_remote_image_wire_projection
+    resource_kind: provider_wire_projection
+    lifecycle: request.mainline
+    identity: [requestId, providerKey, sourceUrl]
+    owner_feature_id: provider.anthropic_remote_image_payload_copy_budget
+    owner_node: ProviderReqOutbound07TransportRequest
+    allowed_readers: [executeAnthropicRequestWithBody, ProviderReqOutbound07TransportRequest]
+    allowed_writers: [inlineRemoteAnthropicImageUrls]
+    forbidden_writers: [HubReqInbound02Standardized, VrRoute04SelectedTarget, HubRespOutbound04ClientSemantic, MetadataCenter, snapshot.debug_sample]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
   - resource_id: response.provider_raw
     resource_kind: provider_response
@@ -171,6 +236,19 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
+
+  - resource_id: route.retry_exclusion_set
+    resource_kind: side_channel
+    lifecycle: error.mainline
+    identity: [requestId, routingGroup, attempt]
+    owner_feature_id: error.execution_decision_consumer
+    owner_node: ErrorErr05ExecutionDecision
+    allowed_readers: [ErrorErr05ExecutionDecision, RequestExecutorRetryRestore, VrAvail01RouteCandidates, VrRoute04SelectedTarget]
+    allowed_writers: [ErrorErr05ExecutionDecision]
+    forbidden_writers: [request.normal_payload, metadata.request_truth, metadata.runtime_control, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:error-pipeline-contract, npm run verify:hub-pipeline-engine-failfast-closeout]
 
   - resource_id: direct.semantic_policy
     resource_kind: control_contract
@@ -300,7 +378,7 @@ resources:
     forbidden_writers: [HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, sse.transport_frame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-history-protocol-contract]
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-history-protocol-contract, npm run verify:responses-relay-continuation-writer-uniqueness, npm run verify:architecture-thin-wrapper-only, npm run test:architecture-thin-wrapper-only-red-fixtures]
 
   - resource_id: dryrun.provider_request_probe
     resource_kind: diagnostic
@@ -341,6 +419,45 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-snapshot-stage-contract]
 
+  - resource_id: snapshot.payload_copy_budget
+    resource_kind: ownership_contract
+    lifecycle: snapshot.contract_surface.mainline
+    identity: [requestId, stageKind, queueSlot, captureMode]
+    owner_feature_id: snapshot.payload_copy_budget
+    owner_node: SnapshotPayloadOwnershipBudget
+    allowed_readers: [SnapshotRecorder, SnapshotWriterRuntime, ProviderSnapshotWriter]
+    allowed_writers: [SnapshotPayloadOwnershipBudget]
+    forbidden_writers: [request.normal_payload, provider.wire_payload, response.hub_semantic, response.client_payload, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:snapshot-payload-copy-budget, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.errorsample_payload_budget
+    resource_kind: diagnostic
+    lifecycle: debug.errorsample_surface
+    identity: [group, kind, scopeId, entryPort, queueSlot]
+    owner_feature_id: debug.errorsample_payload_copy_budget
+    owner_node: ErrorsamplePayloadOwnershipBudget
+    allowed_readers: [ErrorsampleWriter, ErrorsampleQueue, ErrorsamplePruner]
+    allowed_writers: [ErrorsamplePayloadOwnershipBudget]
+    forbidden_writers: [request.normal_payload, provider.wire_payload, response.hub_semantic, response.client_payload, error.chain, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:errorsample-payload-copy-budget, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.contract_observation_payload_budget
+    resource_kind: diagnostic
+    lifecycle: debug.errorsample_surface
+    identity: [requestId, phase, marker, providerKey]
+    owner_feature_id: debug.contract_observation_payload_budget
+    owner_node: ContractObservationPayloadBudget
+    allowed_readers: [PayloadContractErrorsampleWriter, ErrorsampleWriter]
+    allowed_writers: [ContractObservationPayloadBudget]
+    forbidden_writers: [request.normal_payload, provider.wire_payload, response.hub_semantic, response.client_payload, error.chain, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:contract-observation-payload-copy-budget, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
   - resource_id: snapshot.provider_error_buffer_state
     resource_kind: diagnostic
     lifecycle: snapshot.contract_surface.mainline
@@ -363,6 +480,253 @@ resources:
     allowed_readers: [DebugSurface, ProviderHookManager]
     allowed_writers: [registerDebugExampleHooks, enableDebugMode, disableDebugMode]
     forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: provider.debug_hook_payload_copy_budget
+    resource_kind: diagnostic
+    lifecycle: debug.hook_surface.mainline
+    identity: [hookName, executionId, debugLevel]
+    owner_feature_id: provider.debug_example_hooks_payload_copy_budget
+    owner_node: HookExecutionContext
+    allowed_readers: [BidirectionalHookManager, DebugSurface]
+    allowed_writers: [estimateDebugPayloadSize, buildDebugDataSnapshot, buildDebugPayloadPreview]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.llms_engine_shadow_diff_projection
+    resource_kind: diagnostic
+    lifecycle: debug.llms_engine_shadow.mainline
+    identity: [requestId, group, subpath]
+    owner_feature_id: debug.llms_engine_shadow_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [DebugSurface]
+    allowed_writers: [recordLlmsEngineShadowDiff]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.unified_hub_shadow_compare_diff_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_hub_shadow_compare.mainline
+    identity: [requestId, requestFile, entryEndpoint, routeHint]
+    owner_feature_id: debug.unified_hub_shadow_compare_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [DebugSurface]
+    allowed_writers: [diffPayloads, writeCompareErrorSample]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.vision_snapshot_projection
+    resource_kind: diagnostic
+    lifecycle: debug.vision_snapshot.mainline
+    identity: [requestId, stage, entryPort]
+    owner_feature_id: debug.vision_snapshot_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [ProviderSnapshotWriter]
+    allowed_writers: [buildVisionSnapshotPayload]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.harness_replay_execution_copy
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, providerKey, harnessId]
+    owner_feature_id: debug.harness_replay_payload_copy_budget
+    owner_node: DebugObs05HarnessExecuted
+    allowed_readers: [ProviderPreprocessHarness, ProviderWithInternals]
+    allowed_writers: [cloneProviderReplayInput]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:debug-unified-surface]
+
+  - resource_id: debug.responses_provider_replay_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, providerKey, samplePath]
+    owner_feature_id: debug.responses_provider_replay_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [responses-provider-replay]
+    allowed_writers: [createReplayChatOwner, ensureReplayChatModel, replaceSystemMessages]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.replay_codex_sample_request_projection
+    resource_kind: diagnostic
+    lifecycle: debug.pipeline_dry_run_loop.mainline
+    identity: [requestId, samplePath, replayEndpoint]
+    owner_feature_id: debug.replay_codex_sample_payload_copy_budget
+    owner_node: DebugDryRun03CapturedRequestReplay
+    allowed_readers: [replay-codex-sample, fetch]
+    allowed_writers: [stripReplayOnlyClientHeadersFromBody, buildReplayInputFromProviderRequest]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.responses_fai_capture_variant_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, providerKey, variantIndex, samplePath]
+    owner_feature_id: debug.responses_fai_capture_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [responses-fai-capture]
+    allowed_writers: [buildResponseProbeVariants, readExplicitSampleBody]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.responses_sse_capture_request_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, providerKey, samplePath]
+    owner_feature_id: debug.responses_sse_capture_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [responses-sse-capture]
+    allowed_writers: [createResponsesCaptureRequestOwner]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.responses_sse_completed_response_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, samplePath, eventIndex]
+    owner_feature_id: debug.responses_sse_utils_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [responses-golden-roundtrip]
+    allowed_writers: [convertEventsToResponsesJson, extractResponseFromEvents]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.cross_protocol_matrix_chat_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, samplePath, protocolMatrixStep]
+    owner_feature_id: debug.cross_protocol_matrix_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [cross-protocol-matrix]
+    allowed_writers: [canonicalizeChat]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.coverage_hub_standardized_parity_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, coverageCase, endpoint]
+    owner_feature_id: debug.coverage_hub_standardized_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [coverage-hub-chat-envelope-to-standardized-native]
+    allowed_writers: [chatEnvelopeToStandardizedWithNative]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.coverage_hub_chat_projection_parity
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, coverageCase, endpoint]
+    owner_feature_id: debug.coverage_hub_chat_projection_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [coverage-hub-standardized-to-chat-native]
+    allowed_writers: [standardizedToChatEnvelopeWithNative]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.hub_chain_equivalence_sanitized_payload
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [chainId, protocol, sampleFile]
+    owner_feature_id: debug.hub_chain_equivalence_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [hub-chain-equivalence]
+    allowed_writers: [sanitizePayload]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.lmstudio_compat_tools_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [testCase, model, toolSet]
+    owner_feature_id: debug.lmstudio_compat_tools_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [lmstudio-compatibility-tools-test]
+    allowed_writers: [applyLMStudioCompatibility]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter, live.provider_config]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.anthropic_response_regression_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [sampleFile, responseId, providerProtocol]
+    owner_feature_id: debug.anthropic_response_regression_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [anthropic-response-regression]
+    allowed_writers: [buildAnthropicRegressionProjectionWithNative]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter, live.provider_config]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.v2_consistency_summary_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [testRunId, reportTimestamp]
+    owner_feature_id: debug.v2_consistency_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [saveComprehensiveReport, displaySummary]
+    allowed_writers: [runAllTests]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.provider_golden_capture_config_projection
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [providerId, entryType, capturePort]
+    owner_feature_id: debug.provider_golden_capture_payload_copy_budget
+    owner_node: DebugObs07ReplayedOrInspected
+    allowed_readers: [capture-provider-goldens]
+    allowed_writers: [buildDerivedConfig]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter, live.provider_config]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: debug.outbound_regression_execution_copy
+    resource_kind: diagnostic
+    lifecycle: debug.unified_surface.mainline
+    identity: [requestId, providerKey, samplePath]
+    owner_feature_id: debug.outbound_regression_payload_copy_budget
+    owner_node: DebugObs05HarnessExecuted
+    allowed_readers: [outbound-regression-codex-samples, ProviderRuntime]
+    allowed_writers: [cloneOutboundRegressionExecutionPayload]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection, MetadataCenter]
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
@@ -1368,6 +1732,32 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:openai-chat-single-tool-call-history-compat-rust-only]
 
+  - resource_id: protocol.openai_chat_request_filter_projection
+    resource_kind: provider_wire_projection
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, requestFilterProfile]
+    owner_feature_id: conversion.openai_request_filter_payload_copy_budget
+    owner_node: OpenAiOpenAiRequestCodecOutput
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [prune_chat_request_payload_owned]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: protocol.glm_tool_schema_projection
+    resource_kind: provider_wire_projection
+    lifecycle: protocol.compat_surface.mainline
+    identity: [requestId, providerProtocol, toolName]
+    owner_feature_id: conversion.glm_tool_schema_payload_copy_budget
+    owner_node: ProviderReqOutbound06WirePayload
+    allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
+    allowed_writers: [sanitize_glm_tools_schema_owned, sanitize_tool_schema_glm_shell_json]
+    forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection, MetadataCenter]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
   - resource_id: protocol.responses_function_tool_schema
     resource_kind: normal_payload
     lifecycle: protocol.compat_surface.mainline
@@ -1467,9 +1857,9 @@ mainline_resource_flows:
     side_channel_writes: []
   - chain_id: request.mainline
     step_id: req-03
-    consumes: [request.normal_payload, metadata.runtime_control]
+    consumes: [request.normal_payload, metadata.runtime_control, route.retry_exclusion_set]
     produces: [route.selection]
-    side_channel_reads: [metadata.runtime_control]
+    side_channel_reads: [metadata.runtime_control, route.retry_exclusion_set]
     side_channel_writes: [route.selection]
   - chain_id: request.mainline
     step_id: req-04
@@ -1786,9 +2176,9 @@ mainline_resource_flows:
   - chain_id: error.mainline
     step_id: err-04
     consumes: [error.chain, provider_runtime.observation]
-    produces: [error.chain]
+    produces: [error.chain, route.retry_exclusion_set]
     side_channel_reads: [error.chain, provider_runtime.observation]
-    side_channel_writes: [error.chain]
+    side_channel_writes: [error.chain, route.retry_exclusion_set]
   - chain_id: error.mainline
     step_id: err-05
     consumes: [error.chain]

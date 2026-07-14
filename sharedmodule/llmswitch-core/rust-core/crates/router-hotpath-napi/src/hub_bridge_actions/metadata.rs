@@ -68,19 +68,31 @@ fn build_instruction_message(text: &str, reasoning_segments: &[String]) -> Optio
 pub(crate) fn apply_bridge_inject_system_instruction(
     input: ApplyBridgeInjectSystemInstructionInput,
 ) -> ApplyBridgeInjectSystemInstructionOutput {
-    let stage = input.stage.trim().to_ascii_lowercase();
-    let mut messages = input.messages;
+    apply_bridge_inject_system_instruction_borrowed(
+        input.stage.as_str(),
+        input.options.as_ref().and_then(Value::as_object),
+        input.messages,
+        input.raw_request.as_ref(),
+    )
+}
+
+pub(crate) fn apply_bridge_inject_system_instruction_borrowed(
+    stage: &str,
+    options: Option<&Map<String, Value>>,
+    mut messages: Vec<Value>,
+    raw_request: Option<&Value>,
+) -> ApplyBridgeInjectSystemInstructionOutput {
+    let stage = stage.trim().to_ascii_lowercase();
     if stage != "request_inbound" {
         return ApplyBridgeInjectSystemInstructionOutput { messages };
     }
-    let Some(raw_request) = input.raw_request else {
+    let Some(raw_request) = raw_request else {
         return ApplyBridgeInjectSystemInstructionOutput { messages };
     };
     let Some(raw_obj) = raw_request.as_object() else {
         return ApplyBridgeInjectSystemInstructionOutput { messages };
     };
 
-    let options = input.options.as_ref().and_then(Value::as_object);
     let field = read_option_string(options, "field").unwrap_or_else(|| "instructions".to_string());
     let reasoning_field = read_option_string(options, "reasoningField");
     let Some(instructions) = read_object_trimmed_string(raw_obj, field.as_str()) else {

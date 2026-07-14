@@ -154,6 +154,17 @@
         <tr><td>Rust <code>hub_pipeline_</code> symbol/module</td><td>allowed</td><td>Rust is semantic truth</td><td>inventory classifies as legitimate</td></tr>
         </tbody>
         </table>
+        <h2>Root Host Thin-Wrapper Gate</h2>
+        <p><code>verify:architecture-thin-wrapper-only</code> scans the root Hub host surface, not only the retired sharedmodule TS directories:</p>
+        <ul>
+          <li><code>src/modules/llmswitch/bridge/**</code></li>
+          <li><code>src/server/runtime/http-server/executor-pipeline.ts</code></li>
+          <li><code>src/server/runtime/http-server/request-executor.ts</code></li>
+          <li><code>src/server/runtime/http-server/executor/provider-response-converter.ts</code></li>
+          <li><code>src/server/runtime/http-server/executor/request-executor-provider-*.ts</code></li>
+          <li><code>src/server/handlers/responses-handler.ts</code></li>
+        </ul>
+        <p>The gate fails when <code>rootHostCheckedFiles</code> is zero. Allowed host work is limited to NAPI/JSON boundaries, Node IO, HTTP/SSE/stream transport, logging/diagnostics, MetadataCenter transport, and exact Rust effect execution. The paired red fixtures reject handler/request-bridge continuation writers, TS ErrorErr classification, flat metadata protocol/exclusion fallback, semantic payload fallback, malformed native-plan downgrade, broad native facade imports, and deleted wrapper revival.</p>
         <h2>Owner Matrix</h2>
         <table>
         <thead><tr><th>Feature</th><th>Owner surface</th><th>Current action</th></tr></thead>
@@ -171,10 +182,13 @@
         <p>hub-rust-ref-gap-01: Current inventory has runtime/source, test, doc/map/wiki, gate/script, and memory/history references; raw grep output is not a closeout artifact until classified by owner.</p>
         <p>hub-rust-ref-gap-02: Several broad native references are legitimate private-loader or forbidden-path assertions; the gate must distinguish those from runtime callers and stale owner wording.</p>
         <p>hub-rust-ref-gap-03: Runtime refactor is not started by this slice. This page only closes the first gate/doc/test-design convergence layer.</p>
+        <p>hub-rust-ref-gap-04: The former thin-wrapper gate passed with <code>checked files: 0</code>; the root host scan and zero-count failure now close that evidence gap at source-gate level.</p>
         <h2>Verification</h2>
         <ul>
           <li><code>npm run verify:hub-pipeline-native-reference-gate</code></li>
           <li><code>npm run test:hub-pipeline-native-reference-gate-red-fixtures</code></li>
+          <li><code>npm run verify:architecture-thin-wrapper-only</code></li>
+          <li><code>npm run test:architecture-thin-wrapper-only-red-fixtures</code></li>
           <li><code>npm run verify:function-map-compile-gate</code></li>
           <li><code>npm run verify:architecture-wiki-sync</code></li>
           <li><code>npm run verify:architecture-wiki-html-sync</code></li>

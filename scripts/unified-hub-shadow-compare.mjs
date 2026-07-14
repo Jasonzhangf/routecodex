@@ -141,14 +141,6 @@ function stableStringify(value) {
   );
 }
 
-function cloneJsonSafe(value) {
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return value;
-  }
-}
-
 function diffPayloads(expected, actual, p = '<root>') {
   if (Object.is(expected, actual)) return [];
   if (typeof expected !== typeof actual) {
@@ -337,7 +329,7 @@ async function main() {
   if (!baselineProviderPayload || typeof baselineProviderPayload !== 'object') {
     throw new Error('[unified-hub-shadow-compare] hubShadowCompare.baselineProviderPayload missing; ensure llmswitch-core is rebuilt.');
   }
-  const diffs = diffPayloads(cloneJsonSafe(baselineOut), cloneJsonSafe(candidateOut));
+  const diffs = diffPayloads(baselineOut, candidateOut);
   if (!diffs.length) {
     console.log('[unified-hub-shadow-compare] OK diff=0');
     return;

@@ -41,9 +41,11 @@ fn ensure_string_array(value: Option<&Value>) -> Vec<String> {
 
 fn sanitize_shell_command_property(properties: &mut Map<String, Value>) {
     let mut command = properties
-        .get("command")
-        .and_then(Value::as_object)
-        .cloned()
+        .remove("command")
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
         .unwrap_or_default();
 
     command.remove("oneOf");
@@ -73,9 +75,11 @@ fn sanitize_shell_command_property(properties: &mut Map<String, Value>) {
 
 fn sanitize_shell_parameters(params: &mut Map<String, Value>) {
     let mut properties = params
-        .get("properties")
-        .and_then(Value::as_object)
-        .cloned()
+        .remove("properties")
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
         .unwrap_or_default();
     sanitize_shell_command_property(&mut properties);
     params.insert("properties".to_string(), Value::Object(properties));
@@ -103,16 +107,18 @@ fn sanitize_shell_parameters(params: &mut Map<String, Value>) {
     }
 }
 
-fn sanitize_tool_definition(entry: &Value) -> Value {
-    let Some(tool_obj) = entry.as_object() else {
-        return entry.clone();
+fn sanitize_tool_definition_owned(entry: Value) -> Value {
+    let Value::Object(mut sanitized) = entry else {
+        return entry;
     };
-    let mut sanitized = tool_obj.clone();
-    let Some(function_obj) = sanitized.get("function").and_then(Value::as_object) else {
+    let Some(function_value) = sanitized.remove("function") else {
+        return Value::Object(sanitized);
+    };
+    let Value::Object(mut function) = function_value else {
+        sanitized.insert("function".to_string(), function_value);
         return Value::Object(sanitized);
     };
 
-    let mut function = function_obj.clone();
     function.remove("strict");
     if let Some(name) = function.get("name").and_then(Value::as_str) {
         let normalized_name = normalize_glm_tool_name(name);
@@ -127,8 +133,12 @@ fn sanitize_tool_definition(entry: &Value) -> Value {
         .map(|name| name == "shell")
         .unwrap_or(false);
     if is_shell {
-        if let Some(params_obj) = function.get("parameters").and_then(Value::as_object) {
-            let mut params = params_obj.clone();
+        if let Some(params_value) = function.remove("parameters") {
+            let Value::Object(mut params) = params_value else {
+                function.insert("parameters".to_string(), params_value);
+                sanitized.insert("function".to_string(), Value::Object(function));
+                return Value::Object(sanitized);
+            };
             sanitize_shell_parameters(&mut params);
             function.insert("parameters".to_string(), Value::Object(params));
         }
@@ -138,100 +148,132 @@ fn sanitize_tool_definition(entry: &Value) -> Value {
     Value::Object(sanitized)
 }
 
-fn sanitize_tool_choice(payload_obj: &Map<String, Value>, out: &mut Map<String, Value>) {
-    let Some(tool_choice_obj) = payload_obj.get("tool_choice").and_then(Value::as_object) else {
+fn sanitize_tool_choice_owned(out: &mut Map<String, Value>) {
+    let Some(tool_choice_value) = out.remove("tool_choice") else {
         return;
     };
-    let Some(function_obj) = tool_choice_obj.get("function").and_then(Value::as_object) else {
+    let Value::Object(mut tool_choice_obj) = tool_choice_value else {
+        out.insert("tool_choice".to_string(), tool_choice_value);
         return;
     };
-    let Some(name) = function_obj.get("name").and_then(Value::as_str) else {
+    let Some(function_value) = tool_choice_obj.remove("function") else {
+        out.insert("tool_choice".to_string(), Value::Object(tool_choice_obj));
         return;
     };
-    let normalized_name = normalize_glm_tool_name(name);
-    if normalized_name.is_empty() || normalized_name == name {
+    let Value::Object(mut function_obj) = function_value else {
+        tool_choice_obj.insert("function".to_string(), function_value);
+        out.insert("tool_choice".to_string(), Value::Object(tool_choice_obj));
         return;
+    };
+    let normalized_name = function_obj
+        .get("name")
+        .and_then(Value::as_str)
+        .map(normalize_glm_tool_name)
+        .filter(|normalized| !normalized.is_empty());
+    if let Some(normalized_name) = normalized_name {
+        let should_update = function_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|name| normalized_name != name)
+            .unwrap_or(false);
+        if should_update {
+            function_obj.insert("name".to_string(), Value::String(normalized_name));
+        }
     }
-    let mut next_function = function_obj.clone();
-    next_function.insert("name".to_string(), Value::String(normalized_name));
-    let mut next_tool_choice = tool_choice_obj.clone();
-    next_tool_choice.insert("function".to_string(), Value::Object(next_function));
-    out.insert("tool_choice".to_string(), Value::Object(next_tool_choice));
+    tool_choice_obj.insert("function".to_string(), Value::Object(function_obj));
+    out.insert("tool_choice".to_string(), Value::Object(tool_choice_obj));
 }
 
-fn sanitize_message_tool_names(payload_obj: &Map<String, Value>, out: &mut Map<String, Value>) {
-    let Some(messages) = payload_obj.get("messages").and_then(Value::as_array) else {
+fn sanitize_message_tool_names_owned(out: &mut Map<String, Value>) {
+    let Some(messages_value) = out.remove("messages") else {
         return;
     };
-    let mut changed = false;
+    let Value::Array(messages) = messages_value else {
+        out.insert("messages".to_string(), messages_value);
+        return;
+    };
     let mut next_messages = Vec::with_capacity(messages.len());
     for message in messages {
-        let Some(message_obj) = message.as_object() else {
-            next_messages.push(message.clone());
+        let Value::Object(mut next_message) = message else {
+            next_messages.push(message);
             continue;
         };
-        let mut next_message = message_obj.clone();
-        if let Some(tool_calls) = message_obj.get("tool_calls").and_then(Value::as_array) {
-            let mut tool_calls_changed = false;
-            let mut next_tool_calls = Vec::with_capacity(tool_calls.len());
-            for tool_call in tool_calls {
-                let Some(tool_call_obj) = tool_call.as_object() else {
-                    next_tool_calls.push(tool_call.clone());
-                    continue;
-                };
-                let Some(function_obj) = tool_call_obj.get("function").and_then(Value::as_object)
-                else {
-                    next_tool_calls.push(tool_call.clone());
-                    continue;
-                };
-                let Some(name) = function_obj.get("name").and_then(Value::as_str) else {
-                    next_tool_calls.push(tool_call.clone());
-                    continue;
-                };
-                let normalized_name = normalize_glm_tool_name(name);
-                if normalized_name.is_empty() || normalized_name == name {
-                    next_tool_calls.push(tool_call.clone());
-                    continue;
+        if let Some(tool_calls_value) = next_message.remove("tool_calls") {
+            match tool_calls_value {
+                Value::Array(tool_calls) => {
+                    let mut next_tool_calls = Vec::with_capacity(tool_calls.len());
+                    for tool_call in tool_calls {
+                        let Value::Object(mut tool_call_obj) = tool_call else {
+                            next_tool_calls.push(tool_call);
+                            continue;
+                        };
+                        let Some(function_value) = tool_call_obj.remove("function") else {
+                            next_tool_calls.push(Value::Object(tool_call_obj));
+                            continue;
+                        };
+                        let Value::Object(mut function_obj) = function_value else {
+                            tool_call_obj.insert("function".to_string(), function_value);
+                            next_tool_calls.push(Value::Object(tool_call_obj));
+                            continue;
+                        };
+                        let Some(name) = function_obj.get("name").and_then(Value::as_str) else {
+                            tool_call_obj
+                                .insert("function".to_string(), Value::Object(function_obj));
+                            next_tool_calls.push(Value::Object(tool_call_obj));
+                            continue;
+                        };
+                        let normalized_name = normalize_glm_tool_name(name);
+                        if normalized_name.is_empty() || normalized_name == name {
+                            tool_call_obj
+                                .insert("function".to_string(), Value::Object(function_obj));
+                            next_tool_calls.push(Value::Object(tool_call_obj));
+                            continue;
+                        }
+                        function_obj.insert("name".to_string(), Value::String(normalized_name));
+                        tool_call_obj.insert("function".to_string(), Value::Object(function_obj));
+                        next_tool_calls.push(Value::Object(tool_call_obj));
+                    }
+                    next_message.insert("tool_calls".to_string(), Value::Array(next_tool_calls));
                 }
-                let mut next_function = function_obj.clone();
-                next_function.insert("name".to_string(), Value::String(normalized_name));
-                let mut next_tool_call = tool_call_obj.clone();
-                next_tool_call.insert("function".to_string(), Value::Object(next_function));
-                next_tool_calls.push(Value::Object(next_tool_call));
-                tool_calls_changed = true;
-            }
-            if tool_calls_changed {
-                next_message.insert("tool_calls".to_string(), Value::Array(next_tool_calls));
-                changed = true;
+                other => {
+                    next_message.insert("tool_calls".to_string(), other);
+                }
             }
         }
-        if let Some(name) = message_obj.get("name").and_then(Value::as_str) {
+        if let Some(name) = next_message.get("name").and_then(Value::as_str) {
             let normalized_name = normalize_glm_tool_name(name);
             if !normalized_name.is_empty() && normalized_name != name {
                 next_message.insert("name".to_string(), Value::String(normalized_name));
-                changed = true;
             }
         }
         next_messages.push(Value::Object(next_message));
     }
-    if changed {
-        out.insert("messages".to_string(), Value::Array(next_messages));
-    }
+    out.insert("messages".to_string(), Value::Array(next_messages));
 }
 
-fn sanitize_glm_tools_schema(payload: &Value) -> Value {
-    let Some(payload_obj) = payload.as_object() else {
-        return payload.clone();
+fn sanitize_glm_tools_schema_owned(payload: Value) -> Value {
+    let Value::Object(mut out) = payload else {
+        return payload;
     };
-    let mut out = payload_obj.clone();
-    if let Some(tools) = payload_obj.get("tools").and_then(Value::as_array) {
+    if let Some(tools_value) = out.remove("tools") {
+        let Value::Array(tools) = tools_value else {
+            out.insert("tools".to_string(), tools_value);
+            sanitize_tool_choice_owned(&mut out);
+            sanitize_message_tool_names_owned(&mut out);
+            return Value::Object(out);
+        };
         out.insert(
             "tools".to_string(),
-            Value::Array(tools.iter().map(sanitize_tool_definition).collect()),
+            Value::Array(
+                tools
+                    .into_iter()
+                    .map(sanitize_tool_definition_owned)
+                    .collect(),
+            ),
         );
     }
-    sanitize_tool_choice(payload_obj, &mut out);
-    sanitize_message_tool_names(payload_obj, &mut out);
+    sanitize_tool_choice_owned(&mut out);
+    sanitize_message_tool_names_owned(&mut out);
     Value::Object(out)
 }
 
@@ -239,14 +281,40 @@ fn sanitize_glm_tools_schema(payload: &Value) -> Value {
 pub fn sanitize_tool_schema_glm_shell_json(payload_json: String) -> NapiResult<String> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let normalized = sanitize_glm_tools_schema(&payload);
+    let normalized = sanitize_glm_tools_schema_owned(payload);
     serde_json::to_string(&normalized).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_glm_tools_schema;
+    use super::sanitize_glm_tools_schema_owned;
     use serde_json::json;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn glm_tool_schema_sanitizer_does_not_clone_complete_payload_branches() {
+        let mut source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        source.push("src/compat_tool_schema.rs");
+        let source = fs::read_to_string(source).expect("compat_tool_schema.rs source");
+        for (subject, suffix) in [
+            ("payload_obj", ".clone()"),
+            ("tool_obj", ".clone()"),
+            ("function_obj", ".clone()"),
+            ("message_obj", ".clone()"),
+            ("tool_call_obj", ".clone()"),
+            ("tool_choice_obj", ".clone()"),
+            ("payload", ".clone()"),
+            ("message", ".clone()"),
+            ("tool_call", ".clone()"),
+        ] {
+            let forbidden = format!("{subject}{suffix}");
+            assert!(
+                !source.contains(&forbidden),
+                "GLM tool schema sanitizer must move owned payload branches instead of cloning {forbidden}"
+            );
+        }
+    }
 
     #[test]
     fn sanitizes_shell_command_schema_and_removes_strict() {
@@ -275,7 +343,7 @@ mod tests {
           ]
         });
 
-        let output = sanitize_glm_tools_schema(&payload);
+        let output = sanitize_glm_tools_schema_owned(payload);
         let function = output["tools"][0]["function"].as_object().unwrap();
         assert!(function.get("strict").is_none());
         assert_eq!(
@@ -314,7 +382,7 @@ mod tests {
             }
           ]
         });
-        let output = sanitize_glm_tools_schema(&payload);
+        let output = sanitize_glm_tools_schema_owned(payload);
         let function = output["tools"][0]["function"].as_object().unwrap();
         assert!(function.get("strict").is_none());
         assert_eq!(function["parameters"]["required"], json!(["path", 1]));
@@ -361,7 +429,7 @@ mod tests {
           }
         });
 
-        let output = sanitize_glm_tools_schema(&payload);
+        let output = sanitize_glm_tools_schema_owned(payload);
         assert_eq!(
             output["tools"][0]["function"]["name"],
             json!("continue_execution")
@@ -375,5 +443,24 @@ mod tests {
             json!("continue_execution")
         );
         assert_eq!(output["messages"][1]["name"], json!("continue_execution"));
+    }
+
+    #[test]
+    fn preserves_non_array_tool_calls_without_skipping_message_name_normalization() {
+        let payload = json!({
+          "messages": [{
+            "role": "tool",
+            "name": "namespace.read_file",
+            "tool_calls": {"unexpected": true},
+            "content": "{}"
+          }]
+        });
+
+        let output = sanitize_glm_tools_schema_owned(payload);
+        assert_eq!(
+            output["messages"][0]["tool_calls"],
+            json!({"unexpected": true})
+        );
+        assert_eq!(output["messages"][0]["name"], json!("namespace_read_file"));
     }
 }

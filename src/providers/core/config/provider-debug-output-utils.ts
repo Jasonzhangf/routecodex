@@ -1,4 +1,5 @@
 import type { UnknownObject } from '../../../types/common-types.js';
+import { buildDebugPayloadPreview } from '../../../debug/hooks/payload-budget.js';
 
 type DebugLevel = 'basic' | 'detailed' | 'verbose';
 
@@ -45,7 +46,7 @@ export function outputDebugInfo(args: {
   if (args.changes.length > 0) {
     console.log(`🔄 变化详情:`);
     args.changes.forEach(change => {
-      console.log(`  ${change.type}: ${change.path} = ${JSON.stringify(change.newValue)}`);
+      console.log(`  ${change.type}: ${change.path} = ${buildDebugPayloadPreview(change.newValue, 200)}`);
     });
   }
 
@@ -85,11 +86,12 @@ export function formatDataForOutput(
   debugConfig: DebugConfigLike,
   calculateDataSize: (data: UnknownObject) => number
 ): UnknownObject {
-  if (debugConfig.maxDataSize > 0 && calculateDataSize(data) > debugConfig.maxDataSize) {
+  const originalSize = calculateDataSize(data);
+  if (debugConfig.maxDataSize > 0 && originalSize > debugConfig.maxDataSize) {
     return {
       __truncated: true,
-      __originalSize: calculateDataSize(data),
-      __preview: `${JSON.stringify(data).substring(0, 200)  }...`
+      __originalSize: originalSize,
+      __preview: buildDebugPayloadPreview(data, 200)
     };
   }
   return data;

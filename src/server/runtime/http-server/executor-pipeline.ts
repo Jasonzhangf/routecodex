@@ -76,6 +76,7 @@ function buildHubPipelineMetadata(
   stageRecorder: unknown
 ): Record<string, unknown> {
   const pipelineMetadata = { ...metadata };
+  delete pipelineMetadata.__raw_request_body;
   const center = MetadataCenter.read(metadata);
   if (center) {
     MetadataCenter.bind(pipelineMetadata, center);
@@ -138,9 +139,9 @@ export async function runHubPipeline(
   input: PipelineExecutionInput,
   metadata: Record<string, unknown>
 ): Promise<HubPipelineResult> {
+  const providerProtocol = resolveEntryProtocolFromEndpoint(input.entryEndpoint);
   let stageRecorder: unknown;
   if (shouldEnableHubStageRecorder()) {
-    const providerProtocol = resolveEntryProtocolFromEndpoint(input.entryEndpoint);
     try {
       stageRecorder = await bridgeCreateSnapshotRecorder(
         {
@@ -156,16 +157,24 @@ export async function runHubPipeline(
 
   const payload = asRecord(input.body);
   const pipelineMetadata = buildHubPipelineMetadata(metadata, stageRecorder);
+  const retryExclusionSet = pipelineMetadata.excludedProviderKeys;
+  delete pipelineMetadata.excludedProviderKeys;
   const metadataCenterSnapshot = asRecord(pipelineMetadata.metadataCenterSnapshot);
-  const pipelineInput: PipelineExecutionInput & {
+  const { body: _nativeInputBody, ...nativeInputWithoutBody } = input;
+  void _nativeInputBody;
+  const pipelineInput: Omit<PipelineExecutionInput, 'body'> & {
     payload: Record<string, unknown>;
     endpoint: string;
     id: string;
+    providerProtocol: 'openai-responses' | 'anthropic-messages' | 'openai-chat';
+    retryExclusionSet?: unknown;
     metadataCenterSnapshot?: Record<string, unknown>;
   } = {
-    ...input,
+    ...nativeInputWithoutBody,
     id: input.requestId,
     endpoint: input.entryEndpoint,
+    providerProtocol,
+    ...(retryExclusionSet !== undefined ? { retryExclusionSet } : {}),
     metadata: pipelineMetadata,
     ...(metadataCenterSnapshot ? { metadataCenterSnapshot } : {}),
     payload

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::hub_req_chatprocess_03_governed::HubReqChatProcess03Governed;
-use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, clone_object_payload};
+use super::hub_req_inbound_02_standardized::{assert_no_inline_metadata, into_object_payload};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +18,28 @@ impl VrRoute04SelectedTarget {
     pub(crate) fn into_decision(self) -> Value {
         Value::Object(self.decision)
     }
+
+    pub(crate) fn assert_decision_has_no_inline_metadata(
+        &self,
+        node_name: &str,
+    ) -> Result<(), String> {
+        if self.decision.contains_key("metadata") {
+            return Err(format!(
+                "{node_name} must not carry inline metadata; use Meta* carrier"
+            ));
+        }
+        if self
+            .decision
+            .get("context")
+            .and_then(Value::as_object)
+            .is_some_and(|context| context.contains_key("metadata"))
+        {
+            return Err(format!(
+                "{node_name} must not carry context.metadata; use Meta* carrier"
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn build_vr_route_04_from_hub_req_chatprocess_03(
@@ -27,7 +49,7 @@ pub(crate) fn build_vr_route_04_from_hub_req_chatprocess_03(
     assert_no_inline_metadata(governed.payload(), "VrRoute04SelectedTarget.source")?;
     assert_no_inline_metadata(&decision, "VrRoute04SelectedTarget")?;
     assert_no_payload_patch_fields(&decision, "VrRoute04SelectedTarget")?;
-    let decision = clone_object_payload(&decision, "VrRoute04SelectedTarget")?;
+    let decision = into_object_payload(decision, "VrRoute04SelectedTarget")?;
     Ok(VrRoute04SelectedTarget { decision })
 }
 

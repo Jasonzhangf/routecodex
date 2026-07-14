@@ -70,7 +70,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/runtime_config_materialization.rs
         owner_feature_id: config.user_config_materialization
         semantic_input: "normalized v2 userConfig plus materialized or root-loaded providerConfigs"
-        semantic_output: "deterministic RouteCodex runtime manifest and selected routingPolicyGroup"
+        semantic_output: "deterministic RouteCodex runtime manifest and selected routingPolicyGroup; authoring route pool id/poolId stripped from public routing config"
         resource_flow:
           consumes: [config.validated_manifest]
           produces: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
@@ -215,6 +215,7 @@ chains:
         note: "Current admin route owner writes routing/user-config mutations through writeUserConfigFile; future dedicated WebUI config editor APIs must keep this shared writer edge."
 
   - chain_id: servertool.hook_skeleton.mainline
+    invariant: "Stopless has no standalone lifecycle entrypoint; every stopless transition is dispatched by ServertoolReqHook or ServertoolRespHook."
     summary: "Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks."
     entry_contract:
       node: HubRespChatProcess03Governed
@@ -225,8 +226,8 @@ chains:
         to_node: ServertoolRespHook01Intercepted
         caller_symbol: execute
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
-        callee_symbol: run_servertool_resp_stopless_hook_skeleton
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        callee_symbol: run_servertool_response_hooks
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_hook_runtime.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "canonical provider response after Hub response chat-process parsing"
         semantic_output: "response interception event for normal response, abnormal/error response, stopless trigger, `finish_reason=stop` schema candidate, `finish_reason=tool_calls` registered internal servertool call candidate, or no-op"
@@ -240,8 +241,8 @@ chains:
       - step_id: sth-resp-02
         from_node: ServertoolRespHook01Intercepted
         to_node: ServertoolRespHook02SchemaValidated
-        caller_symbol: run_servertool_resp_stopless_hook_skeleton
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        caller_symbol: run_stopless_response_hook
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_stopless_hook.rs
         callee_symbol: inspect_stop_gateway_signal
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -257,8 +258,8 @@ chains:
       - step_id: sth-resp-03
         from_node: ServertoolRespHook02SchemaValidated
         to_node: ServertoolRespHook03HookResponseInjected
-        caller_symbol: run_servertool_resp_stopless_hook_skeleton
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        caller_symbol: run_stopless_response_hook
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_stopless_hook.rs
         callee_symbol: run_stopless_auto_handler_runtime_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -274,8 +275,8 @@ chains:
       - step_id: sth-resp-06
         from_node: ServertoolRespHook03HookResponseInjected
         to_node: ServertoolRespHook06ProjectionFinalized
-        caller_symbol: run_servertool_resp_stopless_hook_skeleton
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        caller_symbol: run_stopless_response_hook
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_stopless_hook.rs
         callee_symbol: build_stopless_auto_cli_projection_from_engine_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -323,14 +324,14 @@ chains:
         status: anchored
         note: "Anchored by Rust CLI projection builder emitting the client-visible `routecodex hook run reasoningStop ...` command; the hook still does not execute client CLI."
       - step_id: sth-req-01
-        from_node: HubReqInbound02Standardized
+        from_node: ChatProcReqContinuation03CanonicalRestored
         to_node: ServertoolReqHook01ResultParsed
-        caller_symbol: normalize_shell_like_tool_calls_before_governance
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
-        callee_symbol: normalize_responses_input_function_calls
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
-        owner_feature_id: hub.req_chatprocess_governance
-        semantic_input: "next request containing ordinary tool result / CLI stdout"
+        caller_symbol: run_servertool_request_hooks
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_hook_runtime.rs
+        callee_symbol: apply_req_process_tool_governance
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        owner_feature_id: hub.servertool_stopless_cli_continuation
+        semantic_input: "post-continuation-restore request containing ordinary tool result / CLI stdout"
         semantic_output: "parsed public hook result event; auto-projected stopless shell call/result evidence is consumed as private control truth and removed before provider projection, while non-stopless servertool results retain their governed semantics"
         resource_flow:
           consumes: [request.normal_payload, servertool.followup_state]
@@ -338,7 +339,7 @@ chains:
           side_channel_reads: [servertool.followup_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Anchored by Rust inbound tool-call normalization. Stopless shell call/result pairs are never restored as provider-visible tool history; they collapse into an ordinary user turn before request governance."
+        note: "Anchored by the Rust servertool request hook scheduler after `ChatProcReqContinuation03CanonicalRestored`. Stopless shell call/result pairs are never restored as provider-visible tool history; they collapse into an ordinary user turn before request governance, and no stopless/servertool semantics may run in the continuation save/restore immutable interval."
       - step_id: sth-req-02
         from_node: ServertoolReqHook01ResultParsed
         to_node: ServertoolReqHook02TextRewritten
@@ -473,12 +474,12 @@ chains:
         semantic_input: "governed Hub request plus route-selection-ready request metadata"
         semantic_output: "selected virtual-router target contract"
         resource_flow:
-          consumes: [request.normal_payload, metadata.runtime_control]
+          consumes: [request.normal_payload, metadata.runtime_control, route.retry_exclusion_set]
           produces: [route.selection]
-          side_channel_reads: [metadata.runtime_control]
+          side_channel_reads: [metadata.runtime_control, route.retry_exclusion_set]
           side_channel_writes: [route.selection]
         status: anchored
-        note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics. VR route reads now come through `vr.metadata_center_surface` backed by the request-scoped `MetadataCenter` snapshot; `__rt` and flat metadata mirrors must not participate in route selection."
+        note: "Runtime route selection still resolves the route decision earlier in `HubPipelineEngine::select_route`, but `req-03` is now anchored at the Rust typed entrypoint that seals the decision into `VrRoute04SelectedTarget`. M4 still owns applying the selected target to outbound request semantics. VR route reads come through `vr.metadata_center_surface` plus the ErrorErr05-owned `route.retry_exclusion_set`; `__rt`, flat metadata, and MetadataCenter exclusion mirrors must not participate in route selection."
       - step_id: req-04
         from_node: VrRoute04SelectedTarget
         to_node: HubReqOutbound05ProviderSemantic
@@ -719,14 +720,14 @@ chains:
         callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "raw current request payload plus explicit continuation evidence such as submit_tool_outputs, previous_response_id, response_id, or internal reentry marker"
-        semantic_output: "Rust-owned continuation action plan resolves direct vs relay owner, legal submit/materialize action, client error, or no-op"
+        semantic_output: "Rust-owned closed continuation plan emits complete lookup/direct/relay/scope effect args or a complete final/client-error descriptor"
         resource_flow:
           consumes: [request.normal_payload, metadata.request_truth]
           produces: [continuation.scope_state]
           side_channel_reads: [metadata.request_truth]
           side_channel_writes: [continuation.scope_state]
         status: anchored
-        note: "Request-visible evidence is the only legal starting point. `prepareResponsesHandlerEntryForHttp` performs host IO lookup, then delegates continuation owner/action semantics to Rust `planResponsesContinuationRequestAction`; session/scope-only hits remain forbidden. Non-responses protocols skip this block."
+        note: "Request-visible evidence is the only legal starting point. Rust `planResponsesContinuationRequestAction` emits `execute_effect|complete`; `prepareResponsesHandlerEntryForHttp` only executes the validated effect args and returns the opaque IO result plus `resultPlanInput` to the same planner. TS may not rebuild response ids, owners, scope, endpoints, payload mutations, resume metadata, or final results. Session/scope-only hits remain forbidden. Non-responses protocols skip this block."
       - step_id: rct-02
         from_node: ChatProcReqContinuation02OwnerResolved
         to_node: ChatProcReqContinuation03CanonicalRestored
@@ -747,7 +748,7 @@ chains:
       - step_id: rct-03
         from_node: ChatProcReqContinuation03CanonicalRestored
         to_node: ChatProcReqContinuation04HookRestored
-        caller_symbol: buildCapturedRelayResumeRequestContextForHttp
+        caller_symbol: buildResponsesRequestContextForHttp
         caller_file: src/modules/llmswitch/bridge/responses-request-bridge.ts
         callee_symbol: captureReqInboundResponsesContextSnapshotJson
         callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
@@ -760,7 +761,7 @@ chains:
           side_channel_reads: [continuation.scope_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Relay materialization now anchors request-side restore before hook restore. Tests must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
+        note: "After the Rust request-context plan selects the canonical payload, the same host bridge invokes the Rust req_inbound context snapshot builder directly; no relay-specific TS reconstruction helper remains. Tests must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
       - step_id: rct-04
         from_node: ChatProcReqContinuation04HookRestored
         to_node: ChatProcReqContinuation05Governed
@@ -810,7 +811,7 @@ chains:
           side_channel_reads: [metadata.request_truth]
           side_channel_writes: [continuation.scope_state]
         status: anchored
-        note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; Rust `publishResponsesRecordPlanJson` validates runtimeStateWrite, emits the complete record args, and TS passes both effect input and record output without shape coercion or owner/entry/scope rebuilding. SSE/handler closeout must not revive save logic."
+        note: "Saving pre-hook/pre-projection shell truth here is invalid. The canonical save owner is now core Chat Process closeout before resp_outbound; Rust `publishResponsesRecordPlanJson` validates runtimeStateWrite, emits the complete record args, and TS passes both effect input and record output without shape coercion or owner/entry/scope rebuilding. SSE/handler closeout must not revive save logic. `verify:architecture-thin-wrapper-only` and its red fixtures lock the root host boundary and must fail if handler/request bridge save logic returns."
       - step_id: rct-07
         from_node: ChatProcRespContinuation07CanonicalSaved
         to_node: ChatProcRespContinuation08Released
@@ -1105,13 +1106,14 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
         owner_feature_id: error.execution_decision_consumer
         semantic_input: "router-policy-applied error event + retry/error snapshot"
-        semantic_output: "executor-visible provider failover/default-pool/client-projection decision; session_storm may not intercept provider availability truth"
+        semantic_output: "executor-visible provider failover/default-pool/client-projection decision plus the canonical request-local retry exclusion set; session_storm may not intercept provider availability truth"
         resource_flow:
           consumes: [error.chain, provider_runtime.observation]
-          produces: [error.chain]
+          produces: [error.chain, route.retry_exclusion_set]
           side_channel_reads: [error.chain, provider_runtime.observation]
-          side_channel_writes: [error.chain]
+          side_channel_writes: [error.chain, route.retry_exclusion_set]
         status: anchored
+        note: "The Rust ErrorErr05 decision is the only semantic writer of the next-attempt exclusion set. The TS host may only apply that returned set to request-local attempt state; flat metadata and MetadataCenter mirrors are forbidden."
       - step_id: err-05
         from_node: ErrorErr05ExecutionDecision
         to_node: ErrorErr06ClientProjected
@@ -1287,7 +1289,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
         owner_feature_id: vr.route_host_effects
         semantic_input: "VirtualRouterHitRecord plus omit config"
-        semantic_output: "Rust-owned diagnostic log line; TS host only writes the returned string to console"
+        semantic_output: "Rust-owned diagnostic log line using route classification only; TS host only writes the returned string to console"
         resource_flow:
           consumes: [vr.hit_log_record]
           produces: [vr.hit_log_record]
@@ -1303,7 +1305,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_hit_log.rs
         owner_feature_id: vr.hit_log_projection
         semantic_input: "VirtualRouterHitRecord plus request/entry metadata"
-        semantic_output: "Rust-owned telemetry event projection for stats-center consumers"
+        semantic_output: "Rust-owned telemetry event projection for stats-center consumers, with `pool` projected as route classification rather than standalone pool name"
         resource_flow:
           consumes: [vr.hit_log_record, metadata.runtime_control]
           produces: [vr.telemetry_projection]
@@ -1536,8 +1538,8 @@ chains:
       - step_id: stl-01
         from_node: StoplessResp01StopDetected
         to_node: StoplessResp02SchemaGateEvaluated
-        caller_symbol: run_servertool_resp_stopless_hook_skeleton
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        caller_symbol: run_stopless_response_hook
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_stopless_hook.rs
         callee_symbol: run_stopless_auto_handler_runtime_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -1569,8 +1571,8 @@ chains:
       - step_id: stl-03
         from_node: StoplessState03RuntimeSnapshotResolved
         to_node: StoplessCli04ProjectionPlanned
-        caller_symbol: run_servertool_resp_stopless_hook_skeleton
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/engine.rs
+        caller_symbol: run_stopless_response_hook
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_stopless_hook.rs
         callee_symbol: build_stopless_auto_cli_projection_from_engine_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
@@ -2006,11 +2008,18 @@ chains:
           consumes: [request.normal_payload]
           produces: [stage_a.protocol_canonical]
           side_channel_reads: []
-          side_channel_writes: []
+        side_channel_writes: []
         status: anchored
         note: "Retired Responses codec TS shell is forbidden from owning codec state or protocol conversion semantics."
-
 shared_multi_reference_functions:
+  - function_id: architecture.mainline_chain_manifest_projection
+    binding_status: confirmed
+    symbol: buildMainlineChainManifest
+    file: scripts/architecture/generate-mainline-chain-manifests.mjs
+    owner_feature_id: architecture.mainline_chain_manifest_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Architecture review block: builds one per-chain manifest projection and passes it directly to YAML serialization without a JSON clone graph."
   - function_id: native.responses_context_capture
     binding_status: confirmed
     symbol: captureReqInboundResponsesContextSnapshotJson
@@ -2061,7 +2070,7 @@ shared_multi_reference_functions:
     reused_by_chains:
       - response.mainline
       - sse.chat_stream_projection.mainline
-    note: "Rust validates streamPipe and selects no_pipe/use_pipe with canonical codec/requestId/payload; TS consumes the returned pipe only for Node stream IO."
+    note: "Rust validates metadata-only streamPipe and selects no_pipe/use_pipe with canonical codec/requestId while rejecting effect-owned payload/body; TS reuses the top-level client semantic reference for Node stream IO."
   - function_id: native.provider_response_diagnostic_alarm_effect
     binding_status: confirmed
     symbol: plan_provider_response_diagnostic_alarm_effect_json
@@ -2142,6 +2151,134 @@ shared_multi_reference_functions:
     reused_by_chains:
       - debug.unified_surface.mainline
     note: "Canonical debug owner entrypoint. createDebugToolkit is the unified facade constructor for debug diag/snapshot/logger/harness replay surfaces."
+  - function_id: debug.harness_replay_input_clone
+    binding_status: confirmed
+    symbol: cloneProviderReplayInput
+    file: src/debug/harness/provider.ts
+    owner_feature_id: debug.harness_replay_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "M6 internal block: creates the single provider-mutation isolation graph for a captured replay input; it is diagnostic-only and releases with harness execution."
+  - function_id: debug.responses_provider_replay_chat_owner
+    binding_status: confirmed
+    symbol: createReplayChatOwner
+    file: scripts/tools/responses-provider-replay.mjs
+    owner_feature_id: debug.responses_provider_replay_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: creates only a shallow top-level owner for captured chat replay mutation; nested payload branches remain borrowed and diagnostic-only."
+  - function_id: debug.replay_codex_sample_metadata_projection
+    binding_status: confirmed
+    symbol: stripReplayOnlyClientHeadersFromBody
+    file: scripts/replay-codex-sample.mjs
+    owner_feature_id: debug.replay_codex_sample_payload_copy_budget
+    reused_by_chains:
+      - debug.pipeline_dry_run_loop.mainline
+    note: "Debug replay block: strips replay-only metadata with path-local shallow owners while preserving unchanged nested request branches."
+  - function_id: debug.replay_codex_sample_provider_request_projection
+    binding_status: confirmed
+    symbol: buildReplayInputFromProviderRequest
+    file: scripts/replay-codex-sample.mjs
+    owner_feature_id: debug.replay_codex_sample_payload_copy_budget
+    reused_by_chains:
+      - debug.pipeline_dry_run_loop.mainline
+    note: "Debug replay block: projects captured provider request shape into a replayable Responses client request without cloning complete payload branches."
+  - function_id: debug.responses_fai_capture_variant_projection
+    binding_status: confirmed
+    symbol: buildResponseProbeVariants
+    file: scripts/responses-fai-capture.mjs
+    owner_feature_id: debug.responses_fai_capture_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: lazily yields one Responses FAI compatibility variant at a time; unchanged nested payload branches remain borrowed and diagnostic-only."
+  - function_id: debug.responses_sse_capture_request_owner
+    binding_status: confirmed
+    symbol: createResponsesCaptureRequestOwner
+    file: scripts/responses-sse-capture.mjs
+    owner_feature_id: debug.responses_sse_capture_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: creates one shallow top-level owner for Responses SSE capture overrides; unchanged nested payload branches remain borrowed and diagnostic-only."
+  - function_id: debug.responses_sse_completed_response_projection
+    binding_status: confirmed
+    symbol: convertEventsToResponsesJson
+    file: sharedmodule/llmswitch-core/scripts/lib/responses-sse-utils.mjs
+    owner_feature_id: debug.responses_sse_utils_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: returns completed response event objects by reference for golden roundtrip; aggregation only synthesizes responses when no completed response exists."
+  - function_id: debug.cross_protocol_matrix_chat_projection
+    binding_status: confirmed
+    symbol: canonicalizeChat
+    file: sharedmodule/llmswitch-core/scripts/tests/cross-protocol-matrix.mjs
+    owner_feature_id: debug.cross_protocol_matrix_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: canonicalizes chat parity samples with path-local owners while preserving source isolation and borrowed unchanged schema branches."
+  - function_id: debug.coverage_hub_standardized_parity_projection
+    binding_status: confirmed
+    symbol: chatEnvelopeToStandardizedWithNative
+    file: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-chat-envelope-to-standardized-native.mjs
+    owner_feature_id: debug.coverage_hub_standardized_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug coverage block: compares TS/native standardized projections directly instead of materializing JSON-cloned comparison graphs."
+  - function_id: debug.coverage_hub_chat_projection_parity
+    binding_status: confirmed
+    symbol: standardizedToChatEnvelopeWithNative
+    file: sharedmodule/llmswitch-core/scripts/tests/coverage-hub-standardized-to-chat-native.mjs
+    owner_feature_id: debug.coverage_hub_chat_projection_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug coverage block: compares TS/native standardized-to-chat projections directly instead of materializing JSON-cloned comparison graphs."
+  - function_id: debug.hub_chain_equivalence_sanitized_payload
+    binding_status: confirmed
+    symbol: sanitizePayload
+    file: sharedmodule/llmswitch-core/scripts/tests/hub-chain-equivalence.mjs
+    owner_feature_id: debug.hub_chain_equivalence_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug equivalence block: removes debug-only comparison fields with path-local owners while borrowing unchanged nested protocol payload branches."
+  - function_id: debug.lmstudio_compat_tools_projection
+    binding_status: confirmed
+    symbol: applyLMStudioCompatibility
+    file: sharedmodule/llmswitch-core/scripts/tests/lmstudio-compatibility-tools-test.mjs
+    owner_feature_id: debug.lmstudio_compat_tools_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug compatibility block: creates a top-level/parameters projection and normalized tool wrappers while borrowing unchanged nested request branches."
+  - function_id: debug.anthropic_response_regression_projection
+    binding_status: confirmed
+    symbol: buildAnthropicRegressionProjectionWithNative
+    file: sharedmodule/llmswitch-core/scripts/tests/anthropic-response-regression.mjs
+    owner_feature_id: debug.anthropic_response_regression_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug regression block: serializes the tracked Anthropic sample once into the Rust native projection owner and validates the returned Hub shape without cloning the source graph."
+  - function_id: debug.v2_consistency_summary_projection
+    binding_status: confirmed
+    symbol: runAllTests
+    file: scripts/v2-consistency/comprehensive-consistency-test.mjs
+    owner_feature_id: debug.v2_consistency_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug reporting block: owns one generated consistency summary and borrows it for persistence/display without JSON round-trip clones."
+  - function_id: debug.provider_golden_capture_config_projection
+    binding_status: confirmed
+    symbol: buildDerivedConfig
+    file: scripts/tools/capture-provider-goldens.mjs
+    owner_feature_id: debug.provider_golden_capture_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug capture block: creates path-local temporary config owners while borrowing unchanged nested provider and config branches until artifact serialization."
+  - function_id: debug.outbound_regression_execution_copy
+    binding_status: confirmed
+    symbol: cloneOutboundRegressionExecutionPayload
+    file: scripts/outbound-regression-codex-samples.mjs
+    owner_feature_id: debug.outbound_regression_payload_copy_budget
+    reused_by_chains:
+      - debug.unified_surface.mainline
+    note: "Debug script block: creates the single provider-mutation isolation graph for one outbound regression attempt; JSON and original-object fallback paths are forbidden."
 
   - function_id: error.err_04_router_policy_applied
     symbol: report_provider_error

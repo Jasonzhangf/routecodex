@@ -33,7 +33,10 @@ fn plan(input: &Value) -> Value {
     let mut writes = Vec::new();
     let runtime_control = input.get("bridgeRuntimeControl").and_then(Value::as_object);
     for (key, reason) in [
-        ("stopless", "provider response stopless runtime pipeline sync"),
+        (
+            "stopless",
+            "provider response stopless runtime pipeline sync",
+        ),
         (
             "stopMessageCompareContext",
             "provider response stop-message compare pipeline sync",
@@ -72,10 +75,14 @@ fn plan(input: &Value) -> Value {
 #[napi(js_name = "planProviderResponseMetadataSyncEffectJson")]
 pub fn plan_provider_response_metadata_sync_effect_json(input_json: String) -> NapiResult<String> {
     let input: Value = serde_json::from_str(&input_json).map_err(|error| {
-        napi::Error::from_reason(format!("provider response metadata sync input parse failed: {error}"))
+        napi::Error::from_reason(format!(
+            "provider response metadata sync input parse failed: {error}"
+        ))
     })?;
     serde_json::to_string(&plan(&input)).map_err(|error| {
-        napi::Error::from_reason(format!("provider response metadata sync output serialize failed: {error}"))
+        napi::Error::from_reason(format!(
+            "provider response metadata sync output serialize failed: {error}"
+        ))
     })
 }
 
@@ -85,13 +92,20 @@ mod tests {
 
     #[test]
     fn plans_bind_and_no_op_actions() {
-        assert_eq!(plan(&json!({"pipelineMetadataIsRecord":false}))["action"], "no_op");
         assert_eq!(
-            plan(&json!({"pipelineMetadataIsRecord":true,"bridgeCenterExists":true,"pipelineCenterExists":false}))["action"],
+            plan(&json!({"pipelineMetadataIsRecord":false}))["action"],
+            "no_op"
+        );
+        assert_eq!(
+            plan(
+                &json!({"pipelineMetadataIsRecord":true,"bridgeCenterExists":true,"pipelineCenterExists":false})
+            )["action"],
             "bind_bridge_center"
         );
         assert_eq!(
-            plan(&json!({"pipelineMetadataIsRecord":true,"bridgeCenterExists":true,"pipelineCenterExists":true,"centersAreSame":true}))["action"],
+            plan(
+                &json!({"pipelineMetadataIsRecord":true,"bridgeCenterExists":true,"pipelineCenterExists":true,"centersAreSame":true})
+            )["action"],
             "no_op"
         );
     }

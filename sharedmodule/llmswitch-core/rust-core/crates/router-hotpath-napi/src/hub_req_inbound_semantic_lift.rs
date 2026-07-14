@@ -1,24 +1,20 @@
 use crate::shared_tool_mapping::build_anthropic_tool_alias_map_from_slice;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Map, Value};
 
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ReqInboundSemanticLiftInput {
-    payload: Option<Value>,
+#[derive(Debug, Default)]
+struct ReqInboundSemanticLiftInput<'a> {
+    payload: Option<&'a Value>,
     protocol: Option<String>,
     entry_endpoint: Option<String>,
-    #[serde(default)]
     has_client_tools_raw: bool,
-    #[serde(default)]
     has_tool_alias_map: bool,
 }
 
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ReqInboundSemanticLiftApplyInput {
+#[derive(Debug)]
+pub struct ReqInboundSemanticLiftApplyInput<'a> {
     pub chat_envelope: Value,
-    pub payload: Option<Value>,
+    pub payload: Option<&'a Value>,
     pub protocol: Option<String>,
     pub entry_endpoint: Option<String>,
 }
@@ -51,10 +47,10 @@ fn should_capture_alias_map(protocol: Option<&str>, entry_endpoint: Option<&str>
 }
 
 fn resolve_req_inbound_semantic_lift_plan(
-    input: &ReqInboundSemanticLiftInput,
+    input: &ReqInboundSemanticLiftInput<'_>,
 ) -> ReqInboundSemanticLiftOutput {
     let mut output = ReqInboundSemanticLiftOutput::default();
-    let raw_tools = read_raw_tools(input.payload.as_ref());
+    let raw_tools = read_raw_tools(input.payload);
 
     if !input.has_client_tools_raw && !raw_tools.is_empty() {
         output.client_tools_raw = Some(raw_tools.clone());
@@ -78,7 +74,7 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
     value.as_object_mut().expect("object just initialized")
 }
 
-pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput) -> Value {
+pub fn apply_req_inbound_semantic_lift(input: ReqInboundSemanticLiftApplyInput<'_>) -> Value {
     let mut chat_envelope = input.chat_envelope;
     let envelope = ensure_object(&mut chat_envelope);
     let payload_value = envelope

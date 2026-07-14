@@ -13,7 +13,6 @@ jest.unstable_mockModule(
     buildResponsesPipelineMetadataForHttp: jest.fn(() => ({})),
     captureResponsesInboundToolHistoryErrorsampleForHttp: jest.fn(async () => undefined),
     clearResponsesConversationOnHandlerFailureForHttp: jest.fn(async () => undefined),
-    finalizeResponsesPipelineResultForHttp: jest.fn((result) => result),
     planResponsesHandlerStreamForHttp: jest.fn(() => ({ outboundStream: false })),
     prepareResponsesRequestBodyForHttp: jest.fn((payload) => ({ payload, responseIdFromPayload: undefined })),
     prepareResponsesHandlerRuntimeForHttp: jest.fn((args) => ({
