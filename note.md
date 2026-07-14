@@ -30520,6 +30520,16 @@ Pure Rust NAPI candidates:
 - The source gate now applies lifecycle/fallback wording checks only to production Rust source while its injected production red fixtures remain green.
 - The reselection blackbox now keeps a controlled failing upstream alive and returns HTTP 503; ten consecutive focused runs passed, followed by the complete architecture/provider/workspace/P0-P5 gate stack.
 - This correction changes test determinism only. Provider/Router/Target production selection semantics were not patched or bypassed.
+
+# 2026-07-14T13:38Z: V3 P6 Responses Direct MVP closeout
+
+- Final gaps: maps/wiki lagged implemented P6 source; new Dry Run made Debug own the business node list and claimed `stopped_before_provider_send=true` while executing Provider12/Transport13 through a fake transport.
+- Source fix: removed dead foundation Dry Run, kept Debug as fixture/side-channel owner, moved replay into the Runtime P6 kernel with `V3DryRunNoNetworkTransport`, added accurate no-network fields, and added Server-owned `build_v3_server_16_http_frame_from_v3_resp_15`.
+- Map/gate fix: anchored `v3-rd-09..14` plus P6 policy/client/debug/error resources; gates now reject Debug-owned topology, Server16 bypass, and false pre-Provider Dry Run claims.
+- Red/green: focused Debug topology and Dry Run semantic tests failed first; source red fixtures now reject 10 forbidden mutations.
+- Verification: full mapped V3 gate stack, fmt, clippy, workspace, CLI build, and diff check passed.
+- Live: actual V3 CLI started config.p6.toml on 45464/45465/45466; controlled upstreams 45467/45468 proved JSON, SSE, wire model/auth boundary, Target-local reselection, terminal Error01-06 exhaustion, no-network Dry Run, redaction, and snapshot release. Exact Ctrl-C stopped both processes; ports 45464-45469 closed.
+- Boundary: no relay, continuation, servertool, other protocol, V2, `~/.rcc`, global install, production restart, or real provider call.
 # 2026-07-14T13:40Z: 5520 multi-provider default floor regression
 
 - Live evidence: `server-5520.log` repeatedly projected `No available providers after applying routing instructions` while online VR status showed the configured `gateway_priority_5520:default` route still had three non-empty tiers and six enabled/available targets after restart.

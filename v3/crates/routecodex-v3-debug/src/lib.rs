@@ -156,7 +156,6 @@ pub struct V3DryRunExecutionPlan {
     pub method: String,
     pub path: String,
     pub terminal_effect: &'static str,
-    pub node_ids: Vec<&'static str>,
 }
 
 #[derive(Debug)]
@@ -462,14 +461,6 @@ impl V3DebugRuntime {
             method: fixture.method,
             path: fixture.path,
             terminal_effect: "no_network_send",
-            node_ids: vec![
-                "V3Server03HttpRequestRaw",
-                "V3Debug01TraceContextStarted",
-                "V3Debug02RawRequestCaptured",
-                "V3DryRunNoNetworkTerminalEffect",
-                "V3Debug03RawResponseCaptured",
-                "V3Server16HttpFrame",
-            ],
         })
     }
 

@@ -1,14 +1,16 @@
 use crate::hooks::V3HookRegistry;
 use crate::nodes::*;
+use async_trait::async_trait;
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
+use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorActionScope, V3ErrorSourceKind,
     V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
+    V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry, V3ProviderError,
+    V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -42,6 +44,25 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_a
     hook_registry: V3HookRegistry,
     debug: &V3DebugRuntime,
 ) -> V3ResponsesDirectRuntimeOutput {
+    execute_v3_responses_direct_runtime_kernel_with_transport_and_debug(
+        manifest,
+        raw,
+        hook_registry,
+        &ReqwestResponsesTransport::default(),
+        debug,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_direct_runtime_kernel_with_transport_and_debug<
+    T: ResponsesTransport,
+>(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    hook_registry: V3HookRegistry,
+    transport: &T,
+    debug: &V3DebugRuntime,
+) -> V3ResponsesDirectRuntimeOutput {
     let scope = match debug.start_trace(&raw.server_id, &raw.request_id, &raw.execution_id) {
         Ok(scope) => scope,
         Err(error) => {
@@ -52,12 +73,8 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_a
         return debug_error_output("V3Debug02RawRequestCaptured", error, &hook_registry);
     }
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_default_transport(
-        manifest,
-        raw,
-        hook_registry,
-    )
-    .await;
+    let output =
+        execute_v3_responses_direct_runtime_kernel(manifest, raw, hook_registry, transport).await;
 
     for node_id in &output.node_trace {
         if let Err(error) = debug.record_node_event(
@@ -78,6 +95,154 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_a
         return debug_error_output("V3Debug03RawResponseCaptured", error, &hook_registry);
     }
     output
+}
+
+#[derive(Debug)]
+struct V3DryRunNoNetworkTransport {
+    response_payload: Value,
+}
+
+#[async_trait]
+impl ResponsesTransport for V3DryRunNoNetworkTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&self.response_payload).map_err(|error| {
+                V3ProviderError::ResponseBody {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: error.to_string(),
+                }
+            })?,
+        ))
+    }
+}
+
+pub async fn execute_v3_responses_direct_dry_run_runtime(
+    fixture: V3DryRunFixture,
+    manifest: &V3Config05ManifestPublished,
+    debug: &V3DebugRuntime,
+) -> crate::V3FoundationRuntimeOutput {
+    if let Err(error) = debug.register_dry_run_fixture(fixture.clone()) {
+        return crate::project_v3_debug_failure("V3DryRunFixtureRegistered", error);
+    }
+    if let Err(error) = debug.build_dry_run_execution_plan(&fixture.fixture_id) {
+        return crate::project_v3_debug_failure("V3DryRunExecutionPlanned", error);
+    }
+    let request_id = format!("dry-run-{}", fixture.fixture_id);
+    let execution_id = format!("dry-run-exec-{}", fixture.fixture_id);
+    let scope = match debug.start_trace(&fixture.server_id, &request_id, &execution_id) {
+        Ok(scope) => scope,
+        Err(error) => {
+            return crate::project_v3_debug_failure("V3Debug01TraceContextStarted", error)
+        }
+    };
+    let session_id = match debug.start_snapshot_session(&scope, "dry-run") {
+        Ok(session_id) => session_id,
+        Err(error) => return crate::project_v3_debug_failure("V3SnapshotSessionStarted", error),
+    };
+    let transport = V3DryRunNoNetworkTransport {
+        response_payload: fixture.response_payload.clone(),
+    };
+    let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_and_debug(
+        manifest,
+        V3Server03HttpRequestRaw {
+            server_id: fixture.server_id.clone(),
+            request_id,
+            execution_id,
+            method: fixture.method.clone(),
+            path: fixture.path.clone(),
+            body: fixture.request_payload.clone(),
+        },
+        crate::register_responses_direct_hooks(),
+        &transport,
+        debug,
+    )
+    .await;
+    if let Some(index) = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3Transport13ResponsesHttpRequest")
+    {
+        output
+            .node_trace
+            .insert(index + 1, "V3DryRunNoNetworkTerminalEffect");
+    }
+    output.node_trace.push("V3Server16HttpFrame");
+    for node_id in ["V3DryRunNoNetworkTerminalEffect", "V3Server16HttpFrame"] {
+        if let Err(error) = debug.record_node_event(
+            &scope,
+            node_id,
+            "dry_run",
+            Some(json!({"terminal_effect": "no_network_send"})),
+        ) {
+            let _ = debug.release_snapshot_session(&scope, &session_id);
+            return crate::project_v3_debug_failure("V3Debug01NodeEventRegistered", error);
+        }
+    }
+    for node_id in &output.node_trace {
+        if let Err(error) = debug.record_snapshot(
+            &scope,
+            &session_id,
+            *node_id,
+            json!({"node_id": node_id, "dry_run": true}),
+        ) {
+            let _ = debug.release_snapshot_session(&scope, &session_id);
+            return crate::project_v3_debug_failure("V3SnapshotNodeCaptured", error);
+        }
+    }
+    let transient_snapshots = match debug.snapshots() {
+        Ok(snapshots) => snapshots
+            .into_iter()
+            .filter(|snapshot| snapshot.session_id == session_id)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            let _ = debug.release_snapshot_session(&scope, &session_id);
+            return crate::project_v3_debug_failure("V3SnapshotProjectionRead", error);
+        }
+    };
+    if let Err(error) = debug.release_snapshot_session(&scope, &session_id) {
+        return crate::project_v3_debug_failure("V3SnapshotSessionReleased", error);
+    }
+    let response_payload = match output.client_payload.body {
+        V3ClientBody::Json(value) => value,
+        V3ClientBody::Bytes(bytes) => json!({"body_kind": "bytes", "byte_len": bytes.len()}),
+    };
+    crate::V3FoundationRuntimeOutput {
+        status: output.client_payload.status,
+        body: json!({
+            "dry_run": {
+                "fixture_id": fixture.fixture_id,
+                "server_id": fixture.server_id,
+                "method": fixture.method,
+                "path": fixture.path,
+                "terminal_effect": "no_network_send",
+                "provider_pipeline_executed": true,
+                "provider_network_send": false,
+                "stopped_before_network_send": true,
+                "node_ids": output.node_trace,
+                "snapshots": transient_snapshots,
+                "response_payload": debug.redact_projection(response_payload)
+            }
+        }),
+        debug_node: "V3DryRunNoNetworkTerminalEffect",
+        error_node: output
+            .error_chain
+            .as_ref()
+            .map_or("none", |_| "V3Error06ClientProjected"),
+        error_chain: output.error_chain.unwrap_or_default(),
+        node_trace: output.node_trace,
+        stopped_before_provider_send: false,
+    }
 }
 
 pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(

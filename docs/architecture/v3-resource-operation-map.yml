@@ -164,7 +164,7 @@ resources:
     forbidden_writers: [V3ProviderResp14Raw, V3Server16HttpFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.provider.responses_wire_payload
     resource_kind: provider_wire
     lifecycle: v3.responses_direct.mainline
@@ -212,7 +212,7 @@ resources:
     forbidden_writers: [V3ProviderResp14Raw, V3Transport13ResponsesHttpRequest]
     may_enter_provider_body: false
     may_enter_client_body: true
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.error.chain
     resource_kind: side_channel
     lifecycle: v3.responses_direct.mainline
@@ -224,7 +224,7 @@ resources:
     forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.debug.artifact
     resource_kind: diagnostic
     lifecycle: v3.responses_direct.mainline
@@ -236,7 +236,7 @@ resources:
     forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload, V3Server16HttpFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.debug.trace_context
     resource_kind: diagnostic
     lifecycle: v3.debug_error_foundation.mainline
@@ -303,7 +303,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3DryRunNoNetworkTerminalEffect
     identity: [fixtureId, serverId, requestId, executionId]
-    allowed_writers: [execute_v3_foundation_dry_run_runtime]
+    allowed_writers: [execute_v3_responses_direct_dry_run_runtime]
     allowed_readers: [V3Server16HttpFrame, developer_diagnostics]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false

@@ -47,13 +47,12 @@ const yaml = (file) => {
   catch (error) { fail(`${file}: YAML parse failed: ${error.message}`); return {}; }
 };
 const array = (value) => Array.isArray(value) ? value : [];
-const p6PendingStepIds = new Set(['v3-rd-09', 'v3-rd-13', 'v3-rd-14']);
-const p6ProviderAnchoredStepIds = new Set(['v3-rd-10', 'v3-rd-11', 'v3-rd-12']);
-const p6PendingResourceIds = new Set([
+const p6AnchoredStepIds = new Set([
+  'v3-rd-09', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14',
+]);
+const p6AnchoredResourceIds = new Set([
   'v3.responses_direct.policy',
   'v3.response.client_payload',
-]);
-const p6ProviderAnchoredResourceIds = new Set([
   'v3.provider.responses_wire_payload',
   'v3.provider.transport_request',
   'v3.response.provider_raw',
@@ -118,11 +117,8 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
   for (const field of ['identity', 'allowed_writers', 'allowed_readers', 'forbidden_writers']) {
     if (!Array.isArray(resource[field]) || resource[field].length === 0) fail(`${where}: missing ${field}`);
   }
-  if (p6PendingResourceIds.has(resource.resource_id) && resource.binding_status !== 'binding_pending') {
-    fail(`${where}: P6 resource must remain binding_pending before implementation source binding`);
-  }
-  if (p6ProviderAnchoredResourceIds.has(resource.resource_id) && resource.binding_status !== 'anchored') {
-    fail(`${where}: Provider slice resource must be anchored after controlled-upstream source binding`);
+  if (p6AnchoredResourceIds.has(resource.resource_id) && resource.binding_status !== 'anchored') {
+    fail(`${where}: P6 resource must be anchored after source binding`);
   }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
@@ -152,27 +148,23 @@ for (const [index, edge] of allEdges.entries()) {
     for (const field of ['caller_file', 'callee_file']) {
       if (edge[field] && !fs.existsSync(abs(edge[field]))) fail(`${where}: missing source ${edge[field]}`);
     }
-  }
-  if (p6PendingStepIds.has(edge.step_id)) {
-    if (edge.status !== 'binding_pending') fail(`${where}: ${edge.step_id} must remain binding_pending`);
-    for (const field of ['caller_file', 'callee_file', 'caller_symbol', 'callee_symbol']) {
-      if (edge[field]) fail(`${where}: ${edge.step_id} binding_pending edge must not invent ${field}`);
+    for (const [symbolField, fileField] of [['caller_symbol', 'caller_file'], ['callee_symbol', 'callee_file']]) {
+      const symbol = String(edge[symbolField] ?? '').split('::').at(-1);
+      if (symbol && edge[fileField] && fs.existsSync(abs(edge[fileField])) && !read(edge[fileField]).includes(symbol)) {
+        fail(`${where}: ${symbolField} ${edge[symbolField]} absent from ${edge[fileField]}`);
+      }
     }
+  }
+  if (p6AnchoredStepIds.has(edge.step_id)) {
+    if (edge.status !== 'anchored') fail(`${where}: ${edge.step_id} must be anchored`);
     if (edge.owner_feature_id !== 'v3.responses_direct_mvp_architecture') {
-      fail(`${where}: ${edge.step_id} must use P6 feature owner`);
-    }
-  }
-  if (p6ProviderAnchoredStepIds.has(edge.step_id)) {
-    if (edge.status !== 'anchored') fail(`${where}: ${edge.step_id} must be anchored by the Provider runtime slice`);
-    for (const field of ['caller_file', 'callee_file', 'caller_symbol', 'callee_symbol']) {
-      if (!edge[field]) fail(`${where}: ${edge.step_id} anchored Provider edge missing ${field}`);
-    }
-    if (edge.owner_feature_id !== 'v3.responses_provider_runtime') {
-      fail(`${where}: ${edge.step_id} must use v3.responses_provider_runtime owner`);
+      if (!['v3.responses_provider_runtime'].includes(edge.owner_feature_id)) {
+        fail(`${where}: ${edge.step_id} must use a P6 feature owner`);
+      }
     }
   }
 }
-for (const stepId of [...p6PendingStepIds, ...p6ProviderAnchoredStepIds]) {
+for (const stepId of p6AnchoredStepIds) {
   if (!allEdges.some((edge) => edge.step_id === stepId)) fail(`mainline: missing P6 edge ${stepId}`);
 }
 

@@ -49,6 +49,24 @@ const fixtures = [
     mutation: '\nfn forbidden_response_repair() {}\n',
     diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
   },
+  {
+    name: 'debug owns business topology',
+    file: 'v3/crates/routecodex-v3-debug/src/lib.rs',
+    mutation: '\nconst FORBIDDEN_DEBUG_TOPOLOGY: &str = "V3ResponsesDirect11Policy";\n',
+    diagnostic: /Debug cannot own or hard-code the Responses Direct business lifecycle topology/,
+  },
+  {
+    name: 'server bypasses Server16 builder',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutation: '\nfn responses_direct_output_response_forbidden(_: V3Resp15ClientPayload) {}\n',
+    diagnostic: /unique V3Resp15 -> V3Server16 builder/,
+  },
+  {
+    name: 'dry run claims pre-provider termination',
+    file: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutation: '\n// "stopped_before_provider_send": true\n',
+    diagnostic: /P6 Dry Run must execute the Provider pipeline/,
+  },
 ];
 
 const failures = [];

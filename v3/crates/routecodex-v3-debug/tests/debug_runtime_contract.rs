@@ -111,8 +111,12 @@ fn dry_run_fixture_registry_tracks_no_network_terminal_effect() {
     runtime.register_dry_run_fixture(fixture).unwrap();
     let plan = runtime.build_dry_run_execution_plan("fixture-a").unwrap();
     assert_eq!(plan.terminal_effect, "no_network_send");
-    assert_eq!(plan.node_ids[0], "V3Server03HttpRequestRaw");
-    assert!(plan.node_ids.contains(&"V3DryRunNoNetworkTerminalEffect"));
+    let serialized = serde_json::to_string(&plan).unwrap();
+    assert!(
+        !serialized.contains("V3Server03HttpRequestRaw")
+            && !serialized.contains("V3ResponsesDirect11Policy"),
+        "Debug may plan a replay but must not own the business lifecycle topology"
+    );
 }
 
 #[test]

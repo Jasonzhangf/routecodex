@@ -3146,3 +3146,13 @@
 - A default-pool floor is not only a cross-route fallback. When a request is already classified as `default`, temporary health cooldown, concurrency busy state, or retry exclusions must not empty all configuration-valid default candidates and project `PROVIDER_NOT_AVAILABLE`/temporary-unavailable errors to the client.
 - Rust Virtual Router selection is the unique owner. If normal availability filtering empties the configured default pool, retain its first configuration-valid candidate and mark `defaultFloorProtected=true`; explicitly disabled/unregistered/capability-invalid candidates remain invalid and must not be revived.
 - Required regression shape: at least two enabled default providers, both in active recoverable cooldown, positive assertion that the first configured candidate is selected, plus negative assertion that an explicitly disabled-only default still fails fast.
+
+# 2026-07-14: V3 P6 Responses Direct MVP is source and local-live verified
+
+- Marker: `routecodex-v3-p6-responses-direct-live-verified-20260714`.
+- Supersedes the earlier Provider-slice-only pending statement: P6 is anchored from `V3Target10ConcreteProviderSelected` through `V3Server16HttpFrame`; `v3-rd-09..14` bind Direct policy, generic Provider wire/transport/raw, Runtime client projection, and Server frame.
+- Dry Run rule: Debug registers fixtures and side-channel artifacts but never hard-codes business topology. Runtime supplies the trace and replaces only Transport13 with a no-network transport. Required truth is `provider_pipeline_executed=true`, `provider_network_send=false`, `stopped_before_network_send=true`.
+- Server response rule: success enters `build_v3_server_16_http_frame_from_v3_resp_15`; Server does not emit directly from Resp15 or default a missing content type.
+- Gates reject Debug-owned topology, Server16 bypass, false pre-Provider Dry Run claims, provider transport outside Provider, route shortcuts, provider identity branches, old Provider nodes, and repair/fallback semantics.
+- Local-live evidence: actual V3 CLI on 45464/45465/45466 plus controlled upstreams 45467/45468 proved JSON, raw SSE, wire model/auth boundary, Target-local 503 reselection without Router re-entry, terminal Error01-06 exhaustion, redacted no-network Dry Run, and snapshot release. Exact Ctrl-C stopped processes; ports 45464-45469 closed.
+- Boundary: relay, continuation, servertool, other protocols, V2 compatibility, global install, production restart, `~/.rcc` mutation, and real provider calls remain outside P6.

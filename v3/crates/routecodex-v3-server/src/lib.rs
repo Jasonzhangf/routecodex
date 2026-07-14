@@ -8,11 +8,11 @@ use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw, execute_v3_foundation_dry_run_runtime,
-    execute_v3_foundation_pending_runtime,
+    build_v3_server_03_http_request_raw, execute_v3_foundation_pending_runtime,
+    execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
     project_v3_debug_failure, register_responses_direct_hooks, V3ClientBody,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3ResponsesDirectRuntimeOutput,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3Resp15ClientPayload,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -37,10 +37,18 @@ pub struct V3ServerStartup01ListenerSetPreflight {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server16HttpFrame {
     pub status: u16,
-    pub body: serde_json::Value,
+    pub content_type: String,
+    pub body: V3Server16Body,
     pub debug_node: &'static str,
     pub error_node: &'static str,
     pub error_chain: Vec<&'static str>,
+    pub node_trace: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum V3Server16Body {
+    Json(serde_json::Value),
+    Bytes(Vec<u8>),
 }
 
 #[derive(Debug)]
@@ -179,8 +187,8 @@ async fn pending_endpoint(
             &state.manifest,
             build_v3_server_03_http_request_raw(
                 state.server.id.clone(),
-                request_id,
-                execution_id,
+                request_id.clone(),
+                execution_id.clone(),
                 method,
                 path,
                 payload,
@@ -189,7 +197,35 @@ async fn pending_endpoint(
             &state.debug,
         )
         .await;
-        responses_direct_output_response(output)
+        let scope = match state
+            .debug
+            .start_trace(&state.server.id, &request_id, &execution_id)
+        {
+            Ok(scope) => scope,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3Debug01TraceContextStarted",
+                    error,
+                ))
+            }
+        };
+        if let Err(error) = state.debug.record_node_event(
+            &scope,
+            "V3Server16HttpFrame",
+            "projected",
+            Some(json!({"status": output.client_payload.status})),
+        ) {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3Server16HttpFrame",
+                error,
+            ));
+        }
+        let frame = build_v3_server_16_http_frame_from_v3_resp_15(
+            output.client_payload,
+            output.node_trace,
+            output.error_chain,
+        );
+        responses_direct_output_response(frame)
     } else {
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
@@ -277,7 +313,7 @@ async fn debug_dry_run(
             V3DebugError::MalformedFixture("response_payload is required".to_string()),
         ));
     };
-    let output = execute_v3_foundation_dry_run_runtime(
+    let output = execute_v3_responses_direct_dry_run_runtime(
         V3DryRunFixture {
             fixture_id,
             server_id: state.server.id.clone(),
@@ -286,8 +322,10 @@ async fn debug_dry_run(
             request_payload,
             response_payload,
         },
+        &state.manifest,
         &state.debug,
-    );
+    )
+    .await;
     foundation_output_response(output)
 }
 
@@ -307,7 +345,7 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
-        .header("content-type", "application/json")
+        .header("content-type", &frame.content_type)
         .header("x-routecodex-v3-debug-node", frame.debug_node);
     if frame.error_chain.is_empty() {
         builder = builder.header("x-routecodex-v3-no-network-send", "true");
@@ -316,37 +354,63 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
             .header("x-routecodex-v3-error-node", frame.error_node)
             .header("x-routecodex-v3-error-chain", frame.error_chain.join(","));
     }
-    builder
-        .body(Body::from(
-            serde_json::to_vec(&frame.body).expect("typed JSON projection"),
-        ))
-        .expect("typed response")
-}
-
-fn responses_direct_output_response(output: V3ResponsesDirectRuntimeOutput) -> Response<Body> {
-    let mut builder = Response::builder()
-        .status(StatusCode::from_u16(output.client_payload.status).expect("typed V3 status"))
-        .header(
-            "content-type",
-            output
-                .client_payload
-                .headers
-                .get("content-type")
-                .map(String::as_str)
-                .unwrap_or("application/json"),
-        )
-        .header("x-routecodex-v3-debug-node", "V3Debug01NodeEventRegistered")
-        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
-    if let Some(chain) = output.error_chain.as_ref() {
-        builder = builder
-            .header("x-routecodex-v3-error-node", "V3Error06ClientProjected")
-            .header("x-routecodex-v3-error-chain", chain.join(","));
-    }
-    let body = match output.client_payload.body {
-        V3ClientBody::Json(value) => serde_json::to_vec(&value).expect("typed JSON projection"),
-        V3ClientBody::Bytes(bytes) => bytes,
+    let body = match frame.body {
+        V3Server16Body::Json(value) => {
+            serde_json::to_vec(&value).expect("V3Server16 JSON projection")
+        }
+        V3Server16Body::Bytes(bytes) => bytes,
     };
     builder.body(Body::from(body)).expect("typed response")
+}
+
+fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body> {
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
+        .header("content-type", &frame.content_type)
+        .header("x-routecodex-v3-debug-node", frame.debug_node)
+        .header("x-routecodex-v3-node-trace", frame.node_trace.join(","));
+    if !frame.error_chain.is_empty() {
+        builder = builder
+            .header("x-routecodex-v3-error-node", frame.error_node)
+            .header("x-routecodex-v3-error-chain", frame.error_chain.join(","));
+    }
+    let body = match frame.body {
+        V3Server16Body::Json(value) => {
+            serde_json::to_vec(&value).expect("V3Server16 JSON projection")
+        }
+        V3Server16Body::Bytes(bytes) => bytes,
+    };
+    builder.body(Body::from(body)).expect("typed response")
+}
+
+pub fn build_v3_server_16_http_frame_from_v3_resp_15(
+    payload: V3Resp15ClientPayload,
+    mut node_trace: Vec<&'static str>,
+    error_chain: Option<Vec<&'static str>>,
+) -> V3Server16HttpFrame {
+    node_trace.push("V3Server16HttpFrame");
+    let content_type = payload
+        .headers
+        .get("content-type")
+        .expect("V3Resp15ClientPayload owns a validated content-type")
+        .clone();
+    let error_chain = error_chain.unwrap_or_default();
+    V3Server16HttpFrame {
+        status: payload.status,
+        content_type,
+        body: match payload.body {
+            V3ClientBody::Json(value) => V3Server16Body::Json(value),
+            V3ClientBody::Bytes(bytes) => V3Server16Body::Bytes(bytes),
+        },
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: if error_chain.is_empty() {
+            "none"
+        } else {
+            "V3Error06ClientProjected"
+        },
+        error_chain,
+        node_trace,
+    }
 }
 
 fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json::Value {
@@ -393,10 +457,12 @@ pub fn build_v3_server_16_http_frame_from_v3_error_06(
 ) -> V3Server16HttpFrame {
     V3Server16HttpFrame {
         status: projected.status,
-        body: projected.body,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(projected.body),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: projected.chain[5],
         error_chain: projected.chain.to_vec(),
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
     }
 }
 
@@ -405,10 +471,12 @@ pub fn build_v3_server_16_http_frame_from_v3_foundation_output(
 ) -> V3Server16HttpFrame {
     V3Server16HttpFrame {
         status: output.status,
-        body: output.body,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(output.body),
         debug_node: output.debug_node,
         error_node: output.error_node,
         error_chain: output.error_chain,
+        node_trace: output.node_trace,
     }
 }
 

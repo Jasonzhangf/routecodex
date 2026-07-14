@@ -10,17 +10,11 @@ This plan implements `feature_id: v3.responses_direct_mvp_architecture`.
 
 ## Implementation Status
 
-P0-P5 are the current verified foundation. The authoritative P5 request path stops at
-`V3Target10ConcreteProviderSelected` before provider send. The first P6 Provider slice now binds
-the generic Rust Responses Provider nodes `12-14` and adjacent edges `10-12` to real source and
-controlled-upstream tests. Direct policy creation, client projection, and Server framing remain
-separate completion boundaries unless their own maps and gates are updated.
-
-Early Responses direct Rust code under `v3/` is not completion evidence by itself. Only source
-symbols that are bound in the maps and covered by current gates may be treated as implemented. The
-generic Provider slice is source-bound through `V3Provider12ResponsesWirePayload`,
-`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`; full `/v1/responses` Server
-usability is still pending.
+P0-P6 are source-bound through `V3Server16HttpFrame`. The authoritative P6 path consumes
+`V3Target10ConcreteProviderSelected`, executes static Direct hooks, traverses the generic Rust
+Responses Provider nodes `12-14`, projects `V3Resp15ClientPayload`, and enters the Server-owned
+`V3Server16HttpFrame`. Final completion requires the full current-tree gates and clean CLI
+controlled-upstream replay; source symbols or prototype tests alone remain insufficient.
 
 ## Acceptance Criteria
 
@@ -309,16 +303,17 @@ After final symbols exist and the required gates pass:
 - No TypeScript V3 MVP source exists.
 - No fallback/repair/sanitize/forced relay exists in Responses direct.
 - No deployment provider ID or provider-specific branch exists in the generic Responses Provider.
-- Every P6 edge `10->11->12->13->14->15->16` and its resource is machine-queryable; unverified
-  edges remain `binding_pending` without caller/callee symbols or source paths.
+- Every P6 edge `10->11->12->13->14->15->16` and its resource is anchored to machine-queryable
+  adjacent source symbols.
 - V3 docs/maps/wiki reflect real symbols and gates.
 - `note.md`, `MEMORY.md`, and MemoryPalace search are updated.
 
 ## General Rust Responses Provider implementation slice
 
-The first P6 implementation slice ends at `V3ProviderResp14Raw`. It replaces the obsolete `07/08/09` Provider
-prototype with the canonical `12/13/14` contracts and leaves the client projection and Server framing nodes
-pending. The Provider wire owner moves the existing request value, changes only the selected upstream `model`,
+The Provider implementation slice ends at `V3ProviderResp14Raw` and replaces the obsolete
+`07/08/09` prototype with canonical `12/13/14` contracts. Runtime client projection and Server
+framing are separate adjacent owners in the same completed P6 chain. The Provider wire owner moves
+the existing request value, changes only the selected upstream `model`,
 and preserves all other standard and extension fields. The transport request carries only an auth handle; the
 secret is resolved at the Reqwest call boundary. JSON bodies remain raw bytes, while SSE uses a validated raw
 event stream whose transport, malformed framing, and client-disconnect failures are explicit typed errors.

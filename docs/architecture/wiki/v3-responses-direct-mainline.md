@@ -38,11 +38,10 @@ flowchart LR
   O15 --> S16[V3Server16HttpFrame]
 ```
 
-P0-P5 are anchored through `V3Target10ConcreteProviderSelected` and stop before Provider send.
-The P6 generic Provider slice source-binds `V3Provider12ResponsesWirePayload`,
-`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw` with controlled-upstream JSON/SSE
-blackbox evidence. `V3ResponsesDirect11Policy`, `V3Resp15ClientPayload`, and
-`V3Server16HttpFrame` remain `binding_pending` for full Server `/v1/responses` usability.
+P0-P5 are anchored through `V3Target10ConcreteProviderSelected`. P6 is source-bound through
+`V3Server16HttpFrame`, including generic Provider JSON/SSE transport, Target-local reselection,
+full exhaustion, and same-kernel Dry Run with only Transport13 replaced by a no-network effect.
+The clean built-CLI controlled-upstream replay is recorded in the P6 local-live evidence section.
 
 ## Ownership review
 
@@ -91,7 +90,7 @@ flowchart TD
   H1 --> H2[V3ProviderAvailabilityProjected]
 ```
 
-P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw capture, transient snapshots, and dry-run fixtures are diagnostic side-channel resources. P4 Error is owned by `routecodex-v3-error`: every error uses adjacent builders from `V3Error01SourceRaised` through `V3Error06ClientProjected`. Provider health is owned by `routecodex-v3-provider-responses`: `V3ProviderHealthStateMutated` stores scoped provider/auth/model state, while `V3ProviderAvailabilityProjected` is read-only for later Target use. `V3DryRunNoNetworkTerminalEffect` is executed by the Runtime foundation kernel and must stop before provider send.
+P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw capture, transient snapshots, and dry-run fixtures are diagnostic side-channel resources. P4 Error is owned by `routecodex-v3-error`: every error uses adjacent builders from `V3Error01SourceRaised` through `V3Error06ClientProjected`. Provider health is owned by `routecodex-v3-provider-responses`: `V3ProviderHealthStateMutated` stores scoped provider/auth/model state, while `V3ProviderAvailabilityProjected` is read-only for later Target use. P6 Dry Run executes the same Runtime topology and substitutes only Transport13 with `V3DryRunNoNetworkTerminalEffect`; Debug records the Runtime-provided node trace and does not own the business topology.
 
 ## Phase checklist
 
@@ -102,8 +101,8 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - [x] P3 global Debug logs/snapshots/dry run.
 - [x] P4 global Error and Provider health boundaries.
 - [x] P5 one-hit Virtual Router and Target Interpreter source binding (runtime verification evidence below).
-- [x] P6 generic Rust Responses Provider wire/transport/raw response slice through node 14.
-- [ ] P6 installed-binary Responses direct JSON/SSE evidence.
+- [x] P6 source-bound Responses Direct lifecycle through Server frame node 16.
+- [x] P6 built CLI Responses direct JSON/SSE/reselection/exhaustion/Dry Run evidence.
 
 ## P2 live evidence
 
@@ -137,12 +136,30 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - The `45455` request hit Router once, expanded one disabled candidate, emitted availability-skip and target-exhausted Debug events, then returned `503 selected_target_exhausted` through the complete six-node Error chain.
 - The exact PTY process received Ctrl-C and both `45454` and `45455` were confirmed closed.
 
-## P6 Provider slice evidence
+## P6 source evidence
 
 - `routecodex-v3-provider-responses` owns the generic Responses wire, transport request, and raw response nodes: `V3Provider12ResponsesWirePayload`, `V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`.
 - Controlled upstream tests prove the same implementation serves distinct provider IDs without provider-specific branches, preserves the full request body except selected `model` mapping, resolves env and token-file auth only at send time, and returns typed JSON/SSE raw responses.
 - Negative coverage proves typed missing-auth, HTTP 401/503, connection failure, malformed SSE, and client-disconnect errors. Source and compile gates reject old 07/08/09 node names, Provider routing/Target imports, Server/CLI Provider transport imports, and non-owner construction of nodes 12/13/14.
-- This evidence stops at Provider raw response. It does not prove installed-binary Server `/v1/responses` live integration, client projection completeness, relay, continuation, or servertool behavior.
+- Runtime static hooks bind Direct policy and client projection; Server exclusively owns
+  `build_v3_server_16_http_frame_from_v3_resp_15` and JSON/SSE emission. Final clean CLI replay is
+  recorded below. Relay, continuation, and servertool remain outside P6.
+
+## P6 local-live evidence
+
+- Actual built `v3/target/debug/routecodex-v3` loaded `v3/fixtures/config.p6.toml` and started
+  `45464` success, `45465` reselection, and `45466` exhaustion listeners in one process.
+- Controlled upstream `45467` captured auth-present `wire-success` JSON and SSE requests while
+  preserving client metadata; JSON returned `P6_LIVE_OK`, and SSE returned equivalent raw event bytes.
+- `45465` first received controlled HTTP 503 from `45468`, traversed Error01-06, reselected inside
+  Target without Router re-entry, then completed through the success upstream.
+- `45466` exhausted controlled 503 plus unreachable candidates and returned HTTP 502 with the
+  complete Error01-06 chain and `target_exhausted=true`.
+- Dry Run traversed the same nodes through Server16, reported `provider_pipeline_executed=true`,
+  `provider_network_send=false`, and `stopped_before_network_send=true`, redacted request/response
+  secrets, returned transient snapshots, and left the shared snapshot registry empty.
+- Explicit Ctrl-C stopped both the V3 server and controlled upstream; socket checks confirmed
+  ports `45464-45469` closed.
 
 ## Forbidden shortcuts
 

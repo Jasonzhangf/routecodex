@@ -99,6 +99,18 @@ if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSour
 if (/route_groups|resolve_default_pool|hit_opaque_target_once|expand_candidates|select_available/.test(serverSource)) {
   fail('Server cannot select routes or interpret targets');
 }
+if (!/build_v3_server_16_http_frame_from_v3_resp_15/.test(serverSource)
+    || /fn\s+\w*responses_direct_output_response\w*\([^)]*V3Resp15ClientPayload/.test(serverSource)) {
+  fail('Server success response must enter the unique V3Resp15 -> V3Server16 builder before HTTP emission');
+}
+if (/unwrap_or\("application\/json"\)/.test(serverSource)) {
+  fail('Server cannot default a missing V3Resp15 content-type during Server16 framing');
+}
+
+const debugSource = files('v3/crates/routecodex-v3-debug/src').map(read).join('\n');
+if (/V3Server03HttpRequestRaw|V3ResponsesDirect11Policy|V3Provider12ResponsesWirePayload|V3Resp15ClientPayload|V3Server16HttpFrame/.test(debugSource)) {
+  fail('Debug cannot own or hard-code the Responses Direct business lifecycle topology');
+}
 
 const errorSource = files('v3/crates/routecodex-v3-error/src').map(read).join('\n');
 if (/V3ProviderHealthStore|apply_error_action|update_quota_state|update_concurrency_state/.test(errorSource)) {
@@ -137,6 +149,21 @@ if (/execute_v3_p5_routing_runtime[\s\S]*run_provider_transport|execute_v3_p5_ro
 }
 if (/ResponsesTransport|execute_v3_responses_direct_runtime_kernel|\.send\(/.test(foundationSource)) {
   fail('P3 Dry Run foundation cannot call Responses Provider transport or P6 Runtime kernel');
+}
+if (/execute_v3_foundation_dry_run_runtime/.test(foundationSource)) {
+  fail('dead foundation Dry Run lifecycle must not coexist with the Runtime-owned P6 Dry Run');
+}
+
+const runtimeKernelSource = read('v3/crates/routecodex-v3-runtime/src/kernel.rs');
+const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*?\n}\n\npub async fn execute_v3_responses_direct_runtime_kernel/)?.[0] ?? '';
+if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)
+    || !/"provider_pipeline_executed": true/.test(dryRunSource)
+    || !/"provider_network_send": false/.test(dryRunSource)
+    || /"stopped_before_provider_send": true/.test(dryRunSource)) {
+  fail('P6 Dry Run must execute the Provider pipeline through an explicit no-network transport without claiming pre-Provider termination');
+}
+if (/"stopped_before_provider_send"\s*:\s*true/.test(runtimeKernelSource)) {
+  fail('P6 Dry Run must execute the Provider pipeline through an explicit no-network transport without claiming pre-Provider termination');
 }
 
 if (failures.length) {

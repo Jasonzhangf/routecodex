@@ -6,8 +6,9 @@ Build the first RouteCodex V3 executable path: Rust server `/v1/responses` -> Ru
 
 This document defines the P6 test contract on top of verified P0-P5. Existing Responses direct
 code is completion evidence only where current maps bind real source symbols and gates prove them.
-The first verified slice is the generic Rust Responses Provider through `V3ProviderResp14Raw`;
-Server live usability and client projection remain separately gated.
+The generic Rust Responses Provider is verified through `V3ProviderResp14Raw`; the full P6 source
+chain is now bound through Runtime client projection and Server framing. Final completion still
+requires the mapped gate stack and clean CLI controlled-upstream replay.
 
 ## Feature scope
 
@@ -165,7 +166,8 @@ P0-P5 evidence proves only:
 
 - Config, Server, Debug, Error/Provider health, Virtual Router, and Target owners are source-bound.
 - The real P5 path reaches `V3Target10ConcreteProviderSelected` and stops before network send.
-- P6 resources and edges remain `binding_pending` even if prototype source or tests exist.
+- P6 resources and edges may be anchored only after their real adjacent symbols, red gates, and
+  controlled-upstream behavior agree.
 
 Before P6 runtime implementation is accepted:
 
@@ -191,6 +193,7 @@ controlled HTTP upstream, all of the following without entering the Server lifec
 - the Provider does not select a route, interpret a Forwarder, project a client response, or mutate health for a
   client disconnect.
 
-This slice may anchor mainline nodes `V3Provider12ResponsesWirePayload`,
-`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`. Nodes 15 and 16 remain `binding_pending` until the
-later Runtime/Server P6 goal supplies its own source and live evidence.
+This Provider-only slice anchors `V3Provider12ResponsesWirePayload`,
+`V3Transport13ResponsesHttpRequest`, and `V3ProviderResp14Raw`. The full P6 goal separately anchors
+`V3ResponsesDirect11Policy`, `V3Resp15ClientPayload`, and `V3Server16HttpFrame` with Runtime/Server
+source, JSON/SSE blackboxes, and final CLI replay evidence.

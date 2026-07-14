@@ -2,7 +2,7 @@ use crate::nodes::{
     build_v3_req_04_standardized_responses_from_v3_server_03, V3Server03HttpRequestRaw,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
+use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
@@ -340,99 +340,6 @@ pub fn execute_v3_foundation_pending_runtime(
             "V3Error04TargetExhaustionDecision",
             "V3Error05ExecutionDecision",
             "V3Error06ClientProjected",
-            "V3Server16HttpFrame",
-        ],
-        stopped_before_provider_send: true,
-    }
-}
-
-pub fn execute_v3_foundation_dry_run_runtime(
-    fixture: V3DryRunFixture,
-    debug: &V3DebugRuntime,
-) -> V3FoundationRuntimeOutput {
-    if let Err(error) = debug.register_dry_run_fixture(fixture.clone()) {
-        return project_v3_debug_failure("V3DryRunFixtureRegistered", error);
-    }
-    let plan = match debug.build_dry_run_execution_plan(&fixture.fixture_id) {
-        Ok(plan) => plan,
-        Err(error) => return project_v3_debug_failure("V3DryRunExecutionPlanned", error),
-    };
-    let request_id = format!("dry-run-{}", fixture.fixture_id);
-    let execution_id = format!("dry-run-exec-{}", fixture.fixture_id);
-    let scope = match debug.start_trace(&fixture.server_id, &request_id, &execution_id) {
-        Ok(scope) => scope,
-        Err(error) => return project_v3_debug_failure("V3Debug01TraceContextStarted", error),
-    };
-    if let Err(error) = debug.capture_raw_request(&scope, fixture.request_payload) {
-        return project_v3_debug_failure("V3Debug02RawRequestCaptured", error);
-    }
-    let session_id = match debug.start_snapshot_session(&scope, "dry-run") {
-        Ok(session_id) => session_id,
-        Err(error) => return project_v3_debug_failure("V3SnapshotSessionStarted", error),
-    };
-    for node_id in &plan.node_ids {
-        if let Err(error) = debug.record_node_event(
-            &scope,
-            *node_id,
-            "dry_run",
-            Some(json!({"terminal_effect": plan.terminal_effect})),
-        ) {
-            let _ = debug.release_snapshot_session(&scope, &session_id);
-            return project_v3_debug_failure("V3Debug01NodeEventRegistered", error);
-        }
-        if let Err(error) = debug.record_snapshot(
-            &scope,
-            &session_id,
-            *node_id,
-            json!({"node_id": node_id, "dry_run": true}),
-        ) {
-            let _ = debug.release_snapshot_session(&scope, &session_id);
-            return project_v3_debug_failure("V3SnapshotNodeCaptured", error);
-        }
-    }
-    let response_payload = debug.redact_projection(fixture.response_payload.clone());
-    if let Err(error) = debug.capture_raw_response(&scope, fixture.response_payload) {
-        let _ = debug.release_snapshot_session(&scope, &session_id);
-        return project_v3_debug_failure("V3Debug03RawResponseCaptured", error);
-    }
-    let transient_snapshots = match debug.snapshots() {
-        Ok(snapshots) => snapshots
-            .into_iter()
-            .filter(|snapshot| snapshot.session_id == session_id)
-            .collect::<Vec<_>>(),
-        Err(error) => {
-            let _ = debug.release_snapshot_session(&scope, &session_id);
-            return project_v3_debug_failure("V3SnapshotProjectionRead", error);
-        }
-    };
-    if let Err(error) = debug.release_snapshot_session(&scope, &session_id) {
-        return project_v3_debug_failure("V3SnapshotSessionReleased", error);
-    }
-    let body = json!({
-        "dry_run": {
-            "fixture_id": fixture.fixture_id,
-            "server_id": fixture.server_id,
-            "method": fixture.method,
-            "path": fixture.path,
-            "terminal_effect": plan.terminal_effect,
-            "stopped_before_provider_send": true,
-            "node_ids": plan.node_ids,
-            "snapshots": transient_snapshots,
-            "response_payload": response_payload
-        }
-    });
-    V3FoundationRuntimeOutput {
-        status: 200,
-        body,
-        debug_node: "V3DryRunNoNetworkTerminalEffect",
-        error_node: "none",
-        error_chain: vec![],
-        node_trace: vec![
-            "V3Server03HttpRequestRaw",
-            "V3Debug01TraceContextStarted",
-            "V3Debug02RawRequestCaptured",
-            "V3DryRunNoNetworkTerminalEffect",
-            "V3Debug03RawResponseCaptured",
             "V3Server16HttpFrame",
         ],
         stopped_before_provider_send: true,

@@ -363,6 +363,10 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    assert!(response.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .ends_with("V3Resp15ClientPayload,V3Server16HttpFrame"));
     assert_eq!(
         response.headers()["content-type"].to_str().unwrap(),
         "application/json"
@@ -425,6 +429,10 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    assert!(response.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .ends_with("V3Resp15ClientPayload,V3Server16HttpFrame"));
     assert_eq!(
         response.headers()["content-type"].to_str().unwrap(),
         "text/event-stream"
@@ -607,8 +615,8 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
             "fixture_id": "server-dry-run",
             "method": "POST",
             "path": "/v1/responses",
-            "request_payload": {"input": "fixed"},
-            "response_payload": {"id": "fixed-response"}
+            "request_payload": {"input": "fixed", "authorization": "Bearer dry-run-request-secret"},
+            "response_payload": {"id": "fixed-response", "api_key": "dry-run-response-secret"}
         }))
         .send()
         .await
@@ -617,7 +625,40 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .await
         .unwrap();
     assert_eq!(dry_run["dry_run"]["terminal_effect"], "no_network_send");
-    assert_eq!(dry_run["dry_run"]["stopped_before_provider_send"], true);
+    assert_eq!(dry_run["dry_run"]["provider_pipeline_executed"], true);
+    assert_eq!(dry_run["dry_run"]["provider_network_send"], false);
+    assert_eq!(dry_run["dry_run"]["stopped_before_network_send"], true);
+    assert!(
+        dry_run["dry_run"].get("stopped_before_provider_send").is_none(),
+        "a replay that executes Provider12/Transport13 cannot claim it stopped before provider send"
+    );
+    assert_eq!(
+        dry_run["dry_run"]["response_payload"]["id"],
+        "fixed-response"
+    );
+    let serialized_dry_run = serde_json::to_string(&dry_run).unwrap();
+    assert!(!serialized_dry_run.contains("dry-run-request-secret"));
+    assert!(!serialized_dry_run.contains("dry-run-response-secret"));
+    let node_ids = dry_run["dry_run"]["node_ids"].as_array().unwrap();
+    for node in [
+        "V3Server03HttpRequestRaw",
+        "V3Req04StandardizedResponses",
+        "V3Router05RequestClassified",
+        "V3Router06RoutePoolResolved",
+        "V3Router07OpaqueTargetHitOnce",
+        "V3Target08KindClassified",
+        "V3Target09CandidateSetExpanded",
+        "V3Target10ConcreteProviderSelected",
+        "V3ResponsesDirect11Policy",
+        "V3Provider12ResponsesWirePayload",
+        "V3Transport13ResponsesHttpRequest",
+        "V3DryRunNoNetworkTerminalEffect",
+        "V3ProviderResp14Raw",
+        "V3Resp15ClientPayload",
+        "V3Server16HttpFrame",
+    ] {
+        assert!(node_ids.iter().any(|value| value == node), "{node}");
+    }
     assert!(
         !dry_run["dry_run"]["snapshots"]
             .as_array()
