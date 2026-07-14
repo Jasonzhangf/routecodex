@@ -23,6 +23,14 @@ use super::utils::{
     is_synthetic_routecodex_tool_call_id, MediaBlock,
 };
 
+pub(crate) struct BridgeInputToChatBorrowedInput<'a> {
+    pub input: &'a [Value],
+    pub tool_result_fallback_text: Option<String>,
+    pub normalize_function_name: Option<String>,
+    pub allow_pending_terminal_tool_call: Option<bool>,
+    pub allow_orphan_tool_result: Option<bool>,
+}
+
 #[derive(Clone)]
 struct DeferredToolResult {
     call_id: String,
@@ -340,7 +348,16 @@ fn process_message_blocks(
     let mut media_blocks: Vec<MediaBlock> = Vec::new();
     let mut ordered_content_blocks: Vec<Value> = Vec::new();
 
-    let entries = blocks.as_array().cloned().unwrap_or_default();
+    let Some(entries) = blocks.as_array() else {
+        return Ok(ProcessBlocksResult {
+            text: None,
+            media_blocks,
+            ordered_content_blocks,
+            tool_calls,
+            tool_messages,
+            reasoning_segments,
+        });
+    };
     for block in entries {
         let Some(block_obj) = block.as_object() else {
             continue;
@@ -604,6 +621,18 @@ fn process_message_blocks(
 pub(crate) fn convert_bridge_input_to_chat_messages(
     input: BridgeInputToChatInput,
 ) -> Result<BridgeInputToChatOutput, String> {
+    convert_bridge_input_to_chat_messages_borrowed(BridgeInputToChatBorrowedInput {
+        input: input.input.as_slice(),
+        tool_result_fallback_text: input.tool_result_fallback_text,
+        normalize_function_name: input.normalize_function_name,
+        allow_pending_terminal_tool_call: input.allow_pending_terminal_tool_call,
+        allow_orphan_tool_result: input.allow_orphan_tool_result,
+    })
+}
+
+pub(crate) fn convert_bridge_input_to_chat_messages_borrowed(
+    input: BridgeInputToChatBorrowedInput<'_>,
+) -> Result<BridgeInputToChatOutput, String> {
     let mut messages: Vec<Value> = Vec::new();
     if input.input.is_empty() {
         return Ok(BridgeInputToChatOutput { messages });
@@ -634,14 +663,9 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             .to_ascii_lowercase();
         if let Some(Value::String(content)) = entry_obj.get("content") {
             let _ = content;
-            let tool_calls = entry_obj
-                .get("tool_calls")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            if !tool_calls.is_empty() {
+            if let Some(tool_calls) = entry_obj.get("tool_calls").and_then(Value::as_array) {
                 for call in tool_calls {
-                    let Value::Object(call_obj) = call else {
+                    let Some(call_obj) = call.as_object() else {
                         continue;
                     };
                     if let Some(call_id) = read_trimmed_string(call_obj.get("call_id"))
@@ -666,7 +690,7 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
         }
     }
 
-    for (entry_index, entry) in input.input.into_iter().enumerate() {
+    for (entry_index, entry) in input.input.iter().enumerate() {
         let Some(entry_obj) = entry.as_object() else {
             continue;
         };
@@ -690,8 +714,12 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             .and_then(Value::as_str)
             .map(|role| coerce_bridge_role(Some(role)))
             .unwrap_or_else(|| "user".to_string());
-        let original_content = entry_obj.get("content").cloned().unwrap_or(Value::Null);
-        if role_hint == "user" && is_stopless_cli_result_content(&original_content) {
+        if role_hint == "user"
+            && entry_obj
+                .get("content")
+                .map(is_stopless_cli_result_content)
+                .unwrap_or(false)
+        {
             continue;
         }
         if role_hint != "system" {
@@ -768,17 +796,13 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
         }
 
         if let Some(Value::String(content)) = entry_obj.get("content") {
-            let tool_calls = entry_obj
-                .get("tool_calls")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            if !tool_calls.is_empty() {
+            if let Some(tool_calls) = entry_obj.get("tool_calls").and_then(Value::as_array) {
                 let mut normalized_calls: Vec<Value> = Vec::new();
                 for call in tool_calls {
-                    let Value::Object(mut call_obj) = call else {
+                    let Some(raw_call_obj) = call.as_object() else {
                         continue;
                     };
+                    let mut call_obj = raw_call_obj.clone();
                     let func = call_obj.get_mut("function").and_then(Value::as_object_mut);
                     let Some(func_obj) = func else {
                         continue;

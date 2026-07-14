@@ -9,7 +9,10 @@ pub(crate) mod pipeline;
 mod reasoning;
 mod tool_ids;
 pub(crate) mod utils;
-pub(crate) use bridge_input::convert_bridge_input_to_chat_messages;
+pub(crate) use bridge_input::{
+    convert_bridge_input_to_chat_messages, convert_bridge_input_to_chat_messages_borrowed,
+    BridgeInputToChatBorrowedInput,
+};
 pub(crate) use history::build_bridge_history;
 pub(crate) use reasoning::normalize_reasoning_in_chat_payload;
 pub(crate) use types::BridgeInputToChatInput;

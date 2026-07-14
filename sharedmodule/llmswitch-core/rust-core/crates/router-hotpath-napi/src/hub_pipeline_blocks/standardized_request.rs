@@ -1,4 +1,6 @@
-use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
+use crate::hub_bridge_actions::{
+    convert_bridge_input_to_chat_messages_borrowed, BridgeInputToChatBorrowedInput,
+};
 use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
@@ -14,18 +16,34 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
         .get("payload")
         .cloned()
         .ok_or_else(|| "payload must be object".to_string())?;
-    let raw_payload = raw_payload
+    let normalized = row
+        .get("normalized")
+        .cloned()
+        .ok_or_else(|| "normalized must be object".to_string())?;
+    coerce_standardized_request_from_owned_parts(raw_payload, normalized)
+}
+
+pub(crate) fn coerce_standardized_request_from_owned_parts(
+    raw_payload_value: Value,
+    normalized_value: Value,
+) -> Result<Value, String> {
+    coerce_standardized_request_from_borrowed_parts(&raw_payload_value, normalized_value)
+}
+
+pub(crate) fn coerce_standardized_request_from_borrowed_parts(
+    raw_payload_value: &Value,
+    normalized_value: Value,
+) -> Result<Value, String> {
+    let raw_payload = raw_payload_value
         .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;
     let normalized_payload_value =
-        normalize_chat_envelope_tool_calls(&Value::Object(raw_payload.clone()))
-            .map_err(|err| err.to_string())?;
+        normalize_chat_envelope_tool_calls(raw_payload_value).map_err(|err| err.to_string())?;
     let payload = normalized_payload_value
         .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;
-    let normalized = row
-        .get("normalized")
-        .and_then(|v| v.as_object())
+    let normalized = normalized_value
+        .as_object()
         .ok_or_else(|| "normalized must be object".to_string())?;
 
     let metadata_from_normalized = normalized
@@ -61,19 +79,19 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
                 normalize_responses_input_items(payload).unwrap_or_else(|| input_items.clone());
             let allow_output_only_resume_tool_result =
                 is_output_only_resume_tool_result(payload, normalized_input_items.as_slice());
-            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-                input: drop_stale_orphan_responses_tool_outputs(payload, normalized_input_items),
-                tools: tools.clone(),
+            let normalized_input_items =
+                drop_stale_orphan_responses_tool_outputs(payload, normalized_input_items);
+            convert_bridge_input_to_chat_messages_borrowed(BridgeInputToChatBorrowedInput {
+                input: normalized_input_items.as_slice(),
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
                 allow_orphan_tool_result: Some(allow_output_only_resume_tool_result),
             })?
             .messages
-        } else if let Some(input_items) = submit_tool_outputs_input.clone() {
-            convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-                input: input_items,
-                tools: tools.clone(),
+        } else if let Some(input_items) = submit_tool_outputs_input.as_ref() {
+            convert_bridge_input_to_chat_messages_borrowed(BridgeInputToChatBorrowedInput {
+                input: input_items.as_slice(),
                 tool_result_fallback_text: None,
                 normalize_function_name: Some("responses".to_string()),
                 allow_pending_terminal_tool_call: Some(true),
@@ -766,6 +784,58 @@ mod tests {
             normalized["function"]["parameters"]["required"],
             json!(["path"])
         );
+    }
+
+    #[test]
+    fn request_payload_copy_budget_owned_standardizer_matches_wrapper_path() {
+        let payload = json!({
+            "model": "gpt-test",
+            "input": [
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hello" }] }
+            ],
+            "tools": [{
+                "type": "function",
+                "name": "read_file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    }
+                }
+            }],
+            "metadata": {
+                "trace": "inline"
+            }
+        });
+        let normalized = json!({
+            "id": "req_copy_budget",
+            "entryEndpoint": "/v1/responses",
+            "stream": false,
+            "processMode": "chat",
+            "metadata": {
+                "runtime_control": {
+                    "stopless": { "enabled": true }
+                }
+            }
+        });
+        let wrapper = json!({
+            "payload": payload,
+            "normalized": normalized
+        });
+        let wrapper_output = coerce_standardized_request_from_payload(&wrapper).unwrap();
+        let owned_output = coerce_standardized_request_from_owned_parts(
+            wrapper.get("payload").unwrap().clone(),
+            wrapper.get("normalized").unwrap().clone(),
+        )
+        .unwrap();
+        let borrowed_output = coerce_standardized_request_from_borrowed_parts(
+            wrapper.get("payload").unwrap(),
+            wrapper.get("normalized").unwrap().clone(),
+        )
+        .unwrap();
+
+        assert_eq!(owned_output, wrapper_output);
+        assert_eq!(borrowed_output, wrapper_output);
     }
 
     #[test]

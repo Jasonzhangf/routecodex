@@ -1,6 +1,7 @@
 // feature_id: hub.req_inbound_responses_context_capture
-use crate::hub_bridge_actions::convert_bridge_input_to_chat_messages;
-use crate::hub_bridge_actions::BridgeInputToChatInput;
+use crate::hub_bridge_actions::{
+    convert_bridge_input_to_chat_messages_borrowed, BridgeInputToChatBorrowedInput,
+};
 use crate::hub_req_inbound_tool_call_normalization::normalize_apply_patch_output_text;
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
@@ -59,21 +60,23 @@ fn normalize_non_empty(value: Option<String>) -> Option<String> {
 }
 
 fn normalize_captured_responses_context(
-    input: Vec<Value>,
-    tools: Option<Vec<Value>>,
+    input: &[Value],
+    tools: Option<&[Value]>,
     allow_orphan_tool_result: bool,
 ) -> Result<(Vec<Value>, Option<Vec<Value>>), String> {
-    let mut tools_value = tools.clone().map(Value::Array).unwrap_or(Value::Null);
+    let mut tools_value = tools
+        .map(|tools| Value::Array(tools.iter().cloned().collect()))
+        .unwrap_or(Value::Null);
     filter_namespace_mcp_aggregator_tool_definitions(&mut tools_value);
     let normalized_tools = tools_value.as_array().cloned();
-    let converted = convert_bridge_input_to_chat_messages(BridgeInputToChatInput {
-        input,
-        tools: normalized_tools.clone(),
-        tool_result_fallback_text: Some(String::new()),
-        normalize_function_name: Some("responses".to_string()),
-        allow_pending_terminal_tool_call: Some(true),
-        allow_orphan_tool_result: Some(allow_orphan_tool_result),
-    })?;
+    let converted =
+        convert_bridge_input_to_chat_messages_borrowed(BridgeInputToChatBorrowedInput {
+            input,
+            tool_result_fallback_text: Some(String::new()),
+            normalize_function_name: Some("responses".to_string()),
+            allow_pending_terminal_tool_call: Some(true),
+            allow_orphan_tool_result: Some(allow_orphan_tool_result),
+        })?;
     let messages = normalize_tool_session_messages(converted.messages);
     Ok((messages, normalized_tools))
 }
@@ -1217,12 +1220,17 @@ fn has_responses_submit_tool_outputs(raw_request_row: &Map<String, Value>) -> bo
 pub fn capture_req_inbound_responses_context_snapshot(
     input: ResponsesContextCaptureInput,
 ) -> Result<Value, String> {
-    let mut normalized_request = input.raw_request.clone();
+    let ResponsesContextCaptureInput {
+        raw_request,
+        request_id,
+        tool_call_id_style,
+    } = input;
+    let captured = collect_tool_outputs(&raw_request);
+    let mut normalized_request = raw_request;
     normalize_shell_like_tool_calls_before_governance(&mut normalized_request)
         .map_err(|error| error.to_string())?;
     let raw_request_row = normalized_request
         .as_object()
-        .cloned()
         .ok_or_else(|| "Responses payload must be an object".to_string())?;
     let has_messages = raw_request_row
         .get("messages")
@@ -1240,7 +1248,7 @@ pub fn capture_req_inbound_responses_context_snapshot(
     }
 
     let mut context = Map::new();
-    if let Some(request_id) = normalize_non_empty(input.request_id) {
+    if let Some(request_id) = normalize_non_empty(request_id) {
         context.insert("requestId".to_string(), Value::String(request_id));
     }
 
@@ -1250,8 +1258,8 @@ pub fn capture_req_inbound_responses_context_snapshot(
         .cloned();
     if let Some(input_array) = normalized_input {
         let (normalized_messages, normalized_tools) = normalize_captured_responses_context(
-            input_array.clone(),
-            raw_tools.clone(),
+            input_array.as_slice(),
+            raw_tools.as_deref(),
             is_submit_tool_outputs_resume,
         )?;
         context.insert("input".to_string(), Value::Array(input_array));
@@ -1338,7 +1346,7 @@ pub fn capture_req_inbound_responses_context_snapshot(
         }
     }
 
-    let style_value = input.tool_call_id_style.as_ref().unwrap_or(&Value::Null);
+    let style_value = tool_call_id_style.as_ref().unwrap_or(&Value::Null);
     if let Some(style) = normalize_tool_call_id_style_candidate(style_value) {
         context.insert("toolCallIdStyle".to_string(), Value::String(style.clone()));
         let metadata_value = context
@@ -1352,7 +1360,6 @@ pub fn capture_req_inbound_responses_context_snapshot(
         }
     }
 
-    let captured = collect_tool_outputs(&input.raw_request);
     if !captured.is_empty() {
         let serialized =
             serde_json::to_value(captured).unwrap_or_else(|_| Value::Array(Vec::new()));
