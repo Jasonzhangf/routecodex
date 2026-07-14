@@ -186,6 +186,7 @@
     "verify:v3-rust-only": "node scripts/architecture/verify-v3-rust-only.mjs",
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",
     "test:v3-source-gate-red-fixtures": "node scripts/tests/v3-source-gate-red-fixtures.mjs",
+    "test:v3-hub-skeleton-doc-red-fixtures": "node scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs",
     "verify:v3-static-hook-registry": "node scripts/architecture/verify-v3-static-hook-registry.mjs",
     "verify:v3-resource-map": "node scripts/architecture/verify-v3-resource-map.mjs",
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",

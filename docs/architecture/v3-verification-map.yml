@@ -1,7 +1,51 @@
 version: 2
-status: p0_p5_source_and_live_verified
-scope: routecodex-v3-foundation-p0-p5
+status: p6_source_and_local_live_verified_hub_v1_contract_defined
+scope: routecodex-v3-p0-p6-plus-hub-v1-contract
 features:
+  - feature_id: v3.hub_pipeline_static_skeleton
+    status: contract_defined_binding_pending
+    change_risk: critical
+    owner_kind: rust_project_v3
+    owner_scope: "Fixed Rust Hub v1 request/response skeleton, static hook registry, four independent branch axes, continuation immutable interval, and P6 migration/deletion contract"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-server
+    design:
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-existing-hub-provider-path-audit.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md
+    test_design:
+      - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
+    required_contract:
+      - one fixed request chain and one fixed response chain
+      - entry protocol continuation ownership execution mode and provider wire protocol are independent typed axes
+      - routed and pinned target resolution merge into one typed target node
+      - local context save and restore are owned only by response and request Chat Process boundaries
+      - immutable interval permits only round-trip-equivalent normalization scope validation storage transport expiry and release
+      - static Rust hook slots exist for every adjacent node and missing hooks fail explicitly
+      - Config publishes declarations and capabilities but never a request-specific branch decision
+      - P6 remains frozen until Hub v1 Direct equivalence cutover then is physically deleted
+      - Relay and new protocols fill hooks without changing or renumbering the skeleton
+      - servertool followup Dry Run JSON SSE retry and Error paths use existing hook slots and the sole response exit
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-hub-skeleton-doc-red-fixtures
+    completion_rule:
+      source: "Current phase is complete only when design, maps, Wiki, and gates agree while all Hub v1 runtime bindings remain honestly pending."
+      runtime: "No runtime completion claim is allowed until typed nodes, static registry, P6 hook migration, sole-entry cutover, old-chain deletion, workspace tests, and actual CLI controlled-upstream replay pass."
+      forbidden_claim: "Contract-defined Hub v1 is not an implemented Hub Pipeline, Relay, continuation, or provider protocol."
+
   - feature_id: v3.foundation_p0_p2
     change_risk: high
     owner_kind: rust_project_v3

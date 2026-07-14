@@ -24,6 +24,12 @@ independent lifecycles.
 10. Debug is one side-channel system. Debug data never becomes request, provider, or client payload truth.
 11. There is no fallback, silent repair, success wrapping, or alternative execution path.
 12. V3 runtime semantics are Rust-only. TypeScript is outside the V3 MVP.
+13. The final Hub Pipeline uses one fixed request/response topology. Direct, Relay, continuation
+    ownership, target resolution, and provider protocol are typed static-hook branches, not separate
+    lifecycles or provider-family conditions.
+14. Local continuation context is immutable from response Chat Process save until the next request
+    Chat Process restore. Only round-trip-equivalent normalization, scope validation,
+    storage/transport, expiry, and release are allowed in that interval.
 
 ## Authoritative modules
 
@@ -151,6 +157,12 @@ Response: Provider Raw Input -> Response Normalize -> Chat Logic / Tool Governan
 ```
 
 Provider adapters and protocol compatibility belong to these pipeline/provider nodes; they cannot form separate complete lifecycles. Responses direct is the first registered flow. Relay is added only as later static hooks inside the same runtime skeleton.
+
+The final topology and migration contract are defined in
+[`v3-hub-pipeline-static-skeleton-contract.md`](v3-hub-pipeline-static-skeleton-contract.md). The
+current P6 Direct chain is frozen as the migration source; Relay, continuation, and new protocols
+must not extend it. Hub v1 will absorb P6 behavior through static hooks, become the sole Server
+entry, and then require physical deletion of the old lifecycle.
 
 ## Completion language
 

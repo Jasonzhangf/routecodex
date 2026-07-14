@@ -80,7 +80,8 @@ Exit: route hit count stays one across failures; nested selection is determinist
 ### P6 — Responses direct Pipeline and Provider
 
 1. Normalize generic Responses input.
-2. Register a typed first-slice Chat Logic/Tool Governance hook.
+2. Register the P6 Direct policy and protocol hooks without claiming Request/Response Chat Process;
+   the complete Chat Process nodes belong to the Hub v1 migration in P7.
 3. Build provider wire from canonical model ID/base URL; resolve secret only at transport.
 4. Send JSON/SSE and capture raw response/source error.
 5. Normalize/provider-project the client Responses output.
@@ -90,9 +91,19 @@ Exit: route hit count stays one across failures; nested selection is determinist
 
 Exit: exact JSON/SSE blackboxes, one-VR-hit failure fixture, same-kernel dry run, installed-binary multi-port start, and a real `/v1/responses` call pass. Only then is Responses direct MVP usable.
 
-### P7 — Later protocols and relay
+### P7 — Fixed Hub v1 skeleton before Relay
 
-Add generic Anthropic, generic Gemini, OpenAI Chat, then relay/continuation/servertool. Each is a static hook set in the same Runtime lifecycle and requires separate maps, test design, positive/negative fixtures, and live evidence.
+P6 Direct is a verified migration source, not the final Hub topology. Before any Relay,
+continuation, or additional protocol implementation, execute H0-H3 from
+[`v3-hub-pipeline-static-skeleton-implementation-plan.md`](v3-hub-pipeline-static-skeleton-implementation-plan.md):
+
+1. lock the fixed request/response graph, four independent branch axes, static hook registry, and
+   continuation immutable interval;
+2. implement the typed skeleton with explicit pending hooks;
+3. migrate P6 Responses Direct behind Hub v1 hooks and cut the Server endpoint to the sole Hub entry;
+4. physically delete the old P6 lifecycle after equivalent controlled-upstream evidence;
+5. only then fill remote continuation, local continuation/Relay, generic Anthropic, generic Gemini,
+   and OpenAI Chat hooks without changing or renumbering the skeleton.
 
 ## Immediate work queue
 

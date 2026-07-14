@@ -3156,3 +3156,12 @@
 - Gates reject Debug-owned topology, Server16 bypass, false pre-Provider Dry Run claims, provider transport outside Provider, route shortcuts, provider identity branches, old Provider nodes, and repair/fallback semantics.
 - Local-live evidence: actual V3 CLI on 45464/45465/45466 plus controlled upstreams 45467/45468 proved JSON, raw SSE, wire model/auth boundary, Target-local 503 reselection without Router re-entry, terminal Error01-06 exhaustion, redacted no-network Dry Run, and snapshot release. Exact Ctrl-C stopped processes; ports 45464-45469 closed.
 - Boundary: relay, continuation, servertool, other protocols, V2 compatibility, global install, production restart, `~/.rcc` mutation, and real provider calls remain outside P6.
+
+# 2026-07-14: V3 Hub v1 must replace P6 Direct before Relay
+
+- Marker: `routecodex-v3-hub-v1-static-skeleton-contract-20260714`.
+- P6 Direct is a verified migration source but not the final Hub Pipeline because it lacks request/response Chat Process, continuation ownership, execution mode, routed/pinned target merge, and a fixed sole response exit.
+- Published P6 node numbering cannot accept inserted stages. Build a new Hub v1 chain version, freeze P6 against feature growth, migrate P6 behavior behind static Rust hooks, cut Server to Hub v1 only, then physically delete the old lifecycle. Permanent dual paths and fallback are forbidden.
+- Hub branching has four independent axes: entry protocol, continuation ownership, execution mode, and provider wire protocol. Same protocol does not imply Direct; Responses does not imply remote continuation; provider family/model prefix cannot select a Hub branch.
+- Non-GPT Responses providers may use RouteCodex-local continuation. Local context is immutable from response Chat Process save through next request Chat Process restore; only round-trip-equivalent normalization, scope validation, storage/transport, expiry, and release are allowed.
+- Contract/maps/gates are defined only; all Hub v1 edges/resources remain `binding_pending`. No Hub v1 runtime, Relay, continuation, or additional provider protocol implementation is claimed.

@@ -30537,3 +30537,10 @@ Pure Rust NAPI candidates:
 - Unique fix: the Rust Virtual Router selection owner now retains the first configuration-valid default candidate whenever standard availability filtering empties the default pool, independent of the requested route and retry exclusions, and marks the selection `defaultFloorProtected=true`.
 - Red/green: a two-provider active-cooldown test failed with `VIRTUAL_ROUTER_ERROR:HTTP_429` before the fix and passed after it. Existing singleton exclusion and explicitly disabled-provider fail-fast tests remain green.
 - Boundary: no provider config, client error mapper, TS retry policy, fallback chain, `/v3`, install, or live restart was changed.
+
+# 2026-07-14T14:00Z: V3 Hub v1 static skeleton contract and existing-path audit
+
+- Audited existing Rust HubPipeline engine, Server router/provider-direct paths, RequestExecutor, Responses Provider transport, and continuation store/bridge ownership.
+- Locked a new Hub v1 request/response chain because P6 published numbering cannot accept missing Chat Process/continuation/execution stages.
+- Defined four independent axes, routed/pinned target merge, static Rust hook slots, Config declaration-only capability/hook references, local continuation immutable interval, and P6 freeze/migrate/cutover/delete order.
+- Added V3 resources/mainline/verification/wiki, architecture checks, and five negative contract mutations. All new Hub v1 bindings remain pending; no runtime/provider/config/live mutation was made.

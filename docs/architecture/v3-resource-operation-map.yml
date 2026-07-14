@@ -1,6 +1,6 @@
 version: 2
-status: p0_p5_source_and_live_verified
-scope: routecodex-v3-foundation-p0-p5
+status: p6_source_and_local_live_verified_hub_v1_contract_defined
+scope: routecodex-v3-p0-p6-plus-hub-v1-contract
 owner_feature_id: v3.foundation_p0_p2
 canonical_docs:
   - docs/design/v3-system-definition.md
@@ -8,6 +8,9 @@ canonical_docs:
   - docs/design/v3-routecodex-runtime-resource-contract.md
   - docs/goals/v3-foundation-implementation-order.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
+  - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+  - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
+  - docs/design/v3-existing-hub-provider-path-audit.md
 resources:
   - resource_id: v3.config.file_source
     resource_kind: config_authoring
@@ -309,6 +312,150 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.hub.entry_protocol
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqInbound02Normalized
+    identity: [requestId, entryEndpoint, protocol]
+    allowed_writers: [V3HubReqInbound02Normalized]
+    allowed_readers: [V3HubReqContinuation03Classified, V3HubRespOutbound05ClientSemantic]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.config.hub_pipeline_declarations
+    resource_kind: config_contract
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config04ResourceRegistryBuilt
+    identity: [skeletonVersion, pipelineId, hookSetId, protocolId, capabilityId]
+    allowed_writers: [V3ConfigStore, V3Config04ResourceRegistryBuilt]
+    allowed_readers: [V3Config05ManifestPublished, V3HubStaticHookRegistryCompiler, V3HubRuntimeKernel]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, dynamic_loader]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.continuation_ownership
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqContinuation03Classified
+    identity: [requestId, ownerKind, scopeId]
+    allowed_writers: [V3HubReqContinuation03Classified, V3HubRespContinuation04Committed]
+    allowed_readers: [V3HubReqChatProcess04Governed, V3HubReqExecution05Planned, V3HubReqTarget06Resolved]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubRespOutbound05ClientSemantic]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.execution_plan
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqExecution05Planned
+    identity: [requestId, executionMode, targetResolutionMode]
+    allowed_writers: [V3HubReqExecution05Planned]
+    allowed_readers: [V3HubReqTarget06Resolved, V3HubReqOutbound07ProviderSemantic, V3HubRespChatProcess03Governed]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.resolved_target
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-target
+    owner_node: V3HubReqTarget06Resolved
+    identity: [requestId, providerId, modelId, authHandleId]
+    allowed_writers: [V3HubReqTarget06Resolved]
+    allowed_readers: [V3HubReqOutbound07ProviderSemantic, V3ProviderReqOutbound08WirePayload]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.provider_protocol
+    resource_kind: side_channel
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqOutbound07ProviderSemantic
+    identity: [requestId, providerProtocol, hookSetId]
+    allowed_writers: [V3HubReqOutbound07ProviderSemantic]
+    allowed_readers: [V3ProviderReqOutbound08WirePayload, V3HubRespInbound02Normalized]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, provider_family_classifier]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.request.provider_semantic
+    resource_kind: normal_payload
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqOutbound07ProviderSemantic
+    identity: [requestId, providerId, modelId, providerProtocol]
+    allowed_writers: [V3HubReqOutbound07ProviderSemantic]
+    allowed_readers: [V3ProviderReqOutbound08WirePayload]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.provider_wire_payload
+    resource_kind: provider_wire
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ProviderReqOutbound08WirePayload
+    identity: [requestId, providerProtocol, providerId, modelId]
+    allowed_writers: [V3ProviderReqOutbound08WirePayload]
+    allowed_readers: [V3ProviderReqOutbound09TransportRequest]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.response_semantic
+    resource_kind: normal_payload
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespInbound02Normalized
+    identity: [requestId, providerProtocol, entryProtocol]
+    allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
+    allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespContinuation04Committed, V3HubRespOutbound05ClientSemantic]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.continuation.remote_binding
+    resource_kind: side_channel
+    lifecycle: v3.responses_continuation.remote
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespContinuation04Committed
+    identity: [remoteResponseId, entryProtocol, serverId, port, routingGroup, sessionId, conversationId, providerId, modelId, authHandleId]
+    allowed_writers: [V3HubRespContinuation04Committed]
+    allowed_readers: [V3HubReqContinuation03Classified, V3HubReqTarget06Resolved]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubReqChatProcess04Governed]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.continuation.local_context_truth
+    resource_kind: side_channel
+    lifecycle: v3.responses_continuation.local_immutable_interval
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubRespContinuation04Committed
+    identity: [contextId, entryProtocol, serverId, port, routingGroup, sessionId, conversationId, ownerKind]
+    allowed_writers: [V3HubRespContinuation04Committed]
+    allowed_readers: [V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.hub.static_hook_registry
+    resource_kind: control
+    lifecycle: v3.hub_pipeline.compile
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubStaticHookRegistry
+    identity: [skeletonVersion, hookSetId, hookSlot]
+    allowed_writers: [V3HubStaticHookRegistryCompiler]
+    allowed_readers: [V3HubRuntimeKernel]
+    forbidden_writers: [routecodex-v3-config, routecodex-v3-server, dynamic_loader, filesystem_scanner]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
   - resource_id: v3.error.source
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline

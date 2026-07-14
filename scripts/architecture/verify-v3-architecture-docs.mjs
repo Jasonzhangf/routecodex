@@ -8,14 +8,18 @@ const requiredFiles = [
   'docs/design/v3-system-definition.md',
   'docs/design/v3-routecodex-rust-module-boundaries.md',
   'docs/design/v3-routecodex-runtime-resource-contract.md',
+  'docs/design/v3-hub-pipeline-static-skeleton-contract.md',
+  'docs/design/v3-existing-hub-provider-path-audit.md',
   'docs/goals/v3-foundation-implementation-order.md',
   'docs/goals/v3-debug-error-foundation-plan.md',
   'docs/goals/v3-responses-direct-mvp-test-design.md',
   'docs/goals/v3-responses-direct-mvp-implementation-plan.md',
+  'docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-mainline-call-map.yml',
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-responses-direct-mainline.md',
+  'docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md',
 ];
 const requiredNodes = [
   'V3Config01FileSource', 'V3Config02AuthoringParsed', 'V3Config03SchemaValidated',
@@ -57,6 +61,26 @@ const p6AnchoredResourceIds = new Set([
   'v3.provider.transport_request',
   'v3.response.provider_raw',
 ]);
+const hubV1PendingResourceIds = new Set([
+  'v3.config.hub_pipeline_declarations',
+  'v3.hub.entry_protocol',
+  'v3.hub.continuation_ownership',
+  'v3.hub.execution_plan',
+  'v3.hub.resolved_target',
+  'v3.hub.provider_protocol',
+  'v3.request.provider_semantic',
+  'v3.hub.provider_wire_payload',
+  'v3.hub.response_semantic',
+  'v3.continuation.remote_binding',
+  'v3.continuation.local_context_truth',
+  'v3.hub.static_hook_registry',
+]);
+const hubV1PendingStepIds = new Set([
+  'v3-hub-req-01', 'v3-hub-req-02', 'v3-hub-req-03', 'v3-hub-req-04',
+  'v3-hub-req-05', 'v3-hub-req-06', 'v3-hub-req-07', 'v3-hub-req-08',
+  'v3-hub-resp-01', 'v3-hub-resp-02', 'v3-hub-resp-03', 'v3-hub-resp-04',
+  'v3-hub-resp-05',
+]);
 
 for (const file of requiredFiles) if (!fs.existsSync(abs(file))) fail(`${file}: missing`);
 
@@ -86,6 +110,42 @@ for (const phrase of [
 if (/\b(?:cc|asxs)\b/.test(p6ContractDocs)) {
   fail('P6 contract docs: deployment provider identity leaked into generic Provider contract');
 }
+const hubV1ContractDocs = [
+  'docs/design/v3-hub-pipeline-static-skeleton-contract.md',
+  'docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md',
+  'docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md',
+].map(read).join('\n');
+const hubV1CanonicalContract = read('docs/design/v3-hub-pipeline-static-skeleton-contract.md');
+const hubV1ExistingPathAudit = read('docs/design/v3-existing-hub-provider-path-audit.md');
+for (const phrase of [
+  'V3HubReqContinuation03Classified',
+  'V3HubReqChatProcess04Governed',
+  'V3HubReqExecution05Planned',
+  'V3HubReqTarget06Resolved',
+  'V3HubRespChatProcess03Governed',
+  'V3HubRespContinuation04Committed',
+  'restore(normalize(save(context))) == context',
+  'Static hook slots',
+  'Provider wire protocol',
+  'servertool followup re-entry',
+  'same kernel and replaces only the transport',
+  'JSON or SSE',
+  'global Error chain',
+  'Physically delete',
+  'binding_pending',
+]) if (!hubV1CanonicalContract.includes(phrase)) fail(`Hub v1 contract docs: missing invariant ${phrase}`);
+for (const phrase of [
+  'HubPipelineEngine::execute',
+  'router-direct-pipeline.ts',
+  'provider-direct-pipeline.ts',
+  'RequestExecutor',
+  'Branch-to-hook migration matrix',
+  'same wire protocol does not imply Direct',
+]) if (!hubV1ExistingPathAudit.includes(phrase)) fail(`Hub v1 existing-path audit: missing evidence ${phrase}`);
+for (const forbidden of [
+  /provider_family\s*==/,
+  /same protocol\s*=\s*Direct/i,
+]) if (forbidden.test(hubV1ContractDocs)) fail(`Hub v1 contract docs: forbidden design ${forbidden}`);
 
 for (const file of requiredFiles.filter((entry) => entry.endsWith('.md'))) {
   const text = read(file);
@@ -120,6 +180,9 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
   if (p6AnchoredResourceIds.has(resource.resource_id) && resource.binding_status !== 'anchored') {
     fail(`${where}: P6 resource must be anchored after source binding`);
   }
+  if (hubV1PendingResourceIds.has(resource.resource_id) && resource.binding_status !== 'binding_pending') {
+    fail(`${where}: Hub v1 resource must remain binding_pending before source implementation`);
+  }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
   if (resource.resource_id !== 'v3.response.client_payload' && resource.may_enter_client_body === true) {
@@ -128,10 +191,22 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
 }
 
 const chains = array(mainlineMap.chains);
-for (const chainId of ['v3.config.compile', 'v3.responses_direct.required_mainline']) {
+for (const chainId of [
+  'v3.config.compile',
+  'v3.responses_direct.required_mainline',
+  'v3.hub_pipeline.v1.request',
+  'v3.hub_pipeline.v1.response',
+]) {
   if (!chains.some((chain) => chain.chain_id === chainId)) fail(`mainline: missing chain ${chainId}`);
 }
 const allEdges = chains.flatMap((chain) => array(chain.edges));
+for (const stepId of hubV1PendingStepIds) {
+  const edge = allEdges.find((candidate) => candidate.step_id === stepId);
+  if (!edge) fail(`mainline: missing Hub v1 edge ${stepId}`);
+  else if (edge.status !== 'binding_pending') {
+    fail(`mainline: ${stepId} must remain binding_pending before source implementation`);
+  }
+}
 for (const [index, edge] of allEdges.entries()) {
   const where = `edge[${index}]`;
   if (!edge.step_id || !edge.from_node || !edge.to_node || !edge.owner_feature_id) fail(`${where}: incomplete identity`);
@@ -172,7 +247,7 @@ const reviewSurface = read('docs/architecture/wiki/v3-responses-direct-mainline.
   + read('docs/design/v3-routecodex-runtime-resource-contract.md');
 for (const node of requiredNodes) if (!reviewSurface.includes(node)) fail(`review surface: missing node ${node}`);
 
-for (const featureId of ['v3.responses_direct_mvp_architecture', 'v3.responses_provider_runtime', 'v3.debug_error_foundation']) {
+for (const featureId of ['v3.hub_pipeline_static_skeleton', 'v3.responses_direct_mvp_architecture', 'v3.responses_provider_runtime', 'v3.debug_error_foundation']) {
   const feature = array(verificationMap.features).find((entry) => entry.feature_id === featureId);
   if (!feature) fail(`verification map: missing ${featureId}`);
   for (const gate of array(feature?.required_gates)) {
