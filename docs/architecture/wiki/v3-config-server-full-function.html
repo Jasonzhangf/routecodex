@@ -7,8 +7,8 @@
   <style>
     body { font: 16px/1.5 system-ui, sans-serif; max-width: 1080px; margin: 2rem auto; padding: 0 1rem; color: #172033; }
     h1, h2 { color: #0d3b66; }
-    .flow { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: .75rem; overflow-x: auto; }
-    .node { border: 1px solid #8aa4bf; border-radius: 8px; padding: .75rem; background: #f5f9fd; }
+    .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .75rem; }
+    .node { border: 1px solid #8aa4bf; border-radius: 8px; padding: .75rem; background: #f5f9fd; min-width: 0; overflow-wrap: anywhere; }
     .error { border-color: #bf6b6b; background: #fff6f6; }
     code { background: #edf2f7; padding: .1rem .25rem; }
     li { margin: .35rem 0; }

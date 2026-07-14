@@ -43,4 +43,4 @@ flowchart LR
 - [x] P6 `/v1/responses` remains sole executable business path.
 - [x] Other protocols remain explicit `not_implemented`.
 - [x] Relay, continuation runtime, Chat Process, Hub cutover, P6 deletion, V2/live/global install remain out of scope.
-- [ ] Completion requires mapped gates plus actual CLI/HTTP/controlled-upstream replay evidence.
+- [x] Completion requires mapped gates plus actual CLI/HTTP/controlled-upstream replay evidence.
