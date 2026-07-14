@@ -1,0 +1,85 @@
+version = 3
+
+[features]
+responses_direct = false
+debug_events = true
+
+[debug]
+log_console = true
+snapshots = true
+dry_run = true
+retention = { raw_requests = 8, raw_responses = 4, events = 128 }
+
+[error.policies.target_pool_exhausted]
+action = "project_client_error"
+
+[servers.p5_primary]
+bind = "127.0.0.1"
+port = 45454
+routing_group = "p5_success"
+endpoints = ["responses"]
+
+[servers.p5_exhausted]
+bind = "127.0.0.1"
+port = 45455
+routing_group = "p5_exhausted"
+endpoints = ["responses"]
+
+[providers.cc]
+enabled = false
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-5.6"
+auth = { type = "api_key", entries = [{ alias = "cc", env = "ROUTECODEX_V3_CC_KEY" }] }
+
+[providers.cc.models."gpt-5.6"]
+wire_name = "gpt-5.6-cc"
+capabilities = ["text"]
+
+[providers.asxs]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-5.6"
+auth = { type = "api_key", entries = [{ alias = "asxs", env = "ROUTECODEX_V3_ASXS_KEY" }] }
+
+[providers.asxs.models."gpt-5.6"]
+wire_name = "gpt-5.6-asxs"
+capabilities = ["text"]
+
+[providers.disabled]
+enabled = false
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-5.6"
+auth = { type = "api_key", entries = [{ alias = "disabled", env = "ROUTECODEX_V3_DISABLED_KEY" }] }
+
+[providers.disabled.models."gpt-5.6"]
+wire_name = "gpt-5.6-disabled"
+
+[forwarders.gpt56_success_inner]
+model = "gpt-5.6"
+aliases = ["gpt-5.6"]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "cc", model = "gpt-5.6", key = "cc", priority = 1 },
+  { kind = "provider_model", provider = "asxs", model = "gpt-5.6", key = "asxs", priority = 2 }
+]
+
+[forwarders.gpt56_success]
+model = "gpt-5.6"
+aliases = ["gpt-5.6"]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "gpt56_success_inner", priority = 1 }]
+
+[forwarders.gpt56_exhausted]
+model = "gpt-5.6"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "disabled", model = "gpt-5.6", key = "disabled", priority = 1 }]
+
+[route_groups.p5_success.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "gpt56_success", priority = 1 }]
+
+[route_groups.p5_exhausted.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "gpt56_exhausted", priority = 1 }]

@@ -1,15 +1,10 @@
 [package]
-name = "routecodex-v3-provider-responses"
+name = "routecodex-v3-virtual-router"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-reqwest.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
-routecodex-v3-error = { path = "../routecodex-v3-error" }
-serde.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true

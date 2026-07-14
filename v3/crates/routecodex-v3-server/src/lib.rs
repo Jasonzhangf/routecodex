@@ -8,8 +8,9 @@ use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_runtime::{
-    execute_v3_foundation_dry_run_runtime, execute_v3_foundation_pending_runtime,
-    project_v3_debug_failure, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    build_v3_server_03_http_request_raw, execute_v3_foundation_dry_run_runtime,
+    execute_v3_foundation_pending_runtime, project_v3_debug_failure, V3FoundationRuntimeInput,
+    V3FoundationRuntimeOutput, V3P5Runtime,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -22,13 +23,7 @@ struct V3ListenerState {
     server: V3ServerManifest,
     manifest_version: u16,
     debug: V3DebugRuntime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3Server03HttpRequestRaw {
-    pub server_id: String,
-    pub method: String,
-    pub path: String,
+    runtime: V3P5Runtime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +80,7 @@ impl V3ServerAggregateHandle {
 pub async fn spawn_v3_server_aggregate(
     manifest: V3Config05ManifestPublished,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
         build_v3_debug_runtime_from_manifest(&manifest.debug).map_err(std::io::Error::other)?;
@@ -105,6 +101,7 @@ pub async fn spawn_v3_server_aggregate(
             server,
             manifest_version: preflight.manifest_version,
             debug: debug.clone(),
+            runtime: V3P5Runtime::new(manifest.clone()),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -170,28 +167,33 @@ async fn pending_endpoint(
     let payload = read_json_payload(request).await;
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
-    let output = execute_v3_foundation_pending_runtime(
-        V3FoundationRuntimeInput {
-            server_id: state.server.id.clone(),
-            request_id,
-            execution_id,
-            method,
-            path,
-            payload,
-        },
-        &state.debug,
-    );
-    let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
-    Response::builder()
-        .status(StatusCode::from_u16(frame.status).expect("fixed status"))
-        .header("content-type", "application/json")
-        .header("x-routecodex-v3-debug-node", frame.debug_node)
-        .header("x-routecodex-v3-error-node", frame.error_node)
-        .header("x-routecodex-v3-error-chain", frame.error_chain.join(","))
-        .body(Body::from(
-            serde_json::to_vec(&frame.body).expect("JSON projection"),
-        ))
-        .expect("fixed response")
+    let is_responses = path == "/v1/responses";
+    let output = if is_responses {
+        state.runtime.execute(
+            build_v3_server_03_http_request_raw(
+                state.server.id.clone(),
+                request_id,
+                execution_id,
+                method,
+                path,
+                payload,
+            ),
+            &state.debug,
+        )
+    } else {
+        execute_v3_foundation_pending_runtime(
+            V3FoundationRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id,
+                execution_id,
+                method,
+                path,
+                payload,
+            },
+            &state.debug,
+        )
+    };
+    foundation_output_response(output)
 }
 
 async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -309,17 +311,6 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
             serde_json::to_vec(&frame.body).expect("typed JSON projection"),
         ))
         .expect("typed response")
-}
-
-pub fn build_v3_server_03_http_request_raw(
-    server: &V3ServerManifest,
-    request: &Request,
-) -> V3Server03HttpRequestRaw {
-    V3Server03HttpRequestRaw {
-        server_id: server.id.clone(),
-        method: request.method().as_str().to_string(),
-        path: request.uri().path().to_string(),
-    }
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_error_06(

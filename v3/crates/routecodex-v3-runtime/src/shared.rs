@@ -1,71 +1,9 @@
-use crate::nodes::{
-    V3ClientBody, V3Req04StandardizedResponses, V3Resp10ClientPayload, V3Route05SelectedTarget,
-};
-use routecodex_v3_config::V3Config05ManifestPublished;
+use crate::nodes::{V3ClientBody, V3Resp10ClientPayload};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
 };
 use routecodex_v3_provider_responses::V3ProviderResp09Raw;
 use std::collections::BTreeMap;
-
-pub(crate) fn select_default_route_target(
-    manifest: &V3Config05ManifestPublished,
-    _request: &V3Req04StandardizedResponses,
-) -> Result<V3Route05SelectedTarget, V3Error01SourceRaised> {
-    let server = manifest
-        .servers
-        .values()
-        .find(|server| server.enabled)
-        .ok_or_else(|| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Route05SelectedTarget",
-                "enabled_server_missing",
-                "validated manifest has no enabled server",
-            )
-        })?;
-    let target = manifest.route_groups[&server.routing_group].pools["default"]
-        .targets
-        .first()
-        .ok_or_else(|| {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3Route05SelectedTarget",
-                "default_target_missing",
-                "validated manifest has no default target",
-            )
-        })?;
-    let provider_id = target.provider.clone().ok_or_else(|| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3Route05SelectedTarget",
-            "forwarder_target_not_implemented",
-            "early Responses direct runtime cannot interpret a forwarder target",
-        )
-    })?;
-    let provider = manifest.providers.get(&provider_id).ok_or_else(|| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3Route05SelectedTarget",
-            "provider_manifest_missing",
-            format!("validated manifest provider {provider_id} missing"),
-        )
-    })?;
-    Ok(V3Route05SelectedTarget {
-        provider_id,
-        model: target
-            .model
-            .clone()
-            .unwrap_or_else(|| provider.default_model.clone()),
-        base_url: provider.base_url.clone(),
-        auth_env: provider
-            .auth
-            .entries
-            .first()
-            .and_then(|entry| entry.env.clone())
-            .unwrap_or_default(),
-    })
-}
 
 pub(crate) fn project_provider_raw_to_client_payload(
     raw: V3ProviderResp09Raw,

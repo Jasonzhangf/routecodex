@@ -1,0 +1,171 @@
+version: 2
+status: p0_p5_source_and_live_verified
+scope: routecodex-v3-foundation-p0-p5
+features:
+  - feature_id: v3.foundation_p0_p2
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "RouteCodex V3 Rust-only P0 architecture gates, P1 full Config compiler, and P2 multi-listener Server/CLI foundation"
+    owner_modules:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-cli
+    design:
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-rust-module-boundaries.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+      - docs/goals/v3-foundation-implementation-order.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    test_design:
+      - docs/goals/v3-foundation-p0-p2-test-design.md
+    required_unit:
+      - routecodex-v3-config full declaration and negative contract tests
+      - routecodex-v3-server multi-listener and pending endpoint tests
+      - routecodex-v3-cli config check and server status tests
+      - routecodex-v3-debug pending endpoint event construction tests by server integration
+      - routecodex-v3-error six-node pending endpoint projection tests by server integration
+    required_contract:
+      - no TypeScript in V3 source scan
+      - no config file IO outside routecodex-v3-config
+      - no provider transport dependency from Server or CLI
+      - no lifecycle executor outside Runtime
+      - no dynamic hook discovery
+      - no compatibility Manifest projection such as single server, default_tier, auth_env shortcut, or selected provider
+    required_integration:
+      - actual routecodex-v3 binary config check against v3/fixtures/config.p2.toml
+      - actual routecodex-v3 binary server status against v3/fixtures/config.p2.toml
+      - actual routecodex-v3 binary starts both 45444 and 45445 from one process
+      - each listener returns its own /health server_id/address/port/manifest_version
+      - pending business endpoints return Debug/Error routed structured not_implemented
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "P0 docs/maps/gates, P1 Config tests, P2 Server/CLI tests, fmt, clippy, and full V3 workspace tests pass."
+      runtime: "The built V3 CLI starts all listeners in v3/fixtures/config.p2.toml, both /health probes pass, pending endpoint probes traverse Debug/Error, and the exact process is stopped cleanly."
+      forbidden_claim: "Do not claim P3 Debug persistence, P4 Error policy runtime, P5 Router/Target runtime, P6 Responses provider execution, or full V3 MVP usable from P0-P2 evidence."
+
+  - feature_id: v3.responses_direct_mvp_architecture
+    status: pending_after_foundation
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "P6 Responses direct Pipeline/Provider business lifecycle after P0-P2 foundation"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-server
+    design:
+      - docs/design/v3-system-definition.md
+      - docs/goals/v3-foundation-implementation-order.md
+      - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+    test_design:
+      - docs/goals/v3-responses-direct-mvp-test-design.md
+    required_gates:
+      - npm run test:v3-responses-direct-unit
+      - npm run test:v3-responses-direct-blackbox
+    completion_rule:
+      source: "Pending P6: provider wire/client response blackboxes are intentionally not part of P0-P2 completion."
+      runtime: "Pending P6: controlled or real upstream Responses request must traverse Runtime/Provider before this feature can be marked usable."
+  - feature_id: v3.debug_error_foundation
+    status: p3_p4_source_and_live_verified
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "P3 global Debug plus P4 global Error and Provider-owned health/availability foundation"
+    owner_modules:
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+    design:
+      - docs/goals/v3-debug-error-foundation-plan.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+      - docs/goals/v3-foundation-implementation-order.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    test_design:
+      - docs/goals/v3-debug-error-foundation-plan.md
+    required_unit:
+      - routecodex-v3-debug ordered events, sinks, redaction, raw capture, snapshot sessions, dry-run fixture plans
+      - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
+      - routecodex-v3-provider-responses provider/auth/model scoped health state and read-only availability
+      - routecodex-v3-runtime foundation pending and dry-run kernels
+    required_contract:
+      - Debug/Error/Health remain side-channel resources and cannot enter provider/client success payloads
+      - Error generates action plans only; Provider alone mutates health state
+      - Target-facing availability is read-only; Router has no Provider health dependency
+      - Dry Run uses Runtime foundation kernel and terminal no-network effect
+      - Server projects Debug/Error/Dry Run through HTTP only and does not duplicate policy
+      - Debug sink and malformed/disabled Dry Run failures enter the six-node Error chain without panic or silent success
+      - Provider health mutation methods are crate-private and external Target-style compile fixtures cannot call them
+    required_integration:
+      - Server pending endpoint emits Debug events and full six-node Error projection
+      - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
+      - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
+      - Provider health scoped action tests prove cross-provider/key/model isolation
+    required_gates:
+      - npm run test:v3-debug-contract
+      - npm run test:v3-error-contract
+      - npm run test:v3-provider-health-contract
+      - npm run test:v3-foundation-runtime-contract
+      - npm run test:v3-server-debug-error-blackbox
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "P3/P4 unit, module blackbox, architecture gates, fmt, clippy, workspace tests, and CLI build must pass."
+      runtime: "The built V3 CLI must start dedicated multi-listener fixture ports and real HTTP probes must prove debug endpoints, dry-run no-send, and six-node error chain."
+      forbidden_claim: "Do not claim P5 Router/Target selection, P6 Responses Provider request, P7 relay/protocol support, real ~/.rcc mutation, or global install from P3/P4 evidence."
+  - feature_id: v3.virtual_router_target_interpreter
+    status: p5_source_and_live_verified
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "P5 one-hit Virtual Router plus recursive Target Interpreter with read-only Provider availability"
+    owner_modules:
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+    test_design:
+      - docs/goals/v3-virtual-router-target-interpreter-plan.md
+    required_contract:
+      - Virtual Router resolves one explicit default pool and returns one opaque target only
+      - Target expands nested forwarders and performs all internal availability reselection
+      - Router cannot import Provider availability and Target cannot mutate Provider health
+      - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
+    required_gates:
+      - npm run test:v3-p5-router-target
+      - npm run test:v3-p5-server-blackbox
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "Router/Target focused tests, source/compile gates, P3/P4 regressions, fmt, clippy, workspace tests, and CLI build pass."
+      runtime: "Actual V3 CLI multi-listener HTTP probes show one Router hit, Target expansion/selection or full six-node exhaustion, Debug evidence, no network send, exact Ctrl-C, and closed ports."
+      forbidden_claim: "Do not claim P6 Provider transport, real upstream availability, relay, V2 compatibility, global install, or ~/.rcc mutation."

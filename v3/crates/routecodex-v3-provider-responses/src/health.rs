@@ -1,6 +1,7 @@
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorActionPlan, V3ErrorActionScope};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -45,12 +46,60 @@ pub trait V3ProviderAvailabilityReader {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct V3ProviderAllAvailable;
+
+impl V3ProviderAvailabilityReader for V3ProviderAllAvailable {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        _now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        V3ProviderAvailabilityProjection {
+            provider_id: provider_id.to_string(),
+            auth_alias: auth_alias.map(ToOwned::to_owned),
+            model_id: model_id.map(ToOwned::to_owned),
+            available: true,
+            blocked_scopes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct V3ProviderHealthStore {
     state: Arc<RwLock<V3ProviderHealthState>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct V3ProviderAvailabilityRegistry {
+    store: V3ProviderHealthStore,
+}
+
+impl V3ProviderAvailabilityRegistry {
+    pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        Self {
+            store: V3ProviderHealthStore::from_manifest(manifest),
+        }
+    }
+}
+
+impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        self.store
+            .availability(provider_id, auth_alias, model_id, now_ms)
+    }
+}
+
 #[derive(Debug, Default)]
 struct V3ProviderHealthState {
+    configured_disabled: BTreeSet<String>,
     cooldowns: BTreeMap<String, V3ProviderCooldown>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
     concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
@@ -69,6 +118,21 @@ pub(crate) enum V3ProviderHealthError {
 }
 
 impl V3ProviderHealthStore {
+    pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        let configured_disabled = manifest
+            .providers
+            .values()
+            .filter(|provider| !provider.enabled)
+            .map(|provider| provider.id.clone())
+            .collect();
+        Self {
+            state: Arc::new(RwLock::new(V3ProviderHealthState {
+                configured_disabled,
+                ..V3ProviderHealthState::default()
+            })),
+        }
+    }
+
     pub(crate) fn apply_error_action(
         &self,
         action: &V3ErrorActionPlan,
@@ -161,6 +225,11 @@ impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
+        if state.configured_disabled.contains(provider_id) {
+            blocked_scopes.push(format!(
+                "configured_disabled:provider_instance:{provider_id}"
+            ));
+        }
         blocked_scopes.extend(
             keys.iter()
                 .filter(|key| {
@@ -277,6 +346,7 @@ fn scope_label(scope: &V3ErrorActionScope) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
     fn action(scope: V3ErrorActionScope) -> V3ErrorActionPlan {
         V3ErrorActionPlan {
@@ -287,6 +357,49 @@ mod tests {
             health_affecting: true,
             exhaustion_effect: "target_local_reselect".to_string(),
         }
+    }
+
+    #[test]
+    fn manifest_disabled_provider_is_projected_as_unavailable_by_provider_owner() {
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(
+                r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.disabled]
+enabled = false
+type = "responses"
+base_url = "http://disabled.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+[providers.disabled.models.m]
+[providers.enabled]
+type = "responses"
+base_url = "http://enabled.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+[providers.enabled.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "k", priority = 1 }]
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let availability = V3ProviderAvailabilityRegistry::from_manifest(&manifest);
+        assert!(
+            !availability
+                .availability("disabled", Some("k"), Some("m"), 0)
+                .available
+        );
+        assert!(
+            availability
+                .availability("enabled", Some("k"), Some("m"), 0)
+                .available
+        );
     }
 
     #[test]

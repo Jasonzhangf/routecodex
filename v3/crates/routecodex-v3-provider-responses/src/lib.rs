@@ -5,7 +5,8 @@ pub mod transport;
 pub mod wire;
 
 pub use health::{
-    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderHealthStore,
+    V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
+    V3ProviderAvailabilityRegistry, V3ProviderHealthStore,
 };
 pub use raw_response::V3ProviderResp09Raw;
 pub use transport::{

@@ -4,7 +4,11 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
 };
-use routecodex_v3_provider_responses::{ReqwestResponsesTransport, ResponsesTransport};
+use routecodex_v3_provider_responses::{
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAllAvailable,
+};
+use routecodex_v3_target::V3TargetInterpreter;
+use routecodex_v3_virtual_router::V3VirtualRouter;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -40,14 +44,80 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
     trace.push("V3Req04StandardizedResponses");
 
-    let selected = match hook_registry.run_route(manifest, &standardized) {
-        Ok(selected) => selected,
-        Err(source) => return error_output(source, trace, &hook_registry),
+    let router = V3VirtualRouter::default();
+    let classified = match router.classify_request(
+        manifest,
+        &standardized.protocol_context.server_id,
+        &standardized.protocol_context.endpoint,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router05RequestClassified", error),
+                trace,
+                &hook_registry,
+            )
+        }
     };
-    trace.push("V3Route05SelectedTarget");
+    trace.push("V3Router05RequestClassified");
+    let pool = match router.resolve_default_pool(manifest, classified) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router06RoutePoolResolved", error),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    trace.push("V3Router06RoutePoolResolved");
+    let hit = match router.hit_opaque_target_once(pool, 0) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Router07OpaqueTargetHitOnce", error),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    trace.push("V3Router07OpaqueTargetHitOnce");
+    let target = V3TargetInterpreter::default();
+    let kind = target.classify_kind(hit);
+    trace.push("V3Target08KindClassified");
+    let expanded = match target.expand_candidates(manifest, kind, 0) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                runtime_source("V3Target09CandidateSetExpanded", error),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    trace.push("V3Target09CandidateSetExpanded");
+    let selected = match target.select_available(expanded, &V3ProviderAllAvailable, 0) {
+        Ok(value) => value,
+        Err(error) => {
+            return error_output(
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::TargetPoolExhausted,
+                    "V3Target10ConcreteProviderSelected",
+                    "selected_target_exhausted",
+                    format!(
+                        "{} candidates unavailable",
+                        error.attempted_candidates.len()
+                    ),
+                ),
+                trace,
+                &hook_registry,
+            )
+        }
+    };
+    trace.push("V3Target10ConcreteProviderSelected");
 
-    let policy = build_v3_responses_direct_06_policy_from_v3_route_05(selected, &standardized);
-    trace.push("V3ResponsesDirect06Policy");
+    let policy = hook_registry.run_route(selected, &standardized);
+    trace.push("V3ResponsesDirect11Policy");
 
     let wire = hook_registry.run_request_projection(&policy);
     trace.push("V3Provider07ResponsesWirePayload");
@@ -83,6 +153,15 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
         node_trace: trace,
         error_chain: None,
     }
+}
+
+fn runtime_source(stage: &'static str, error: impl std::fmt::Display) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        stage,
+        "v3_route_target_runtime_failure",
+        error.to_string(),
+    )
 }
 
 fn error_output(
@@ -156,6 +235,9 @@ mod tests {
         let output = execute_v3_responses_direct_runtime_kernel(
             &test_manifest(),
             V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
                 method: "POST".to_string(),
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),
@@ -175,8 +257,13 @@ mod tests {
                 "V3Config05ManifestPublished",
                 "V3Server03HttpRequestRaw",
                 "V3Req04StandardizedResponses",
-                "V3Route05SelectedTarget",
-                "V3ResponsesDirect06Policy",
+                "V3Router05RequestClassified",
+                "V3Router06RoutePoolResolved",
+                "V3Router07OpaqueTargetHitOnce",
+                "V3Target08KindClassified",
+                "V3Target09CandidateSetExpanded",
+                "V3Target10ConcreteProviderSelected",
+                "V3ResponsesDirect11Policy",
                 "V3Provider07ResponsesWirePayload",
                 "V3Transport08ResponsesHttpRequest",
                 "V3ProviderResp09Raw",
@@ -200,6 +287,9 @@ mod tests {
         let output = execute_v3_responses_direct_runtime_kernel(
             &test_manifest(),
             V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
                 method: "POST".to_string(),
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),

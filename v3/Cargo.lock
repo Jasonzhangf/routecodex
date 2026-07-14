@@ -906,6 +906,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "reqwest",
+ "routecodex-v3-config",
  "routecodex-v3-error",
  "serde",
  "serde_json",
@@ -921,6 +922,8 @@ dependencies = [
  "routecodex-v3-debug",
  "routecodex-v3-error",
  "routecodex-v3-provider-responses",
+ "routecodex-v3-target",
+ "routecodex-v3-virtual-router",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -938,6 +941,24 @@ dependencies = [
  "routecodex-v3-runtime",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "routecodex-v3-target"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v3-config",
+ "routecodex-v3-provider-responses",
+ "routecodex-v3-virtual-router",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "routecodex-v3-virtual-router"
+version = "0.1.0"
+dependencies = [
+ "routecodex-v3-config",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

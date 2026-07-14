@@ -1,0 +1,407 @@
+version: 2
+status: p0_p5_source_and_live_verified
+scope: routecodex-v3-foundation-p0-p5
+owner_feature_id: v3.foundation_p0_p2
+canonical_docs:
+  - docs/design/v3-system-definition.md
+  - docs/design/v3-routecodex-rust-module-boundaries.md
+  - docs/design/v3-routecodex-runtime-resource-contract.md
+  - docs/goals/v3-foundation-implementation-order.md
+  - docs/goals/v3-responses-direct-mvp-test-design.md
+resources:
+  - resource_id: v3.config.file_source
+    resource_kind: config_authoring
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config01FileSource
+    identity: [configPath]
+    allowed_writers: [V3ConfigStore]
+    allowed_readers: [V3Config02AuthoringParsed]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.config.authoring_parsed
+    resource_kind: config_authoring
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config02AuthoringParsed
+    identity: [configPath, configVersion]
+    allowed_writers: [parse_v3_config_02_authoring]
+    allowed_readers: [V3Config03SchemaValidated, V3ConfigStore]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.config.schema_validated
+    resource_kind: config_contract
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config03SchemaValidated
+    identity: [configPath, configVersion]
+    allowed_writers: [validate_v3_config_03_schema_from_v3_config_02]
+    allowed_readers: [V3Config04ResourceRegistryBuilt]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.config.resource_registry
+    resource_kind: resource_registry
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config04ResourceRegistryBuilt
+    identity: [configVersion, serverIds, providerIds, forwarderIds, routeGroupIds]
+    allowed_writers: [build_v3_config_04_resource_registry_from_v3_config_03]
+    allowed_readers: [V3Config05ManifestPublished]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.config.published_manifest
+    resource_kind: config_manifest
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [configVersion, serverIds, providerIds, forwarderIds, routeGroupIds]
+    allowed_writers: [publish_v3_config_05_manifest_from_v3_config_04]
+    allowed_readers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.secret.provider_auth_handle
+    resource_kind: secret_handle
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [providerId, authAlias, envOrTokenFileHandle]
+    allowed_writers: [V3Config05ManifestPublished]
+    allowed_readers: [V3Transport13ResponsesHttpRequest]
+    forbidden_writers: [V3DebugArtifact, V3Error06ClientProjected]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.listener_set
+    resource_kind: runtime_handle
+    lifecycle: v3.server.startup
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerStartup01ListenerSetPreflight
+    identity: [manifestVersion, serverIds, bindAddresses]
+    allowed_writers: [build_v3_server_startup_01_listener_set_from_config_05]
+    allowed_readers: [spawn_v3_server_aggregate, V3Server03HttpRequestRaw]
+    forbidden_writers: [routecodex-v3-cli, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.request.protocol_context
+    resource_kind: protocol_context
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-server
+    owner_node: V3Server03HttpRequestRaw
+    identity: [requestId, serverId, endpoint, method, streamIntent]
+    allowed_writers: [V3Server03HttpRequestRaw]
+    allowed_readers: [V3Req04StandardizedResponses, V3Server16HttpFrame]
+    forbidden_writers: [routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.request.normal_payload
+    resource_kind: normal_payload
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3Req04StandardizedResponses
+    identity: [requestId, endpoint]
+    allowed_writers: [V3Req04StandardizedResponses]
+    allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy]
+    forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload, V3DebugArtifact]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.route.opaque_target
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-virtual-router
+    owner_node: V3Router07OpaqueTargetHitOnce
+    identity: [requestId, serverId, routeGroupId, poolId, targetId]
+    allowed_writers: [V3Router07OpaqueTargetHitOnce]
+    allowed_readers: [V3Target08KindClassified]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.candidate_set
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target09CandidateSetExpanded
+    identity: [requestId, targetId, candidateIds]
+    allowed_writers: [V3Target09CandidateSetExpanded]
+    allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.target.concrete_provider
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target10ConcreteProviderSelected
+    identity: [requestId, targetId, providerId, authAlias, modelId]
+    allowed_writers: [V3Target10ConcreteProviderSelected]
+    allowed_readers: [V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.responses_direct.policy
+    resource_kind: control_contract
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesDirect11Policy
+    identity: [requestId, targetId, providerId, modelId]
+    allowed_writers: [V3ResponsesDirect11Policy]
+    allowed_readers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
+    forbidden_writers: [V3ProviderResp14Raw, V3Server16HttpFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.provider.responses_wire_payload
+    resource_kind: provider_wire
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3Provider12ResponsesWirePayload
+    identity: [requestId, providerId, modelId]
+    allowed_writers: [V3Provider12ResponsesWirePayload]
+    allowed_readers: [V3Transport13ResponsesHttpRequest]
+    forbidden_writers: [V3Resp15ClientPayload, V3Server16HttpFrame, V3DebugArtifact]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.provider.transport_request
+    resource_kind: transport
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3Transport13ResponsesHttpRequest
+    identity: [requestId, providerId, upstreamUrl]
+    allowed_writers: [V3Transport13ResponsesHttpRequest]
+    allowed_readers: [V3ProviderResp14Raw]
+    forbidden_writers: [routecodex-v3-server, V3Resp15ClientPayload]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.response.provider_raw
+    resource_kind: provider_response
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderResp14Raw
+    identity: [requestId, providerId, statusCode]
+    allowed_writers: [V3ProviderResp14Raw]
+    allowed_readers: [V3Resp15ClientPayload, V3Error01SourceRaised]
+    forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.response.client_payload
+    resource_kind: normal_payload
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3Resp15ClientPayload
+    identity: [requestId, endpoint, streamIntent]
+    allowed_writers: [V3Resp15ClientPayload]
+    allowed_readers: [V3Server16HttpFrame]
+    forbidden_writers: [V3ProviderResp14Raw, V3Transport13ResponsesHttpRequest]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    binding_status: binding_pending
+  - resource_id: v3.error.chain
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error01SourceRaised
+    identity: [requestId, targetId, providerId, errorStage]
+    allowed_writers: [V3Error01SourceRaised, V3Error02Classified, V3Error03TargetLocalAction, V3Error04TargetExhaustionDecision, V3Error05ExecutionDecision, V3Error06ClientProjected]
+    allowed_readers: [V3Target09CandidateSetExpanded, V3Server16HttpFrame]
+    forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.debug.artifact
+    resource_kind: diagnostic
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugArtifact
+    identity: [requestId, nodeId, artifactKind]
+    allowed_writers: [V3DebugArtifact]
+    allowed_readers: [developer_diagnostics]
+    forbidden_writers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload, V3Server16HttpFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: binding_pending
+  - resource_id: v3.debug.trace_context
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugTraceContextStarted
+    identity: [serverId, requestId, executionId]
+    allowed_writers: [V3DebugRuntime::start_trace]
+    allowed_readers: [V3DebugEventLedgerRecorded, V3DebugRawCaptureStored, V3DebugSnapshotSessionRegistered]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.event_ledger
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugEventLedgerRecorded
+    identity: [sequence, serverId, requestId, executionId, nodeId]
+    allowed_writers: [V3DebugRuntime::record_node_event]
+    allowed_readers: [V3DebugRuntime::logs, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.raw_capture
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugRawCaptureStored
+    identity: [sequence, serverId, requestId, executionId, kind]
+    allowed_writers: [V3DebugRuntime::capture_raw_request, V3DebugRuntime::capture_raw_response]
+    allowed_readers: [V3DebugRuntime::raw_requests, V3DebugRuntime::raw_responses, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.snapshot_session
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugSnapshotSessionRegistered
+    identity: [sessionId, serverId, requestId, executionId]
+    allowed_writers: [V3DebugRuntime::start_snapshot_session, V3DebugRuntime::record_snapshot, V3DebugRuntime::release_snapshot_session]
+    allowed_readers: [V3DebugRuntime::snapshots, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.dry_run_fixture
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DryRunFixture
+    identity: [fixtureId, serverId, endpoint]
+    allowed_writers: [V3DebugRuntime::register_dry_run_fixture]
+    allowed_readers: [V3DebugRuntime::dry_run_fixture, V3DebugRuntime::build_dry_run_execution_plan]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.debug.dry_run_execution
+    resource_kind: diagnostic
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3DryRunNoNetworkTerminalEffect
+    identity: [fixtureId, serverId, requestId, executionId]
+    allowed_writers: [execute_v3_foundation_dry_run_runtime]
+    allowed_readers: [V3Server16HttpFrame, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.source
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error01SourceRaised
+    identity: [sourceStage, code, sourceKind]
+    allowed_writers: [build_v3_error_01_source_raised]
+    allowed_readers: [V3Error02Classified]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.classified
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error02Classified
+    identity: [sourceStage, code, class]
+    allowed_writers: [build_v3_error_02_classified_from_v3_error_01]
+    allowed_readers: [V3Error03TargetLocalAction]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.action_plan
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error03TargetLocalAction
+    identity: [scope, reason, retryEligible, healthAffecting]
+    allowed_writers: [build_v3_error_03_target_local_action_from_v3_error_02]
+    allowed_readers: [V3Error04TargetExhaustionDecision, V3ProviderHealthStateMutated]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.exhaustion_decision
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error04TargetExhaustionDecision
+    identity: [candidatesRemaining, targetExhausted]
+    allowed_writers: [build_v3_error_04_target_exhaustion_decision_from_v3_error_03]
+    allowed_readers: [V3Error05ExecutionDecision]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.execution_decision
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error05ExecutionDecision
+    identity: [decision, targetExhausted]
+    allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04]
+    allowed_readers: [V3Error06ClientProjected]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.client_projection
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error06ClientProjected
+    identity: [status, code, errorNode]
+    allowed_writers: [build_v3_error_06_client_projected_from_v3_error_05]
+    allowed_readers: [V3Server16HttpFrame]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.provider.health_state
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderHealthStateMutated
+    identity: [providerId, authAlias, modelId, reason, untilMs]
+    allowed_writers: [V3ProviderHealthStore::apply_error_action]
+    allowed_readers: [V3ProviderHealthStore::availability]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.provider.availability_projection
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderAvailabilityProjected
+    identity: [providerId, authAlias, modelId, available]
+    allowed_writers: [V3ProviderHealthStore::availability]
+    allowed_readers: [routecodex-v3-target]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored

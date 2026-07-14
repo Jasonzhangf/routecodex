@@ -3,9 +3,30 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
+    pub server_id: String,
+    pub request_id: String,
+    pub execution_id: String,
     pub method: String,
     pub path: String,
     pub body: Value,
+}
+
+pub fn build_v3_server_03_http_request_raw(
+    server_id: String,
+    request_id: String,
+    execution_id: String,
+    method: String,
+    path: String,
+    body: Value,
+) -> V3Server03HttpRequestRaw {
+    V3Server03HttpRequestRaw {
+        server_id,
+        request_id,
+        execution_id,
+        method,
+        path,
+        body,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,21 +37,16 @@ pub struct V3Req04StandardizedResponses {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProtocolContext {
+    pub server_id: String,
+    pub request_id: String,
+    pub execution_id: String,
     pub endpoint: String,
     pub method: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3Route05SelectedTarget {
-    pub provider_id: String,
-    pub model: String,
-    pub base_url: String,
-    pub auth_env: String,
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct V3ResponsesDirect06Policy {
-    pub target: V3Route05SelectedTarget,
+pub struct V3ResponsesDirect11Policy {
+    pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_body: Value,
 }
 
@@ -52,6 +68,9 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
 ) -> V3Req04StandardizedResponses {
     V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
+            server_id: raw.server_id,
+            request_id: raw.request_id,
+            execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
         },
@@ -59,11 +78,11 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     }
 }
 
-pub fn build_v3_responses_direct_06_policy_from_v3_route_05(
-    selected: V3Route05SelectedTarget,
+pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     standardized: &V3Req04StandardizedResponses,
-) -> V3ResponsesDirect06Policy {
-    V3ResponsesDirect06Policy {
+) -> V3ResponsesDirect11Policy {
+    V3ResponsesDirect11Policy {
         target: selected,
         request_body: standardized.body.clone(),
     }

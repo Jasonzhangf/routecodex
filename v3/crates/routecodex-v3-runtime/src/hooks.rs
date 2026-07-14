@@ -1,9 +1,8 @@
 use crate::nodes::{
-    V3Req04StandardizedResponses, V3Resp10ClientPayload, V3ResponsesDirect06Policy,
-    V3Route05SelectedTarget,
+    build_v3_responses_direct_11_policy_from_v3_target_10, V3Req04StandardizedResponses,
+    V3Resp10ClientPayload, V3ResponsesDirect11Policy,
 };
-use crate::shared::{project_provider_raw_to_client_payload, select_default_route_target};
-use routecodex_v3_config::V3Config05ManifestPublished;
+use crate::shared::project_provider_raw_to_client_payload;
 use routecodex_v3_error::{
     build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
@@ -17,6 +16,7 @@ use routecodex_v3_provider_responses::{
     build_v3_transport_08_responses_http_request_from_v3_provider_07,
     V3Provider07ResponsesWirePayload, V3ProviderResp09Raw, V3Transport08ResponsesHttpRequest,
 };
+use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HookPoint {
@@ -36,10 +36,10 @@ pub struct V3RegisteredHook {
 }
 
 type RouteHook = fn(
-    &V3Config05ManifestPublished,
+    V3Target10ConcreteProviderSelected,
     &V3Req04StandardizedResponses,
-) -> Result<V3Route05SelectedTarget, V3Error01SourceRaised>;
-type RequestProjectionHook = fn(&V3ResponsesDirect06Policy) -> V3Provider07ResponsesWirePayload;
+) -> V3ResponsesDirect11Policy;
+type RequestProjectionHook = fn(&V3ResponsesDirect11Policy) -> V3Provider07ResponsesWirePayload;
 type ProviderTransportHook =
     fn(V3Provider07ResponsesWirePayload) -> V3Transport08ResponsesHttpRequest;
 type ResponseProjectionHook =
@@ -76,15 +76,15 @@ impl V3HookRegistry {
 
     pub fn run_route(
         &self,
-        manifest: &V3Config05ManifestPublished,
-        request: &V3Req04StandardizedResponses,
-    ) -> Result<V3Route05SelectedTarget, V3Error01SourceRaised> {
-        (self.route)(manifest, request)
+        selected: V3Target10ConcreteProviderSelected,
+        standardized: &V3Req04StandardizedResponses,
+    ) -> V3ResponsesDirect11Policy {
+        (self.route)(selected, standardized)
     }
 
     pub fn run_request_projection(
         &self,
-        policy: &V3ResponsesDirect06Policy,
+        policy: &V3ResponsesDirect11Policy,
     ) -> V3Provider07ResponsesWirePayload {
         (self.request_projection)(policy)
     }
@@ -113,13 +113,13 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
         V3RegisteredHook {
             hook_id: "ResponsesDirectRouteHook",
             hook_point: V3HookPoint::Route,
-            input_node: "V3Req04StandardizedResponses",
-            output_node: "V3Route05SelectedTarget",
+            input_node: "V3Target10ConcreteProviderSelected",
+            output_node: "V3ResponsesDirect11Policy",
         },
         V3RegisteredHook {
             hook_id: "ResponsesDirectRequestProjectionHook",
             hook_point: V3HookPoint::RequestProjection,
-            input_node: "V3ResponsesDirect06Policy",
+            input_node: "V3ResponsesDirect11Policy",
             output_node: "V3Provider07ResponsesWirePayload",
         },
         V3RegisteredHook {
@@ -152,20 +152,20 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
 }
 
 fn responses_direct_route_hook(
-    manifest: &V3Config05ManifestPublished,
-    request: &V3Req04StandardizedResponses,
-) -> Result<V3Route05SelectedTarget, V3Error01SourceRaised> {
-    select_default_route_target(manifest, request)
+    selected: V3Target10ConcreteProviderSelected,
+    standardized: &V3Req04StandardizedResponses,
+) -> V3ResponsesDirect11Policy {
+    build_v3_responses_direct_11_policy_from_v3_target_10(selected, standardized)
 }
 
 fn responses_direct_request_projection_hook(
-    policy: &V3ResponsesDirect06Policy,
+    policy: &V3ResponsesDirect11Policy,
 ) -> V3Provider07ResponsesWirePayload {
     build_v3_provider_07_responses_wire_payload(
-        policy.target.provider_id.clone(),
-        policy.target.base_url.clone(),
-        policy.target.model.clone(),
-        policy.target.auth_env.clone(),
+        policy.target.candidate.provider_id.clone(),
+        policy.target.candidate.base_url.clone(),
+        policy.target.candidate.wire_model.clone(),
+        policy.target.candidate.env_name.clone().unwrap_or_default(),
         policy.request_body.clone(),
     )
 }

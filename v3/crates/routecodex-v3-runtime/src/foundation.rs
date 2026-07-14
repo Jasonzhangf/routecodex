@@ -1,3 +1,7 @@
+use crate::nodes::{
+    build_v3_req_04_standardized_responses_from_v3_server_03, V3Server03HttpRequestRaw,
+};
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
@@ -7,7 +11,43 @@ use routecodex_v3_error::{
     build_v3_error_06_client_projected_from_v3_error_05, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorSourceKind,
 };
+use routecodex_v3_provider_responses::{
+    V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
+};
+use routecodex_v3_target::V3TargetInterpreter;
+use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
+use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct V3P5Runtime<R = V3ProviderAvailabilityRegistry> {
+    manifest: Arc<V3Config05ManifestPublished>,
+    availability: R,
+}
+
+impl V3P5Runtime<V3ProviderAvailabilityRegistry> {
+    pub fn new(manifest: Arc<V3Config05ManifestPublished>) -> Self {
+        let availability = V3ProviderAvailabilityRegistry::from_manifest(&manifest);
+        Self::with_availability(manifest, availability)
+    }
+}
+
+impl<R: V3ProviderAvailabilityReader> V3P5Runtime<R> {
+    pub fn with_availability(manifest: Arc<V3Config05ManifestPublished>, availability: R) -> Self {
+        Self {
+            manifest,
+            availability,
+        }
+    }
+
+    pub fn execute(
+        &self,
+        input: V3Server03HttpRequestRaw,
+        debug: &V3DebugRuntime,
+    ) -> V3FoundationRuntimeOutput {
+        execute_v3_p5_routing_runtime(input, &self.manifest, &self.availability, debug)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3FoundationRuntimeInput {
@@ -28,6 +68,219 @@ pub struct V3FoundationRuntimeOutput {
     pub error_chain: Vec<&'static str>,
     pub node_trace: Vec<&'static str>,
     pub stopped_before_provider_send: bool,
+}
+
+pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
+    raw: V3Server03HttpRequestRaw,
+    manifest: &V3Config05ManifestPublished,
+    availability: &R,
+    debug: &V3DebugRuntime,
+) -> V3FoundationRuntimeOutput {
+    let scope = match debug.start_trace(&raw.server_id, &raw.request_id, &raw.execution_id) {
+        Ok(scope) => scope,
+        Err(error) => return project_v3_debug_failure("V3Debug01TraceContextStarted", error),
+    };
+    if let Err(error) = debug.capture_raw_request(&scope, raw.body.clone()) {
+        return project_v3_debug_failure("V3Debug02RawRequestCaptured", error);
+    }
+    if let Err(error) = debug.record_node_event(
+        &scope,
+        "V3Server03HttpRequestRaw",
+        "entered",
+        Some(json!({"server_id": raw.server_id, "method": raw.method, "path": raw.path})),
+    ) {
+        return project_v3_debug_failure("V3Server03HttpRequestRaw", error);
+    }
+    let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
+    if let Err(error) = debug.record_node_event(
+        &scope,
+        "V3Req04StandardizedResponses",
+        "standardized",
+        Some(json!({
+            "server_id": standardized.protocol_context.server_id,
+            "endpoint": standardized.protocol_context.endpoint,
+            "method": standardized.protocol_context.method
+        })),
+    ) {
+        return project_v3_debug_failure("V3Req04StandardizedResponses", error);
+    }
+    let router = V3VirtualRouter::default();
+    let classified = match router.classify_request(
+        manifest,
+        &standardized.protocol_context.server_id,
+        &standardized.protocol_context.endpoint,
+    ) {
+        Ok(node) => node,
+        Err(error) => {
+            return project_p5_failure(
+                "V3Router05RequestClassified",
+                "route_classification_failed",
+                error.to_string(),
+            )
+        }
+    };
+    if let Err(error) = debug.record_node_event(&scope, "V3Router05RequestClassified", "classified", Some(json!({"server_id": classified.server_id, "routing_group_id": classified.routing_group_id, "endpoint": classified.endpoint}))) {
+        return project_v3_debug_failure("V3Router05RequestClassified", error);
+    }
+    let pool = match router.resolve_default_pool(manifest, classified) {
+        Ok(node) => node,
+        Err(error) => {
+            return project_p5_failure(
+                "V3Router06RoutePoolResolved",
+                "default_pool_unavailable",
+                error.to_string(),
+            )
+        }
+    };
+    if let Err(error) = debug.record_node_event(&scope, "V3Router06RoutePoolResolved", "resolved", Some(json!({"routing_group_id": pool.routing_group_id, "pool_id": pool.pool_id, "candidate_count": pool.targets.len()}))) {
+        return project_v3_debug_failure("V3Router06RoutePoolResolved", error);
+    }
+    let hit = match router.hit_opaque_target_once(pool, 0) {
+        Ok(node) => node,
+        Err(error) => {
+            return project_p5_failure(
+                "V3Router07OpaqueTargetHitOnce",
+                "opaque_target_hit_failed",
+                error.to_string(),
+            )
+        }
+    };
+    if let Err(error) = debug.record_node_event(&scope, "V3Router07OpaqueTargetHitOnce", "hit_once", Some(json!({"routing_group_id": hit.routing_group_id, "pool_id": hit.pool_id, "target_index": hit.target_index, "target_kind": format!("{:?}", hit.target_kind), "target_id": hit.target_id, "hit_count": hit.hit_count}))) {
+        return project_v3_debug_failure("V3Router07OpaqueTargetHitOnce", error);
+    }
+    let target = V3TargetInterpreter::default();
+    let kind = target.classify_kind(hit);
+    if let Err(error) = debug.record_node_event(
+        &scope,
+        "V3Target08KindClassified",
+        "classified",
+        Some(json!({"target_kind": format!("{:?}", kind.route.target_kind)})),
+    ) {
+        return project_v3_debug_failure("V3Target08KindClassified", error);
+    }
+    let expanded = match target.expand_candidates(manifest, kind, 0) {
+        Ok(node) => node,
+        Err(error) => {
+            return project_p5_failure(
+                "V3Target09CandidateSetExpanded",
+                "target_expansion_failed",
+                error.to_string(),
+            )
+        }
+    };
+    if let Err(error) = debug.record_node_event(&scope, "V3Target09CandidateSetExpanded", "expanded", Some(json!({"candidate_count": expanded.candidates.len(), "route_target_index": expanded.route.target_index}))) {
+        return project_v3_debug_failure("V3Target09CandidateSetExpanded", error);
+    }
+    match target.select_available(expanded, availability, 0) {
+        Ok(selected) => {
+            for candidate in &selected.unavailable_candidates {
+                if let Err(error) = debug.record_node_event(
+                    &scope,
+                    "V3TargetAvailabilitySkipped",
+                    "unavailable",
+                    Some(json!({"candidate": candidate})),
+                ) {
+                    return project_v3_debug_failure("V3TargetAvailabilitySkipped", error);
+                }
+            }
+            if selected.attempts > 1 {
+                if let Err(error) = debug.record_node_event(
+                    &scope,
+                    "V3TargetLocalReselected",
+                    "reselected",
+                    Some(json!({
+                        "attempts": selected.attempts,
+                        "router_hit_count": selected.route.hit_count
+                    })),
+                ) {
+                    return project_v3_debug_failure("V3TargetLocalReselected", error);
+                }
+            }
+            if let Err(error) = debug.record_node_event(&scope, "V3Target10ConcreteProviderSelected", "selected", Some(json!({"provider_id": selected.candidate.provider_id, "auth_alias": selected.candidate.auth_alias, "model_id": selected.candidate.model_id, "attempts": selected.attempts, "unavailable_candidates": selected.unavailable_candidates, "router_hit_count": selected.route.hit_count, "stopped_before_provider_send": true}))) {
+                return project_v3_debug_failure("V3Target10ConcreteProviderSelected", error);
+            }
+            V3FoundationRuntimeOutput {
+                status: 200,
+                body: json!({"p5_routing": {"routing_group_id": selected.route.routing_group_id, "pool_id": selected.route.pool_id, "router_hit_count": selected.route.hit_count, "provider_id": selected.candidate.provider_id, "auth_alias": selected.candidate.auth_alias, "model_id": selected.candidate.model_id, "attempts": selected.attempts, "stopped_before_provider_send": true, "next_node": "V3ResponsesDirect11Policy"}}),
+                debug_node: "V3Target10ConcreteProviderSelected",
+                error_node: "none",
+                error_chain: vec![],
+                node_trace: vec![
+                    "V3Server03HttpRequestRaw",
+                    "V3Req04StandardizedResponses",
+                    "V3Router05RequestClassified",
+                    "V3Router06RoutePoolResolved",
+                    "V3Router07OpaqueTargetHitOnce",
+                    "V3Target08KindClassified",
+                    "V3Target09CandidateSetExpanded",
+                    "V3Target10ConcreteProviderSelected",
+                ],
+                stopped_before_provider_send: true,
+            }
+        }
+        Err(exhausted) => {
+            for candidate in &exhausted.attempted_candidates {
+                if let Err(error) = debug.record_node_event(
+                    &scope,
+                    "V3TargetAvailabilitySkipped",
+                    "unavailable",
+                    Some(json!({"candidate": candidate})),
+                ) {
+                    return project_v3_debug_failure("V3TargetAvailabilitySkipped", error);
+                }
+            }
+            if let Err(error) = debug.record_node_event(
+                &scope,
+                "V3TargetPoolExhausted",
+                "exhausted",
+                Some(json!({
+                    "attempted_candidates": exhausted.attempted_candidates.len(),
+                    "router_hit_count": exhausted.route.hit_count
+                })),
+            ) {
+                return project_v3_debug_failure("V3TargetPoolExhausted", error);
+            }
+            project_p5_failure(
+                "V3Target10ConcreteProviderSelected",
+                "selected_target_exhausted",
+                format!(
+                    "all {} candidates unavailable",
+                    exhausted.attempted_candidates.len()
+                ),
+            )
+        }
+    }
+}
+
+fn project_p5_failure(
+    source_stage: &'static str,
+    code: &'static str,
+    message: String,
+) -> V3FoundationRuntimeOutput {
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::TargetPoolExhausted,
+        source_stage,
+        code,
+        message,
+    );
+    let classified = build_v3_error_02_classified_from_v3_error_01(source);
+    let action = build_v3_error_03_target_local_action_from_v3_error_02(
+        classified,
+        V3ErrorActionScope::None,
+        0,
+    );
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
+    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
+    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    V3FoundationRuntimeOutput {
+        status: projected.status,
+        body: projected.body,
+        debug_node: source_stage,
+        error_node: projected.chain[5],
+        error_chain: projected.chain.to_vec(),
+        node_trace: projected.chain.to_vec(),
+        stopped_before_provider_send: true,
+    }
 }
 
 pub fn execute_v3_foundation_pending_runtime(

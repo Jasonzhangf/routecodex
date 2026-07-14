@@ -69,7 +69,7 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
         let pending = client
-            .post(format!("http://{}/v1/responses", listener.addr))
+            .post(format!("http://{}/v1/messages", listener.addr))
             .send()
             .await
             .unwrap();
@@ -113,7 +113,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .send()
         .await
         .unwrap();
-    assert_eq!(pending.status(), 501);
+    assert_eq!(pending.status(), 200);
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))
@@ -135,7 +135,9 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .await
         .unwrap();
     let serialized_logs = serde_json::to_string(&logs).unwrap();
-    assert!(serialized_logs.contains("V3Error06ClientProjected"));
+    assert!(serialized_logs.contains("V3Server03HttpRequestRaw"));
+    assert!(serialized_logs.contains("V3Req04StandardizedResponses"));
+    assert!(serialized_logs.contains("V3Target10ConcreteProviderSelected"));
     assert!(!serialized_logs.contains("sk-v3-secret"));
 
     let dry_run: serde_json::Value = client

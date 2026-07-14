@@ -1,0 +1,342 @@
+version: 2
+status: p0_p5_source_and_live_verified
+scope: routecodex-v3
+chains:
+  - chain_id: v3.config.compile
+    owner_feature_id: v3.config_interpreter_contract
+    summary: "Unique config.v3 read/parse/validate/registry/publish chain."
+    edges:
+      - step_id: v3-cfg-01
+        from_node: V3Config01FileSource
+        to_node: V3Config02AuthoringParsed
+        caller_symbol: V3ConfigStore::read_authoring
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: parse_v3_config_02_authoring
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        owner_feature_id: v3.config_interpreter_contract
+        resource_flow:
+          consumes: [v3.config.file_source]
+          produces: [v3.config.authoring_parsed]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-cfg-02
+        from_node: V3Config02AuthoringParsed
+        to_node: V3Config03SchemaValidated
+        caller_symbol: V3ConfigStore::load_snapshot
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: validate_v3_config_03_schema_from_v3_config_02
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        owner_feature_id: v3.config_interpreter_contract
+        resource_flow:
+          consumes: [v3.config.authoring_parsed]
+          produces: [v3.config.schema_validated]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-cfg-03
+        from_node: V3Config03SchemaValidated
+        to_node: V3Config04ResourceRegistryBuilt
+        caller_symbol: V3ConfigStore::load_snapshot
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: build_v3_config_04_resource_registry_from_v3_config_03
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        owner_feature_id: v3.config_interpreter_contract
+        resource_flow:
+          consumes: [v3.config.schema_validated]
+          produces: [v3.config.resource_registry]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-cfg-04
+        from_node: V3Config04ResourceRegistryBuilt
+        to_node: V3Config05ManifestPublished
+        caller_symbol: V3ConfigStore::load_snapshot
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: publish_v3_config_05_manifest_from_v3_config_04
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        owner_feature_id: v3.config_interpreter_contract
+        resource_flow:
+          consumes: [v3.config.resource_registry]
+          produces: [v3.config.published_manifest, v3.secret.provider_auth_handle]
+          side_channel_reads: []
+          side_channel_writes: [v3.secret.provider_auth_handle]
+        status: anchored
+  - chain_id: v3.responses_direct.required_mainline
+    owner_feature_id: v3.responses_direct_mvp_architecture
+    summary: "Required no-shortcut lifecycle. Config through Target node 10 is anchored; Provider transport and response nodes 11-16 remain P6 binding pending."
+    edges:
+      - { step_id: v3-rd-01, from_node: V3Config05ManifestPublished, to_node: V3Server03HttpRequestRaw, caller_symbol: pending_endpoint, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: build_v3_server_03_http_request_raw, callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.config.published_manifest], produces: [v3.request.protocol_context], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-rd-02, from_node: V3Server03HttpRequestRaw, to_node: V3Req04StandardizedResponses, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: build_v3_req_04_standardized_responses_from_v3_server_03, callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.request.protocol_context], produces: [v3.request.normal_payload], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-rd-03, from_node: V3Req04StandardizedResponses, to_node: V3Router05RequestClassified, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3VirtualRouter::classify_request, callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.request.normal_payload, v3.config.published_manifest], produces: [], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-rd-04, from_node: V3Router05RequestClassified, to_node: V3Router06RoutePoolResolved, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3VirtualRouter::resolve_default_pool, callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.config.published_manifest], produces: [], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-rd-05, from_node: V3Router06RoutePoolResolved, to_node: V3Router07OpaqueTargetHitOnce, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3VirtualRouter::hit_opaque_target_once, callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.config.published_manifest], produces: [v3.route.opaque_target], side_channel_reads: [], side_channel_writes: [v3.route.opaque_target] } }
+      - { step_id: v3-rd-06, from_node: V3Router07OpaqueTargetHitOnce, to_node: V3Target08KindClassified, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3TargetInterpreter::classify_kind, callee_file: v3/crates/routecodex-v3-target/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.route.opaque_target], produces: [], side_channel_reads: [v3.route.opaque_target], side_channel_writes: [] } }
+      - { step_id: v3-rd-07, from_node: V3Target08KindClassified, to_node: V3Target09CandidateSetExpanded, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3TargetInterpreter::expand_candidates, callee_file: v3/crates/routecodex-v3-target/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.route.opaque_target, v3.config.published_manifest], produces: [v3.target.candidate_set], side_channel_reads: [v3.route.opaque_target], side_channel_writes: [v3.target.candidate_set] } }
+      - { step_id: v3-rd-08, from_node: V3Target09CandidateSetExpanded, to_node: V3Target10ConcreteProviderSelected, caller_symbol: execute_v3_p5_routing_runtime, caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs, callee_symbol: V3TargetInterpreter::select_available, callee_file: v3/crates/routecodex-v3-target/src/lib.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.target.candidate_set], produces: [v3.target.concrete_provider], side_channel_reads: [v3.target.candidate_set], side_channel_writes: [v3.target.concrete_provider] } }
+      - { step_id: v3-rd-09, from_node: V3Target10ConcreteProviderSelected, to_node: V3ResponsesDirect11Policy, caller_symbol: execute_v3_responses_direct_runtime_kernel, caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, callee_symbol: build_v3_responses_direct_11_policy_from_v3_target_10, callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs, status: anchored, owner_feature_id: v3.virtual_router_target_interpreter, resource_flow: { consumes: [v3.target.concrete_provider, v3.request.normal_payload], produces: [v3.responses_direct.policy], side_channel_reads: [v3.target.concrete_provider], side_channel_writes: [v3.responses_direct.policy] } }
+      - { step_id: v3-rd-10, from_node: V3ResponsesDirect11Policy, to_node: V3Provider12ResponsesWirePayload, status: binding_pending, owner_feature_id: v3.responses_direct_mvp_architecture, resource_flow: { consumes: [v3.responses_direct.policy, v3.request.normal_payload, v3.target.concrete_provider], produces: [v3.provider.responses_wire_payload], side_channel_reads: [v3.responses_direct.policy, v3.target.concrete_provider], side_channel_writes: [] } }
+      - { step_id: v3-rd-11, from_node: V3Provider12ResponsesWirePayload, to_node: V3Transport13ResponsesHttpRequest, status: binding_pending, owner_feature_id: v3.responses_direct_mvp_architecture, resource_flow: { consumes: [v3.provider.responses_wire_payload, v3.secret.provider_auth_handle], produces: [v3.provider.transport_request], side_channel_reads: [v3.secret.provider_auth_handle], side_channel_writes: [] } }
+      - { step_id: v3-rd-12, from_node: V3Transport13ResponsesHttpRequest, to_node: V3ProviderResp14Raw, status: binding_pending, owner_feature_id: v3.responses_direct_mvp_architecture, resource_flow: { consumes: [v3.provider.transport_request], produces: [v3.response.provider_raw], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-rd-13, from_node: V3ProviderResp14Raw, to_node: V3Resp15ClientPayload, status: binding_pending, owner_feature_id: v3.responses_direct_mvp_architecture, resource_flow: { consumes: [v3.response.provider_raw, v3.responses_direct.policy], produces: [v3.response.client_payload], side_channel_reads: [v3.responses_direct.policy], side_channel_writes: [] } }
+      - { step_id: v3-rd-14, from_node: V3Resp15ClientPayload, to_node: V3Server16HttpFrame, status: binding_pending, owner_feature_id: v3.responses_direct_mvp_architecture, resource_flow: { consumes: [v3.response.client_payload, v3.request.protocol_context], produces: [], side_channel_reads: [], side_channel_writes: [] } }
+  - chain_id: v3.server.startup
+    owner_feature_id: v3.foundation_p0_p2
+    summary: "P2 multi-listener Server startup and pending endpoint placeholder chain. Business pipeline remains pending."
+    edges:
+      - step_id: v3-srv-01
+        from_node: V3Config05ManifestPublished
+        to_node: V3ServerStartup01ListenerSetPreflight
+        caller_symbol: spawn_v3_server_aggregate
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: build_v3_server_startup_01_listener_set_from_config_05
+        callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+        owner_feature_id: v3.foundation_p0_p2
+        resource_flow:
+          consumes: [v3.config.published_manifest]
+          produces: [v3.server.listener_set]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-srv-02
+        from_node: V3ServerStartup01ListenerSetPreflight
+        to_node: V3Server03HttpRequestRaw
+        caller_symbol: pending_endpoint
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: build_v3_server_03_http_request_raw
+        callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+        owner_feature_id: v3.foundation_p0_p2
+        resource_flow:
+          consumes: [v3.server.listener_set]
+          produces: [v3.request.protocol_context]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-srv-03
+        from_node: V3Server03HttpRequestRaw
+        to_node: V3Debug01NodeEventRegistered
+        caller_symbol: pending_endpoint
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: register_v3_debug_01_pending_endpoint_event
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.foundation_p0_p2
+        resource_flow:
+          consumes: [v3.request.protocol_context]
+          produces: [v3.debug.artifact]
+          side_channel_reads: []
+          side_channel_writes: [v3.debug.artifact]
+        status: anchored
+      - step_id: v3-srv-04
+        from_node: V3Debug01NodeEventRegistered
+        to_node: V3Error06ClientProjected
+        caller_symbol: pending_endpoint
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: project_v3_pending_endpoint_error
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.foundation_p0_p2
+        resource_flow:
+          consumes: [v3.debug.artifact]
+          produces: [v3.error.chain]
+          side_channel_reads: [v3.debug.artifact]
+          side_channel_writes: [v3.error.chain]
+        status: anchored
+      - step_id: v3-srv-05
+        from_node: V3Error06ClientProjected
+        to_node: V3Server16HttpFrame
+        caller_symbol: pending_endpoint
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: build_v3_server_16_http_frame_from_v3_error_06
+        callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+        owner_feature_id: v3.foundation_p0_p2
+        resource_flow:
+          consumes: [v3.error.chain]
+          produces: [v3.response.client_payload]
+          side_channel_reads: [v3.error.chain]
+          side_channel_writes: []
+        status: anchored
+  - chain_id: v3.debug_error_foundation.mainline
+    owner_feature_id: v3.debug_error_foundation
+    summary: "P3/P4 Runtime foundation: Server enters Runtime, Debug records side-channel evidence, Error traverses six adjacent nodes, Provider owns health state."
+    edges:
+      - step_id: v3-de-01
+        from_node: V3Server03HttpRequestRaw
+        to_node: V3DebugTraceContextStarted
+        caller_symbol: execute_v3_foundation_pending_runtime
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: V3DebugRuntime::start_trace
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.request.protocol_context]
+          produces: [v3.debug.trace_context]
+          side_channel_reads: []
+          side_channel_writes: [v3.debug.trace_context]
+        status: anchored
+      - step_id: v3-de-02
+        from_node: V3DebugTraceContextStarted
+        to_node: V3DebugRawCaptureStored
+        caller_symbol: execute_v3_foundation_pending_runtime
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: V3DebugRuntime::capture_raw_request
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.debug.trace_context]
+          produces: [v3.debug.raw_capture]
+          side_channel_reads: [v3.debug.trace_context]
+          side_channel_writes: [v3.debug.raw_capture]
+        status: anchored
+      - step_id: v3-de-03
+        from_node: V3DebugTraceContextStarted
+        to_node: V3DebugEventLedgerRecorded
+        caller_symbol: execute_v3_foundation_pending_runtime
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: V3DebugRuntime::record_node_event
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.debug.trace_context]
+          produces: [v3.debug.event_ledger]
+          side_channel_reads: [v3.debug.trace_context]
+          side_channel_writes: [v3.debug.event_ledger]
+        status: anchored
+      - step_id: v3-de-04
+        from_node: V3Server03HttpRequestRaw
+        to_node: V3Error01SourceRaised
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_01_source_raised
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.request.protocol_context]
+          produces: [v3.error.source]
+          side_channel_reads: []
+          side_channel_writes: [v3.error.source]
+        status: anchored
+      - step_id: v3-de-05
+        from_node: V3Error01SourceRaised
+        to_node: V3Error02Classified
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_02_classified_from_v3_error_01
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.source]
+          produces: [v3.error.classified]
+          side_channel_reads: [v3.error.source]
+          side_channel_writes: [v3.error.classified]
+        status: anchored
+      - step_id: v3-de-06
+        from_node: V3Error02Classified
+        to_node: V3Error03TargetLocalAction
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_03_target_local_action_from_v3_error_02
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.classified]
+          produces: [v3.error.action_plan]
+          side_channel_reads: [v3.error.classified]
+          side_channel_writes: [v3.error.action_plan]
+        status: anchored
+      - step_id: v3-de-07
+        from_node: V3Error03TargetLocalAction
+        to_node: V3Error04TargetExhaustionDecision
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_04_target_exhaustion_decision_from_v3_error_03
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.action_plan]
+          produces: [v3.error.exhaustion_decision]
+          side_channel_reads: [v3.error.action_plan]
+          side_channel_writes: [v3.error.exhaustion_decision]
+        status: anchored
+      - step_id: v3-de-08
+        from_node: V3Error04TargetExhaustionDecision
+        to_node: V3Error05ExecutionDecision
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_05_execution_decision_from_v3_error_04
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.exhaustion_decision]
+          produces: [v3.error.execution_decision]
+          side_channel_reads: [v3.error.exhaustion_decision]
+          side_channel_writes: [v3.error.execution_decision]
+        status: anchored
+      - step_id: v3-de-09
+        from_node: V3Error05ExecutionDecision
+        to_node: V3Error06ClientProjected
+        caller_symbol: build_pending_projection
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: build_v3_error_06_client_projected_from_v3_error_05
+        callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.execution_decision]
+          produces: [v3.error.client_projection]
+          side_channel_reads: [v3.error.execution_decision]
+          side_channel_writes: [v3.error.client_projection]
+        status: anchored
+      - step_id: v3-de-10
+        from_node: V3DryRunFixture
+        to_node: V3DryRunNoNetworkTerminalEffect
+        caller_symbol: execute_v3_foundation_dry_run_runtime
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: V3DebugRuntime::build_dry_run_execution_plan
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.debug.dry_run_fixture]
+          produces: [v3.debug.dry_run_execution]
+          side_channel_reads: [v3.debug.dry_run_fixture]
+          side_channel_writes: [v3.debug.dry_run_execution]
+        status: anchored
+      - step_id: v3-de-11
+        from_node: V3DebugTraceContextStarted
+        to_node: V3DebugSnapshotSessionRegistered
+        caller_symbol: execute_v3_foundation_dry_run_runtime
+        caller_file: v3/crates/routecodex-v3-runtime/src/foundation.rs
+        callee_symbol: V3DebugRuntime::start_snapshot_session
+        callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.debug.trace_context]
+          produces: [v3.debug.snapshot_session]
+          side_channel_reads: [v3.debug.trace_context]
+          side_channel_writes: [v3.debug.snapshot_session]
+        status: anchored
+      - step_id: v3-de-12
+        from_node: V3Error03TargetLocalAction
+        to_node: V3ProviderHealthStateMutated
+        caller_symbol: V3ProviderHealthStore::apply_error_action
+        caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        callee_symbol: V3ProviderHealthStore::apply_error_action
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.error.action_plan]
+          produces: [v3.provider.health_state]
+          side_channel_reads: [v3.error.action_plan]
+          side_channel_writes: [v3.provider.health_state]
+        status: anchored
+      - step_id: v3-de-13
+        from_node: V3ProviderHealthStateMutated
+        to_node: V3ProviderAvailabilityProjected
+        caller_symbol: V3ProviderHealthStore::availability
+        caller_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        callee_symbol: V3ProviderHealthStore::availability
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.provider.health_state]
+          produces: [v3.provider.availability_projection]
+          side_channel_reads: [v3.provider.health_state]
+          side_channel_writes: [v3.provider.availability_projection]
+        status: anchored
