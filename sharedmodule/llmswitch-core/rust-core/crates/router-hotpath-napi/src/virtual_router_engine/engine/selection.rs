@@ -951,11 +951,7 @@ impl VirtualRouterEngineCore {
                                 "unavailableProviders": unavailable
                             }));
                         }
-                        if route_name == DEFAULT_ROUTE
-                            && requested_route != DEFAULT_ROUTE
-                            && excluded_keys.is_empty()
-                            && default_floor_selection.is_none()
-                        {
+                        if route_name == DEFAULT_ROUTE && default_floor_selection.is_none() {
                             default_floor_selection = Some(
                                 SelectionResult::new(
                                     filtered_candidates[0].clone(),
@@ -965,7 +961,8 @@ impl VirtualRouterEngineCore {
                                     Some(pool.id.clone()),
                                 )
                                 .with_route_params(pool.route_params.clone())
-                                .with_route_thinking(pool.thinking.clone()),
+                                .with_route_thinking(pool.thinking.clone())
+                                .with_default_floor_protected(true),
                             );
                         }
                     }
@@ -3886,6 +3883,74 @@ mod tests {
             selected.is_err(),
             "runtime active 503 cooldown must stay out of the routing pool while cooldown is active"
         );
+    }
+
+    #[test]
+    fn default_route_with_multiple_cooled_providers_preserves_last_provider_floor() {
+        let provider_keys = ["default-a.key1.model", "default-b.key1.model"];
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for provider_key in provider_keys {
+            providers.insert(
+                provider_key.to_string(),
+                json!({
+                    "providerKey": provider_key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        core.health_manager
+            .register_providers(&core.provider_registry.list_keys());
+        core.routing = parse_routing(&Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![json!({
+                "id": "default-floor",
+                "priority": 100,
+                "mode": "priority",
+                "targets": provider_keys
+            })]),
+        )]));
+
+        for provider_key in provider_keys {
+            for attempt in 1..=3 {
+                core.handle_provider_error(&json!({
+                    "code": "HTTP_503",
+                    "message": format!("failure {attempt}"),
+                    "stage": "provider.send",
+                    "status": 503,
+                    "errorClassification": "recoverable",
+                    "runtime": {
+                        "requestId": format!("{provider_key}-{attempt}"),
+                        "providerKey": provider_key,
+                        "runtimeKey": provider_key
+                    }
+                }));
+            }
+        }
+
+        let selected = core
+            .select_provider(
+                "default",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "default".to_string(),
+                    confidence: 1.0,
+                    reasoning: "test".to_string(),
+                    candidates: vec!["default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default pool must retain one provider while configured targets exist");
+
+        assert_eq!(selected.provider_key, provider_keys[0]);
+        assert_eq!(selected.route_used, "default");
+        assert!(selected.default_floor_protected);
     }
 
     #[test]

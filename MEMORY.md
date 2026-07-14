@@ -3141,3 +3141,8 @@
 - Do not model provider failure by releasing an ephemeral port before starting RouteCodex listeners. The port can be reused by the process under test and create recursive or unrelated traffic.
 - Keep a controlled upstream listener alive, return the intended provider error such as HTTP 503, and shut it down explicitly. Focused raw transport tests may use a closed port only when no subsequent listener allocation can reuse it.
 - Verification baseline: ten consecutive target-local reselection replays plus the full V3 workspace and mapped P0-P5 gates.
+# 2026-07-14: Default pool floor applies to default-route requests too
+
+- A default-pool floor is not only a cross-route fallback. When a request is already classified as `default`, temporary health cooldown, concurrency busy state, or retry exclusions must not empty all configuration-valid default candidates and project `PROVIDER_NOT_AVAILABLE`/temporary-unavailable errors to the client.
+- Rust Virtual Router selection is the unique owner. If normal availability filtering empties the configured default pool, retain its first configuration-valid candidate and mark `defaultFloorProtected=true`; explicitly disabled/unregistered/capability-invalid candidates remain invalid and must not be revived.
+- Required regression shape: at least two enabled default providers, both in active recoverable cooldown, positive assertion that the first configured candidate is selected, plus negative assertion that an explicitly disabled-only default still fails fast.

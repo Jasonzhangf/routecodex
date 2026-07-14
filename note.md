@@ -30520,3 +30520,10 @@ Pure Rust NAPI candidates:
 - The source gate now applies lifecycle/fallback wording checks only to production Rust source while its injected production red fixtures remain green.
 - The reselection blackbox now keeps a controlled failing upstream alive and returns HTTP 503; ten consecutive focused runs passed, followed by the complete architecture/provider/workspace/P0-P5 gate stack.
 - This correction changes test determinism only. Provider/Router/Target production selection semantics were not patched or bypassed.
+# 2026-07-14T13:40Z: 5520 multi-provider default floor regression
+
+- Live evidence: `server-5520.log` repeatedly projected `No available providers after applying routing instructions` while online VR status showed the configured `gateway_priority_5520:default` route still had three non-empty tiers and six enabled/available targets after restart.
+- Root cause: Rust `select_provider` preserved an unavailable default-floor candidate only for a non-default route falling back to `default`; a request already classified as `default` could exhaust multiple temporarily cooled/busy candidates and return a routing error to the client.
+- Unique fix: the Rust Virtual Router selection owner now retains the first configuration-valid default candidate whenever standard availability filtering empties the default pool, independent of the requested route and retry exclusions, and marks the selection `defaultFloorProtected=true`.
+- Red/green: a two-provider active-cooldown test failed with `VIRTUAL_ROUTER_ERROR:HTTP_429` before the fix and passed after it. Existing singleton exclusion and explicitly disabled-provider fail-fast tests remain green.
+- Boundary: no provider config, client error mapper, TS retry policy, fallback chain, `/v3`, install, or live restart was changed.
