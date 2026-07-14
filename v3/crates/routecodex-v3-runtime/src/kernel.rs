@@ -1,19 +1,23 @@
 use crate::hooks::V3HookRegistry;
 use crate::nodes::*;
 use routecodex_v3_config::V3Config05ManifestPublished;
+use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorActionScope, V3ErrorSourceKind,
+    V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAllAvailable,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
 };
-use routecodex_v3_target::V3TargetInterpreter;
+use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
-use std::collections::BTreeMap;
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct V3ResponsesDirectRuntimeOutput {
-    pub client_payload: V3Resp10ClientPayload,
+    pub client_payload: V3Resp15ClientPayload,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
 }
@@ -30,6 +34,50 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport(
         &ReqwestResponsesTransport::default(),
     )
     .await
+}
+
+pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    hook_registry: V3HookRegistry,
+    debug: &V3DebugRuntime,
+) -> V3ResponsesDirectRuntimeOutput {
+    let scope = match debug.start_trace(&raw.server_id, &raw.request_id, &raw.execution_id) {
+        Ok(scope) => scope,
+        Err(error) => {
+            return debug_error_output("V3Debug01TraceContextStarted", error, &hook_registry)
+        }
+    };
+    if let Err(error) = debug.capture_raw_request(&scope, raw.body.clone()) {
+        return debug_error_output("V3Debug02RawRequestCaptured", error, &hook_registry);
+    }
+
+    let output = execute_v3_responses_direct_runtime_kernel_with_default_transport(
+        manifest,
+        raw,
+        hook_registry,
+    )
+    .await;
+
+    for node_id in &output.node_trace {
+        if let Err(error) = debug.record_node_event(
+            &scope,
+            *node_id,
+            "executed",
+            output
+                .error_chain
+                .as_ref()
+                .map(|chain| json!({"error_chain": chain})),
+        ) {
+            return debug_error_output("V3Debug01NodeEventRegistered", error, &hook_registry);
+        }
+    }
+    if let Err(error) =
+        debug.capture_raw_response(&scope, client_payload_debug_value(&output.client_payload))
+    {
+        return debug_error_output("V3Debug03RawResponseCaptured", error, &hook_registry);
+    }
+    output
 }
 
 pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
@@ -96,62 +144,97 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
         }
     };
     trace.push("V3Target09CandidateSetExpanded");
-    let selected = match target.select_available(expanded, &V3ProviderAllAvailable, 0) {
-        Ok(value) => value,
-        Err(error) => {
-            return error_output(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::TargetPoolExhausted,
-                    "V3Target10ConcreteProviderSelected",
-                    "selected_target_exhausted",
-                    format!(
-                        "{} candidates unavailable",
-                        error.attempted_candidates.len()
+    let availability = V3ProviderAvailabilityRegistry::from_manifest(manifest);
+    let mut failed_candidates = BTreeSet::new();
+    loop {
+        let attempt_availability = V3RuntimeAttemptAvailability {
+            base: &availability,
+            failed_candidates: &failed_candidates,
+        };
+        let selected = match target.select_available(expanded.clone(), &attempt_availability, 0) {
+            Ok(value) => value,
+            Err(error) => {
+                return error_output(
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::TargetPoolExhausted,
+                        "V3Target10ConcreteProviderSelected",
+                        "selected_target_exhausted",
+                        format!(
+                            "{} candidates unavailable",
+                            error.attempted_candidates.len()
+                        ),
                     ),
-                ),
-                trace,
-                &hook_registry,
-            )
-        }
-    };
-    trace.push("V3Target10ConcreteProviderSelected");
+                    trace,
+                    &hook_registry,
+                )
+            }
+        };
+        trace.push("V3Target10ConcreteProviderSelected");
 
-    let policy = hook_registry.run_route(selected, &standardized);
-    trace.push("V3ResponsesDirect11Policy");
+        let provider_scope = V3ErrorActionScope::ProviderInstance {
+            provider_id: selected.candidate.provider_id.clone(),
+        };
+        let failed_key = candidate_key(&selected.candidate);
+        let policy = hook_registry.run_route(selected, &standardized);
+        trace.push("V3ResponsesDirect11Policy");
 
-    let wire = hook_registry.run_request_projection(&policy);
-    trace.push("V3Provider07ResponsesWirePayload");
+        let wire = match hook_registry.run_request_projection(&policy) {
+            Ok(value) => value,
+            Err(source) => return error_output(source, trace, &hook_registry),
+        };
+        trace.push("V3Provider12ResponsesWirePayload");
 
-    let transport_request = hook_registry.run_provider_transport(wire);
-    trace.push("V3Transport08ResponsesHttpRequest");
+        let transport_request = match hook_registry.run_provider_transport(wire) {
+            Ok(value) => value,
+            Err(source) => return error_output(source, trace, &hook_registry),
+        };
+        trace.push("V3Transport13ResponsesHttpRequest");
 
-    let provider_raw = match transport.send(transport_request).await {
-        Ok(raw) => raw,
-        Err(error) => {
-            return error_output(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3Transport08ResponsesHttpRequest",
-                    "provider_transport_error",
-                    error.to_string(),
-                ),
-                trace,
-                &hook_registry,
-            )
-        }
-    };
-    trace.push("V3ProviderResp09Raw");
+        let provider_raw = match transport.send(transport_request).await {
+            Ok(raw) => raw,
+            Err(error) => {
+                failed_candidates.insert(failed_key);
+                let remaining = remaining_available_candidates(
+                    &expanded.candidates,
+                    &availability,
+                    &failed_candidates,
+                );
+                let projected = hook_registry.run_error(
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::ProviderFailure,
+                        "V3Transport13ResponsesHttpRequest",
+                        "provider_transport_error",
+                        error.to_string(),
+                    ),
+                    provider_scope,
+                    remaining,
+                );
+                trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+                if projected
+                    .body
+                    .pointer("/error/decision")
+                    .and_then(Value::as_str)
+                    == Some("target_local_reselect")
+                {
+                    trace.push("V3TargetLocalReselected");
+                    continue;
+                }
+                return projected_error_output(projected, trace);
+            }
+        };
+        trace.push("V3ProviderResp14Raw");
 
-    let payload = match hook_registry.run_response_projection(provider_raw) {
-        Ok(payload) => payload,
-        Err(source) => return error_output(source, trace, &hook_registry),
-    };
-    trace.push("V3Resp10ClientPayload");
+        let payload = match hook_registry.run_response_projection(provider_raw).await {
+            Ok(payload) => payload,
+            Err(source) => return error_output(source, trace, &hook_registry),
+        };
+        trace.push("V3Resp15ClientPayload");
 
-    V3ResponsesDirectRuntimeOutput {
-        client_payload: payload,
-        node_trace: trace,
-        error_chain: None,
+        return V3ResponsesDirectRuntimeOutput {
+            client_payload: payload,
+            node_trace: trace,
+            error_chain: None,
+        };
     }
 }
 
@@ -169,9 +252,16 @@ fn error_output(
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let projected = hook_registry.run_error(source);
+    let projected = hook_registry.run_error(source, V3ErrorActionScope::None, 0);
+    projected_error_output(projected, node_trace)
+}
+
+fn projected_error_output(
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
-        client_payload: V3Resp10ClientPayload {
+        client_payload: V3Resp15ClientPayload {
             status: projected.status,
             headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
             body: V3ClientBody::Json(projected.body),
@@ -179,6 +269,103 @@ fn error_output(
         node_trace,
         error_chain: Some(projected.chain.to_vec()),
     }
+}
+
+fn debug_error_output(
+    stage: &'static str,
+    error: V3DebugError,
+    hook_registry: &V3HookRegistry,
+) -> V3ResponsesDirectRuntimeOutput {
+    error_output(
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            "v3_debug_failure",
+            error.to_string(),
+        ),
+        vec![stage],
+        hook_registry,
+    )
+}
+
+fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
+    match &payload.body {
+        V3ClientBody::Json(value) => value.clone(),
+        V3ClientBody::Bytes(bytes) => json!({
+            "body_kind": "bytes",
+            "byte_len": bytes.len()
+        }),
+    }
+}
+
+struct V3RuntimeAttemptAvailability<'a, R> {
+    base: &'a R,
+    failed_candidates: &'a BTreeSet<String>,
+}
+
+impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
+    for V3RuntimeAttemptAvailability<'_, R>
+{
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        let mut projection = self
+            .base
+            .availability(provider_id, auth_alias, model_id, now_ms);
+        let key = availability_key(provider_id, auth_alias, model_id);
+        if self.failed_candidates.contains(&key) {
+            projection.available = false;
+            projection
+                .blocked_scopes
+                .push(format!("request_failed:{key}"));
+        }
+        projection
+    }
+}
+
+fn candidate_key(candidate: &V3TargetCandidate) -> String {
+    availability_key(
+        &candidate.provider_id,
+        Some(&candidate.auth_alias),
+        Some(&candidate.model_id),
+    )
+}
+
+fn availability_key(provider_id: &str, auth_alias: Option<&str>, model_id: Option<&str>) -> String {
+    format!(
+        "{}:{}:{}",
+        provider_id,
+        auth_alias.unwrap_or(""),
+        model_id.unwrap_or("")
+    )
+}
+
+fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
+    candidates: &[V3TargetCandidate],
+    availability: &R,
+    failed_candidates: &BTreeSet<String>,
+) -> usize {
+    let attempt_availability = V3RuntimeAttemptAvailability {
+        base: availability,
+        failed_candidates,
+    };
+    candidates
+        .iter()
+        .filter(|candidate| {
+            attempt_availability
+                .availability(
+                    &candidate.provider_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    0,
+                )
+                .available
+        })
+        .count()
 }
 
 fn require_static_hooks(hook_registry: &V3HookRegistry) {
@@ -202,7 +389,8 @@ mod tests {
     use async_trait::async_trait;
     use routecodex_v3_config::*;
     use routecodex_v3_provider_responses::{
-        V3ProviderError, V3ProviderResp09Raw, V3Transport08ResponsesHttpRequest,
+        V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
+        V3Transport13ResponsesHttpRequest,
     };
     use serde_json::json;
 
@@ -212,21 +400,19 @@ mod tests {
     impl ResponsesTransport for CaptureTransport {
         async fn send(
             &self,
-            request: V3Transport08ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp09Raw, V3ProviderError> {
-            assert_eq!(
-                request.body,
-                json!({"model":"client-model","input":"hello"})
-            );
-            Ok(V3ProviderResp09Raw {
-                provider_id: request.provider_id,
-                status: 200,
-                headers: BTreeMap::from([(
-                    "content-type".to_string(),
-                    "application/json".to_string(),
-                )]),
-                body: br#"{"id":"resp_test","output_text":"ok"}"#.to_vec(),
-            })
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_test","output_text":"ok"}"#.to_vec(),
+            ))
         }
     }
 
@@ -264,10 +450,10 @@ mod tests {
                 "V3Target09CandidateSetExpanded",
                 "V3Target10ConcreteProviderSelected",
                 "V3ResponsesDirect11Policy",
-                "V3Provider07ResponsesWirePayload",
-                "V3Transport08ResponsesHttpRequest",
-                "V3ProviderResp09Raw",
-                "V3Resp10ClientPayload",
+                "V3Provider12ResponsesWirePayload",
+                "V3Transport13ResponsesHttpRequest",
+                "V3ProviderResp14Raw",
+                "V3Resp15ClientPayload",
             ]
         );
     }
@@ -279,9 +465,13 @@ mod tests {
         impl ResponsesTransport for ErrorTransport {
             async fn send(
                 &self,
-                _request: V3Transport08ResponsesHttpRequest,
-            ) -> Result<V3ProviderResp09Raw, V3ProviderError> {
-                Err(V3ProviderError::Transport("boom".to_string()))
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                Err(V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "boom".to_string(),
+                })
             }
         }
         let output = execute_v3_responses_direct_runtime_kernel(
@@ -308,6 +498,73 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn provider_failure_reselects_without_router_reentry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FirstFailsSecondSucceeds {
+            sends: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ResponsesTransport for FirstFailsSecondSucceeds {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(V3ProviderError::Transport {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        reason: "first failed".to_string(),
+                    });
+                }
+                assert_eq!(request.provider_id(), "second");
+                assert_eq!(request.body()["model"], "wire-second");
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+                ))
+            }
+        }
+
+        let transport = FirstFailsSecondSucceeds {
+            sends: AtomicUsize::new(0),
+        };
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &reselection_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({"model":"client-model","input":"hello"}),
+            },
+            crate::register_responses_direct_hooks(),
+            &transport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            output
+                .node_trace
+                .iter()
+                .filter(|node| **node == "V3Router07OpaqueTargetHitOnce")
+                .count(),
+            1
+        );
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    }
+
     fn test_manifest() -> V3Config05ManifestPublished {
         let authoring = parse_v3_config_02_authoring(
             r#"
@@ -330,6 +587,49 @@ supports_streaming = true
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
+"#,
+        )
+        .unwrap();
+        compile_v3_config_05_manifest(authoring).unwrap()
+    }
+
+    fn reselection_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "FIRST_KEY" }] }
+[providers.first.models.test]
+wire_name = "wire-first"
+
+[providers.second]
+type = "responses"
+base_url = "http://second.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SECOND_KEY" }] }
+[providers.second.models.test]
+wire_name = "wire-second"
+
+[forwarders.responses]
+model = "test"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "second", model = "test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 "#,
         )
         .unwrap();

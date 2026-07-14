@@ -47,6 +47,7 @@ pub struct V3ProtocolContext {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    pub request_id: String,
     pub request_body: Value,
 }
 
@@ -57,7 +58,7 @@ pub enum V3ClientBody {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct V3Resp10ClientPayload {
+pub struct V3Resp15ClientPayload {
     pub status: u16,
     pub headers: BTreeMap<String, String>,
     pub body: V3ClientBody,
@@ -84,6 +85,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
 ) -> V3ResponsesDirect11Policy {
     V3ResponsesDirect11Policy {
         target: selected,
+        request_id: standardized.protocol_context.request_id.clone(),
         request_body: standardized.body.clone(),
     }
 }

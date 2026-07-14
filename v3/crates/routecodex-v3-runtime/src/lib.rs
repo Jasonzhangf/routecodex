@@ -13,6 +13,7 @@ pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3
 pub use kernel::{
     execute_v3_responses_direct_runtime_kernel,
     execute_v3_responses_direct_runtime_kernel_with_default_transport,
+    execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
     V3ResponsesDirectRuntimeOutput,
 };
 pub use nodes::*;

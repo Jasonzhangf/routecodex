@@ -3127,3 +3127,17 @@
 - Early P6-shaped Rust symbols, unit tests, and controlled-upstream harnesses are prototype evidence until red-first source/compile gates, final owner review, adjacent source binding, and mapped runtime evidence all agree.
 - Unverified P6 resources and edges remain `binding_pending` with no caller/callee symbol or source path. `routecodex-v3-provider-responses` is a generic protocol Provider and production source must not branch on deployment provider IDs or provider families.
 - Parallel Provider implementation does not block independent contract/map/gate calibration. Contract work proceeds and commits exact non-runtime scope; only actively changing runtime compilation/format checks wait for integration.
+
+# 2026-07-14: V3 P6 generic Responses Provider slice is source-bound
+
+- The generic Rust Provider owns `V3Provider12ResponsesWirePayload -> V3Transport13ResponsesHttpRequest -> V3ProviderResp14Raw`; map edges `v3-rd-10..12` and their three Provider resources are anchored to real source under `routecodex-v3-provider-responses`.
+- Provider wire preserves the current request body except the selected wire model; transport resolves environment or token-file auth only at send time; JSON/SSE bytes and typed provider failures stay explicit.
+- Controlled-upstream tests and an actual local V3 CLI replay proved JSON/SSE transport, secret isolation, client-disconnect/error polarity, Target-local reselection without Router re-entry, and Server/CLI no transport shortcut.
+- `v3-rd-09`, `v3-rd-13`, and `v3-rd-14` remain `binding_pending`; end-to-end smoke does not by itself authorize anchoring those Runtime/client/Server edges.
+- Scope excludes relay, continuation, servertool, other protocols, V2 compatibility, global install, real `~/.rcc` mutation, live RouteCodex restart, and real provider traffic.
+
+# 2026-07-14: Controlled upstream failures are required for multi-listener reselection tests
+
+- Do not model provider failure by releasing an ephemeral port before starting RouteCodex listeners. The port can be reused by the process under test and create recursive or unrelated traffic.
+- Keep a controlled upstream listener alive, return the intended provider error such as HTTP 503, and shut it down explicitly. Focused raw transport tests may use a closed port only when no subsequent listener allocation can reuse it.
+- Verification baseline: ten consecutive target-local reselection replays plus the full V3 workspace and mapped P0-P5 gates.

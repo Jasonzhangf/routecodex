@@ -30506,3 +30506,17 @@ Pure Rust NAPI candidates:
 
 - Correction: an active Provider runtime claim blocks overlapping runtime edits, not independent P6 contract/map/gate work.
 - Continue document calibration, machine-query gates, red mutation fixtures, evidence, and exact-scope commit in parallel; use handoff for shared surfaces. Defer only current-state gates that directly compile or format actively changing runtime files.
+
+# 2026-07-14T12:10Z: V3 P6 generic Responses Provider runtime slice verified
+
+- Current source binds Provider nodes 12-14 and map edges `v3-rd-10..12`; policy, client projection, and Server frame edges `v3-rd-09/13/14` remain honestly pending.
+- Full current-tree V3 gate stack passed, including seven red source mutations, compile-fail fixtures, Provider controlled-upstream tests, JSON/SSE Server blackbox, P0-P5 regressions, workspace, Clippy, fmt, and CLI build.
+- Actual local `v3/target/debug/routecodex-v3` with a temporary config and controlled upstream returned a real Responses JSON result, projected the model catalog, preserved client metadata, rewrote only the selected wire model, resolved auth only at transport, and emitted the Provider/Runtime debug node trace without leaking the secret.
+- No global install, `~/.rcc` change, live restart, real provider request, relay, continuation, servertool, other protocol, or V2 work was performed.
+
+# 2026-07-14T12:32Z: V3 Provider final-gate flake removed
+
+- Final `set -e` audit initially caught two real issues: the module-boundary scanner treated test names as production fallback/repair semantics, and the reselection blackbox used a released ephemeral port as an assumed connection failure.
+- The source gate now applies lifecycle/fallback wording checks only to production Rust source while its injected production red fixtures remain green.
+- The reselection blackbox now keeps a controlled failing upstream alive and returns HTTP 503; ten consecutive focused runs passed, followed by the complete architecture/provider/workspace/P0-P5 gate stack.
+- This correction changes test determinism only. Provider/Router/Target production selection semantics were not patched or bypassed.

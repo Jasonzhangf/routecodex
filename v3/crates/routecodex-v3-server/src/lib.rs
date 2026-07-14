@@ -9,8 +9,10 @@ use routecodex_v3_debug::{
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, execute_v3_foundation_dry_run_runtime,
-    execute_v3_foundation_pending_runtime, project_v3_debug_failure, V3FoundationRuntimeInput,
-    V3FoundationRuntimeOutput, V3P5Runtime,
+    execute_v3_foundation_pending_runtime,
+    execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
+    project_v3_debug_failure, register_responses_direct_hooks, V3ClientBody,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3ResponsesDirectRuntimeOutput,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -22,8 +24,8 @@ use tokio::sync::oneshot;
 struct V3ListenerState {
     server: V3ServerManifest,
     manifest_version: u16,
+    manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
-    runtime: V3P5Runtime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,8 +102,8 @@ pub async fn spawn_v3_server_aggregate(
         let app = build_v3_listener_router(V3ListenerState {
             server,
             manifest_version: preflight.manifest_version,
+            manifest: manifest.clone(),
             debug: debug.clone(),
-            runtime: V3P5Runtime::new(manifest.clone()),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -132,7 +134,7 @@ pub async fn serve_v3_server_aggregate_until_shutdown(
 fn build_v3_listener_router(state: V3ListenerState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/v1/models", any(pending_endpoint))
+        .route("/v1/models", get(models_endpoint))
         .route("/v1/responses", any(pending_endpoint))
         .route("/v1/messages", any(pending_endpoint))
         .route("/v1/chat/completions", any(pending_endpoint))
@@ -158,6 +160,10 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::V
     }))
 }
 
+async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
+    json_response(200, build_v3_models_catalog(&state.manifest))
+}
+
 async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
@@ -168,8 +174,9 @@ async fn pending_endpoint(
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let is_responses = path == "/v1/responses";
-    let output = if is_responses {
-        state.runtime.execute(
+    if is_responses {
+        let output = execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
+            &state.manifest,
             build_v3_server_03_http_request_raw(
                 state.server.id.clone(),
                 request_id,
@@ -178,10 +185,13 @@ async fn pending_endpoint(
                 path,
                 payload,
             ),
+            register_responses_direct_hooks(),
             &state.debug,
         )
+        .await;
+        responses_direct_output_response(output)
     } else {
-        execute_v3_foundation_pending_runtime(
+        let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
                 request_id,
@@ -191,9 +201,9 @@ async fn pending_endpoint(
                 payload,
             },
             &state.debug,
-        )
-    };
-    foundation_output_response(output)
+        );
+        foundation_output_response(output)
+    }
 }
 
 async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -311,6 +321,71 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
             serde_json::to_vec(&frame.body).expect("typed JSON projection"),
         ))
         .expect("typed response")
+}
+
+fn responses_direct_output_response(output: V3ResponsesDirectRuntimeOutput) -> Response<Body> {
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(output.client_payload.status).expect("typed V3 status"))
+        .header(
+            "content-type",
+            output
+                .client_payload
+                .headers
+                .get("content-type")
+                .map(String::as_str)
+                .unwrap_or("application/json"),
+        )
+        .header("x-routecodex-v3-debug-node", "V3Debug01NodeEventRegistered")
+        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
+    if let Some(chain) = output.error_chain.as_ref() {
+        builder = builder
+            .header("x-routecodex-v3-error-node", "V3Error06ClientProjected")
+            .header("x-routecodex-v3-error-chain", chain.join(","));
+    }
+    let body = match output.client_payload.body {
+        V3ClientBody::Json(value) => serde_json::to_vec(&value).expect("typed JSON projection"),
+        V3ClientBody::Bytes(bytes) => bytes,
+    };
+    builder.body(Body::from(body)).expect("typed response")
+}
+
+fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json::Value {
+    let mut data = Vec::new();
+    for provider in manifest
+        .providers
+        .values()
+        .filter(|provider| provider.enabled)
+    {
+        for model in provider.models.values() {
+            let visible_ids = if model.aliases.is_empty() {
+                vec![model.id.clone()]
+            } else {
+                model.aliases.clone()
+            };
+            for visible_id in visible_ids {
+                data.push(json!({
+                    "id": visible_id,
+                    "object": "model",
+                    "owned_by": format!("provider:{}", provider.id),
+                    "provider_id": provider.id,
+                    "canonical_model_id": model.id,
+                    "wire_model": model.wire_name,
+                    "aliases": model.aliases,
+                    "capabilities": model.capabilities,
+                    "supports_streaming": model.supports_streaming,
+                    "supports_thinking": model.supports_thinking,
+                    "thinking": model.thinking,
+                    "max_tokens": model.max_tokens,
+                    "max_context_tokens": model.max_context_tokens,
+                    "features": model.features,
+                }));
+            }
+        }
+    }
+    json!({
+        "object": "list",
+        "data": data,
+    })
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_error_06(

@@ -905,12 +905,16 @@ name = "routecodex-v3-provider-responses"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "bytes",
+ "futures-util",
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-error",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

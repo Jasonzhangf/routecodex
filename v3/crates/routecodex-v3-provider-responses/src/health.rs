@@ -408,26 +408,26 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
         let applied = store
             .apply_error_action(
                 &action(V3ErrorActionScope::AuthKey {
-                    provider_id: "cc".to_string(),
+                    provider_id: "provider-a".to_string(),
                     auth_alias: "key-a".to_string(),
                 }),
                 100,
             )
             .unwrap();
-        assert_eq!(applied.scope_label, "auth_key:cc:key-a");
+        assert_eq!(applied.scope_label, "auth_key:provider-a:key-a");
         assert!(
             !store
-                .availability("cc", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
         assert!(
             store
-                .availability("cc", Some("key-b"), Some("gpt-5.5"), 101)
+                .availability("provider-a", Some("key-b"), Some("gpt-5.5"), 101)
                 .available
         );
         assert!(
             store
-                .availability("asxs", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
     }
@@ -450,7 +450,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             .unwrap();
         assert!(
             store
-                .availability("cc", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
     }
@@ -460,10 +460,10 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
         let store = V3ProviderHealthStore::default();
         for scope in [
             V3ErrorActionScope::ProviderInstance {
-                provider_id: "cc".to_string(),
+                provider_id: "provider-a".to_string(),
             },
             V3ErrorActionScope::CanonicalModel {
-                provider_id: "asxs".to_string(),
+                provider_id: "provider-b".to_string(),
                 model_id: "gpt-5.5".to_string(),
             },
         ] {
@@ -471,17 +471,17 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
         }
         assert!(
             !store
-                .availability("cc", Some("key-a"), Some("other-model"), 101)
+                .availability("provider-a", Some("key-a"), Some("other-model"), 101)
                 .available
         );
         assert!(
             !store
-                .availability("asxs", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
         assert!(
             store
-                .availability("asxs", Some("key-a"), Some("other-model"), 101)
+                .availability("provider-b", Some("key-a"), Some("other-model"), 101)
                 .available
         );
         assert!(
@@ -497,7 +497,7 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
         store
             .update_quota_state(
                 &V3ErrorActionScope::CanonicalModel {
-                    provider_id: "cc".to_string(),
+                    provider_id: "provider-a".to_string(),
                     model_id: "gpt-5.5".to_string(),
                 },
                 0,
@@ -506,18 +506,18 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
             .unwrap();
         assert!(
             !store
-                .availability("cc", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
         assert!(
             store
-                .availability("cc", Some("key-a"), Some("other-model"), 101)
+                .availability("provider-a", Some("key-a"), Some("other-model"), 101)
                 .available
         );
-        store.update_concurrency_state("asxs", 2, 2).unwrap();
+        store.update_concurrency_state("provider-b", 2, 2).unwrap();
         assert!(
             !store
-                .availability("asxs", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
                 .available
         );
         assert!(
@@ -526,8 +526,14 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
                 .available
         );
         assert_eq!(
-            explain_provider_health_reasons(&store, "cc", Some("key-a"), Some("gpt-5.5"), 101,),
-            vec!["quota:canonical_model:cc:gpt-5.5:exhausted"]
+            explain_provider_health_reasons(
+                &store,
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                101,
+            ),
+            vec!["quota:canonical_model:provider-a:gpt-5.5:exhausted"]
         );
     }
 }

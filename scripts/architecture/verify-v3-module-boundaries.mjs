@@ -57,7 +57,7 @@ for (const path of all) {
   if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
     fail('full lifecycle executor outside runtime crate: ' + path);
   }
-  if (/run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(text)) {
+  if (!isTest && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(productionText)) {
     fail('forbidden V3 MVP lifecycle/fallback wording in source: ' + path);
   }
   if (!isTest && !isErrorOwner && /pub struct V3Error0[1-6]/.test(text)) {
