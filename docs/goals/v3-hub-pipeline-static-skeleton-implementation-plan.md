@@ -77,4 +77,3 @@ Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pi
 - The gate rejects removal of the four axes, immutable interval, static registry, migration deletion
   plan, or no-fallback rule.
 - No runtime implementation, Relay, continuation, provider config, install, or restart is claimed.
-
