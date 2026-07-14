@@ -130,6 +130,7 @@ description: RouteCodex 调试与架构路由入口
 - 只要任务涉及 `servertool / stopless / reasoning_stop / hook run / followup / reenter / schema validation / tool injection`，必须先读 `22` 再读 `23`。
 - 只要任务涉及 `/v1/responses` continuation、SSE、req_inbound/resp_outbound、history/tool loss、JSON/SSE parity，必须先读 `25`，再回 function map/mainline 锁 owner。
 - **Continuation 不可变区高优先级**：`resp_chatprocess save -> immutable store interval -> req_chatprocess restore` 之间禁止任何语义转换、上下文恢复、history/tool 修补、required_action 推断、stopless/servertool guidance 注入。`req_inbound` / `resp_outbound` / SSE / handler / adapter / store transport 只能做语义等价归一化、投影、传输、scope 校验和释放。
+- **Responses split tool output 判定**：同一 custom tool `call_id` 的 `custom_tool_call_output` chunk 属于 req-inbound 语义等价归一化，即使中间穿插独立 `wait` 等 function call/output，也只能在 Rust req-inbound context capture 按 custom-call owner 合并；无匹配 custom call 的真实 orphan 仍必须 fail-fast。禁止把该规则泛化到普通 function output，也不要在 handler、resp_outbound、store transport、provider runtime 或 TS bridge 补 history / continuation / tool_result。
 - 如果看到 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 在保存后到恢复前被用来补上下文或 history，先判定为越界 owner shortcut；修复方式是删除该逻辑并回 Chat Process continuation owner，而不是在 inbound/outbound/handler 再补一层。
 - `22` 锁目标骨架、主线顺序、case matrix、黑盒闭环。
 - `23` 锁实施顺序、debug 切段、证据链、删 TS 准入条件。

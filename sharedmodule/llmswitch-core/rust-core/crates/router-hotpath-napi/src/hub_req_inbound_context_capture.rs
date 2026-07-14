@@ -578,6 +578,81 @@ fn rewrite_responses_tool_history_entry_call_id(
     next
 }
 
+fn tool_output_value_to_text(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Null) | None => None,
+        Some(other) => serde_json::to_string(other).ok(),
+    }
+}
+
+fn join_split_tool_output_text(existing: &str, next: &str) -> String {
+    if existing.is_empty() {
+        return next.to_string();
+    }
+    if next.is_empty() {
+        return existing.to_string();
+    }
+    if existing.ends_with('\n') || next.starts_with('\n') {
+        format!("{existing}{next}")
+    } else {
+        format!("{existing}\n{next}")
+    }
+}
+
+fn merge_non_empty_string_field(
+    target: &mut Map<String, Value>,
+    source: &Map<String, Value>,
+    key: &str,
+) {
+    let Some(next) = read_trimmed_string(source.get(key)) else {
+        return;
+    };
+    let current = read_trimmed_string(target.get(key));
+    if current.is_none() {
+        target.insert(key.to_string(), Value::String(next));
+    }
+}
+
+fn merge_custom_tool_output_chunk(
+    previous: &mut Map<String, Value>,
+    next: &Map<String, Value>,
+) -> bool {
+    let previous_ty = read_trimmed_string(previous.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let next_ty = read_trimmed_string(next.get("type"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if previous_ty != "custom_tool_call_output" || next_ty != "custom_tool_call_output" {
+        return false;
+    }
+
+    let previous_call_id = responses_history_item_call_id(previous);
+    let next_call_id = responses_history_item_call_id(next);
+    if previous_call_id.is_none() || previous_call_id != next_call_id {
+        return false;
+    }
+
+    let previous_text = tool_output_value_to_text(previous.get("output"))
+        .or_else(|| tool_output_value_to_text(previous.get("content")))
+        .unwrap_or_default();
+    let next_text = tool_output_value_to_text(next.get("output"))
+        .or_else(|| tool_output_value_to_text(next.get("content")))
+        .unwrap_or_default();
+    previous.insert(
+        "output".to_string(),
+        Value::String(join_split_tool_output_text(
+            previous_text.as_str(),
+            next_text.as_str(),
+        )),
+    );
+    merge_non_empty_string_field(previous, next, "name");
+    merge_non_empty_string_field(previous, next, "status");
+    merge_non_empty_string_field(previous, next, "tool_call_id");
+    true
+}
+
 fn strip_provider_tool_sentinel_residue_from_value(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(strip_provider_tool_sentinel_residue(text.as_str())),
@@ -996,24 +1071,52 @@ pub(crate) fn normalize_responses_input_items(
                         continue;
                     }
                     seen_signatures.insert(payload_signature);
-                    let normalized_output =
-                        Value::Object(strip_provider_tool_sentinel_residue_from_row(rewritten_row));
+                    let normalized_output_row =
+                        strip_provider_tool_sentinel_residue_from_row(rewritten_row);
                     if deduped_identical_function_call_ids.contains(call_id.as_str()) {
                         if let Some(existing_index) = latest_tool_output_index_by_call_id
                             .get(call_id.as_str())
                             .copied()
                         {
-                            normalized[existing_index] = normalized_output;
+                            normalized[existing_index] = Value::Object(normalized_output_row);
                         } else {
                             latest_tool_output_index_by_call_id
                                 .insert(call_id.clone(), normalized.len());
-                            normalized.push(normalized_output);
+                            normalized.push(Value::Object(normalized_output_row));
                         }
                         continue;
                     }
+                    if ty == "custom_tool_call_output" {
+                        if let Some(existing_index) = latest_tool_output_index_by_call_id
+                            .get(call_id.as_str())
+                            .copied()
+                        {
+                            if let Some(existing_output) =
+                                normalized[existing_index].as_object_mut()
+                            {
+                                if merge_custom_tool_output_chunk(
+                                    existing_output,
+                                    &normalized_output_row,
+                                ) {
+                                    continue;
+                                }
+                            }
+                        }
+                        if let Some(previous_output) =
+                            normalized.last_mut().and_then(Value::as_object_mut)
+                        {
+                            if merge_custom_tool_output_chunk(
+                                previous_output,
+                                &normalized_output_row,
+                            ) {
+                                continue;
+                            }
+                        }
+                    }
                     latest_tool_output_index_by_call_id
-                        .entry(call_id)
+                        .entry(call_id.clone())
                         .or_insert(normalized.len());
+                    let normalized_output = Value::Object(normalized_output_row);
                     normalized.push(normalized_output);
                     continue;
                 }
@@ -1777,6 +1880,172 @@ mod tests {
         assert_eq!(normalized[1]["type"], "function_call_output");
         assert_eq!(normalized[2]["type"], "function_call_output");
         assert_eq!(normalized[2]["output"], "{\"stdout\":\"/var\"}");
+    }
+
+    #[test]
+    fn normalize_responses_input_items_merges_split_custom_tool_outputs_for_single_call() {
+        let raw_request = json!({
+          "input": [
+            {
+              "type": "custom_tool_call",
+              "call_id": "call_split",
+              "name": "exec",
+              "input": "mempalace search"
+            },
+            {
+              "type": "custom_tool_call_output",
+              "call_id": "call_split",
+              "output": "Script running with cell ID 3\nWall time 1.0 seconds\nOutput:\n"
+            },
+            {
+              "type": "custom_tool_call_output",
+              "call_id": "call_split",
+              "name": "exec",
+              "output": "RUN mempalace_search"
+            }
+          ]
+        });
+
+        let normalized = normalize_responses_input_items(raw_request.as_object().unwrap())
+            .expect("normalized input");
+        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized[0]["type"], "custom_tool_call");
+        assert_eq!(normalized[1]["type"], "custom_tool_call_output");
+        assert_eq!(normalized[1]["call_id"], "call_split");
+        assert_eq!(normalized[1]["name"], "exec");
+        assert_eq!(
+            normalized[1]["output"],
+            "Script running with cell ID 3\nWall time 1.0 seconds\nOutput:\nRUN mempalace_search"
+        );
+    }
+
+    #[test]
+    fn context_capture_merges_split_custom_tool_outputs_for_single_call() {
+        let input = ResponsesContextCaptureInput {
+            raw_request: json!({
+                "model": "gpt-5.6-sol",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            { "type": "output_text", "text": "Running gate matrix." }
+                        ]
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_split",
+                        "name": "exec",
+                        "input": "mempalace search"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_split",
+                        "output": "Script running with cell ID 3\nWall time 1.0 seconds\nOutput:\n"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_split",
+                        "name": "exec",
+                        "output": "RUN mempalace_search"
+                    }
+                ]
+            }),
+            request_id: Some("req_split_custom_output".to_string()),
+            tool_call_id_style: None,
+        };
+
+        let captured =
+            capture_req_inbound_responses_context_snapshot(input).expect("context capture");
+        let normalized_input = captured["input"].as_array().expect("captured input");
+        assert_eq!(normalized_input.len(), 3);
+        assert_eq!(normalized_input[2]["type"], "custom_tool_call_output");
+        assert_eq!(
+            normalized_input[2]["output"],
+            "Script running with cell ID 3\nWall time 1.0 seconds\nOutput:\nRUN mempalace_search"
+        );
+        let chat_messages = captured["chatMessages"].as_array().unwrap();
+        assert_eq!(chat_messages.len(), 3);
+        assert_eq!(chat_messages[2]["role"], "tool");
+        assert_eq!(chat_messages[2]["tool_call_id"], "call_split");
+        assert_eq!(
+            chat_messages[2]["content"],
+            "Script running with cell ID 3\nWall time 1.0 seconds\nOutput:\nRUN mempalace_search"
+        );
+    }
+
+    #[test]
+    fn context_capture_merges_non_adjacent_custom_tool_output_chunks_for_async_exec() {
+        let input = ResponsesContextCaptureInput {
+            raw_request: json!({
+                "model": "gpt-5.6-sol",
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_async_exec",
+                        "name": "exec",
+                        "input": "run gates"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_async_exec",
+                        "output": "Script running with cell ID 9\n"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_async_exec",
+                        "name": "exec",
+                        "output": "running focused-postfmt"
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_wait_async",
+                        "name": "wait",
+                        "arguments": "{\"cell_id\":\"9\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_wait_async",
+                        "output": "still running"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_async_exec",
+                        "name": "exec",
+                        "output": "running build-native-hotpath"
+                    }
+                ]
+            }),
+            request_id: Some("req_async_exec_split_custom_output".to_string()),
+            tool_call_id_style: None,
+        };
+
+        let captured =
+            capture_req_inbound_responses_context_snapshot(input).expect("context capture");
+        let normalized_input = captured["input"].as_array().expect("captured input");
+        let custom_outputs = normalized_input
+            .iter()
+            .filter(|entry| entry["type"] == "custom_tool_call_output")
+            .collect::<Vec<_>>();
+        assert_eq!(custom_outputs.len(), 1);
+        assert_eq!(custom_outputs[0]["call_id"], "call_async_exec");
+        assert_eq!(
+            custom_outputs[0]["output"],
+            "Script running with cell ID 9\nrunning focused-postfmt\nrunning build-native-hotpath"
+        );
+
+        let chat_messages = captured["chatMessages"].as_array().unwrap();
+        let tool_messages = chat_messages
+            .iter()
+            .filter(|entry| entry["role"] == "tool")
+            .collect::<Vec<_>>();
+        assert_eq!(tool_messages.len(), 2);
+        assert_eq!(tool_messages[0]["tool_call_id"], "call_async_exec");
+        assert_eq!(
+            tool_messages[0]["content"],
+            "Script running with cell ID 9\nrunning focused-postfmt\nrunning build-native-hotpath"
+        );
+        assert_eq!(tool_messages[1]["tool_call_id"], "call_wait_async");
     }
 
     #[test]

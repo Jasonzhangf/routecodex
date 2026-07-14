@@ -1653,6 +1653,9 @@ verification:
       - cargo test -p router-hotpath-napi normalize_responses_input_items_dedupes_identical_duplicate_function_calls --lib -- --nocapture
       - cargo test -p router-hotpath-napi normalize_responses_input_items_keeps_distinct_duplicate_function_call_outputs --lib -- --nocapture
       - cargo test -p router-hotpath-napi normalize_responses_input_items_collapses_distinct_outputs_when_identical_call_batch_repeats --lib -- --nocapture
+      - cargo test -p router-hotpath-napi normalize_responses_input_items_merges_split_custom_tool_outputs_for_single_call --lib -- --nocapture
+      - cargo test -p router-hotpath-napi context_capture_merges_split_custom_tool_outputs_for_single_call --lib -- --nocapture
+      - cargo test -p router-hotpath-napi context_capture_merges_non_adjacent_custom_tool_output_chunks_for_async_exec --lib -- --nocapture
       - npm run verify:function-map-compile-gate
     build:
       - npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false
