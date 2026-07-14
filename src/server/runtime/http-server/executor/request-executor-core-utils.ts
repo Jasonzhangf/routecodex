@@ -97,6 +97,7 @@ export interface RouteAvailabilityDecisionNativeResult {
   routePoolRemainingAfterExclusion: string[];
   remainingRouteCandidates: number;
   defaultPoolAvailable: boolean;
+  defaultPoolSingletonProvider: boolean;
   policyExhausted: boolean;
   mayProject: boolean;
   routePoolAuthoritative: boolean;

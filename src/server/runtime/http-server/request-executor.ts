@@ -924,11 +924,12 @@ export class HubRequestExecutor implements RequestExecutor {
             });
             if (singletonPoolDecision.shouldBlock) {
               const waitMs = singletonPoolDecision.waitMs ?? 0;
+              const excludedProviderKeysBeforeWait = Array.from(excludedProviderKeys);
               logStage('provider.route_pool_cooldown_wait', providerRequestId, {
                 routeName: primaryExhaustedRoute,
                 waitMs,
                 candidateProviderCount: singletonPoolDecision.candidateProviderCount,
-                excludedProviderKeys: Array.from(excludedProviderKeys),
+                excludedProviderKeys: excludedProviderKeysBeforeWait,
                 attempt,
               });
               if (waitMs > 0) {
@@ -942,9 +943,10 @@ export class HubRequestExecutor implements RequestExecutor {
                 routeName: primaryExhaustedRoute,
                 waitMs,
                 candidateProviderCount: singletonPoolDecision.candidateProviderCount,
-                excludedProviderKeys: Array.from(excludedProviderKeys),
+                excludedProviderKeys: excludedProviderKeysBeforeWait,
                 attempt,
               });
+              excludedProviderKeys.clear();
               allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;
             }
@@ -1012,6 +1014,8 @@ export class HubRequestExecutor implements RequestExecutor {
             Array.isArray(routingDecisionForAttempt?.routePool) && routingDecisionForAttempt.routePool.length > 0,
         });
         const defaultTierAvailableForAttempt = routeAvailabilityForAttempt.defaultPoolAvailable;
+        const defaultPoolSingletonProviderForAttempt =
+          routeAvailabilityForAttempt.defaultPoolSingletonProvider;
         const routePoolIsAuthoritativeForAttempt = routeAvailabilityForAttempt.routePoolAuthoritative;
         const concurrencyScopeKey =
           typeof target.concurrencyScopeKey === 'string' && target.concurrencyScopeKey.trim()
@@ -1088,6 +1092,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
+            defaultPoolSingletonProvider: defaultPoolSingletonProviderForAttempt,
             excludedProviderKeys,
             portScope,
             recordAttempt,
@@ -1233,6 +1238,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
+            defaultPoolSingletonProvider: defaultPoolSingletonProviderForAttempt,
             excludedProviderKeys,
             portScope,
             recordAttempt,
@@ -1721,6 +1727,7 @@ export class HubRequestExecutor implements RequestExecutor {
             routePoolForAttempt,
             routePoolIsAuthoritative: routePoolIsAuthoritativeForAttempt,
             defaultTierAvailable: defaultTierAvailableForAttempt,
+            defaultPoolSingletonProvider: defaultPoolSingletonProviderForAttempt,
             excludedProviderKeys,
             portScope,
             recordAttempt,

@@ -87,6 +87,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   status?: number;
   forceExcludeCurrentProviderOnRetry?: boolean;
   defaultTierAvailable?: boolean;
+  defaultPoolSingletonProvider?: boolean;
   isStreamingRequest?: boolean;
   providerOwnedContinuation?: boolean;
   abortSignal?: AbortSignal;
@@ -126,6 +127,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     status: args.status,
     forceExcludeCurrentProviderOnRetry: args.forceExcludeCurrentProviderOnRetry,
     defaultTierAvailable: args.defaultTierAvailable,
+    defaultPoolSingletonProvider: args.defaultPoolSingletonProvider,
     isStreamingRequest: args.isStreamingRequest,
     providerOwnedContinuation: args.providerOwnedContinuation,
     abortSignal: args.abortSignal,

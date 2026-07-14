@@ -783,6 +783,7 @@ export function resolveErrorErr05RouteAvailabilityDecisionNative(input: {
   routePoolRemainingAfterExclusion: string[];
   remainingRouteCandidates: number;
   defaultPoolAvailable: boolean;
+  defaultPoolSingletonProvider: boolean;
   policyExhausted: boolean;
   mayProject: boolean;
   routePoolAuthoritative: boolean;
@@ -808,6 +809,7 @@ export function resolveErrorErr05RouteAvailabilityDecisionNative(input: {
     routePoolRemainingAfterExclusion: string[];
     remainingRouteCandidates: number;
     defaultPoolAvailable: boolean;
+    defaultPoolSingletonProvider: boolean;
     policyExhausted: boolean;
     mayProject: boolean;
     routePoolAuthoritative: boolean;

@@ -593,6 +593,49 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['primary.key1.gpt-5.5']);
   });
 
+  it('keeps the sole default provider after request-local exclusion and retries it', async () => {
+    const excludedProviderKeys = new Set<string>(['default.key1.model']);
+    const error = Object.assign(new Error('HTTP 502: upstream failed'), {
+      statusCode: 502,
+      code: 'HTTP_502',
+      upstreamCode: 'HTTP_502'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 502,
+        errorCode: 'HTTP_502',
+        upstreamCode: 'HTTP_502',
+        reason: 'HTTP 502: upstream failed'
+      },
+      attempt: 1,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'default.key1.model',
+      runtimeKey: 'default.key1',
+      logicalRequestChainKey: 'req-default-pool-singleton',
+      logicalChainRetryLimitStageRequestId: 'req-default-pool-singleton',
+      routePool: ['default.key1.model'],
+      routePoolIsAuthoritative: true,
+      defaultTierAvailable: true,
+      defaultPoolSingletonProvider: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn()
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.excludedCurrentProvider).toBe(false);
+    expect(plan.routePoolRemainingAfterExclusion).toEqual(['default.key1.model']);
+    expect(plan.defaultPoolAvailable).toBe(true);
+    expect(plan.policyExhausted).toBe(false);
+    expect(plan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual([]);
+  });
+
   it('excludes current provider for recoverable HTTP 502 as soon as alternatives exist', async () => {
     const excludedProviderKeys = new Set<string>();
     const error = Object.assign(new Error('HTTP 502: Upstream service temporarily unavailable'), {

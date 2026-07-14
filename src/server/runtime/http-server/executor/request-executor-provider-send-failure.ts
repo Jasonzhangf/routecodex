@@ -55,6 +55,7 @@ type RequestExecutorProviderSendFailureArgs = {
   routePoolForAttempt?: string[];
   routePoolIsAuthoritative?: boolean;
   defaultTierAvailable?: boolean;
+  defaultPoolSingletonProvider?: boolean;
   excludedProviderKeys: Set<string>;
   portScope?: string;
   providerTransportBackoffKey?: string;
@@ -365,6 +366,7 @@ export async function processProviderSendFailure(
     routePool: args.routePoolForAttempt,
     routePoolIsAuthoritative: args.routePoolIsAuthoritative,
     defaultTierAvailable: args.defaultTierAvailable,
+    defaultPoolSingletonProvider: args.defaultPoolSingletonProvider,
     runtimeManager: args.runtimeManager,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,

@@ -48,6 +48,7 @@ pub struct ErrorErr05RouteAvailabilityDecision {
     pub route_pool_remaining_after_exclusion: Vec<String>,
     pub remaining_route_candidates: usize,
     pub default_pool_available: bool,
+    pub default_pool_singleton_provider: bool,
     pub policy_exhausted: bool,
     pub may_project: bool,
     pub route_pool_authoritative: bool,
@@ -80,19 +81,26 @@ pub fn resolve_error_err05_route_availability_decision(
             .any(|candidate| candidate != provider && !excluded.contains(candidate))
     });
     let configured_candidates = configured_route_candidates(&input.route_tiers);
-    let route_pool_authoritative = input.routing_decision_route_pool_present
-        && (route_pool.len() > 1
-            || (route_pool.len() == 1
-                && configured_candidates.len() == 1
-                && !default_pool_available
-                && excluded.is_empty()));
-    let verified_last_provider = provider_key.as_ref().is_some_and(|provider| {
+    let is_default_route = input
+        .route_name
+        .as_ref()
+        .and_then(|value| trim_nonempty_str(value))
+        .is_some_and(|route| route.eq_ignore_ascii_case("default"));
+    let route_pool_singleton_current = provider_key.as_ref().is_some_and(|provider| {
         route_pool.len() == 1
             && route_pool.first() == Some(provider)
             && configured_candidates.len() == 1
             && configured_candidates.contains(provider)
-            && !default_pool_available
     });
+    let default_pool_singleton_provider =
+        is_default_route && default_pool_available && route_pool_singleton_current;
+    let route_pool_authoritative = input.routing_decision_route_pool_present
+        && (route_pool.len() > 1
+            || (route_pool_singleton_current
+                && ((!default_pool_available && excluded.is_empty())
+                    || default_pool_singleton_provider)));
+    let verified_last_provider =
+        route_pool_singleton_current && (!default_pool_available || default_pool_singleton_provider);
     let policy_exhausted = remaining.is_empty() && !default_pool_available;
     let reason_code = if default_pool_available {
         "default_pool_available"
@@ -110,6 +118,7 @@ pub fn resolve_error_err05_route_availability_decision(
         remaining_route_candidates: remaining.len(),
         route_pool_remaining_after_exclusion: remaining,
         default_pool_available,
+        default_pool_singleton_provider,
         policy_exhausted,
         may_project: policy_exhausted,
         route_pool_authoritative,
@@ -129,6 +138,11 @@ fn resolve_default_pool_available(
         .as_ref()
         .and_then(|value| trim_nonempty_str(value))
         .map(|value| value.to_ascii_lowercase());
+    if route_name.as_deref() == Some("default") {
+        return configured_route_candidates(&input.route_tiers)
+            .iter()
+            .any(|target| !target.is_empty());
+    }
     let mut tiers = input.route_tiers.clone();
     if route_name
         .as_deref()
@@ -216,6 +230,47 @@ mod tests {
     }
 
     #[test]
+    fn default_route_singleton_stays_available_despite_request_local_exclusion() {
+        let decision = resolve_error_err05_route_availability_decision(
+            &ErrorErr05RouteAvailabilityDecisionInput {
+                route_name: Some("default".to_string()),
+                route_pool: vec!["default.key1.model".to_string()],
+                route_tiers: vec![tier(&["default.key1.model"], true)],
+                default_route_tiers: Vec::new(),
+                excluded_provider_keys: vec!["default.key1.model".to_string()],
+                provider_key: Some("default.key1.model".to_string()),
+                routing_decision_route_pool_present: true,
+            },
+        );
+        assert!(decision.default_pool_available);
+        assert!(decision.default_pool_singleton_provider);
+        assert!(decision.route_pool_authoritative);
+        assert!(decision.verified_last_provider);
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+        assert_eq!(decision.reason_code, "default_pool_available");
+    }
+
+    #[test]
+    fn default_route_without_targets_is_terminal_when_route_pool_empty() {
+        let decision = resolve_error_err05_route_availability_decision(
+            &ErrorErr05RouteAvailabilityDecisionInput {
+                route_name: Some("default".to_string()),
+                route_pool: Vec::new(),
+                route_tiers: Vec::new(),
+                default_route_tiers: Vec::new(),
+                excluded_provider_keys: Vec::new(),
+                provider_key: None,
+                routing_decision_route_pool_present: true,
+            },
+        );
+        assert!(!decision.default_pool_available);
+        assert!(!decision.default_pool_singleton_provider);
+        assert!(decision.policy_exhausted);
+        assert!(decision.may_project);
+    }
+
+    #[test]
     fn single_configured_candidate_without_default_is_verified_last_provider() {
         let decision = resolve_error_err05_route_availability_decision(
             &ErrorErr05RouteAvailabilityDecisionInput {
@@ -230,6 +285,7 @@ mod tests {
         );
         assert!(decision.route_pool_authoritative);
         assert!(decision.verified_last_provider);
+        assert!(decision.default_pool_singleton_provider);
         assert!(!decision.has_alternative_candidate);
     }
 

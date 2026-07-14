@@ -252,7 +252,7 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
             effects: &[
                 "record_error_action_backoff",
                 "emit_error_action_hook",
-                "blocking_wait_1s_3s_5s_cycle",
+                "blocking_wait_1s_2s_3s_cycle",
                 "enforce_fixed_waiter_cap",
             ],
             forbidden_paths: vec![
@@ -266,8 +266,8 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
                 "provider_traffic_governor_unified_queue.red",
                 "server_module_help_error_action_queue.red",
             ],
-            debug_flow: "1. Query describeServerModuleHelp('server.error_action_queue'). 2. Inspect request-executor-error-action-queue.ts contract. 3. Verify category/scope hook events and 1s/3s/5s blocking wait behavior in focused tests.",
-            help: "Error action queue: all error-storm waits use one fixed blocking queue: 1s -> 3s -> 5s -> repeat. Supported categories are global_error, session_storm, and servertool_followup. No per-call/env backoff configuration, no local soft-wait loops.",
+            debug_flow: "1. Query describeServerModuleHelp('server.error_action_queue'). 2. Inspect request-executor-error-action-queue.ts contract. 3. Verify category/scope hook events and 1s/2s/3s blocking wait behavior in focused tests.",
+            help: "Error action queue: all error-storm waits use one fixed blocking queue: 1s -> 2s -> 3s -> repeat. Supported categories are global_error, session_storm, and servertool_followup. No per-call/env backoff configuration, no local soft-wait loops.",
         },
     ]
 }

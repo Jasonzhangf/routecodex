@@ -55,6 +55,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   providerOwnedContinuation?: boolean;
   abortSignal?: AbortSignal;
   defaultTierAvailable?: boolean;
+  defaultPoolSingletonProvider?: boolean;
   logNonBlockingError: LogNonBlockingError;
 }): Promise<ProviderRetryExecutionPlan> {
   const errorErr02HostCaptured = buildErrorErr02HostCapturedInput({
@@ -83,6 +84,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     attempt: args.attempt,
     maxAttempts: args.maxAttempts,
     defaultPoolAvailable: args.defaultTierAvailable === true,
+    defaultPoolSingletonProvider: args.defaultPoolSingletonProvider === true,
     promptTooLong: args.promptTooLong === true,
     providerOwnedContinuation: args.providerOwnedContinuation === true,
     protocolBoundaryFailure: isProviderProtocolBoundaryError(args.error, args.retryError),

@@ -224,6 +224,8 @@ pub struct ErrorErr05ExecutionDecisionInput {
     #[serde(default)]
     pub default_pool_available: bool,
     #[serde(default)]
+    pub default_pool_singleton_provider: bool,
+    #[serde(default)]
     pub prompt_too_long: bool,
     #[serde(default)]
     pub provider_owned_continuation: bool,
@@ -349,6 +351,33 @@ pub fn resolve_error_err05_execution_decision(
             allow_retry_beyond_attempt_budget: false,
             retry_switch_plan: None,
             retry_execution_policy_reason: None,
+            route_pool_remaining_after_exclusion: remaining(&excluded),
+            default_pool_available: input.default_pool_available,
+            policy_exhausted: false,
+            may_project: false,
+            excluded_provider_keys: excluded,
+        };
+    }
+    let default_pool_singleton_provider = input.default_pool_singleton_provider
+        && input.default_pool_available
+        && only_current_provider
+        && !has_alternative_before_exclusion;
+    let may_retry_default_pool_singleton_provider = default_pool_singleton_provider
+        && !input.prompt_too_long
+        && !input.provider_owned_continuation
+        && input.attempt < input.max_attempts
+        && eligible_last_provider_stage
+        && retryable;
+    if may_retry_default_pool_singleton_provider {
+        if let Some(key) = provider_key {
+            excluded.retain(|value| value != key);
+        }
+        return ErrorErr05ExecutionDecision {
+            should_retry: true,
+            excluded_current_provider: false,
+            allow_retry_beyond_attempt_budget: false,
+            retry_switch_plan: None,
+            retry_execution_policy_reason: Some("default_pool_singleton_provider_retry"),
             route_pool_remaining_after_exclusion: remaining(&excluded),
             default_pool_available: input.default_pool_available,
             policy_exhausted: false,
@@ -1512,6 +1541,7 @@ mod tests {
             attempt: 1,
             max_attempts: 6,
             default_pool_available: false,
+            default_pool_singleton_provider: false,
             prompt_too_long: false,
             provider_owned_continuation: false,
             protocol_boundary_failure: false,
@@ -1540,7 +1570,50 @@ mod tests {
         input.default_pool_available = true;
         let decision = resolve_error_err05_execution_decision(input);
         assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert_eq!(decision.excluded_provider_keys, vec!["p1.model"]);
         assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_default_pool_singleton_provider_retries_without_exclusion() {
+        let mut input = error_err05_input();
+        input.route_pool = vec!["p1.model".to_string()];
+        input.excluded_provider_keys = vec!["p1.model".to_string()];
+        input.default_pool_available = true;
+        input.default_pool_singleton_provider = true;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(!decision.excluded_current_provider);
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+        assert_eq!(
+            decision.route_pool_remaining_after_exclusion,
+            vec!["p1.model"]
+        );
+        assert!(decision.excluded_provider_keys.is_empty());
+        assert!(decision.retry_switch_plan.is_none());
+        assert_eq!(
+            decision.retry_execution_policy_reason,
+            Some("default_pool_singleton_provider_retry")
+        );
+    }
+
+    #[test]
+    fn error_err05_primary_singleton_with_separate_default_still_excludes_and_reroutes() {
+        let mut input = error_err05_input();
+        input.route_pool = vec!["p1.model".to_string()];
+        input.default_pool_available = true;
+        input.default_pool_singleton_provider = false;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert_eq!(decision.excluded_provider_keys, vec!["p1.model"]);
+        assert_eq!(
+            decision.retry_switch_plan.unwrap().switch_action,
+            "exclude_and_reroute"
+        );
         assert!(!decision.may_project);
     }
 

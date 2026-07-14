@@ -33,7 +33,7 @@ type ErrorActionQueueState = {
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 type ErrorActionQueueHook = (event: ErrorActionQueueEvent) => void;
 
-const ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 3_000, 5_000] as const;
+const ERROR_ACTION_DELAY_SEQUENCE_MS = [1_000, 2_000, 3_000] as const;
 const ERROR_ACTION_STATE_TTL_MS = 10 * 60_000;
 const ERROR_ACTION_MAX_WAITERS = 64;
 

@@ -35,6 +35,7 @@ type RequestExecutorProviderResolveFailureArgs = {
   routePoolForAttempt?: string[];
   routePoolIsAuthoritative?: boolean;
   defaultTierAvailable?: boolean;
+  defaultPoolSingletonProvider?: boolean;
   excludedProviderKeys: Set<string>;
   portScope?: string;
   providerTransportBackoffKey?: string;
@@ -110,6 +111,7 @@ export async function processProviderResolveFailure(
     routePool: args.routePoolForAttempt,
     routePoolIsAuthoritative: args.routePoolIsAuthoritative,
     defaultTierAvailable: args.defaultTierAvailable,
+    defaultPoolSingletonProvider: args.defaultPoolSingletonProvider,
     excludedProviderKeys: args.excludedProviderKeys,
     recordAttempt: args.recordAttempt,
     logStage: args.logStage,

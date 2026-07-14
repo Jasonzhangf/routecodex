@@ -1838,6 +1838,8 @@ export class RouteCodexHttpServer {
           && ((routingDecision as Record<string, unknown>).routePool as unknown[]).length > 0,
       });
       const defaultTierAvailableForDecision = routeAvailabilityDecision.defaultPoolAvailable;
+      const defaultPoolSingletonProviderForDecision =
+        routeAvailabilityDecision.defaultPoolSingletonProvider;
       const routePoolIsAuthoritativeForDecision = routeAvailabilityDecision.routePoolAuthoritative;
       await processProviderResolveFailure({
         error: resolveError,
@@ -1860,6 +1862,7 @@ export class RouteCodexHttpServer {
         routePoolForAttempt: routingDecisionProviderPool,
         routePoolIsAuthoritative: routePoolIsAuthoritativeForDecision,
         defaultTierAvailable: defaultTierAvailableForDecision,
+        defaultPoolSingletonProvider: defaultPoolSingletonProviderForDecision,
         excludedProviderKeys: retryState.excludedProviderKeys,
         recordAttempt: () => {},
         logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
@@ -2065,6 +2068,8 @@ export class RouteCodexHttpServer {
             && ((ctx.routingDecision as Record<string, unknown>).routePool as unknown[]).length > 0,
         });
         const defaultTierAvailableForDecision = routeAvailabilityDecision.defaultPoolAvailable;
+        const defaultPoolSingletonProviderForDecision =
+          routeAvailabilityDecision.defaultPoolSingletonProvider;
         const routePoolIsAuthoritativeForDecision = routeAvailabilityDecision.routePoolAuthoritative;
         this.logStage('router-direct.send.error', input.requestId, {
           port: portConfig.port,
@@ -2105,6 +2110,7 @@ export class RouteCodexHttpServer {
           routePoolForAttempt: routingDecisionProviderPool,
           routePoolIsAuthoritative: routePoolIsAuthoritativeForDecision,
           defaultTierAvailable: defaultTierAvailableForDecision,
+          defaultPoolSingletonProvider: defaultPoolSingletonProviderForDecision,
           excludedProviderKeys: retryState.excludedProviderKeys,
           recordAttempt: () => {},
           logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),

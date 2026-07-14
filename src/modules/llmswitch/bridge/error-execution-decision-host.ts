@@ -96,6 +96,7 @@ export type ErrorErr05ExecutionDecisionInput = {
   attempt?: number;
   maxAttempts?: number;
   defaultPoolAvailable?: boolean;
+  defaultPoolSingletonProvider?: boolean;
   promptTooLong?: boolean;
   providerOwnedContinuation?: boolean;
   protocolBoundaryFailure?: boolean;

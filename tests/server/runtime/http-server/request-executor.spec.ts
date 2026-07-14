@@ -70,6 +70,9 @@ function createRequestExecutorLocalRoutingIntegrationsMock() {
     return [process.cwd(), ...parts].join('/');
   };
   return {
+    buildRequestStageRuntimeControlWritePlanNative: () => ({
+      runtimeControl: undefined,
+    }),
     executeHubPipelineNative: (_handle: string, input: unknown) => {
       if (!requestExecutorLocalHubPipelineExecute) {
         throw new Error('request-executor local Hub pipeline fixture is not installed');
@@ -81,6 +84,11 @@ function createRequestExecutorLocalRoutingIntegrationsMock() {
     resolveRccPathNativeSync,
     resolveRccSnapshotsDirNativeSync: () => resolveRccPathNativeSync(['codex-samples']),
     resolveRccUserDirNativeSync,
+    resolveEntryProtocolFromEndpointNative: (entryEndpoint: string) => {
+      if (entryEndpoint === '/v1/responses') return 'openai-responses';
+      if (entryEndpoint === '/v1/messages') return 'anthropic-messages';
+      return 'openai-chat';
+    },
   };
 }
 
@@ -2888,31 +2896,67 @@ describe('HubRequestExecutor failover', () => {
     }
   });
 
-  test('default-pool singleton exhaustion fails fast after Rust default-pool plan is consumed', async () => {
-    jest.useFakeTimers();
+  test('default-pool singleton exhaustion waits, clears exclusions, and replays the sole provider', async () => {
+    jest.resetModules();
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/runtime-integrations.js',
+      createRequestExecutorLocalRuntimeIntegrationsMock
+    );
+    jest.unstable_mockModule(
+      '../../../../src/modules/llmswitch/bridge/routing-integrations.js',
+      createRequestExecutorLocalRoutingIntegrationsMock
+    );
     const searchProvider = 'search.key1.gpt-5.4';
     const defaultProvider = 'default.key1.MiniMax-M3';
+    const defaultAttemptExclusions: unknown[] = [];
+    const handle = buildHandle(
+      defaultProvider,
+      async () => ({ status: 200, data: { id: 'ok-after-default-singleton-wait' } }),
+      'openai-chat'
+    );
 
     const runtimeManager = {
       resolveRuntimeKey: (key: string) => key,
-      getHandleByRuntimeKey: () => undefined
+      getHandleByRuntimeKey: (runtimeKey?: string) =>
+        runtimeKey === defaultProvider ? handle : undefined
     };
 
+    let defaultAttempts = 0;
     const pipeline = {
-      execute: jest.fn(async (input: any) => {
+      execute: jest.fn((input: any) => {
         const allowedProviders = input?.metadata?.allowedProviders;
         if (Array.isArray(allowedProviders) && allowedProviders[0] === defaultProvider) {
-          throw Object.assign(new Error('All providers unavailable for route default'), {
-            code: 'PROVIDER_NOT_AVAILABLE',
-            details: {
+          defaultAttempts += 1;
+          defaultAttemptExclusions.push(input?.metadata?.excludedProviderKeys);
+          if (defaultAttempts === 1) {
+            throw Object.assign(new Error('All providers unavailable for route default'), {
+              code: 'PROVIDER_NOT_AVAILABLE',
+              details: {
+                routeName: 'default',
+                candidateProviderCount: 1,
+                minRecoverableCooldownMs: 5,
+                recoverableCooldownHints: [
+                  { providerKey: defaultProvider, waitMs: 5, source: 'provider.error' }
+                ]
+              }
+            });
+          }
+          return {
+            requestId: input.id,
+            providerPayload: { model: 'test-model', messages: [{ role: 'user', content: 'hello' }] },
+            target: {
+              providerKey: defaultProvider,
+              providerType: 'openai',
+              outboundProfile: 'openai-chat',
+              runtimeKey: defaultProvider
+            },
+            routingDecision: {
               routeName: 'default',
-              candidateProviderCount: 1,
-              minRecoverableCooldownMs: 1000,
-              recoverableCooldownHints: [
-                { providerKey: defaultProvider, waitMs: 1000, source: 'provider.error' }
-              ]
-            }
-          });
+              providerProtocol: 'openai-chat',
+              routePool: [defaultProvider]
+            },
+            metadata: {}
+          };
         }
         throw Object.assign(new Error('All providers unavailable for route search'), {
           code: 'PROVIDER_NOT_AVAILABLE',
@@ -2936,11 +2980,15 @@ describe('HubRequestExecutor failover', () => {
       }),
       updateVirtualRouterConfig: jest.fn()
     };
+    requestExecutorLocalHubPipelineExecute = (input: unknown) => pipeline.execute(input);
+    const { createRequestExecutor: createRequestExecutorLocal } = await import(
+      '../../../../src/server/runtime/http-server/request-executor'
+    );
 
     const logStage = jest.fn();
-    const executor = createRequestExecutor({
+    const executor = createRequestExecutorLocal({
       runtimeManager: runtimeManager as any,
-      getHubPipeline: () => pipeline as any,
+      getHubPipeline: () => 'request-executor-default-singleton-native-handle' as any,
       getRoutingTiers: () => [
         { id: 'search-primary', targets: [searchProvider], priority: 200 },
         { id: 'default-primary', targets: [defaultProvider], priority: 100, backup: true }
@@ -2949,8 +2997,12 @@ describe('HubRequestExecutor failover', () => {
       logStage,
       stats: new StatsManager()
     });
+    jest.spyOn(executor as any, 'convertProviderResponseIfNeeded').mockResolvedValue({
+      status: 200,
+      body: { id: 'ok-after-default-singleton-wait', object: 'response', status: 'completed' }
+    });
 
-    const expectation = expect(executor.execute({
+    const pending = executor.execute({
       requestId: 'req-default-pool-singleton-must-stop',
       entryEndpoint: '/v1/chat/completions',
       body: {
@@ -2961,16 +3013,21 @@ describe('HubRequestExecutor failover', () => {
       metadata: {
         routecodexRoutingPolicyGroup: 'gateway_priority_5555'
       }
-    })).rejects.toMatchObject({ code: 'PROVIDER_NOT_AVAILABLE' });
+    });
 
-    await jest.advanceTimersByTimeAsync(1_000);
-    await expectation;
+    const result = await pending;
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(3);
+    expect(defaultAttemptExclusions).toEqual([undefined, undefined]);
     expect(
       logStage.mock.calls.some((call) => call[0] === 'provider.primary_exhausted_to_default_pool.applied')
     ).toBe(true);
     expect(
-      logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait.exhausted')
-    ).toBe(false);
+      logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait')
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some((call) => call[0] === 'provider.route_pool_cooldown_wait.completed')
+    ).toBe(true);
   }, 20_000);
 
 

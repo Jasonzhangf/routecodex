@@ -171,14 +171,22 @@ describe('request-executor primary exhausted plan bridge', () => {
     })).toBe('gateway_glm_4444');
   });
 
-  it('[reverse] default tier availability is false when the remaining pool is already the default tier last provider', () => {
-    expect(coreUtilsModule.resolveErrorErr05RouteAvailabilityDecision({
+  it('[forward] default tier singleton stays available despite request-local exclusion', () => {
+    const decision = coreUtilsModule.resolveErrorErr05RouteAvailabilityDecision({
       routeName: 'default',
       routeTiers: [
         { id: 'default-primary', targets: ['default.key1.model'], priority: 100, backup: true },
       ],
       routePool: ['default.key1.model'],
       excludedProviderKeys: new Set(['default.key1.model']),
-    }).defaultPoolAvailable).toBe(false);
+      providerKey: 'default.key1.model',
+      routingDecisionRoutePoolPresent: true,
+    });
+
+    expect(decision.defaultPoolAvailable).toBe(true);
+    expect(decision.defaultPoolSingletonProvider).toBe(true);
+    expect(decision.verifiedLastProvider).toBe(true);
+    expect(decision.policyExhausted).toBe(false);
+    expect(decision.mayProject).toBe(false);
   });
 });
