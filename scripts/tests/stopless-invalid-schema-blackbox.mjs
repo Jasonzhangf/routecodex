@@ -13,6 +13,20 @@ const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
 );
 
+const STOPLESS_TRANSPARENT_CONTINUATION_PROMPT = '继续处理当前任务：先依据已有上下文判断目标是否已完成。未完成时，识别完成目标所必需的事项，按重要性和依赖顺序直接依次执行，从当前最重要且可执行的下一步继续；不要重复已完成内容，也不要因为非关键偏好、实现细节、可自主判断的选择，或询问用户“是否继续”而停止。只要存在能够自主执行且有助于完成目标的下一步，就直接执行，不要请求继续许可。只有确实缺少会影响目标、权限、实际成本或不可逆风险的用户专属决策时，才暂停并提出一个具体、可回答的问题。已完成则按系统合同收口。';
+
+const PROVIDER_FORBIDDEN_STOPLESS_MARKERS = [
+  'servertool',
+  'routecodex hook',
+  'reasoningStop',
+  'function_call_output',
+  'repeatCount',
+  'reasonCode',
+  'missingFields',
+  'schemaGuidance',
+  'STOPLESS_CLI_RESULT_MALFORMED'
+];
+
 function setEnv(name, value) {
   const old = process.env[name];
   if (value === undefined) delete process.env[name]; else process.env[name] = value;
@@ -154,24 +168,6 @@ function upstreamResponse(text, finish = 'stop') {
     usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
     finish_reason: finish
   };
-}
-
-function validTerminalSchemaText() {
-  const schema = JSON.stringify({
-    stopreason: 0,
-    reason: '已完成 invalid schema 缺失字段反馈闭环',
-    has_evidence: 1,
-    evidence: 'provider request carried full missingFields feedback twice',
-    issue_cause: '之前 schema 字段缺失',
-    excluded_factors: '已排除 raw reasoningStop 泄漏和 endless CLI loop',
-    diagnostic_order: 'first invalid -> full missingFields feedback -> second invalid -> next_step feedback -> terminal schema',
-    done_steps: '完成两轮 invalid schema 修复反馈验证',
-    next_step: '',
-    next_suggested_path: '无',
-    needs_user_input: false,
-    learned: 'invalid schema feedback must enumerate every missing field until complete'
-  });
-  return `<rcc_stop_schema>${schema}</rcc_stop_schema>`;
 }
 
 function findExecCommandTool(body) {
@@ -344,64 +340,55 @@ function assertExactSet(actual, expected, label) {
   );
 }
 
-function assertProviderFeedback(body, reasonCode, missingFields, label) {
-  const text = JSON.stringify(body);
-  assert.ok(text.includes(reasonCode), `${label}: provider request missing reasonCode=${reasonCode}: ${text}`);
-  for (const field of missingFields) {
-    assert.ok(text.includes(field), `${label}: provider request missing field=${field}: ${text}`);
+function collectMessageTexts(items, role) {
+  const texts = [];
+  if (!Array.isArray(items)) {
+    return texts;
   }
-  assert.ok(
-    text.includes(`missingFields=${missingFields.join(', ')}`) || missingFields.every((field) => text.includes(field)),
-    `${label}: provider request must render missingFields: ${text}`
-  );
+  for (const item of items) {
+    if (role && item?.role !== role) {
+      continue;
+    }
+    const content = item?.content;
+    if (typeof content === 'string' && content.trim()) {
+      texts.push(content);
+      continue;
+    }
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const part of content) {
+      if (typeof part?.text === 'string' && part.text.trim()) {
+        texts.push(part.text);
+      }
+    }
+  }
+  return texts;
 }
 
-function assertProviderGuidance(body, reasonCode, missingFields, label) {
-  assertProviderFeedback(body, reasonCode, missingFields, label);
+function assertProviderTransparentContinuation(body, label) {
   const text = JSON.stringify(body);
+  assert.ok(text.includes('<rcc_stop_schema>'), `${label}: missing stop schema tag: ${text}`);
+  assert.ok(text.includes('字段类型'), `${label}: missing field types: ${text}`);
+  assert.ok(text.includes('必选合同'), `${label}: missing required contract: ${text}`);
+  assert.ok(text.includes('可选字段'), `${label}: missing optional fields: ${text}`);
+  assert.ok(text.includes('stopreason 取值'), `${label}: missing stopreason values: ${text}`);
+  assert.ok(text.includes('finished 示例'), `${label}: missing finished example: ${text}`);
+  assert.ok(text.includes('blocked 示例'), `${label}: missing blocked example: ${text}`);
+  assert.ok(text.includes('continue_needed 示例'), `${label}: missing continue-needed example: ${text}`);
   assert.ok(
-    text.includes('上一轮执行结果') && text.includes(`reasonCode=${reasonCode}`),
-    `${label}: provider request must include the prior round result snapshot: ${text}`
+    text.includes('“是否继续”') && text.includes('不是有效 blocked/user-input'),
+    `${label}: missing no-continue-permission rule: ${text}`
   );
-  assert.ok(
-    text.includes(`missingFields=${missingFields.join(', ')}`),
-    `${label}: provider request must render exact missingFields order for the model: ${text}`
+  const userTexts = collectMessageTexts(body?.input, 'user');
+  assert.equal(
+    userTexts.at(-1),
+    STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
+    `${label}: latest user prompt must be transparent continuation: ${text}`
   );
-  assert.ok(
-    text.includes('继续；按上一轮反馈补齐 next_step')
-      || text.includes('继续；按上一轮反馈补齐 current_goal')
-      || text.includes('继续；按上一轮反馈补齐字段'),
-    `${label}: provider request must include neutral current_goal/next_step repair guidance: ${text}`
-  );
-  assert.ok(
-    text.includes('按上一轮反馈补齐这些字段'),
-    `${label}: provider request must explain conditional schema fields: ${text}`
-  );
-  assert.ok(
-    text.includes('has_evidence=1 时 evidence 必须写证据')
-      || text.includes('stopreason=0 需要 has_evidence=1 且 evidence 非空'),
-    `${label}: provider request must include has_evidence/evidence relation: ${text}`
-  );
-  assert.ok(
-    text.includes('stopreason=2 必须写 current_goal 和 next_step')
-      || text.includes('stopreason=2 需要 current_goal 和 next_step'),
-    `${label}: provider request must include stopreason=2 relation: ${text}`
-  );
-  assert.ok(
-    text.includes('needs_user_input=true 时 next_step 必须直接写要问用户的问题'),
-    `${label}: provider request must include user-decision relation: ${text}`
-  );
-  assert.ok(
-    text.includes('最小可复制样本')
-      && text.includes('next_step')
-      && text.includes('needs_user_input')
-      && text.includes('has_evidence'),
-    `${label}: provider request must include a complete minimal sample: ${text}`
-  );
-  assert.ok(
-    !text.includes('每个字段都要写具体内容') && !text.includes('样例：'),
-    `${label}: provider request must not regress to old all-fields/sample wording: ${text}`
-  );
+  for (const marker of PROVIDER_FORBIDDEN_STOPLESS_MARKERS) {
+    assert.ok(!text.includes(marker), `${label}: leaked internal marker ${marker}: ${text}`);
+  }
 }
 
 async function buildRealCodexResponsesRequest(sessionId) {
@@ -409,6 +396,17 @@ async function buildRealCodexResponsesRequest(sessionId) {
   const payload = JSON.parse(raw);
   const next = JSON.parse(JSON.stringify(payload));
   next.model = 'gpt-5.3-codex';
+  delete next.instructions;
+  next.input = [{
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: '继续完成 invalid schema 黑盒任务。' }]
+  }];
+  const execCommandTool = Array.isArray(next.tools)
+    ? next.tools.find((tool) => (tool?.name ?? tool?.function?.name) === 'exec_command')
+    : null;
+  next.tools = execCommandTool ? [execCommandTool] : [];
+  next.tool_choice = 'auto';
   next.stream = false;
   next.metadata = {
     ...(next.metadata && typeof next.metadata === 'object' ? next.metadata : {}),
@@ -460,7 +458,7 @@ async function main() {
       if (upstreamHits.length === 2) {
         return res.json(upstreamResponse('第二轮仍然 plain stop，等待第二次 invalid schema 修复', 'stop'));
       }
-      return res.json(upstreamResponse(validTerminalSchemaText(), 'stop'));
+      return res.json(upstreamResponse('第三轮仍然 plain stop，必须直接透传给客户端', 'stop'));
     });
     upstreamServer = await listen(http.createServer(upstreamApp));
 
@@ -521,6 +519,10 @@ async function main() {
     assert.ok(execTool1, `expected first exec_command projection, body=${text}`);
     assert.equal(upstreamHits.length, 1, `expected one upstream hit before CLI execution, got ${upstreamHits.length}`);
     assert.equal(upstreamHits[0]?.isFollowup, false, `unexpected server-side followup hit: ${JSON.stringify(upstreamHits)}`);
+    assert.ok(
+      !JSON.stringify(upstreamHits[0]).includes('reasoningStop'),
+      `first provider request must not expose reasoningStop: ${JSON.stringify(upstreamHits[0])}`
+    );
 
     const firstProjectionInput = extractInputJson(execTool1.command);
     assert.equal(firstProjectionInput.repeatCount, 1, `expected first repeatCount=1, command=${execTool1.command}`);
@@ -551,7 +553,7 @@ async function main() {
     const submitText1 = await submit1.text();
     assert.equal(submit1.status, 200, `expected first submit 200, body=${submitText1}`);
     assert.equal(upstreamHits.length, 2, `expected second upstream hit after first invalid submit, hits=${JSON.stringify(upstreamHits)}`);
-    assertProviderGuidance(upstreamHits[1], 'stop_schema_next_step_missing', missingRound1, 'round1 provider guidance');
+    assertProviderTransparentContinuation(upstreamHits[1], 'round1 provider guidance');
     assert.ok(!submitText1.includes('"reasoningStop"'), `client response leaked raw reasoningStop: ${submitText1}`);
 
     const submitBody1 = parseJsonOrSseResponse(submitText1);
@@ -597,19 +599,20 @@ async function main() {
     const submitText2 = await submit2.text();
     assert.equal(submit2.status, 200, `expected second submit 200, body=${submitText2}`);
     assert.equal(upstreamHits.length, 3, `expected third upstream hit after second invalid submit, hits=${JSON.stringify(upstreamHits)}`);
-    assertProviderGuidance(upstreamHits[2], 'stop_schema_next_step_missing', missingRound2, 'round2 provider guidance');
+    assertProviderTransparentContinuation(upstreamHits[2], 'round2 provider guidance');
     assert.ok(!submitText2.includes('"reasoningStop"'), `terminal client response leaked raw reasoningStop: ${submitText2}`);
 
     const submitBody2 = parseJsonOrSseResponse(submitText2);
-    assert.ok(!findExecCommandTool(submitBody2), `complete schema must terminate without another CLI projection, body=${submitText2}`);
+    assert.ok(!findExecCommandTool(submitBody2), `third consecutive stop must terminate without another CLI projection, body=${submitText2}`);
+    assert.equal(submitBody2?.status, 'completed', `third consecutive stop must be client-terminal, body=${submitText2}`);
     assert.ok(
       typeof submitBody2?.output_text === 'string'
-        && submitBody2.output_text.includes('已完成 invalid schema 缺失字段反馈闭环'),
-      `terminal response must surface completed schema summary, body=${submitText2}`
+        && submitBody2.output_text.includes('第三轮仍然 plain stop，必须直接透传给客户端'),
+      `third consecutive stop must preserve the original provider text, body=${submitText2}`
     );
     assert.ok(
       !String(submitBody2?.output_text || '').includes('stopless budget exhausted'),
-      `complete schema must not be misclassified as budget exhausted, body=${submitText2}`
+      `third consecutive stop must not be rewritten as budget exhaustion, body=${submitText2}`
     );
 
     console.log('✅ stopless invalid schema blackbox passed', JSON.stringify({
@@ -618,7 +621,7 @@ async function main() {
       sessionId,
       round1MissingFields: cliOutput1.schemaFeedback.missingFields,
       round2MissingFields: cliOutput2.schemaFeedback.missingFields,
-      terminal: submitBody2.output_text
+      passthrough: submitBody2.output_text
     }));
   } finally {
     await close(harnessServer?.server);

@@ -13,6 +13,20 @@ const REAL_CODEX_REQUEST_FIXTURE = path.resolve(
   'tests/fixtures/errorsamples/responses-request-standardization/2026-06-13-duplicate-replay-wrapper-noise/request-body.json'
 );
 
+const STOPLESS_TRANSPARENT_CONTINUATION_PROMPT = '继续处理当前任务：先依据已有上下文判断目标是否已完成。未完成时，识别完成目标所必需的事项，按重要性和依赖顺序直接依次执行，从当前最重要且可执行的下一步继续；不要重复已完成内容，也不要因为非关键偏好、实现细节、可自主判断的选择，或询问用户“是否继续”而停止。只要存在能够自主执行且有助于完成目标的下一步，就直接执行，不要请求继续许可。只有确实缺少会影响目标、权限、实际成本或不可逆风险的用户专属决策时，才暂停并提出一个具体、可回答的问题。已完成则按系统合同收口。';
+
+const PROVIDER_FORBIDDEN_STOPLESS_MARKERS = [
+  'servertool',
+  'routecodex hook',
+  'reasoningStop',
+  'function_call_output',
+  'repeatCount',
+  'reasonCode',
+  'missingFields',
+  'schemaGuidance',
+  'STOPLESS_CLI_RESULT_MALFORMED'
+];
+
 function setEnv(name, value) {
   const old = process.env[name];
   if (value === undefined) delete process.env[name]; else process.env[name] = value;
@@ -222,13 +236,6 @@ function extractToolNames(tools) {
     .filter((value) => typeof value === 'string');
 }
 
-function findTool(tools, toolName) {
-  if (!Array.isArray(tools)) {
-    return null;
-  }
-  return tools.find((tool) => (tool?.name ?? tool?.function?.name) === toolName) ?? null;
-}
-
 function collectMessageTexts(items, role) {
   const texts = [];
   if (!Array.isArray(items)) {
@@ -258,16 +265,16 @@ function collectMessageTexts(items, role) {
 function assertStoplessSystemInstructionContract(text, label) {
   const value = String(text || '');
   assert.ok(value.includes('<rcc_stop_schema>'), `${label} missing rcc_stop_schema tag: ${value}`);
-  assert.ok(
-    value.includes('字段是条件必填'),
-    `${label} missing conditional-field system guidance: ${value}`
-  );
+  assert.ok(value.includes('字段类型'), `${label} missing field types: ${value}`);
+  assert.ok(value.includes('必选合同'), `${label} missing required contract: ${value}`);
+  assert.ok(value.includes('可选字段'), `${label} missing optional fields: ${value}`);
+  assert.ok(value.includes('stopreason 取值'), `${label} missing stopreason values: ${value}`);
   assert.ok(
     value.includes('stopreason=0') && value.includes('has_evidence=1') && value.includes('evidence'),
     `${label} missing has_evidence/evidence relation: ${value}`
   );
   assert.ok(
-    value.includes('stopreason=1') && value.includes('reason 非空'),
+    value.includes('stopreason=1') && value.includes('非空 reason'),
     `${label} missing blocked/reason relation: ${value}`
   );
   assert.ok(
@@ -278,40 +285,13 @@ function assertStoplessSystemInstructionContract(text, label) {
     value.includes('needs_user_input=true') && value.includes('next_step'),
     `${label} missing user-decision relation: ${value}`
   );
-  assert.ok(value.includes('最小可复制样本'), `${label} missing minimal sample: ${value}`);
-}
-
-function assertReasoningStopToolContract(tool, label) {
-  assert.ok(tool, `${label} missing reasoningStop tool`);
-  const fn = tool.function ?? tool;
-  const description = String(fn.description || '');
   assert.ok(
-    description.includes('Fields are conditionally required'),
-    `${label} missing conditional-field tool description: ${description}`
+    value.includes('“是否继续”') && value.includes('不是有效 blocked/user-input'),
+    `${label} missing no-continue-permission rule: ${value}`
   );
-  assert.ok(
-    description.includes('stopreason=1 requires non-empty reason'),
-    `${label} missing blocked/reason tool description: ${description}`
-  );
-  assert.ok(
-    description.includes('stopreason=2 requires current_goal and next_step'),
-    `${label} missing continue/next_step tool description: ${description}`
-  );
-  assert.ok(
-    description.includes('needs_user_input=true requires next_step'),
-    `${label} missing user-decision tool description: ${description}`
-  );
-  assert.ok(
-    description.includes('Minimal continue sample') && description.includes('Minimal finished sample'),
-    `${label} missing tool samples: ${description}`
-  );
-  assert.ok(!description.includes('fill every field'), `${label} retained all-fields wording: ${description}`);
-  const required = fn.parameters?.required ?? fn.input_schema?.required ?? [];
-  assert.deepEqual(
-    [...required].sort(),
-    ['stopreason'],
-    `${label} reasoningStop required fields must be unconditional baseline only`
-  );
+  assert.ok(value.includes('finished 示例'), `${label} missing finished example: ${value}`);
+  assert.ok(value.includes('blocked 示例'), `${label} missing blocked example: ${value}`);
+  assert.ok(value.includes('continue_needed 示例'), `${label} missing continue-needed example: ${value}`);
 }
 
 function extractInputJson(command) {
@@ -322,15 +302,50 @@ function extractInputJson(command) {
 function hasStopSchemaContractText(text) {
   const value = String(text || '');
   return value.includes('<rcc_stop_schema>')
-    && (
-      value.includes('stopreason 取值：0=finished，1=blocked，2=continue_needed')
-      || value.includes('stopreason values: 0=finished, 1=blocked, 2=continue_needed')
-    )
-    && (
-      value.includes('字段是条件必填')
-      || value.includes('Fields are conditionally required')
-    )
+    && value.includes('stopreason 取值：0=finished，1=blocked，2=continue_needed')
+    && value.includes('必选合同')
+    && value.includes('可选字段')
     && value.includes('next_step');
+}
+
+function assertProviderRequestDryRun(body, label) {
+  assert.equal(body?.object, 'routecodex.pipeline_dry_run', `${label} must return pipeline dry-run object`);
+  assert.equal(body?.kind, 'provider_request', `${label} must return provider_request kind`);
+  assert.equal(body?.dryRun, true, `${label} must return dryRun=true`);
+  assert.equal(
+    body?.evidence?.stoppedBeforeProviderSend,
+    true,
+    `${label} must stop before provider send`
+  );
+  assert.equal(
+    body?.evidence?.providerRequestSnapshotWritten,
+    true,
+    `${label} must write provider-request snapshot`
+  );
+  assert.ok(body?.providerRequest && typeof body.providerRequest === 'object', `${label} missing providerRequest`);
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(body.providerRequest, 'body'),
+    `${label} missing providerRequest.body`
+  );
+}
+
+function parseProviderRequestBody(value, label) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = JSON.parse(value);
+    assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed), `${label} body must be an object`);
+    return parsed;
+  }
+  assert.fail(`${label} providerRequest.body must be an object or JSON string`);
+}
+
+function assertNoStoplessInternalLeak(body, label) {
+  const serialized = JSON.stringify(body);
+  for (const marker of PROVIDER_FORBIDDEN_STOPLESS_MARKERS) {
+    assert.ok(!serialized.includes(marker), `${label} leaked internal marker ${marker}: ${serialized}`);
+  }
 }
 
 function runCliCommand(command) {
@@ -370,6 +385,17 @@ async function buildRealCodexResponsesRequest(sessionId) {
   const payload = JSON.parse(raw);
   const next = JSON.parse(JSON.stringify(payload));
   next.model = 'gpt-5.3-codex';
+  delete next.instructions;
+  next.input = [{
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: '继续完成当前测试任务，不要提前停止。' }]
+  }];
+  const execCommandTool = Array.isArray(next.tools)
+    ? next.tools.find((tool) => (tool?.name ?? tool?.function?.name) === 'exec_command')
+    : null;
+  next.tools = execCommandTool ? [execCommandTool] : [];
+  next.tool_choice = 'auto';
   next.stream = false;
   next.metadata = {
     ...(next.metadata && typeof next.metadata === 'object' ? next.metadata : {}),
@@ -388,7 +414,7 @@ const CASES = [
     expectedReasonCode: 'stop_schema_missing',
     expectedTriggerHint: 'no_schema',
     expectCliSchemaFeedback: false,
-    expectedProviderText: '上一轮执行结果：repeatCount=1/3',
+    expectedProviderPrompt: STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
     expectedMissingFields: ['stopreason']
   },
   {
@@ -412,7 +438,7 @@ const CASES = [
     expectedReasonCode: 'stop_schema_next_step_missing',
     expectedTriggerHint: 'invalid_schema',
     expectCliSchemaFeedback: true,
-    expectedProviderText: 'stop_schema_next_step_missing',
+    expectedProviderPrompt: STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
     expectedMissingFields: ['current_goal', 'next_step']
   },
   {
@@ -438,9 +464,7 @@ const CASES = [
     expectedReasonCode: 'stop_schema_continue_next_step',
     expectedTriggerHint: 'non_terminal_schema',
     expectCliSchemaFeedback: true,
-    expectedProviderText: 'rerun failing command',
-    forbiddenProviderText: '你当前的目标是',
-    expectCurrentTurnGuidance: false
+    expectedProviderPrompt: 'rerun failing command'
   }
 ];
 
@@ -547,15 +571,15 @@ async function runCase(testCase) {
 
     assert.equal(first.status, 200, `case=${testCase.id} expected first response 200, body=${firstText}`);
     assert.ok(firstExec, `case=${testCase.id} expected exec_command, body=${firstText}`);
+    assert.ok(
+      firstExec.command.includes('routecodex hook run reasoningStop'),
+      `case=${testCase.id} client exec_command must run public reasoningStop CLI: ${firstExec.command}`
+    );
     assert.ok(hasStopSchemaContractText(firstProviderText), `case=${testCase.id} missing stop schema contract in provider-request: ${firstProviderText}`);
     assertStoplessSystemInstructionContract(firstProviderText, `case=${testCase.id} first provider-request system instruction`);
-    assert.ok(firstProviderTools.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop tool in first provider-request: ${JSON.stringify(firstProviderPayload)}`);
-    assertReasoningStopToolContract(
-      findTool(firstProviderPayload.tools, 'reasoningStop'),
-      `case=${testCase.id} first provider-request`
-    );
+    assert.ok(!firstProviderTools.includes('reasoningStop'), `case=${testCase.id} provider must not receive reasoningStop tool: ${JSON.stringify(firstProviderPayload)}`);
     assert.ok(firstProviderTools.includes('exec_command'), `case=${testCase.id} missing exec_command tool in first provider-request: ${JSON.stringify(firstProviderPayload)}`);
-    assert.ok(!JSON.stringify(firstBody).includes('"reasoningStop"'), `case=${testCase.id} client payload leaked raw reasoningStop: ${firstText}`);
+    assertNoStoplessInternalLeak(firstProviderPayload, `case=${testCase.id} first provider-request`);
 
     const cliOutput = testCase.buildCliOutput({
       command: firstExec.command,
@@ -583,7 +607,8 @@ async function runCase(testCase) {
       headers: {
         'content-type': 'application/json',
         'x-session-id': sessionId,
-        'x-conversation-id': sessionId
+        'x-conversation-id': sessionId,
+        'x-routecodex-dry-run': 'provider-request'
       },
       body: JSON.stringify({
         tool_outputs: [{
@@ -594,53 +619,28 @@ async function runCase(testCase) {
     });
     const submitText = await submit.text();
     const submitBody = parseJsonOrSseResponse(submitText);
-    const secondExec = findExecCommandTool(submitBody);
-    const secondInput = extractInputJson(secondExec?.command ?? '');
-    const secondProviderPayload = upstreamHits[1] ?? {};
+    assertProviderRequestDryRun(submitBody, `case=${testCase.id} submit dry-run`);
+    const secondProviderPayload = parseProviderRequestBody(
+      submitBody.providerRequest.body,
+      `case=${testCase.id} submit dry-run`
+    );
     const secondProviderText = JSON.stringify(secondProviderPayload);
     const secondProviderInput = Array.isArray(secondProviderPayload.input) ? secondProviderPayload.input : [];
-    const secondProviderCurrentTurnItems = secondProviderInput.slice(-2);
-    const secondProviderCurrentTurnText = JSON.stringify(secondProviderCurrentTurnItems);
-    const secondProviderCurrentTurnUserTexts = collectMessageTexts(secondProviderCurrentTurnItems, 'user');
+    const secondProviderCurrentTurnUserTexts = collectMessageTexts(secondProviderInput, 'user');
     const secondProviderTools = extractToolNames(secondProviderPayload.tools);
 
     assert.equal(submit.status, 200, `case=${testCase.id} expected submit_tool_outputs 200, body=${submitText}`);
-    assert.equal(upstreamHits.length, 2, `case=${testCase.id} expected 2 upstream hits, hits=${JSON.stringify(upstreamHits)}`);
-    assert.ok(secondExec, `case=${testCase.id} expected second-round exec_command, body=${submitText}`);
+    assert.equal(upstreamHits.length, 1, `case=${testCase.id} dry-run must not call upstream, hits=${JSON.stringify(upstreamHits)}`);
     assert.ok(hasStopSchemaContractText(secondProviderText), `case=${testCase.id} missing stop schema guidance in second provider-request: ${secondProviderText}`);
-    assert.ok(secondProviderText.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop semantics in second provider-request: ${secondProviderText}`);
-    assert.ok(secondProviderText.includes(testCase.expectedProviderText), `case=${testCase.id} missing expected provider feedback ${testCase.expectedProviderText}: ${secondProviderText}`);
-    if (testCase.forbiddenProviderText) {
-      assert.ok(
-        !secondProviderText.includes(testCase.forbiddenProviderText),
-        `case=${testCase.id} provider request must not include fixed continuation text ${testCase.forbiddenProviderText}: ${secondProviderText}`
-      );
-    }
-    assert.ok(secondProviderTools.includes('reasoningStop'), `case=${testCase.id} missing reasoningStop tool in second provider-request: ${JSON.stringify(secondProviderPayload)}`);
+    assertStoplessSystemInstructionContract(secondProviderText, `case=${testCase.id} second provider-request system instruction`);
+    assert.ok(!secondProviderTools.includes('reasoningStop'), `case=${testCase.id} provider must not receive reasoningStop tool: ${JSON.stringify(secondProviderPayload)}`);
     assert.ok(secondProviderTools.includes('exec_command'), `case=${testCase.id} missing exec_command tool in second provider-request: ${JSON.stringify(secondProviderPayload)}`);
-    assert.ok(!JSON.stringify(submitBody).includes('"reasoningStop"'), `case=${testCase.id} client submit_tool_outputs response leaked raw reasoningStop: ${submitText}`);
-    assert.equal(secondInput.triggerHint, 'no_schema', `case=${testCase.id} unexpected client exec_command triggerHint: ${JSON.stringify(secondInput)}`);
-    assert.equal(secondInput.repeatCount, 2, `case=${testCase.id} unexpected client exec_command repeatCount: ${JSON.stringify(secondInput)}`);
-    assert.equal(secondInput.maxRepeats, 3, `case=${testCase.id} unexpected client exec_command maxRepeats: ${JSON.stringify(secondInput)}`);
-    if (testCase.expectCurrentTurnGuidance !== false) {
-      assert.ok(
-        secondProviderCurrentTurnText.includes('上一轮执行结果：repeatCount=1/3')
-          && secondProviderCurrentTurnText.includes(testCase.expectedProviderText),
-        `case=${testCase.id} second provider-request must rewrite CLI output into current-turn model-visible stopless guidance: ${secondProviderCurrentTurnText}`
-      );
-    } else {
-      assert.deepEqual(
-        secondProviderCurrentTurnUserTexts,
-        [testCase.expectedProviderText],
-        `case=${testCase.id} second provider-request current-turn user prompt must be the exact next_step text: ${secondProviderCurrentTurnText}`
-      );
-    }
-    assert.ok(
-      !secondProviderCurrentTurnText.includes('"name":"exec_command"')
-        && !secondProviderCurrentTurnText.includes('stop_message_auto')
-        && !secondProviderCurrentTurnText.includes('routecodex hook run'),
-      `case=${testCase.id} second provider-request current-turn guidance must not replay raw shell/stop_message_auto history: ${secondProviderCurrentTurnText}`
+    assert.equal(
+      secondProviderCurrentTurnUserTexts.at(-1),
+      testCase.expectedProviderPrompt,
+      `case=${testCase.id} latest provider user prompt must be transparent continuation or exact next_step: ${secondProviderText}`
     );
+    assertNoStoplessInternalLeak(secondProviderPayload, `case=${testCase.id} second provider-request`);
   } finally {
     if (upstreamServer) {
       try {

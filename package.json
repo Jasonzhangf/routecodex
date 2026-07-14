@@ -299,6 +299,7 @@
     "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
     "verify:stopless-contract-blackbox": "node scripts/tests/stopless-contract-blackbox.mjs",
     "verify:stopless-invalid-schema-blackbox": "node scripts/tests/stopless-invalid-schema-blackbox.mjs",
+    "verify:servertool-cli-binary-blackbox": "node scripts/tests/servertool-cli-binary-blackbox.mjs",
     "verify:servertool-rust-only": "node scripts/verify-servertool-rust-only.mjs",
     "verify:runtime-lifecycle-pid-rebase": "node scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs",
     "verify:runtime-lifecycle-loop-gate-matrix": "node scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs",

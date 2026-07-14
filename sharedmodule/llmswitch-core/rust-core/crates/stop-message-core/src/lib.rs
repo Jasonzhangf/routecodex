@@ -205,6 +205,17 @@ pub struct StopSchemaGateDecision {
     pub feedback_history: Vec<SchemaErrorFeedback>,
 }
 
+fn should_passthrough_after_consecutive_stop_budget(
+    count_budget: bool,
+    used: u32,
+    effective_max: u32,
+    no_change_count: u32,
+) -> bool {
+    count_budget
+        && effective_max > 0
+        && (used.saturating_add(1) >= effective_max || no_change_count >= effective_max)
+}
+
 // ── Core decision function ──────────────────────────────────────────────────
 
 /// Decide whether `stop_message_auto` should trigger a followup.
@@ -1052,6 +1063,26 @@ fn schema_followup(
     observation_hash: String,
     feedback_history: Vec<SchemaErrorFeedback>,
 ) -> StopSchemaGateDecision {
+    if should_passthrough_after_consecutive_stop_budget(
+        count_budget,
+        used,
+        effective_max,
+        no_change_count,
+    ) {
+        return StopSchemaGateDecision {
+            max_repeats: effective_max,
+            action: StopSchemaGateAction::AllowStop,
+            reason_code: "stop_schema_loop_guard_passthrough".to_string(),
+            summary_prefix: None,
+            followup_text: None,
+            count_budget: false,
+            missing_fields: vec![],
+            no_change_count,
+            observation_hash,
+            parsed,
+            feedback_history,
+        };
+    }
     let mut text = String::new();
     if reason_code == "stop_schema_continue_next_step" {
         text.push_str(message);
@@ -2269,9 +2300,9 @@ mod tests {
         assert_eq!(second.no_change_count, 1);
 
         let third = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
-        assert_eq!(third.reason_code, "stop_schema_missing");
-        assert_eq!(third.action, StopSchemaGateAction::Followup);
-        assert!(third.count_budget);
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
+        assert_eq!(third.action, StopSchemaGateAction::AllowStop);
+        assert!(!third.count_budget);
     }
 
     #[test]
@@ -2313,15 +2344,15 @@ mod tests {
 
     #[test]
     fn stop_schema_missing_exhausts_after_three_consecutive_stops() {
-        let still_followup = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
-        assert_eq!(still_followup.action, StopSchemaGateAction::Followup);
-        assert_eq!(still_followup.reason_code, "stop_schema_missing");
-        assert!(still_followup.count_budget);
+        let third = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
+        assert_eq!(third.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
+        assert!(!third.count_budget);
 
         let exhausted = evaluate_stop_schema_gate("普通停止文本", 3, 3, "", 0);
-        assert_eq!(exhausted.action, StopSchemaGateAction::Followup);
-        assert_eq!(exhausted.reason_code, "stop_schema_missing");
-        assert!(exhausted.count_budget);
+        assert_eq!(exhausted.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(exhausted.reason_code, "stop_schema_loop_guard_passthrough");
+        assert!(!exhausted.count_budget);
     }
 
     #[test]
@@ -2626,7 +2657,7 @@ mod tests {
         assert_eq!(second.no_change_count, 2);
         assert_eq!(second.action, StopSchemaGateAction::Followup);
 
-        // Third call with same hash still feeds back instead of silently terminal.
+        // Third consecutive stop passes through without projecting a fourth CLI.
         let third = evaluate_stop_schema_gate(
             "普通停止文本",
             0,
@@ -2635,8 +2666,8 @@ mod tests {
             second.no_change_count,
         );
         assert_eq!(third.no_change_count, 3);
-        assert_eq!(third.action, StopSchemaGateAction::Followup);
-        assert_eq!(third.reason_code, "stop_schema_missing");
+        assert_eq!(third.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
     }
 
     /// Different schema texts get different hashes -> no_change_count resets
@@ -2697,9 +2728,9 @@ mod tests {
         assert_eq!(decision.observation_hash, "");
     }
 
-    /// Budget-exhausted fail_fast returns observation_hash
+    /// Loop-guard passthrough still returns the final observation hash.
     #[test]
-    fn fail_fast_returns_observation_hash() {
+    fn loop_guard_passthrough_returns_observation_hash() {
         let first = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
         let second = evaluate_stop_schema_gate(
             "普通停止文本",
@@ -2715,7 +2746,8 @@ mod tests {
             &second.observation_hash,
             second.no_change_count,
         );
-        assert_eq!(third.action, StopSchemaGateAction::Followup);
+        assert_eq!(third.action, StopSchemaGateAction::AllowStop);
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
         assert!(third.observation_hash.len() > 0);
     }
 

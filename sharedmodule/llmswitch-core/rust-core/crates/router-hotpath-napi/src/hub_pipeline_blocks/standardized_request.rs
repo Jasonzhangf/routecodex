@@ -2,6 +2,7 @@ use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInp
 use crate::hub_req_inbound_context_capture::normalize_responses_input_items;
 use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use crate::shared_json_utils::read_trimmed_string;
+use crate::stopless_current_turn::{scan_stopless_current_turn_items, StoplessCurrentTurnScan};
 use crate::virtual_router_engine::derive_model_id;
 use serde_json::{Map, Value};
 
@@ -122,6 +123,12 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
             metadata.insert(key, value);
         }
     }
+    if let Some(runtime_control) = metadata
+        .get_mut("runtime_control")
+        .and_then(Value::as_object_mut)
+    {
+        runtime_control.remove("stopless");
+    }
     metadata.insert(
         "requestId".to_string(),
         Value::String(
@@ -159,7 +166,7 @@ pub(crate) fn coerce_standardized_request_from_payload(input: &Value) -> Result<
             );
         }
     }
-    if let Some(stopless) = derive_stopless_runtime_control_from_payload(payload) {
+    if let Some(stopless) = derive_stopless_runtime_control_from_payload(raw_payload) {
         let runtime_control = metadata
             .entry("runtime_control".to_string())
             .or_insert_with(|| Value::Object(Map::new()));
@@ -331,19 +338,57 @@ fn derive_stopless_runtime_control_from_payload(payload: &Map<String, Value>) ->
         .and_then(|row| build_stopless_runtime_control_from_cli(&row))
 }
 
+pub(crate) fn derive_stopless_runtime_control_from_payload_value(payload: &Value) -> Option<Value> {
+    payload
+        .as_object()
+        .and_then(derive_stopless_runtime_control_from_payload)
+}
+
+pub(crate) fn attach_current_stopless_runtime_control(
+    standardized_request: &mut Value,
+    stopless: Option<Value>,
+) -> Result<(), String> {
+    let Some(stopless) = stopless else {
+        return Ok(());
+    };
+    let request = standardized_request
+        .as_object_mut()
+        .ok_or_else(|| "standardized request must be object".to_string())?;
+    let metadata = request
+        .entry("metadata".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let metadata = metadata
+        .as_object_mut()
+        .ok_or_else(|| "standardized request metadata must be object".to_string())?;
+    let runtime_control = metadata
+        .entry("runtime_control".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let runtime_control = runtime_control
+        .as_object_mut()
+        .ok_or_else(|| "standardized request runtime_control must be object".to_string())?;
+    runtime_control.insert("stopless".to_string(), stopless);
+    Ok(())
+}
+
 fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<String, Value>> {
-    let items = items?.as_array()?;
-    for item in items.iter().rev() {
-        let Some(row) = item.as_object() else {
-            continue;
-        };
+    match scan_stopless_current_turn_items(items, |row| {
+        if row
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| role.trim().eq_ignore_ascii_case("user"))
+        {
+            return None;
+        }
         if let Some(output) = row.get("output").or_else(|| row.get("content")) {
             if let Some(parsed) = parse_stopless_cli_output(output) {
                 return Some(parsed);
             }
         }
+        None
+    }) {
+        StoplessCurrentTurnScan::Evidence(output) => Some(output),
+        StoplessCurrentTurnScan::ResetByUserTurn | StoplessCurrentTurnScan::None => None,
     }
-    None
 }
 
 fn parse_stopless_cli_output(value: &Value) -> Option<Map<String, Value>> {
@@ -852,6 +897,109 @@ mod tests {
             !serialized.contains("stop_message_auto"),
             "continuation metadata stopless identity must not be projected by request standardization: {}",
             serialized
+        );
+    }
+
+    #[test]
+    fn responses_standardization_new_user_turn_does_not_restore_stale_stopless_output() {
+        let stale_stopless_output = json!({
+            "ok": true,
+            "toolName": "stop_message_auto",
+            "flowId": "stop_message_flow",
+            "repeatCount": 3,
+            "maxRepeats": 3,
+            "schemaGuidance": {
+                "triggerHint": "budget_exhausted"
+            },
+            "input": {
+                "flowId": "stop_message_flow",
+                "repeatCount": 3,
+                "maxRepeats": 3,
+                "triggerHint": "budget_exhausted"
+            }
+        });
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_stale_stopless_round_3",
+                        "output": stale_stopless_output.to_string()
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "新的用户任务"
+                        }]
+                    }
+                ]
+            },
+            "normalized": {
+                "id": "req_new_user_stopless_reset",
+                "entryEndpoint": "/v1/responses",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        assert!(
+            output["standardizedRequest"]["metadata"]["runtime_control"]["stopless"].is_null(),
+            "request standardization must not revive stopless state from before the latest user turn: {}",
+            output["standardizedRequest"]["metadata"]
+        );
+    }
+
+    #[test]
+    fn responses_standardization_current_stopless_output_after_user_turn_is_preserved() {
+        let current_stopless_output = json!({
+            "ok": true,
+            "toolName": "stop_message_auto",
+            "flowId": "stop_message_flow",
+            "repeatCount": 2,
+            "maxRepeats": 3,
+            "input": {
+                "flowId": "stop_message_flow",
+                "repeatCount": 2,
+                "maxRepeats": 3,
+                "triggerHint": "invalid_schema"
+            }
+        });
+        let input = json!({
+            "payload": {
+                "model": "gpt-test",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "原始任务"
+                        }]
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_current_stopless_round_2",
+                        "output": current_stopless_output.to_string()
+                    }
+                ]
+            },
+            "normalized": {
+                "id": "req_current_stopless_output",
+                "entryEndpoint": "/v1/responses.submit_tool_outputs",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input).unwrap();
+        assert_eq!(
+            output["standardizedRequest"]["metadata"]["runtime_control"]["stopless"]["repeatCount"],
+            json!(2),
+            "current continuation output after the user turn must preserve the active streak"
         );
     }
 

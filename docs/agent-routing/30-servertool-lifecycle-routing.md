@@ -26,23 +26,24 @@ servertool / stopless / followup / schema gate 改动前，先查：
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
 2. 被迁移的 servertool 一律投影成客户端可见的 `exec_command` CLI 调用，不再走私有 server-side followup/reenter。
 3. 客户端执行 `routecodex servertool run <toolName> --input-json <json>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按普通 exec_command 工具结果进入正常请求链。
-4. stop summary / hook explanation 必须映射到 reasoning；stopless CLI command 只承载 status-only 输入，schema guidance 只允许出现在 CLI stdout。
+4. stop summary / hook explanation 必须映射到 reasoning；stopless CLI command/stdout 只承载 status/control，schema guidance 只允许出现在 provider-facing system prompt。
 5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 
 ## stopless 生命周期
-1. 当前 stopless 默认开启，默认注入三轮递进六项排查检查提示：目标、过程、证据、问题原因、已排除因素、排查顺序；默认次数 3；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
+1. 当前 stopless 默认开启，默认次数 3。每个受管 provider request 注入完整 system stop schema；旧默认 `继续执行` 只作为 legacy exact-match 输入并在 Rust 中升级。
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
-3. `/goal non-active` 时收到 `finish_reason=stop`：自动注入六项排查检查提示；任一项无证据必须调用工具，已完成/阻塞必须给证据。
-4. 非 `/goal` 时收到 `finish_reason=stop`：自动注入六项排查检查提示；任一项无证据必须调用工具，已完成/阻塞必须给证据。
+3. `/goal non-active` 时收到 missing/invalid-schema `finish_reason=stop`：连续第 1、2 次投影客户端 CLI；下一轮 provider 只收到透明续跑 user prompt 或合法 `next_step`，并继续收到完整 system stop schema。
+4. 非 `/goal` 时使用同一 missing/invalid-schema 处理合同，不另建提示或计数语义。
 5. stopless 激活时校验当前 assistant stop schema：字段不是全局必填，而是关系必填；`stopreason` 是唯一无条件必填字段，必须是数字 `0=finished/1=blocked/2=continue_needed`。
 6. `stopreason=0` 是完成停止条件；必须 `has_evidence=1` 且 `evidence` 非空，证据内容只检查存在性，不判断真假。诊断字段按真实情况填写，不是全局必填。
 7. `stopreason=1` 是阻塞停止条件；必须 `reason` 非空，提供 reason 即可停止。`blocked + needs_user_input=true` 必须把 summary 和要用户决策的问题返回给用户，并以 `finish_reason=stop` 停止等待。
 8. `stopreason=2` 是继续条件；必须填写 `next_step`，followup 给模型的续跑文本就是 `next_step` 本身。缺 `next_step` 时按 invalid schema 返回缺失字段反馈。
-9. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 no schema / invalid schema 连续 3 次后停止继续改写；`stopreason=2 + next_step` 是有效进展控制，不计入连续错误预算。非 stop 响应、工具调用或正常进展必须 reset budget。
-9. stopless 不得走 `reenterPipeline` 普通 user 注入。非 terminal stop_message_flow 只能投影 CLI，并由 CLI stdout 提供 continuation prompt + schema guidance 闭环。
-10. stopless 的前置注入和拦截补打一律是同一个停止 hook 语义：模型若要停止，必须主动调用该 hook 并附 stop schema；若模型直接 stop 未调用，系统只能补打一轮同一 hook，并在结果中再次要求模型下一轮自己调用。
-11. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
-12. 注入失败必须清理状态，防止循环。
+9. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 no schema / invalid schema 连续第 1、2 次拦截并投影 CLI；第 3 次达到上限后不再拦截，直接放行原始 `finish_reason=stop` 给客户端。`stopreason=2 + next_step` 是有效进展控制，不计入连续错误预算。非 stop 响应、工具调用或正常进展必须 reset budget。
+10. stopless 不得走 server-side `reenterPipeline`。非 terminal stop_message_flow 只能向客户端投影 CLI；下一轮由 ReqChatProcess 把自动 CLI call/result 转成普通 user prompt。
+11. `reasoningStop` 只允许作为客户端执行的公共 CLI alias，不得作为 provider-facing tool 或 tool history。schema guidance 只允许存在于 system prompt。
+12. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
+13. 注入失败必须清理状态，防止循环。
+14. `verify:stopless-contract-blackbox` 必须检查 dry-run 返回的最终 `providerRequest.body`：完整 system schema、透明/next_step user prompt、无内部 marker、且 `stoppedBeforeProviderSend=true`。
 
 ## followup 边界
 0. CLI projection 已迁移的 servertool 不得再进入 followup；stopless 也属于 CLI projection，旧 followup 规则只适用于尚未迁移的 legacy servertool flow。

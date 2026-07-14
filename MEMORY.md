@@ -2702,3 +2702,17 @@
 - Configured/listening member ports with the same PID identity receive exactly one `/daemon/restart-process` or SIGUSR2 request. Different non-empty PID identities fail before restart IO; per-port restart loops are forbidden.
 - Restart success requires every configured member port to return healthy with one listener identity. The original managed parent/session restart contract remains unchanged.
 - Verified on 2026-07-13: focused positive/negative restart contracts passed 23/23; TypeScript, runtime lifecycle/function-map/mainline/wiki/browser/native/base/release gates passed. Global install used locator 5520 and emitted one aggregate restart. PID changed `52949 -> 85361` under the same parent `24613`; 4444/5520/5555/10000 all reported ready/pipelineReady with version `0.90.3932`.
+# 2026-07-13: Stopless continuation is transparent at the provider boundary
+
+- Relay submit materialization may change the internal endpoint to `/v1/responses`; current-turn stopless state must therefore come from the current `MetadataCenter.continuation_context.responsesResume.toolOutputsDetailed` truth, not an endpoint substring.
+- The transparent continuation user prompt is presentation only and must never be parsed as repeat state. Automatic CLI call/result evidence is private control state and must be absent from provider-facing history.
+- Stop schema guidance is system-instruction-only. Missing/invalid schema emits the fixed transparent continuation prompt; valid `stopreason=2` emits exact `next_step`.
+- Provider-request dry-run is the acceptance boundary: inspect final `providerRequest.body`, require the complete typed/required/optional/value/example schema contract plus the ordinary user prompt, and reject `reasoningStop`, `servertool`, hook identity, function-call output, repeat counters, schema feedback, and internal error markers.
+- `npm run verify:stopless-contract-blackbox` passed `no_schema`, `invalid_schema`, and `next_step`, proving `stoppedBeforeProviderSend=true`, no second upstream send, and final provider-body transparency.
+
+# 2026-07-13: Stopless transparent dry-run is globally installed and verified
+
+- Supersedes the source-only closeout gap. Global release `0.90.3934` is installed, one aggregate restart was performed, and CLI/install/current plus configured members `4444/5520/5555/10000` all report ready `0.90.3934`.
+- The packaged blackbox lives at `/opt/homebrew/lib/node_modules/routecodex/scripts/tests/stopless-contract-blackbox.mjs`. Executing that absolute script proves its relative imports resolve to the global package `dist`, while the repo working directory supplies only the tracked real-request fixture.
+- The installed-artifact gate passed `no_schema`, `invalid_schema`, and `next_step`, inspecting final dry-run `providerRequest.body` for the complete system schema, transparent user continuation or exact `next_step`, internal-marker absence, `stoppedBeforeProviderSend=true`, and no second upstream request.
+- Global installer isolated builds must copy tracked governance authoring sources required by architecture gates. Copy `.agent-collab/PROTOCOL.md`, `schema`, and `examples`, but never package runtime `runs`, `claims`, heartbeats, evidence, or kill-switch state.

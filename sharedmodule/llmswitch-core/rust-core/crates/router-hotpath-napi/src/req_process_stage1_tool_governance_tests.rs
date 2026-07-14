@@ -1,5 +1,6 @@
 use super::*;
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::resolve_tool_name;
+use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
 use std::collections::HashSet;
 
 fn first_responses_system_input_text(value: &serde_json::Value) -> &str {
@@ -163,6 +164,405 @@ fn test_req_chatprocess_restores_stopless_count_from_responses_resume_tool_outpu
         serde_json::json!("stop_schema_next_step_missing")
     );
     assert_ne!(stopless["repeatCount"], serde_json::json!(0));
+}
+
+#[test]
+fn test_req_chatprocess_transparent_continuation_preserves_snapshot_repeat_count() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": STOPLESS_TRANSPARENT_CONTINUATION_PROMPT
+              }]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses.submit_tool_outputs",
+          "runtime_control": {
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "repeatCount": 0,
+              "maxRepeats": 3
+            }
+          }
+        }),
+        entry_endpoint: "/v1/responses.submit_tool_outputs".to_string(),
+        request_id: "req_stopless_transparent_preserve_count".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_stopless_transparent_preserve_count",
+            "sessionId": "sess_stopless_transparent_preserve_count"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            },
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "sessionId": "sess_stopless_transparent_preserve_count",
+              "repeatCount": 1,
+              "maxRepeats": 3,
+              "triggerHint": "invalid_schema",
+              "schemaFeedback": {
+                "reasonCode": "stop_schema_next_step_missing",
+                "missingFields": ["next_step"]
+              }
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(
+        stopless["repeatCount"],
+        serde_json::json!(1),
+        "transparent stopless user prompt must preserve the private consecutive-stop count"
+    );
+    assert_eq!(
+        stopless["sessionId"],
+        serde_json::json!("sess_stopless_transparent_preserve_count")
+    );
+    assert_eq!(stopless["triggerHint"], serde_json::json!("invalid_schema"));
+}
+
+#[test]
+fn test_req_chatprocess_relay_materialized_resume_restores_private_repeat_count() {
+    let stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 1,
+        "maxRepeats": 3,
+        "schemaFeedback": {
+            "reasonCode": "stop_schema_next_step_missing",
+            "missingFields": ["next_step"]
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 1,
+            "maxRepeats": 3,
+            "triggerHint": "invalid_schema"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": STOPLESS_TRANSPARENT_CONTINUATION_PROMPT
+              }]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses",
+          "responsesResume": {
+            "continuationOwner": "relay",
+            "materializedMode": "submit_tool_outputs",
+            "toolOutputsDetailed": [{
+              "callId": "call_stopless_relay_resume",
+              "outputText": stopless_stdout.to_string()
+            }]
+          },
+          "runtime_control": {
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "repeatCount": 0,
+              "maxRepeats": 3
+            }
+          }
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_relay_materialized_resume".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_stopless_relay_materialized_resume",
+            "sessionId": "sess_stopless_relay_materialized_resume"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            },
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "sessionId": "sess_stopless_relay_materialized_resume",
+              "repeatCount": 0,
+              "maxRepeats": 3
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(
+        stopless["repeatCount"],
+        serde_json::json!(1),
+        "relay-materialized submit must consume current responsesResume tool output even after the internal endpoint becomes /v1/responses"
+    );
+    assert_eq!(stopless["triggerHint"], serde_json::json!("invalid_schema"));
+    assert_eq!(
+        stopless["schemaFeedback"]["reasonCode"],
+        serde_json::json!("stop_schema_next_step_missing")
+    );
+}
+
+#[test]
+fn test_req_chatprocess_new_user_turn_resets_stale_stopless_snapshot_and_history() {
+    let stale_stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 3,
+        "maxRepeats": 3,
+        "schemaGuidance": {
+            "triggerHint": "budget_exhausted"
+        },
+        "input": {
+            "flowId": "stop_message_flow",
+            "repeatCount": 3,
+            "maxRepeats": 3,
+            "triggerHint": "budget_exhausted"
+        }
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_stale_stopless_round_3",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":3,\\\"maxRepeats\\\":3}'\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_stale_stopless_round_3",
+              "output": stale_stopless_stdout.to_string()
+            },
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "这是新任务，第一次停止必须重新触发 stopless"
+              }]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses"
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_new_user_reset".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_stopless_new_user_reset",
+            "sessionId": "sess_stopless_new_user_reset"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            },
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "repeatCount": 3,
+              "maxRepeats": 3,
+              "triggerHint": "budget_exhausted"
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["active"], serde_json::json!(true));
+    assert_eq!(
+        stopless["repeatCount"],
+        serde_json::json!(0),
+        "a real user turn must clear the completed stopless cycle before the next stop"
+    );
+    assert_eq!(stopless["maxRepeats"], serde_json::json!(3));
+    assert!(
+        stopless.get("triggerHint").is_none(),
+        "stale terminal trigger must not survive a new user turn: {stopless}"
+    );
+    let serialized = result.processed_request.to_string();
+    assert!(serialized.contains("这是新任务，第一次停止必须重新触发 stopless"));
+    assert!(
+        !serialized.contains("call_stale_stopless_round_3")
+            && !serialized.contains("\"repeatCount\":3"),
+        "previous-cycle stopless tool history must not reach the provider: {serialized}"
+    );
+    assert!(
+        serialized.contains("<rcc_stop_schema>") && !serialized.contains("reasoningStop"),
+        "new user turn must remain stopless-enabled through the schema contract without internal tool: {serialized}"
+    );
+}
+
+#[test]
+fn test_req_chatprocess_real_user_continue_execution_resets_stale_stopless_snapshot() {
+    let stale_stopless_stdout = serde_json::json!({
+        "ok": true,
+        "toolName": "stop_message_auto",
+        "flowId": "stop_message_flow",
+        "repeatCount": 2,
+        "maxRepeats": 3,
+        "trigger": "invalid_schema"
+    });
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "function_call",
+              "name": "reasoningStop",
+              "call_id": "call_stale_before_real_continue",
+              "arguments": "{}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_stale_before_real_continue",
+              "output": stale_stopless_stdout.to_string()
+            },
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "继续执行"
+              }]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses"
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_real_user_continue_reset".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_stopless_real_user_continue_reset",
+            "sessionId": "sess_stopless_real_user_continue_reset"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            },
+            "stopless": {
+              "active": true,
+              "flowId": "stop_message_flow",
+              "sessionId": "sess_stopless_real_user_continue_reset",
+              "repeatCount": 2,
+              "maxRepeats": 3,
+              "triggerHint": "invalid_schema"
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(
+        stopless["repeatCount"],
+        serde_json::json!(0),
+        "a real user turn must reset the streak even when its text equals a legacy transparent prompt"
+    );
+    assert!(
+        stopless.get("triggerHint").is_none(),
+        "real user input must clear stale stopless classification: {stopless}"
+    );
+    let serialized = serde_json::to_string(&result.processed_request).unwrap();
+    assert!(
+        !serialized.contains("call_stale_before_real_continue"),
+        "a real user turn must remove previous-cycle stopless tool history: {serialized}"
+    );
+    assert!(
+        serialized.contains("继续执行"),
+        "the real user turn must remain provider-visible: {serialized}"
+    );
+}
+
+#[test]
+fn test_req_chatprocess_new_user_turn_cuts_off_stale_materialized_guidance() {
+    let input = ToolGovernanceInput {
+        request: serde_json::json!({
+          "model": "gpt-5.3-codex",
+          "input": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "上一轮执行结果：repeatCount=3/3；reasonCode=stop_schema_missing；missingFields=stopreason。"
+              }]
+            },
+            {
+              "type": "message",
+              "role": "user",
+              "content": [{
+                "type": "input_text",
+                "text": "审计新的 stopless 问题"
+              }]
+            }
+          ]
+        }),
+        raw_payload: serde_json::json!({}),
+        metadata: serde_json::json!({
+          "entryEndpoint": "/v1/responses"
+        }),
+        entry_endpoint: "/v1/responses".to_string(),
+        request_id: "req_stopless_new_user_guidance_reset".to_string(),
+        has_active_stop_message_for_continue_execution: Some(true),
+        metadata_center_snapshot: serde_json::json!({
+          "requestTruth": {
+            "requestId": "req_stopless_new_user_guidance_reset",
+            "sessionId": "sess_stopless_new_user_guidance_reset"
+          },
+          "runtimeControl": {
+            "stopMessage": {
+              "enabled": true
+            }
+          }
+        }),
+    };
+
+    let result = apply_req_process_tool_governance(input).unwrap();
+    let stopless = &result.metadata["runtime_control"]["stopless"];
+    assert_eq!(stopless["active"], serde_json::json!(true));
+    assert_eq!(
+        stopless["repeatCount"],
+        serde_json::json!(0),
+        "materialized guidance before the latest real user turn belongs to the previous cycle"
+    );
+    assert!(
+        stopless.get("schemaFeedback").is_none(),
+        "previous-cycle feedback must not be injected into the new task: {stopless}"
+    );
 }
 
 #[test]
@@ -423,40 +823,34 @@ fn test_req_process_responses_input_materializes_stopless_instructions_when_clie
 
     let result = apply_req_process_tool_governance(input).unwrap();
     let instructions = first_responses_system_input_text(&result.processed_request);
-    assert!(instructions.contains("使用唯一 stop schema 合同"));
-    assert!(instructions.contains("优先调用 reasoningStop function tool"));
+    assert!(instructions.contains("停止输出合同"));
+    assert!(instructions.contains("必选合同"));
     assert!(instructions.contains("<rcc_stop_schema>"));
-    assert!(instructions.contains("字段是条件必填"));
-    assert!(instructions.contains("stopreason=0 需要 has_evidence=1 且 evidence 非空"));
-    assert!(instructions.contains("stopreason=1 需要 reason 非空"));
-    assert!(instructions.contains("stopreason=2 需要 current_goal 和 next_step"));
-    assert!(instructions.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
-    assert!(instructions.contains("最小可复制样本"));
-    assert!(instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"));
+    assert!(instructions.contains("字段类型"));
+    assert!(
+        instructions.contains("stopreason=0(finished) 必须同时写 has_evidence=1 和非空 evidence")
+    );
+    assert!(instructions.contains("stopreason=1(blocked) 必须写非空 reason"));
+    assert!(instructions.contains("stopreason=2(continue_needed)"));
+    assert!(
+        instructions.contains("needs_user_input=true 时 next_step 必须是要直接询问用户的完整问题")
+    );
+    assert!(instructions.contains("finished 示例"));
+    assert!(!instructions.contains("reasoningStop"));
     assert_eq!(result.processed_request["input"][0]["role"], "system");
-    let tools = result.processed_request["tools"].as_array().expect("tools");
-    let reasoning_stop_tool = tools
-        .iter()
-        .find(|tool| {
+    let tools = result.processed_request["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !tools.iter().any(|tool| {
             tool.get("function")
                 .and_then(|function| function.get("name"))
                 .and_then(|name| name.as_str())
                 == Some("reasoningStop")
-        })
-        .expect("reasoningStop tool");
-    let description = reasoning_stop_tool["function"]["description"]
-        .as_str()
-        .expect("reasoningStop description");
-    assert!(description.contains("Fields are conditionally required"));
-    assert!(description.contains("stopreason=1 requires non-empty reason"));
-    assert!(description.contains("stopreason=2 requires current_goal and next_step"));
-    assert!(description.contains("needs_user_input=true requires next_step"));
-    assert!(description.contains("Minimal continue sample"));
-    assert!(!description.contains("fill every field"));
-    let required = reasoning_stop_tool["function"]["parameters"]["required"]
-        .as_array()
-        .expect("required");
-    assert_eq!(required, &vec![serde_json::json!("stopreason")]);
+        }),
+        "provider tools must not expose internal reasoningStop: {tools:?}"
+    );
 }
 
 #[test]
@@ -494,11 +888,13 @@ fn test_req_process_prefers_metadata_center_snapshot_for_stop_message_injection(
 
     let result = apply_req_process_tool_governance(input).unwrap();
     let instructions = first_responses_system_input_text(&result.processed_request);
-    assert!(instructions.contains("使用唯一 stop schema 合同"));
+    assert!(instructions.contains("停止输出合同"));
+    assert!(instructions.contains("必选合同"));
+    assert!(!instructions.contains("reasoningStop"));
     assert!(!instructions.contains("已收敛"));
     assert!(!instructions.contains("任务已经完成"));
     assert!(!instructions.contains("直接收尾"));
-    assert!(result.processed_request["tools"]
+    assert!(!result.processed_request["tools"]
         .as_array()
         .unwrap()
         .iter()
@@ -591,7 +987,8 @@ fn test_req_process_replaces_stale_top_level_stopless_responses_instructions() {
         "ReqChatProcess must not keep stale stopless top-level instructions"
     );
     let instructions = first_responses_system_input_text(&result.processed_request);
-    assert!(instructions.contains("字段是条件必填"));
+    assert!(instructions.contains("必选合同"));
+    assert!(!instructions.contains("reasoningStop"));
 }
 
 #[test]
@@ -629,8 +1026,10 @@ fn test_req_process_responses_input_still_materializes_stopless_contract() {
 
     let result = apply_req_process_tool_governance(input).unwrap();
     let instructions = first_responses_system_input_text(&result.processed_request);
-    assert!(instructions.contains("使用唯一 stop schema 合同"));
-    assert!(instructions.contains("优先调用 reasoningStop function tool"));
+    assert!(instructions.contains("停止输出合同"));
+    assert!(instructions.contains("必选合同"));
+    assert!(instructions.contains("finished 示例"));
+    assert!(!instructions.contains("reasoningStop"));
     assert!(!instructions.contains("已收敛"));
     assert!(!instructions.contains("任务已经完成"));
     assert!(!instructions.contains("直接收尾"));
@@ -675,8 +1074,10 @@ fn test_req_process_responses_input_materializes_stopless_instructions_without_c
 
     let result = apply_req_process_tool_governance(input).unwrap();
     let instructions = first_responses_system_input_text(&result.processed_request);
-    assert!(instructions.contains("使用唯一 stop schema 合同"));
-    assert!(instructions.contains("优先调用 reasoningStop function tool"));
+    assert!(instructions.contains("停止输出合同"));
+    assert!(instructions.contains("必选合同"));
+    assert!(instructions.contains("finished 示例"));
+    assert!(!instructions.contains("reasoningStop"));
     assert!(!instructions.contains("已收敛"));
     assert!(!instructions.contains("任务已经完成"));
     assert!(!instructions.contains("直接收尾"));
@@ -1230,7 +1631,8 @@ fn test_servertool_orchestration_uses_explicit_stop_message_flag_instead_of_runt
 }
 
 #[test]
-fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_example() {
+fn test_servertool_orchestration_injects_complete_stop_schema_system_contract_without_internal_tool(
+) {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4o-mini",
@@ -1273,70 +1675,62 @@ fn test_servertool_orchestration_injects_reasoning_stop_tool_with_schema_and_exa
         .cloned()
         .unwrap_or_default();
 
-    let reasoning_stop = tools
-        .iter()
-        .find(|tool| resolve_tool_name(tool).as_deref() == Some("reasoningStop"))
-        .expect("reasoningStop tool");
     let instructions = first_chat_system_message_text(&result.processed_request);
-
-    let function = reasoning_stop["function"].as_object().expect("function");
-    let description = function["description"].as_str().expect("description");
-    let parameters = function["parameters"].as_object().expect("parameters");
-    let properties = parameters["properties"].as_object().expect("properties");
-    let required = parameters["required"].as_array().expect("required");
-
     assert!(
-        description.contains("stopreason"),
-        "description={description}"
+        !tools
+            .iter()
+            .any(|tool| resolve_tool_name(tool).as_deref() == Some("reasoningStop")),
+        "internal stop hook tool must not reach the provider: {tools:?}"
     );
     assert!(
-        description.contains("0=finished"),
-        "description={description}"
-    );
-    assert!(
-        description.contains("<rcc_stop_schema>"),
-        "description={description}"
-    );
-    assert!(
-        description.contains("Provide stop schema as JSON arguments"),
-        "description={description}"
-    );
-    assert!(
-        description.contains("Field meanings"),
-        "description={description}"
-    );
-    assert!(
-        description.contains("\"stopreason\":0"),
-        "description={description}"
-    );
-    assert!(properties.contains_key("stopreason"));
-    assert!(properties.contains_key("reason"));
-    assert!(properties.contains_key("current_goal"));
-    assert!(properties.contains_key("next_step"));
-    assert!(properties.contains_key("learned"));
-    assert!(required
-        .iter()
-        .any(|value| value.as_str() == Some("stopreason")));
-    assert!(!required
-        .iter()
-        .any(|value| value.as_str() == Some("reason")));
-    assert!(!required
-        .iter()
-        .any(|value| value.as_str() == Some("has_evidence")));
-    assert!(!required
-        .iter()
-        .any(|value| value.as_str() == Some("next_step")));
-    assert!(
-        instructions.contains("优先调用 reasoningStop function tool"),
+        instructions.contains("必选合同"),
         "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("可选字段"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("字段类型"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("0=finished"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("1=blocked"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("2=continue_needed"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("finished 示例")
+            && instructions.contains("blocked 示例")
+            && instructions.contains("continue_needed 示例"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("\"stopreason\":0")
+            && instructions.contains("\"stopreason\":1")
+            && instructions.contains("\"stopreason\":2"),
+        "instructions={instructions}"
+    );
+    assert!(
+        instructions.contains("<rcc_stop_schema>") && instructions.contains("</rcc_stop_schema>"),
+        "instructions={instructions}"
+    );
+    assert!(
+        !instructions.contains("reasoningStop")
+            && !instructions.contains("servertool")
+            && !instructions.contains("hook"),
+        "system contract must not expose internal stopless machinery: {instructions}"
     );
     assert!(
         !instructions.contains("已收敛") && !instructions.contains("任务已经完成"),
         "instructions must not make task-state judgments for the model: {instructions}"
-    );
-    assert!(
-        instructions.contains("不要输出或执行 exec_command(cmd=\"reasoningStop\")"),
-        "instructions={instructions}"
     );
 }
 
@@ -1420,7 +1814,7 @@ fn test_terminal_budget_exhausted_stopless_turn_strips_reasoning_stop_controls()
 }
 
 #[test]
-fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
+fn test_non_terminal_stopless_feedback_keeps_schema_contract_without_internal_tool() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-4o-mini",
@@ -1461,10 +1855,10 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         instructions.contains("<rcc_stop_schema>"),
         "non-terminal feedback must keep stopless instruction"
     );
-    assert_eq!(
-        result.metadata["runtime_control"]["stopless"]["sessionId"],
-        serde_json::json!("sess-stopless-request-owner"),
-        "request ChatProcess must scope CLI-derived stopless runtime control with current request truth sessionId: {}",
+    assert!(
+        result.metadata["runtime_control"]["stopless"]["sessionId"]
+            == serde_json::json!("sess-stopless-request-owner"),
+        "request ChatProcess must bind CLI-derived stopless runtime control to current request truth sessionId: {}",
         result.metadata
     );
     let tools = processed
@@ -1474,8 +1868,8 @@ fn test_non_terminal_stopless_feedback_keeps_reasoning_stop_controls() {
         .unwrap_or_default();
     let tool_names: HashSet<String> = tools.iter().filter_map(resolve_tool_name).collect();
     assert!(
-        tool_names.contains("reasoningStop"),
-        "non-terminal feedback must still expose reasoningStop"
+        !tool_names.contains("reasoningStop"),
+        "non-terminal feedback must not expose internal reasoningStop"
     );
 }
 
@@ -1536,7 +1930,7 @@ fn test_submit_tool_outputs_stopless_cli_updates_runtime_control() {
 }
 
 #[test]
-fn test_materialized_stopless_turn_preserves_snapshot_runtime_control() {
+fn test_plain_user_guidance_resets_snapshot_runtime_control() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-5.3-codex",
@@ -1589,23 +1983,15 @@ fn test_materialized_stopless_turn_preserves_snapshot_runtime_control() {
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let stopless = &result.metadata["runtime_control"]["stopless"];
-    assert_eq!(stopless["flowId"].as_str(), Some("stop_message_flow"));
-    assert_eq!(
-        stopless["repeatCount"].as_u64(),
-        Some(1),
-        "materialized request must not reset snapshot stopless control to 0"
-    );
-    assert_eq!(stopless["maxRepeats"].as_u64(), Some(3));
-    assert_eq!(stopless["triggerHint"].as_str(), Some("invalid_schema"));
-    assert_eq!(
-        stopless["schemaFeedback"]["reasonCode"].as_str(),
-        Some("stop_schema_next_step_missing")
+    assert!(
+        result.metadata["runtime_control"]["stopless"].is_null(),
+        "plain user guidance must not preserve private snapshot state without current structured evidence: {}",
+        result.metadata
     );
 }
 
 #[test]
-fn test_materialized_stopless_guidance_updates_runtime_control_without_snapshot() {
+fn test_plain_user_guidance_does_not_reconstruct_runtime_control() {
     let input = ToolGovernanceInput {
         request: serde_json::json!({
           "model": "gpt-5.3-codex",
@@ -1647,22 +2033,10 @@ fn test_materialized_stopless_guidance_updates_runtime_control_without_snapshot(
     };
 
     let result = apply_req_process_tool_governance(input).unwrap();
-    let stopless = &result.metadata["runtime_control"]["stopless"];
-    assert_eq!(stopless["flowId"].as_str(), Some("stop_message_flow"));
-    assert_eq!(
-        stopless["repeatCount"].as_u64(),
-        Some(1),
-        "materialized stopless guidance is current request truth and must not reinitialize to 0"
-    );
-    assert_eq!(stopless["maxRepeats"].as_u64(), Some(3));
-    assert_eq!(stopless["triggerHint"].as_str(), Some("invalid_schema"));
-    assert_eq!(
-        stopless["schemaFeedback"]["reasonCode"].as_str(),
-        Some("stop_schema_next_step_missing")
-    );
-    assert_eq!(
-        stopless["schemaFeedback"]["missingFields"][0].as_str(),
-        Some("next_step")
+    assert!(
+        result.metadata["runtime_control"]["stopless"].is_null(),
+        "plain user guidance must not reconstruct private stopless state: {}",
+        result.metadata
     );
 }
 

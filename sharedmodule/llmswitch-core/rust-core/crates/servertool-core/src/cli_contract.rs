@@ -257,42 +257,6 @@ fn normalize_cli_run_input_aliases(
     Ok(input)
 }
 
-fn build_terminal_stopless_output(
-    session_id: Option<String>,
-    request_id: Option<String>,
-    continuation_prompt: String,
-    max_repeats: u32,
-) -> ServertoolCliRunOutput {
-    ServertoolCliRunOutput {
-        ok: true,
-        kind: "stop_message_auto".to_string(),
-        tool: "stop_message_auto".to_string(),
-        summary: "继续".to_string(),
-        model_guidance: continuation_prompt.clone(),
-        tool_name: "stop_message_auto".to_string(),
-        flow_id: "stop_message_flow".to_string(),
-        route_hint: None,
-        continuation_prompt,
-        repeat_count: max_repeats,
-        max_repeats,
-        session_id,
-        request_id,
-        schema_guidance: Some(stopless_schema_guidance_with_trigger(
-            StoplessContinuationTrigger::BudgetExhausted,
-            max_repeats.saturating_sub(1),
-            max_repeats,
-        )),
-        schema_feedback: None,
-        injected_prompt_preview: None,
-        input: serde_json::json!({
-            "flowId": "stop_message_flow",
-            "repeatCount": max_repeats,
-            "maxRepeats": max_repeats,
-            "triggerHint": "budget_exhausted"
-        }),
-    }
-}
-
 fn stop_schema_field_keys() -> &'static [&'static str] {
     &[
         "stopreason",
@@ -456,21 +420,7 @@ fn build_stop_message_auto_run_output(
         || (current_repeat_count >= current_max_repeats
             && derived_trigger != Some(StoplessContinuationTrigger::SchemaPass))
     {
-        // 打满后优雅停止，不报错；但若当前这次已经提交了合法终态 schema，
-        // 必须允许 schema_pass 正常收尾，而不是被 budget_exhausted 吞掉。
-        let continuation_prompt =
-            resolve_stopless_continuation_prompt(StoplessContinuationPromptInput {
-                used: current_max_repeats.saturating_sub(1),
-                max_repeats: current_max_repeats,
-                trigger: StoplessContinuationTrigger::BudgetExhausted,
-            })
-            .expect("prompt");
-        return Ok(build_terminal_stopless_output(
-            session_id,
-            request_id,
-            continuation_prompt.client_visible_text,
-            current_max_repeats,
-        ));
+        return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
     }
     let used_for_prompt = current_repeat_count.saturating_sub(1);
     let flow_id = input
@@ -1269,7 +1219,7 @@ pub fn plan_client_exec_cli_projection_output(
             .max_repeats
             .or_else(|| read_u32(&payload, "maxRepeats"))
             .ok_or(ServertoolCliError::MissingField("maxRepeats"))?;
-        if max_repeats == 0 || repeat_count > max_repeats {
+        if max_repeats == 0 || repeat_count >= max_repeats {
             return Err(ServertoolCliError::InvalidField("repeatCount/maxRepeats"));
         }
         let mut canonical = Map::new();
@@ -1991,7 +1941,7 @@ mod tests {
                 flow_id: Some("stop_message_flow".to_string()),
                 input: Some(json!({
                     "continuationPrompt": "continue with full schema",
-                    "repeatCount": 4,
+                    "repeatCount": 3,
                     "maxRepeats": 3
                 })),
                 repeat_count: None,
@@ -2431,12 +2381,11 @@ mod tests {
                 request_id: Some("req-test".to_string()),
             },
         )
-        .expect("over budget must return terminal output, not error");
-        assert_eq!(repeat_over_budget.ok, true);
-        assert_eq!(repeat_over_budget.summary, "继续");
-        assert_eq!(repeat_over_budget.repeat_count, 3);
-        assert_eq!(repeat_over_budget.max_repeats, 3);
-        assert!(!repeat_over_budget.continuation_prompt.is_empty());
+        .expect_err("over-budget CLI input must fail fast");
+        assert_eq!(
+            repeat_over_budget.to_string(),
+            "SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats"
+        );
 
         let flow_err = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
@@ -2754,9 +2703,8 @@ mod tests {
     }
 
     #[test]
-    fn stopless_cli_output_with_explicit_budget_exhausted_trigger_hints_produces_budget_exhausted_hint(
-    ) {
-        let output = build_servertool_cli_binary_run_command_from_client_exec_result(
+    fn stopless_cli_output_rejects_budget_exhausted_at_repeat_limit() {
+        let err = build_servertool_cli_binary_run_command_from_client_exec_result(
             ServertoolCliRunInput {
                 tool_name: "stop_message_auto".to_string(),
                 input: json!({
@@ -2772,14 +2720,11 @@ mod tests {
                 request_id: Some("req-trigger-test".to_string()),
             },
         )
-        .expect("stop_message_auto output");
-        let schema_guidance = output.schema_guidance.expect("must carry schema guidance");
+        .expect_err("repeatCount at maxRepeats must fail fast");
         assert_eq!(
-            schema_guidance.trigger_hint, "budget_exhausted",
-            "explicit budget_exhausted triggerHint must map to budget_exhausted"
+            err,
+            ServertoolCliError::InvalidField("repeatCount/maxRepeats")
         );
-        let inp = output.input;
-        assert_eq!(inp["triggerHint"], "budget_exhausted");
     }
 
     #[test]

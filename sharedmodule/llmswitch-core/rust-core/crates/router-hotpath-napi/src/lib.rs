@@ -121,6 +121,7 @@ mod snapshot_tool_failures;
 mod sse_runtime_dispatch;
 mod stop_message_auto_blocks;
 mod stopless_auto_handler_bridge;
+mod stopless_current_turn;
 mod streaming_tool_extractor;
 mod tool_harvester;
 mod virtual_router_engine;

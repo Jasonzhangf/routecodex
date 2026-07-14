@@ -245,7 +245,7 @@ chains:
         callee_symbol: inspect_stop_gateway_signal
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/servertool_core_blocks.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "response interception event plus skeleton-selected schema source: assistant text/fence for `finish_reason=stop`, or registered internal servertool arguments for `finish_reason=tool_calls` such as `reasoningStop.arguments`"
+        semantic_input: "response interception event plus skeleton-selected schema source: assistant text/fence for stopless `finish_reason=stop`; registered non-stopless servertools may still supply their own governed arguments"
         semantic_output: "single schema validation event covering valid terminal, non-terminal/still-running, empty schema/no_schema, invalid schema, malformed args, already-terminal cases, and client-projection-required cases"
         resource_flow:
           consumes: [servertool.followup_state, response.hub_semantic]
@@ -253,7 +253,7 @@ chains:
           side_channel_reads: [servertool.followup_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton; internal `reasoningStop`/stop schema judgment happens before outbound projection."
+        note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton. Stopless schema judgment reads assistant output; `reasoningStop` is only the client-visible CLI alias and is never declared to the provider."
       - step_id: sth-resp-03
         from_node: ServertoolRespHook02SchemaValidated
         to_node: ServertoolRespHook03HookResponseInjected
@@ -331,14 +331,14 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "next request containing ordinary tool result / CLI stdout"
-        semantic_output: "parsed public hook result event, including restoration of shell-executed stop hook results back to model-visible `reasoningStop -> function_call_output`, or no-op when no servertool result exists"
+        semantic_output: "parsed public hook result event; auto-projected stopless shell call/result evidence is consumed as private control truth and removed before provider projection, while non-stopless servertool results retain their governed semantics"
         resource_flow:
           consumes: [request.normal_payload, servertool.followup_state]
           produces: [servertool.followup_state]
           side_channel_reads: [servertool.followup_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Anchored by Rust inbound tool-call normalization converting shell-projected stop hook calls/results back into model-visible `reasoningStop` function-call semantics before request governance."
+        note: "Anchored by Rust inbound tool-call normalization. Stopless shell call/result pairs are never restored as provider-visible tool history; they collapse into an ordinary user turn before request governance."
       - step_id: sth-req-02
         from_node: ServertoolReqHook01ResultParsed
         to_node: ServertoolReqHook02TextRewritten
@@ -361,18 +361,18 @@ chains:
         to_node: ServertoolReqHook03ToolInjected
         caller_symbol: apply_req_process_tool_governance
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
-        callee_symbol: inject_reasoning_stop_tool
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        callee_symbol: maybe_apply_servertool_orchestration
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/servertool_injection.rs
         owner_feature_id: hub.req_chatprocess_governance
         semantic_input: "request semantic after optional text rewrite"
-        semantic_output: "request tool declarations, stop hook contract, and tool constraints injected for servertool-managed turns"
+        semantic_output: "request tool declarations and tool constraints injected for servertool-managed turns"
         resource_flow:
           consumes: [request.normal_payload, servertool.followup_state]
           produces: [request.normal_payload]
           side_channel_reads: [servertool.followup_state]
           side_channel_writes: []
         status: anchored
-        note: "Anchored by Rust req_chatprocess governance injecting the model-facing `reasoningStop` tool and stopless system contract for servertool-managed turns."
+        note: "Anchored by Rust req_chatprocess governance applying servertool orchestration operations after stopless/text rewrite. Stopless schema-contract reinjection is represented separately by `stopless.session.mainline` edge `stl-07`."
       - step_id: sth-req-04
         from_node: ServertoolReqHook03ToolInjected
         to_node: ServertoolReqHook04RequestFinalized
@@ -1528,7 +1528,7 @@ chains:
         status: anchored
 
   - chain_id: stopless.session.mainline
-    summary: "Stopless three-round contract inside Chat Process boundary: every request first injects stop guidance plus internal reasoningStop, Round-1 response intercepts/normalizes stop into terminal-or-CLI and saves canonical continuation truth, Round-2 request restores CLI result into guidance plus reasoningStop pair, and Round-3 no_schema guard stops endless stop->CLI rewriting."
+    summary: "Stopless three-round contract inside Chat Process boundary: every managed request injects the stop schema as a system instruction without a provider-facing stopless tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the system schema, and Round-3 passes the original finish_reason=stop through."
     entry_contract:
       node: StoplessResp01StopDetected
       owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
@@ -1549,7 +1549,7 @@ chains:
           side_channel_reads: [metadata.runtime_control]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Response-side Chat Process exit stage. Same-round provider request must already have injected stop guidance plus internal reasoningStop."
+        note: "Response-side Chat Process exit stage. Same-round provider request must already contain the complete stop schema system instruction and must not contain a `reasoningStop` tool declaration."
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
@@ -1591,7 +1591,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "exec_command shell string with status-only input and repeat flags"
-        semantic_output: "servertool CLI stdout JSON containing continuationPrompt, schemaGuidance, structured schemaFeedback, repeatCount, and maxRepeats"
+        semantic_output: "status/control-only servertool CLI stdout JSON containing trigger/result state and optional structured schemaFeedback; no model-facing schema guidance text"
         resource_flow:
           consumes: [stopless.cli_projection]
           produces: [stopless.cli_result]
@@ -1602,13 +1602,13 @@ chains:
       - step_id: stl-05
         from_node: StoplessCli06ClientExecuted
         to_node: StoplessReq07ContinuationRestored
-        caller_symbol: has_stop_message_auto_cli_result_in_request_json
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
-        callee_symbol: resolve_runtime_stop_message_state_from_metadata_center
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src/persisted_lookup.rs
+        caller_symbol: apply_req_process_tool_governance
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
+        callee_symbol: latest_stopless_cli_output_from_resume
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "next request MetadataCenter runtime_control.stopless control signal"
-        semantic_output: "stopless runtime snapshot restored into request turn without file persistence, payload/context copying, or adapterContext carrier"
+        semantic_input: "next request after Responses continuation restore, including current `responsesResume.toolOutputsDetailed` control evidence and the bound MetadataCenter snapshot"
+        semantic_output: "private stopless repeat state restored into the current request control slot without parsing the provider-visible continuation text and without file persistence"
         resource_flow:
           consumes: [stopless.cli_result, stopless.runtime_snapshot, continuation.scope_state]
           produces: [stopless.runtime_snapshot]
@@ -1619,13 +1619,13 @@ chains:
       - step_id: stl-06
         from_node: StoplessReq07ContinuationRestored
         to_node: StoplessReq08GuidanceRewritten
-        caller_symbol: run_responses_openai_request_codec_json
-        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs
-        callee_symbol: convert_bridge_input_to_chat_messages
-        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/bridge_input.rs
+        caller_symbol: normalize_responses_input_function_calls
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
+        callee_symbol: build_stop_hook_guidance_text_from_output
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
-        semantic_output: "model-transparent natural-language corrective guidance restored into the next request turn, with legacy shell-projected `reasoningStop` / `reasoning_stop` history physically removed instead of replayed"
+        semantic_output: "ordinary user continuation for the next provider turn: exact `next_step` when valid, otherwise the fixed transparent continuation prompt; all stopless shell/tool history and internal feedback fields are removed"
         resource_flow:
           consumes: [request.normal_payload, stopless.cli_result, stopless.runtime_snapshot]
           produces: [stopless.guidance_rewrite]

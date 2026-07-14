@@ -146,31 +146,38 @@ verification:
       - tests/servertool/stop-schema-lifecycle-contract.spec.ts
       - tests/responses/responses-openai-bridge.spec.ts
       - tests/servertool/servertool-cli-result-restore.spec.ts
+      - scripts/tests/stopless-contract-blackbox.mjs
       - scripts/tests/stopless-invalid-schema-blackbox.mjs
+      - scripts/tests/servertool-cli-binary-blackbox.mjs
       - tests/sharedmodule/hub-pipeline-preselected-route.spec.ts
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     integration:
       - tests/servertool/stopless-metadata-center.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_tests.rs
     smoke:
+      - npm run verify:stopless-contract-blackbox
       - npm run verify:stopless-invalid-schema-blackbox
+      - npm run verify:servertool-cli-binary-blackbox
       - npm run verify:servertool-rust-only
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
     build:
       - npm run build:base
     notes:
-      - "Validation must prove stopless request-side restore/guidance rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema/reasoningStop normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
+      - "Validation must prove stopless request-side private-state restore/user-prompt rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
       - "Validation must prove the response-side stopless hook is executed as the standard `ServertoolRespHook` skeleton inside Rust Hub RespChatProcess, and that outbound/SSE layers only receive the finalized semantic payload."
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessExecutionPlan` must compose request-truth session/control state and expose `cli_projection` for non-terminal stop_message_flow."
-      - "Validation must prove stop hook injection is unconditional for stopless-managed relay turns; if the hook is absent, the only allowed escape hatch is the 3-round loop guard stop."
+      - "Validation must prove the complete stop schema system instruction is unconditional for stopless-managed relay turns and contains field types, required/optional contracts, stopreason values, output shape, and finished/blocked/continue-needed examples."
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
       - "Validation must prove TS engine orchestration calls Rust `planStoplessExecutionJson` and does not build stopless `context.stopless`, `context.requestTruth`, or session truth locally."
-      - "Command input must stay concise (`flowId/repeatCount/maxRepeats/triggerHint` plus optional structured `schemaFeedback{reasonCode,missingFields}`); CLI stdout must carry continuationPrompt/schemaGuidance plus structured feedback for req_chatprocess rewrite."
+      - "Command input and CLI stdout must stay status/control-only; provider-facing guidance is built by ReqChatProcess as an ordinary user prompt, while schema guidance comes only from the system instruction."
       - "Validation must prove the client-visible stopless command uses alias `reasoningStop` and the client payload does not expose `__servertool_cli_projection`."
-      - "Validation must prove NoSchema model-facing schema guidance is present through the provider-visible system instruction and `reasoningStop` tool description/schema, while CLI stdout keeps public `input.triggerHint=no_schema` and current-request restoration advances repeatCount 1 -> 2 -> 3."
-      - "Validation must prove req_chatprocess rewrites the paired stopless tool result into model-transparent natural language + missing/error feedback, and VR still routes that turn to thinking."
+      - "Validation must prove NoSchema model-facing schema guidance is present through the provider-visible system instruction without a `reasoningStop` tool declaration, current-request restoration advances repeatCount 1 -> 2 privately, and the 3rd consecutive missing/invalid-schema stop passes the original `finish_reason=stop` through without another CLI projection."
+      - "Validation must prove req_chatprocess consumes the paired stopless shell result as private evidence, emits only the fixed transparent user prompt or exact valid `next_step`, and VR still routes that turn to thinking."
+      - "Validation must prove the latest real user turn is a hard reset boundary across inbound normalization, continuation-history collapse, and the final Responses-to-chat codec: older stopless pairs are removed, the user text is preserved verbatim, and no automatic guidance is rebuilt."
+      - "Validation must prove embedded `responsesContext.toolsNormalized` cannot leak `reasoningStop`, `reasoning_stop`, or `stop_message_auto` into provider tools, while ordinary client tools such as `exec_command` remain present."
+      - "`verify:stopless-contract-blackbox` must inspect dry-run `providerRequest.body`, prove `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `dryRun=true`, `stoppedBeforeProviderSend=true`, and reject missing system schema or any internal stopless marker."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
       - "Validation must prove stopless CLI projection/CLI execution uses write-once `request_truth.sessionId/requestId` for identity, and that Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
       - "Validation must prove missing/blank current request-truth `sessionId` disables stopless interception, writes no stopless runtime state, emits `stopless_missing_session_id`, and lets the model stop naturally."

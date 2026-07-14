@@ -5,7 +5,7 @@
 //! 2. `<rcc_stop_schema>` 带完整 stopreason=1 → AllowStop
 //! 3. `<rcc_stop_schema>` 带完整 stopreason=2 + next_step → Followup
 //! 4. 无 schema → Followup + 字段提示
-//! 5. 连续 3 次无 schema → Followup，不静默终止
+//! 5. 连续 3 次无 schema → AllowStop passthrough，不投影第 4 次 CLI
 //! 6. fence 内非法 JSON → invalid_json
 //! 7. forcestop=1 → AllowStop bypass budget
 //! 8. needs_user_input=true → AllowStop
@@ -85,7 +85,7 @@ fn t2_no_schema_returns_followup() {
 }
 
 #[test]
-fn t2_no_schema_repeated_three_times_still_returns_followup() {
+fn t2_no_schema_repeated_three_times_allows_original_stop_passthrough() {
     let d1 = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
     assert_eq!(d1.reason_code, "stop_schema_missing");
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
@@ -93,7 +93,7 @@ fn t2_no_schema_repeated_three_times_still_returns_followup() {
 
     let d2 = evaluate_stop_schema_gate(
         "普通停止文本",
-        0,
+        1,
         3,
         d1.observation_hash.as_str(),
         d1.no_change_count,
@@ -104,13 +104,13 @@ fn t2_no_schema_repeated_three_times_still_returns_followup() {
 
     let d3 = evaluate_stop_schema_gate(
         "普通停止文本",
-        0,
+        2,
         3,
         d2.observation_hash.as_str(),
         d2.no_change_count,
     );
-    assert_eq!(d3.action, StopSchemaGateAction::Followup);
-    assert_eq!(d3.reason_code, "stop_schema_missing");
+    assert_eq!(d3.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(d3.reason_code, "stop_schema_loop_guard_passthrough");
     assert_eq!(d3.no_change_count, 3);
 }
 
@@ -137,17 +137,17 @@ fn t2_stopreason_non_numeric_returns_followup() {
     );
 }
 
-// ── T3: 连续 3 次 → Followup，不静默终止 ─────────────────────────────────────
+// ── T3: 连续 3 次 → passthrough 原始 stop ───────────────────────────────────
 
 #[test]
-fn t3_three_no_schema_still_returns_followup() {
+fn t3_third_no_schema_allows_original_stop_passthrough() {
     let d1 = evaluate_stop_schema_gate("普通停止文本", 0, 3, "", 0);
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
     assert_eq!(d1.no_change_count, 1);
 
     let d2 = evaluate_stop_schema_gate(
         "普通停止文本",
-        0,
+        1,
         3,
         &d1.observation_hash,
         d1.no_change_count,
@@ -157,25 +157,33 @@ fn t3_three_no_schema_still_returns_followup() {
 
     let d3 = evaluate_stop_schema_gate(
         "普通停止文本",
-        0,
+        2,
         3,
         &d2.observation_hash,
         d2.no_change_count,
     );
     assert_eq!(
         d3.action,
-        StopSchemaGateAction::Followup,
-        "3rd consecutive missing schema must still feed back to the model"
+        StopSchemaGateAction::AllowStop,
+        "3rd consecutive missing schema must pass the original stop through"
     );
-    assert_eq!(d3.reason_code, "stop_schema_missing");
+    assert_eq!(d3.reason_code, "stop_schema_loop_guard_passthrough");
+    assert!(d3.followup_text.is_none());
 }
 
 #[test]
-fn t3_three_invalid_schema_still_returns_followup() {
+fn t3_third_invalid_schema_allows_original_stop_passthrough() {
     let bad = "<rcc_stop_schema>{bad json}</rcc_stop_schema>";
     let d1 = evaluate_stop_schema_gate(bad, 0, 3, "", 0);
     assert_eq!(d1.action, StopSchemaGateAction::Followup);
     assert_eq!(d1.reason_code, "stop_schema_invalid_json");
+
+    let d2 = evaluate_stop_schema_gate(bad, 1, 3, &d1.observation_hash, d1.no_change_count);
+    assert_eq!(d2.action, StopSchemaGateAction::Followup);
+
+    let d3 = evaluate_stop_schema_gate(bad, 2, 3, &d2.observation_hash, d2.no_change_count);
+    assert_eq!(d3.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(d3.reason_code, "stop_schema_loop_guard_passthrough");
 }
 
 #[test]
@@ -207,7 +215,7 @@ fn t3_invalid_schema_with_empty_arguments_fails_fast_after_three_rounds() {
     let d2 = evaluate_stop_schema_gate_with_reasoning_stop_arguments(
         "",
         Some(r#"{}"#),
-        0,
+        1,
         3,
         &d1.observation_hash,
         d1.no_change_count,
@@ -218,16 +226,13 @@ fn t3_invalid_schema_with_empty_arguments_fails_fast_after_three_rounds() {
     let d3 = evaluate_stop_schema_gate_with_reasoning_stop_arguments(
         "",
         Some(r#"{}"#),
-        0,
+        2,
         3,
         &d2.observation_hash,
         d2.no_change_count,
     );
-    assert_eq!(d3.action, StopSchemaGateAction::Followup);
-    assert_eq!(
-        d3.reason_code,
-        "stop_schema_stopreason_missing_or_non_numeric"
-    );
+    assert_eq!(d3.action, StopSchemaGateAction::AllowStop);
+    assert_eq!(d3.reason_code, "stop_schema_loop_guard_passthrough");
 }
 
 // ── T4: 不同错误 → no_change_count 重置 ─────────────────────────────────────

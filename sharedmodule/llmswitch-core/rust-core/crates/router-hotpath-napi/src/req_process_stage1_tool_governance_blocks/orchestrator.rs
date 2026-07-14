@@ -2,6 +2,7 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 use crate::hub_pipeline_blocks::responses_resume::lift_responses_resume_into_semantics;
 use crate::metadata_center::{
@@ -17,6 +18,10 @@ use crate::req_process_stage1_tool_governance_blocks::request_sanitizer::{
 };
 use crate::req_process_stage1_tool_governance_blocks::servertool_injection::maybe_apply_servertool_orchestration;
 use crate::shared_json_utils::{normalize_record, normalize_record_ref};
+use crate::stopless_current_turn::{
+    is_stopless_transparent_continuation_prompt, scan_stopless_current_turn_items,
+    StoplessCurrentTurnScan,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,24 +51,31 @@ struct GovernanceContext {
 }
 
 const STOPLESS_SYSTEM_INSTRUCTION: &str = concat!(
-    "停止、暂停或继续当前轮时，使用唯一 stop schema 合同。\n",
-    "优先调用 reasoningStop function tool，并把 JSON schema 放进 tool call arguments。\n",
-    "禁止把 reasoningStop 当成 shell / CLI 命令；不要输出或执行 exec_command(cmd=\"reasoningStop\")。\n",
-    "字段是条件必填：stopreason 是唯一无条件必填字段；stopreason=0 需要 has_evidence=1 且 evidence 非空；stopreason=1 需要 reason 非空；stopreason=2 需要 current_goal 和 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题。\n",
-    "如果收到上一轮反馈，只按反馈补对应字段；没有反馈时继续当前任务。\n",
-    "如果你直接 finish_reason=stop，正文末尾必须附：\n",
-    "<rcc_stop_schema>\n",
-    "{\"stopreason\":2,\"reason\":\"当前状态\",\"current_goal\":\"当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"下一步动作\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
-    "</rcc_stop_schema>\n",
-    "标准 JSON 字段：stopreason, reason, current_goal, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned。\n",
+    "停止输出合同：准备结束、暂停或总结当前回复时，最终 summary 的末尾必须附 stop schema；不要省略，也不要猜字段。\n",
+    "字段类型：stopreason=整数 0/1/2；simple_question=布尔值；reason/current_goal/evidence/issue_cause/excluded_factors/diagnostic_order/done_steps/next_step/next_suggested_path/learned=字符串；has_evidence=整数 0/1；needs_user_input=布尔值。\n",
+    "必选合同：普通任务必须写 stopreason。stopreason=0(finished) 必须同时写 has_evidence=1 和非空 evidence；stopreason=1(blocked) 必须写非空 reason；stopreason=2(continue_needed) 必须写非空 current_goal 和 next_step；needs_user_input=true 时 next_step 必须是要直接询问用户的完整问题。simple_question=true 仅用于当前用户输入确实是简单问答，此时可不写 stopreason。\n",
+    "用户输入规则：needs_user_input=true 只允许用于缺少会影响目标、权限、实际成本或不可逆风险的用户专属决策；“是否继续”“要不要继续”“是否执行下一步”不是有效 blocked/user-input。只要存在可自主执行且有助于完成目标的下一步，就按重要性和依赖顺序直接执行，并在收口 schema 中使用 stopreason=2 和 next_step。\n",
+    "可选字段：issue_cause、excluded_factors、diagnostic_order、done_steps、next_suggested_path、learned；有事实就写，没有可用空字符串。reason 在 stopreason=0/2 时可选；has_evidence=0 时 evidence 可为空。\n",
     "stopreason 取值：0=finished，1=blocked，2=continue_needed。\n",
-    "needs_user_input 只能是 true/false；true 只用于真的需要向用户提一个问题。\n",
-    "最小可复制样本：{\"stopreason\":2,\"reason\":\"当前状态\",\"current_goal\":\"当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"下一步动作\",\"needs_user_input\":false}。\n",
-    "没有 reasoningStop arguments 时，使用 <rcc_stop_schema>。"
+    "输出形态：\n",
+    "<rcc_stop_schema>\n",
+    "{\"stopreason\":0,\"simple_question\":false,\"reason\":\"\",\"current_goal\":\"\",\"has_evidence\":1,\"evidence\":\"真实文件/日志/命令/测试证据\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"已完成事项\",\"next_step\":\"\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}\n",
+    "</rcc_stop_schema>\n",
+    "finished 示例：<rcc_stop_schema>{\"stopreason\":0,\"simple_question\":false,\"reason\":\"修复完成\",\"current_goal\":\"\",\"has_evidence\":1,\"evidence\":\"测试 12/12 通过\",\"issue_cause\":\"旧状态被跨 turn 恢复\",\"excluded_factors\":\"provider 响应正常\",\"diagnostic_order\":\"样本->主线->真源->回放\",\"done_steps\":\"根因修复并验证\",\"next_step\":\"\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"计数必须按当前 turn 隔离\"}</rcc_stop_schema>\n",
+    "blocked 示例：<rcc_stop_schema>{\"stopreason\":1,\"simple_question\":false,\"reason\":\"缺少生产访问权限\",\"current_goal\":\"\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"权限不足\",\"excluded_factors\":\"本地构建已通过\",\"diagnostic_order\":\"本地验证后检查权限\",\"done_steps\":\"完成本地验证\",\"next_step\":\"请授权生产只读访问\",\"next_suggested_path\":\"授权后执行在线回放\",\"needs_user_input\":true,\"learned\":\"\"}</rcc_stop_schema>\n",
+    "continue_needed 示例：<rcc_stop_schema>{\"stopreason\":2,\"simple_question\":false,\"reason\":\"仍需在线验证\",\"current_goal\":\"完成 stopless 透明续轮闭环\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"源码测试已通过\",\"next_step\":\"运行真实 submit_tool_outputs 回放\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}</rcc_stop_schema>"
 );
 
 fn text_has_current_stopless_system_instruction(content: &str) -> bool {
-    content.contains("<rcc_stop_schema>") && content.contains("字段是条件必填")
+    content.contains("<rcc_stop_schema>")
+        && content.contains("必选合同")
+        && content.contains("可选字段")
+        && content.contains("finished 示例")
+        && content.contains("blocked 示例")
+        && content.contains("continue_needed 示例")
+        && content.contains("是否继续")
+        && content.contains("stopreason=2")
+        && content.contains("next_step")
 }
 
 fn text_has_any_stopless_system_instruction(content: &str) -> bool {
@@ -152,25 +164,6 @@ fn should_inject_stopless_system_instruction(center: &MetadataCenter) -> bool {
     center.stop_message_enabled().unwrap_or(false)
 }
 
-fn request_has_tool(request: &Map<String, Value>, tool_name: &str) -> bool {
-    request
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools.iter().any(|tool| {
-                let direct_name = tool.get("name").and_then(Value::as_str).map(str::trim);
-                let function_name = tool
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|row| row.get("name"))
-                    .and_then(Value::as_str)
-                    .map(str::trim);
-                direct_name == Some(tool_name) || function_name == Some(tool_name)
-            })
-        })
-        .unwrap_or(false)
-}
-
 fn output_has_terminal_stopless_trigger(output: &Value) -> bool {
     let row = match output {
         Value::String(raw) => serde_json::from_str::<Value>(raw).ok(),
@@ -214,51 +207,6 @@ fn is_terminal_stopless_trigger(value: &str) -> bool {
         || normalized.eq_ignore_ascii_case("stop_schema_forcestop")
 }
 
-fn value_contains_terminal_stopless_output(value: Option<&Value>) -> bool {
-    let Some(value) = value else {
-        return false;
-    };
-    let Some(items) = value.as_array() else {
-        return false;
-    };
-    items.iter().any(|entry| {
-        let Some(row) = entry.as_object() else {
-            return false;
-        };
-        let item_type = row
-            .get("type")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if matches!(
-            item_type.as_str(),
-            "function_call_output" | "tool_result" | "tool_message"
-        ) {
-            return output_has_terminal_stopless_trigger(row.get("output").unwrap_or(&Value::Null));
-        }
-        let role = row
-            .get("role")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if role == "tool" {
-            return output_has_terminal_stopless_trigger(
-                row.get("content")
-                    .or_else(|| row.get("output"))
-                    .unwrap_or(&Value::Null),
-            );
-        }
-        false
-    })
-}
-
-fn request_has_terminal_stopless_output(request: &Map<String, Value>) -> bool {
-    value_contains_terminal_stopless_output(request.get("input"))
-        || value_contains_terminal_stopless_output(request.get("messages"))
-}
-
 fn metadata_has_terminal_stopless_runtime_control(metadata: &Map<String, Value>) -> bool {
     metadata
         .get("runtime_control")
@@ -279,6 +227,22 @@ fn metadata_has_terminal_stopless_runtime_control(metadata: &Map<String, Value>)
         .and_then(Value::as_str)
         .map(is_terminal_stopless_trigger)
         .unwrap_or(false)
+}
+
+fn current_request_stopless_runtime_control(metadata: &Map<String, Value>) -> Option<Value> {
+    metadata
+        .get("runtime_control")
+        .and_then(Value::as_object)
+        .and_then(|runtime_control| runtime_control.get("stopless"))
+        .and_then(Value::as_object)
+        .filter(|stopless| {
+            stopless
+                .get("active")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && read_u64_field(stopless, "repeatCount", "repeat_count").is_some()
+        })
+        .map(|stopless| Value::Object(stopless.clone()))
 }
 
 fn strip_tool_choice_for_terminal_stopless_turn(request: &mut Map<String, Value>) {
@@ -379,69 +343,270 @@ fn parse_stopless_cli_output(value: &Value) -> Option<Map<String, Value>> {
     Some(row)
 }
 
+#[derive(Debug)]
+enum StoplessCurrentTurnEvidence {
+    CliOutput(Map<String, Value>),
+    Guidance(Value),
+    TransparentContinuation,
+    ResetByUserTurn,
+    None,
+}
+
+fn stopless_evidence_from_item(
+    row: &Map<String, Value>,
+    allow_internal_text_evidence: bool,
+) -> Option<StoplessCurrentTurnEvidence> {
+    let is_user_turn = row
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role.trim().eq_ignore_ascii_case("user"));
+    if is_user_turn && !allow_internal_text_evidence {
+        return None;
+    }
+    if let Some(output) = row.get("output").or_else(|| row.get("content")) {
+        if let Some(parsed) = parse_stopless_cli_output(output) {
+            return Some(StoplessCurrentTurnEvidence::CliOutput(parsed));
+        }
+    }
+    if !allow_internal_text_evidence {
+        return None;
+    }
+    let mut texts = Vec::new();
+    collect_string_segments(&Value::Object(row.clone()), &mut texts);
+    for text in texts.iter().rev() {
+        if is_stopless_transparent_continuation_prompt(text) {
+            return Some(StoplessCurrentTurnEvidence::TransparentContinuation);
+        }
+        if let Some(stopless) = build_stopless_runtime_control_from_guidance_text(text) {
+            return Some(StoplessCurrentTurnEvidence::Guidance(stopless));
+        }
+    }
+    None
+}
+
+fn scan_stopless_current_turn_evidence(
+    items: Option<&Value>,
+    allow_internal_text_evidence: bool,
+) -> StoplessCurrentTurnEvidence {
+    match scan_stopless_current_turn_items(items, |row| {
+        stopless_evidence_from_item(row, allow_internal_text_evidence)
+    }) {
+        StoplessCurrentTurnScan::Evidence(evidence) => evidence,
+        StoplessCurrentTurnScan::ResetByUserTurn => StoplessCurrentTurnEvidence::ResetByUserTurn,
+        StoplessCurrentTurnScan::None => StoplessCurrentTurnEvidence::None,
+    }
+}
+
 fn latest_stopless_cli_output_from_items(items: Option<&Value>) -> Option<Map<String, Value>> {
-    let items = items?.as_array()?;
-    for item in items.iter().rev() {
+    match scan_stopless_current_turn_evidence(items, false) {
+        StoplessCurrentTurnEvidence::CliOutput(output) => Some(output),
+        StoplessCurrentTurnEvidence::Guidance(_)
+        | StoplessCurrentTurnEvidence::TransparentContinuation
+        | StoplessCurrentTurnEvidence::ResetByUserTurn
+        | StoplessCurrentTurnEvidence::None => None,
+    }
+}
+
+fn latest_stopless_current_turn_evidence(
+    request: &Map<String, Value>,
+    allow_explicit_resume_output: bool,
+) -> StoplessCurrentTurnEvidence {
+    if allow_explicit_resume_output {
+        if let Some(output) = latest_stopless_cli_output_from_items(request.get("tool_outputs")) {
+            return StoplessCurrentTurnEvidence::CliOutput(output);
+        }
+        if let Some(output) = latest_stopless_cli_output_from_request_resume(request) {
+            return StoplessCurrentTurnEvidence::CliOutput(output);
+        }
+        let semantics_input = request
+            .get("semantics")
+            .and_then(Value::as_object)
+            .and_then(|semantics| semantics.get("input"));
+        if let StoplessCurrentTurnEvidence::CliOutput(output) =
+            scan_stopless_current_turn_evidence(semantics_input, false)
+        {
+            return StoplessCurrentTurnEvidence::CliOutput(output);
+        }
+    }
+    for items in [request.get("input"), request.get("messages")] {
+        match scan_stopless_current_turn_evidence(items, allow_explicit_resume_output) {
+            StoplessCurrentTurnEvidence::None => {}
+            evidence => return evidence,
+        }
+    }
+    let semantics_input = request
+        .get("semantics")
+        .and_then(Value::as_object)
+        .and_then(|semantics| semantics.get("input"));
+    scan_stopless_current_turn_evidence(semantics_input, allow_explicit_resume_output)
+}
+
+fn has_current_responses_resume(request: &Map<String, Value>) -> bool {
+    request
+        .get("semantics")
+        .and_then(Value::as_object)
+        .and_then(|semantics| semantics.get("responses"))
+        .and_then(Value::as_object)
+        .and_then(|responses| responses.get("resume"))
+        .is_some_and(Value::is_object)
+}
+
+fn latest_stopless_cli_output_from_request_resume(
+    request: &Map<String, Value>,
+) -> Option<Map<String, Value>> {
+    let semantics = request.get("semantics").and_then(Value::as_object)?;
+    latest_stopless_cli_output_from_resume(
+        semantics
+            .get("responses")
+            .and_then(Value::as_object)
+            .and_then(|responses| responses.get("resume")),
+    )
+    .or_else(|| latest_stopless_cli_output_from_resume(semantics.get("continuation")))
+}
+
+fn stopless_cli_output_is_terminal(row: &Map<String, Value>) -> bool {
+    output_has_terminal_stopless_trigger(&Value::Object(row.clone()))
+}
+
+fn clear_stopless_runtime_control(metadata: &mut Map<String, Value>) {
+    if let Some(runtime_control) = metadata
+        .get_mut("runtime_control")
+        .and_then(Value::as_object_mut)
+    {
+        runtime_control.remove("stopless");
+    }
+}
+
+fn read_item_call_id(row: &Map<String, Value>) -> Option<String> {
+    read_trimmed_string(row.get("call_id"))
+        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+        .or_else(|| read_trimmed_string(row.get("id")))
+}
+
+fn item_is_stopless_cli_call(row: &Map<String, Value>) -> bool {
+    let item_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if item_type != "function_call" {
+        return false;
+    }
+    let name = read_trimmed_string(row.get("name")).unwrap_or_default();
+    if name != "exec_command" {
+        return name == "reasoningStop" || name == "stop_message_auto";
+    }
+    let arguments = row
+        .get("arguments")
+        .map(Value::to_string)
+        .unwrap_or_default();
+    arguments.contains("routecodex hook run reasoningStop")
+        || arguments.contains("routecodex hook run stop_message_auto")
+        || (arguments.contains("stop_message_flow") && arguments.contains("repeatCount"))
+}
+
+fn nested_tool_call_is_stale_stopless(call: &Value, stale_call_ids: &HashSet<String>) -> bool {
+    let Some(row) = call.as_object() else {
+        return false;
+    };
+    if read_item_call_id(row).is_some_and(|call_id| stale_call_ids.contains(&call_id)) {
+        return true;
+    }
+    let function = row
+        .get("function")
+        .and_then(Value::as_object)
+        .unwrap_or(row);
+    let name = read_trimmed_string(function.get("name")).unwrap_or_default();
+    if name == "reasoningStop" || name == "stop_message_auto" {
+        return true;
+    }
+    if name != "exec_command" {
+        return false;
+    }
+    let arguments = function
+        .get("arguments")
+        .map(Value::to_string)
+        .unwrap_or_default();
+    arguments.contains("routecodex hook run reasoningStop")
+        || arguments.contains("routecodex hook run stop_message_auto")
+        || (arguments.contains("stop_message_flow") && arguments.contains("repeatCount"))
+}
+
+fn item_content_is_empty(row: &Map<String, Value>) -> bool {
+    match row.get("content") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(text)) => text.trim().is_empty(),
+        Some(Value::Array(items)) => items.is_empty(),
+        Some(_) => false,
+    }
+}
+
+fn strip_previous_cycle_stopless_items(items: &mut Vec<Value>) {
+    // This cleanup only runs after current-turn scanning has established a real user reset.
+    let Some(latest_real_user_index) = items.iter().rposition(|item| {
         let Some(row) = item.as_object() else {
+            return false;
+        };
+        row.get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| role.trim().eq_ignore_ascii_case("user"))
+    }) else {
+        return;
+    };
+    let stale_call_ids = items[..latest_real_user_index]
+        .iter()
+        .filter_map(Value::as_object)
+        .filter(|row| stopless_evidence_from_item(row, true).is_some())
+        .filter_map(read_item_call_id)
+        .collect::<HashSet<_>>();
+    let original_items = std::mem::take(items);
+    for (index, mut item) in original_items.into_iter().enumerate() {
+        if index >= latest_real_user_index {
+            items.push(item);
+            continue;
+        }
+        let Some(row) = item.as_object_mut() else {
+            items.push(item);
             continue;
         };
-        if let Some(output) = row.get("output").or_else(|| row.get("content")) {
-            if let Some(parsed) = parse_stopless_cli_output(output) {
-                return Some(parsed);
-            }
-        }
-        let item_type = row
-            .get("type")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if matches!(
-            item_type.as_str(),
-            "function_call_output" | "tool_result" | "tool_message"
-        ) {
+        let is_stopless_evidence = stopless_evidence_from_item(row, true).is_some();
+        let is_paired_call =
+            read_item_call_id(row).is_some_and(|call_id| stale_call_ids.contains(&call_id));
+        if is_stopless_evidence || is_paired_call || item_is_stopless_cli_call(row) {
             continue;
         }
-        let role = row
-            .get("role")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if role == "tool" {
-            if let Some(output) = row.get("content").or_else(|| row.get("output")) {
-                if let Some(parsed) = parse_stopless_cli_output(output) {
-                    return Some(parsed);
-                }
-            }
+        let mut removed_nested_stopless_call = false;
+        if let Some(tool_calls) = row.get_mut("tool_calls").and_then(Value::as_array_mut) {
+            let before = tool_calls.len();
+            tool_calls.retain(|call| !nested_tool_call_is_stale_stopless(call, &stale_call_ids));
+            removed_nested_stopless_call = tool_calls.len() != before;
         }
-    }
-    None
-}
-
-fn latest_stopless_cli_output(request: &Map<String, Value>) -> Option<Map<String, Value>> {
-    latest_stopless_cli_output_from_items(request.get("input"))
-        .or_else(|| latest_stopless_cli_output_from_items(request.get("messages")))
-        .or_else(|| latest_stopless_cli_output_from_items(request.get("tool_outputs")))
-}
-
-fn latest_stopless_runtime_control_from_guidance(request: &Map<String, Value>) -> Option<Value> {
-    latest_stopless_runtime_control_from_guidance_items(request.get("input"))
-        .or_else(|| latest_stopless_runtime_control_from_guidance_items(request.get("messages")))
-}
-
-fn latest_stopless_runtime_control_from_guidance_items(items: Option<&Value>) -> Option<Value> {
-    let items = items?.as_array()?;
-    for item in items.iter().rev() {
-        let mut texts = Vec::new();
-        collect_string_segments(item, &mut texts);
-        for text in texts.iter().rev() {
-            if let Some(stopless) = build_stopless_runtime_control_from_guidance_text(text) {
-                return Some(stopless);
-            }
+        let tool_calls_empty = row
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty);
+        if removed_nested_stopless_call && tool_calls_empty && item_content_is_empty(row) {
+            continue;
         }
+        items.push(item);
     }
-    None
+}
+
+fn strip_previous_cycle_stopless_history(request: &mut Map<String, Value>) {
+    if let Some(input) = request.get_mut("input").and_then(Value::as_array_mut) {
+        strip_previous_cycle_stopless_items(input);
+    }
+    if let Some(messages) = request.get_mut("messages").and_then(Value::as_array_mut) {
+        strip_previous_cycle_stopless_items(messages);
+    }
+    if let Some(semantics_input) = request
+        .get_mut("semantics")
+        .and_then(Value::as_object_mut)
+        .and_then(|semantics| semantics.get_mut("input"))
+        .and_then(Value::as_array_mut)
+    {
+        strip_previous_cycle_stopless_items(semantics_input);
+    }
 }
 
 fn collect_string_segments(value: &Value, out: &mut Vec<String>) {
@@ -577,22 +742,6 @@ fn latest_stopless_cli_output_from_resume(resume: Option<&Value>) -> Option<Map<
         }
     }
     None
-}
-
-fn latest_stopless_cli_output_from_request_semantics(
-    request: &Map<String, Value>,
-) -> Option<Map<String, Value>> {
-    let semantics = request.get("semantics").and_then(Value::as_object)?;
-    latest_stopless_cli_output_from_items(semantics.get("input"))
-        .or_else(|| {
-            latest_stopless_cli_output_from_resume(
-                semantics
-                    .get("responses")
-                    .and_then(Value::as_object)
-                    .and_then(|responses| responses.get("resume")),
-            )
-        })
-        .or_else(|| latest_stopless_cli_output_from_resume(semantics.get("continuation")))
 }
 
 fn request_truth_session_id(metadata_center: &MetadataCenter) -> Option<String> {
@@ -749,7 +898,11 @@ fn build_initial_stopless_runtime_control(metadata_center: &MetadataCenter) -> O
     }))
 }
 
-fn clone_stopless_runtime_control_from_snapshot(snapshot: &Value) -> Option<Value> {
+fn clone_stopless_runtime_control_from_snapshot(
+    snapshot: &Value,
+    metadata_center: &MetadataCenter,
+) -> Option<Value> {
+    let session_id = request_truth_session_id(metadata_center)?;
     let stopless = snapshot
         .get("runtimeControl")
         .and_then(Value::as_object)
@@ -770,6 +923,7 @@ fn clone_stopless_runtime_control_from_snapshot(snapshot: &Value) -> Option<Valu
 
     let mut cloned = Map::new();
     cloned.insert("flowId".to_string(), Value::String(flow_id));
+    cloned.insert("sessionId".to_string(), Value::String(session_id));
     cloned.insert(
         "repeatCount".to_string(),
         Value::Number(repeat_count.into()),
@@ -874,105 +1028,6 @@ fn write_stopless_runtime_control(metadata: &mut Map<String, Value>, stopless: V
     }
 }
 
-fn build_reasoning_stop_tool() -> Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "reasoningStop",
-            "description": concat!(
-                "Use this tool when you stop, pause, or need another turn. ",
-                "Provide stop schema as JSON arguments. Fields are conditionally required: stopreason is the only unconditional required field; stopreason=0 requires has_evidence=1 and non-empty evidence; stopreason=1 requires non-empty reason; stopreason=2 requires current_goal and next_step; needs_user_input=true requires next_step to be the exact user question. ",
-                "If you do not call this tool, the assistant text must end with <rcc_stop_schema>...</rcc_stop_schema>. ",
-                "stopreason values: 0=finished, 1=blocked, 2=continue_needed. ",
-                "If work remains, use stopreason=2 and write current_goal plus next_step. ",
-                "Field meanings: stopreason, reason, current_goal, has_evidence, evidence, issue_cause, excluded_factors, diagnostic_order, done_steps, next_step, next_suggested_path, needs_user_input, learned. ",
-                "Minimal continue sample: ",
-                "{\"stopreason\":2,\"reason\":\"当前状态\",\"current_goal\":\"当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"下一步动作\",\"needs_user_input\":false}. ",
-                "Minimal finished sample: ",
-                "{\"stopreason\":0,\"reason\":\"stopreason=0 条件成立\",\"has_evidence\":1,\"evidence\":\"列出日志/测试/文件证据\",\"needs_user_input\":false}"
-            ),
-            "parameters": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "stopreason": {
-                        "type": "integer",
-                        "enum": [0, 1, 2],
-                        "description": "0=finished, 1=blocked, 2=continue_needed"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Required for blocked stopreason=1; optional summary for other stopreason values."
-                    },
-                    "has_evidence": {
-                        "type": "integer",
-                        "enum": [0, 1],
-                        "description": "Required as 1 only when stopreason=0 finished."
-                    },
-                    "current_goal": {
-                        "type": "string",
-                        "description": "Required when stopreason=2 continue_needed; write the current objective before choosing next_step."
-                    },
-                    "evidence": {
-                        "type": "string",
-                        "description": "Required only when stopreason=0 finished or has_evidence=1."
-                    },
-                    "issue_cause": {
-                        "type": "string",
-                        "description": "Root cause or current blocker cause."
-                    },
-                    "excluded_factors": {
-                        "type": "string",
-                        "description": "Things already ruled out."
-                    },
-                    "diagnostic_order": {
-                        "type": "string",
-                        "description": "Investigation order already taken."
-                    },
-                    "done_steps": {
-                        "type": "string",
-                        "description": "Concrete steps already completed."
-                    },
-                    "next_step": {
-                        "type": "string",
-                        "description": "Required when stopreason=2 continue_needed, or when needs_user_input=true as the exact user question."
-                    },
-                    "next_suggested_path": {
-                        "type": "string",
-                        "description": "Suggested next path if another turn is needed."
-                    },
-                    "needs_user_input": {
-                        "type": "boolean",
-                        "description": "true only when user input is required before progress can continue."
-                    },
-                    "learned": {
-                        "type": "string",
-                        "description": "Key lesson or durable conclusion from this turn."
-                    }
-                },
-                "required": [
-                    "stopreason"
-                ]
-            }
-        }
-    })
-}
-
-fn inject_reasoning_stop_tool(request: &mut Map<String, Value>) {
-    if request_has_tool(request, "reasoningStop") {
-        return;
-    }
-    let tools = request
-        .entry("tools".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !tools.is_array() {
-        *tools = Value::Array(Vec::new());
-    }
-    if let Some(items) = tools.as_array_mut() {
-        items.push(build_reasoning_stop_tool());
-    }
-}
-
 pub fn apply_req_process_tool_governance(
     input: ToolGovernanceInput,
 ) -> Result<ToolGovernanceOutput, String> {
@@ -994,22 +1049,66 @@ pub fn apply_req_process_tool_governance(
     let mut metadata = normalize_record(lifted_metadata.clone());
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
     let mut request = normalize_record(lifted_request);
+    let current_request_stopless = request
+        .get("metadata")
+        .and_then(Value::as_object)
+        .and_then(current_request_stopless_runtime_control);
     apply_chat_process_request_sanitizer(&mut request);
     let has_current_session_id = has_request_truth_session_id(&metadata_center);
-    let has_terminal_stopless_turn = request_has_terminal_stopless_output(&request)
-        || metadata_has_terminal_stopless_runtime_control(&metadata);
-    let stopless_cli_output = latest_stopless_cli_output(&request)
-        .or_else(|| latest_stopless_cli_output_from_request_semantics(&request));
-    if let Some(stopless) = stopless_cli_output.as_ref().and_then(|row| {
-        build_stopless_runtime_control_from_cli(
+    let allow_explicit_resume_output = input.entry_endpoint.contains("submit_tool_outputs")
+        || has_current_responses_resume(&request);
+    let current_turn_evidence = current_request_stopless
+        .map(StoplessCurrentTurnEvidence::Guidance)
+        .unwrap_or_else(|| {
+            latest_stopless_current_turn_evidence(&request, allow_explicit_resume_output)
+        });
+    let user_turn_reset = matches!(
+        current_turn_evidence,
+        StoplessCurrentTurnEvidence::ResetByUserTurn
+    );
+    let has_terminal_stopless_turn = match &current_turn_evidence {
+        StoplessCurrentTurnEvidence::CliOutput(row) => stopless_cli_output_is_terminal(row),
+        StoplessCurrentTurnEvidence::Guidance(_)
+        | StoplessCurrentTurnEvidence::TransparentContinuation
+        | StoplessCurrentTurnEvidence::ResetByUserTurn
+        | StoplessCurrentTurnEvidence::None => false,
+    } || (!user_turn_reset
+        && metadata_has_terminal_stopless_runtime_control(&metadata));
+    let current_turn_stopless = match &current_turn_evidence {
+        StoplessCurrentTurnEvidence::CliOutput(row) => build_stopless_runtime_control_from_cli(
             row,
             &metadata_center,
             input
                 .has_active_stop_message_for_continue_execution
                 .unwrap_or(false),
-        )
-    }) {
+        ),
+        StoplessCurrentTurnEvidence::Guidance(stopless) => stopless.as_object().and_then(|row| {
+            build_stopless_runtime_control_from_cli(
+                row,
+                &metadata_center,
+                input
+                    .has_active_stop_message_for_continue_execution
+                    .unwrap_or(false),
+            )
+        }),
+        StoplessCurrentTurnEvidence::TransparentContinuation => {
+            clone_stopless_runtime_control_from_snapshot(
+                &input.metadata_center_snapshot,
+                &metadata_center,
+            )
+        }
+        StoplessCurrentTurnEvidence::ResetByUserTurn | StoplessCurrentTurnEvidence::None => None,
+    };
+    if let Some(stopless) = current_turn_stopless {
         write_stopless_runtime_control(&mut metadata, stopless);
+    } else if user_turn_reset {
+        strip_previous_cycle_stopless_history(&mut request);
+        clear_stopless_runtime_control(&mut metadata);
+        if has_current_session_id && should_inject_stopless_system_instruction(&metadata_center) {
+            if let Some(stopless) = build_initial_stopless_runtime_control(&metadata_center) {
+                write_stopless_runtime_control(&mut metadata, stopless);
+            }
+        }
     } else if !has_terminal_stopless_turn
         && metadata
             .get("runtime_control")
@@ -1017,10 +1116,10 @@ pub fn apply_req_process_tool_governance(
             .and_then(|runtime_control| runtime_control.get("stopless"))
             .is_none()
     {
-        if let Some(stopless) =
-            clone_stopless_runtime_control_from_snapshot(&input.metadata_center_snapshot)
-                .or_else(|| latest_stopless_runtime_control_from_guidance(&request))
-        {
+        if let Some(stopless) = clone_stopless_runtime_control_from_snapshot(
+            &input.metadata_center_snapshot,
+            &metadata_center,
+        ) {
             write_stopless_runtime_control(&mut metadata, stopless);
         } else if has_current_session_id
             && should_inject_stopless_system_instruction(&metadata_center)
@@ -1039,7 +1138,6 @@ pub fn apply_req_process_tool_governance(
     {
         inject_stopless_live_continuation_prompt(&mut request, &metadata);
         inject_stopless_system_instruction(&mut request);
-        inject_reasoning_stop_tool(&mut request);
     }
     normalize_apply_patch_freeform_tool_schema(&mut request);
 

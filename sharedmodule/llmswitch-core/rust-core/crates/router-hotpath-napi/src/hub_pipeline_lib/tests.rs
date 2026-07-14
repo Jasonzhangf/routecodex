@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{execute_hub_pipeline_json, HubPipelineConfig, HubPipelineEngine, HubPipelineRequest};
+use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
 use crate::virtual_router_engine::provider_runtime_ingress::{
     register_runtime, report_provider_error, reset_for_tests, test_registry_guard,
 };
@@ -924,7 +925,7 @@ fn execute_hub_pipeline_json_preserves_stopless_instructions_for_anthropic_provi
 }
 
 #[test]
-fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair_and_guidance() {
+fn execute_hub_pipeline_json_restores_stopless_cli_result_as_transparent_user_guidance() {
     let stopless_cli_output = json!({
         "ok": true,
         "kind": "stop_message_auto",
@@ -1067,10 +1068,8 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
     );
     let serialized = serde_json::to_string(&output["payload"]).unwrap();
     assert!(
-        serialized.contains("上一轮执行结果：repeatCount=1/3")
-            && serialized.contains("reasonCode=stop_schema_missing")
-            && serialized.contains("missingFields=stopreason, reason, next_step"),
-        "provider payload must carry exact CLI feedback, got: {}",
+        serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT),
+        "provider payload must carry transparent stopless continuation prompt, got: {}",
         serialized
     );
     assert!(
@@ -1087,7 +1086,7 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
     assert_eq!(
         output["metadata"]["runtime_control"]["stopless"]["sessionId"],
         json!("sess-stopless-cli-feedback-provider-guidance"),
-        "request ChatProcess metadata must scope stopless progression to current request truth sessionId: {}",
+        "request ChatProcess metadata must bind stopless progression to current request truth sessionId: {}",
         output["metadata"]
     );
     assert_eq!(
@@ -1103,12 +1102,6 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         output["metadata"]
     );
     assert!(
-        serialized.contains("按上一轮反馈补齐字段")
-            && serialized.contains("stopreason, reason, next_step"),
-        "provider payload must explain missing fields naturally, got: {}",
-        serialized
-    );
-    assert!(
         !serialized.contains("如果任务已经完成"),
         "provider payload must not judge completion for the model: {}",
         serialized
@@ -1117,36 +1110,14 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         .as_array()
         .expect("anthropic provider messages");
     assert!(
-        messages.len() >= 3,
-        "provider payload must keep restored stopless pair adjacent to guidance, got: {}",
+        messages.len() >= 1,
+        "provider payload must carry transparent stopless continuation as user text, got: {}",
         output["payload"]
     );
-    assert!(
-        messages[1]["content"][0]["type"] == json!("tool_use"),
-        "provider payload must restore internal tool-call semantics, got: {}",
-        output["payload"]
-    );
+    assert_eq!(messages[0]["role"], json!("user"));
     assert_eq!(
-        messages[1]["content"][0]["name"],
-        json!("reasoningStop"),
-        "provider payload must restore reasoningStop instead of replaying raw exec_command history"
-    );
-    assert_eq!(
-        messages[2]["content"][0]["type"],
-        json!("tool_result"),
-        "provider payload must restore paired tool result, got: {}",
-        output["payload"]
-    );
-    assert_eq!(
-        messages[2]["content"][0]["tool_use_id"], messages[1]["content"][0]["id"],
-        "provider payload must pair restored reasoningStop call/result on the same id"
-    );
-    assert!(
-        !serde_json::to_string(&messages[2]["content"][0])
-            .unwrap_or_default()
-            .contains("stop_message_auto"),
-        "provider payload must not expose raw stop_message_auto CLI identity: {}",
-        output["payload"]
+        messages[0]["content"][0]["text"],
+        json!(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
     );
     assert!(
         output["payload"]["tools"]
@@ -1158,14 +1129,16 @@ fn execute_hub_pipeline_json_restores_stopless_cli_result_as_reasoning_stop_pair
         output
     );
     assert!(
-        output["payload"]["tools"]
+        !output["payload"]["tools"]
             .as_array()
             .unwrap_or(&Vec::new())
             .iter()
             .any(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("reasoningStop")),
-        "provider payload must keep reasoningStop tool contract on the next round: {}",
+        "provider payload must not expose internal reasoningStop tool: {}",
         output
     );
+    assert!(!serialized.contains("stop_message_auto"));
+    assert!(!serialized.contains("schemaFeedback"));
 }
 
 fn stopless_metadata_write<'a>(
@@ -1362,6 +1335,73 @@ fn stopless_repeated_missing_schema_increments_cli_projection_repeat_count() {
     );
     let write_plan = stopless_metadata_write(&output).expect("stopless write plan");
     assert_eq!(write_plan["stopless"]["repeatCount"], json!(2));
+}
+
+#[test]
+fn stopless_third_consecutive_missing_schema_passes_original_stop_through() {
+    let mut engine = HubPipelineEngine::new(HubPipelineConfig::default()).unwrap();
+    let output = engine
+        .execute(HubPipelineRequest {
+            request_id: "req-stopless-third-stop-passthrough".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "id": "chatcmpl_stopless_third_stop_passthrough",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "第三轮仍然 plain stop。" },
+                    "finish_reason": "stop"
+                }]
+            }),
+            metadata: json!({
+                "clientProtocol": "openai-responses",
+                "entryEndpoint": "/v1/responses"
+            }),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-stopless-third-stop-passthrough",
+                    "sessionId": "sess-stopless-third-stop-passthrough"
+                },
+                "runtimeControl": {
+                    "stopMessage": { "enabled": true },
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "sessionId": "sess-stopless-third-stop-passthrough",
+                        "repeatCount": 2,
+                        "maxRepeats": 3,
+                        "triggerHint": "no_schema"
+                    }
+                }
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "response".to_string(),
+            stage: "outbound".to_string(),
+        })
+        .unwrap();
+
+    assert!(output.success);
+    let payload = output.payload.as_ref().expect("payload");
+    assert!(
+        stopless_exec_arguments(payload).is_none(),
+        "third consecutive missing-schema stop must not project another CLI"
+    );
+    let serialized = payload.to_string();
+    assert!(
+        serialized.contains("第三轮仍然 plain stop。"),
+        "passthrough must preserve original stop text, got: {serialized}"
+    );
+    assert!(
+        !serialized.contains("routecodex hook run reasoningStop"),
+        "passthrough must not expose another reasoningStop command: {serialized}"
+    );
+    let reset_plan =
+        stopless_metadata_write(&output).expect("third stop passthrough must reset stopless");
+    assert_eq!(reset_plan["stopless"]["active"], json!(false));
+    assert_eq!(reset_plan["stopless"]["repeatCount"], json!(0));
 }
 
 #[test]

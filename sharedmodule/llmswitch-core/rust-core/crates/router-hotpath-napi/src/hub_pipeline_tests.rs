@@ -13,6 +13,7 @@ use crate::hub_pipeline_blocks::runtime_metadata::*;
 use crate::hub_pipeline_blocks::standardized_request::*;
 use crate::hub_pipeline_blocks::web_search::*;
 use crate::hub_pipeline_lib::execute_hub_pipeline_json;
+use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
 use serde_json::{json, Value};
 
 #[test]
@@ -667,44 +668,21 @@ fn test_execute_hub_pipeline_restores_stopless_resume_as_reasoning_stop_pair_wit
         .as_array()
         .expect("provider messages");
     assert!(
-        messages.len() >= 3,
-        "provider payload must keep restored stopless pair, got: {}",
+        messages.len() >= 2,
+        "provider payload must keep original user turn plus transparent stopless continuation, got: {}",
         output["payload"]
     );
     assert_eq!(messages[0]["role"], json!("user"));
-    assert_eq!(messages[1]["role"], json!("assistant"));
-    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
-    assert_eq!(messages[1]["content"][0]["id"], json!("call_stopless_1"));
-    assert_eq!(messages[1]["content"][0]["name"], json!("reasoningStop"));
-    assert_eq!(messages[2]["role"], json!("user"));
-    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(messages[1]["role"], json!("user"));
     assert_eq!(
-        messages[2]["content"][0]["tool_use_id"],
-        json!("call_stopless_1")
-    );
-    assert!(
-        !serde_json::to_string(&messages[2]["content"][0])
-            .unwrap_or_default()
-            .contains("stop_message_auto"),
-        "restored provider-facing tool result must not leak raw stop_message_auto identity: {}",
-        output["payload"]
+        messages[1]["content"][0]["text"],
+        json!(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
     );
     let guidance = serde_json::to_string(&output["payload"]).expect("payload json");
-    assert!(
-        guidance.contains("上一轮执行结果：repeatCount=2/3"),
-        "provider payload must include stopless repeat-count feedback: {}",
-        output["payload"]
-    );
-    assert!(
-        guidance.contains("继续。"),
-        "provider payload must carry the continuation guidance back to the model: {}",
-        output["payload"]
-    );
-    assert!(
-        guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"),
-        "provider payload must carry the stop schema contract as plain guidance: {}",
-        output["payload"]
-    );
+    assert!(!guidance.contains("reasoningStop"));
+    assert!(!guidance.contains("stop_message_auto"));
+    assert!(!guidance.contains("repeatCount"));
+    assert!(!guidance.contains("schemaFeedback"));
     assert!(
         !guidance.contains("如果任务已经完成"),
         "provider payload must not judge completion for the model: {}",
@@ -856,8 +834,7 @@ fn test_execute_hub_pipeline_live_slice_keeps_public_catalog_tool_result_before_
 }
 
 #[test]
-fn test_execute_hub_pipeline_live_stopless_chat_provider_restores_reasoning_stop_pair_instead_of_raw_tool_message(
-) {
+fn test_execute_hub_pipeline_new_user_turn_clears_previous_stopless_pair_and_counter() {
     let input_json = json!({
         "config": {
             "virtualRouter": {
@@ -936,6 +913,25 @@ fn test_execute_hub_pipeline_live_stopless_chat_provider_restores_reasoning_stop
                 "entryEndpoint": "/v1/responses",
                 "sessionId": "stopless-live-5555-fixcheck-2",
                 "conversationId": "stopless-live-5555-fixcheck-2"
+            },
+            "metadataCenterSnapshot": {
+                "requestTruth": {
+                    "requestId": "req_1782485411953_57627b4d",
+                    "sessionId": "stopless-live-5555-fixcheck-2",
+                    "conversationId": "stopless-live-5555-fixcheck-2"
+                },
+                "runtimeControl": {
+                    "stopMessage": {
+                        "enabled": true
+                    },
+                    "stopless": {
+                        "active": true,
+                        "flowId": "stop_message_flow",
+                        "repeatCount": 1,
+                        "maxRepeats": 3,
+                        "triggerHint": "invalid_schema"
+                    }
+                }
             }
         }
     })
@@ -958,29 +954,14 @@ fn test_execute_hub_pipeline_live_stopless_chat_provider_restores_reasoning_stop
         "provider-facing request must not leak raw stopless tool result: {}",
         output["payload"]
     );
-    let assistant_tool_call = messages
-        .iter()
-        .find(|message| {
-            message["role"] == json!("assistant") && message.get("tool_calls").is_some()
-        })
-        .expect("restored reasoningStop assistant tool call");
-    assert_eq!(
-        assistant_tool_call["tool_calls"][0]["function"]["name"],
-        json!("reasoningStop")
-    );
-    let restored_tool_result = messages
-        .iter()
-        .find(|message| {
-            message["role"] == json!("tool")
-                && message["tool_call_id"] == json!("call_servertool_cli_live_verify_fix_2")
-        })
-        .expect("restored reasoningStop tool result");
     assert!(
-        !restored_tool_result["content"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("stop_message_auto"),
-        "restored reasoningStop tool result must not leak stop_message_auto: {}",
+        !messages.iter().any(|message| {
+            message
+                .to_string()
+                .contains("call_servertool_cli_live_verify_fix_2")
+                || message.to_string().contains("\"repeatCount\":1")
+        }),
+        "new user turn must remove the previous-cycle stopless call/output pair: {}",
         output["payload"]
     );
     let guidance = messages
@@ -988,9 +969,14 @@ fn test_execute_hub_pipeline_live_stopless_chat_provider_restores_reasoning_stop
         .rev()
         .find(|message| message["role"] == json!("user"))
         .and_then(|message| message["content"].as_str())
-        .expect("restored guidance user turn");
+        .expect("new user turn");
     assert!(!guidance.trim().is_empty());
     assert!(guidance.contains("继续修正 stop schema 并继续执行"));
+    assert_eq!(
+        output["metadata"]["runtime_control"]["stopless"]["repeatCount"],
+        json!(0),
+        "new user turn must clear the previous stopless cycle"
+    );
 }
 
 #[test]

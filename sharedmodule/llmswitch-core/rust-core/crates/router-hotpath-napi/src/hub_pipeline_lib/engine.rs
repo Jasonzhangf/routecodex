@@ -5,7 +5,10 @@ use serde_json::Value;
 
 use crate::hub_pipeline::{run_hub_pipeline, HubPipelineInput};
 use crate::hub_pipeline_blocks::protocol::resolve_hub_client_protocol;
-use crate::hub_pipeline_blocks::standardized_request::coerce_standardized_request_from_payload;
+use crate::hub_pipeline_blocks::standardized_request::{
+    attach_current_stopless_runtime_control, coerce_standardized_request_from_payload,
+    derive_stopless_runtime_control_from_payload_value,
+};
 use crate::hub_pipeline_types::{
     run_hub_req_chatprocess_03_governed_entrypoint, run_hub_req_inbound_02_standardized_entrypoint,
     run_hub_req_outbound_05_provider_semantic_entrypoint,
@@ -460,6 +463,11 @@ impl HubPipelineEngine {
             HubPipelineDiagnosticStatus::Started,
             None,
         )];
+        let current_stopless_runtime_control = if direction == "response" {
+            None
+        } else {
+            derive_stopless_runtime_control_from_payload_value(&request.payload)
+        };
         let input = HubPipelineInput {
             request_id: request_id.clone(),
             endpoint: request.endpoint,
@@ -559,7 +567,7 @@ impl HubPipelineEngine {
             }
         }))
         .map_err(HubPipelineError::from)?;
-        let standardized_payload = standardized
+        let mut standardized_payload = standardized
             .get("standardizedRequest")
             .cloned()
             .ok_or_else(|| {
@@ -568,6 +576,11 @@ impl HubPipelineEngine {
                     "Rust HubPipeline req inbound returned no standardized request",
                 )
             })?;
+        attach_current_stopless_runtime_control(
+            &mut standardized_payload,
+            current_stopless_runtime_control,
+        )
+        .map_err(HubPipelineError::from)?;
         let standardized_raw_payload =
             standardized.get("rawPayload").cloned().ok_or_else(|| {
                 HubPipelineError::new(

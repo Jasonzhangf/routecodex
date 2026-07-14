@@ -1395,6 +1395,7 @@ pub fn map_bridge_tools_to_chat_json(raw_tools_json: String) -> NapiResult<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
     use serde_json::json;
 
     #[test]
@@ -2249,21 +2250,17 @@ mod tests {
         let captured = capture_req_inbound_responses_context_snapshot(input)
             .expect("stopless context capture");
         let input_items = captured["input"].as_array().expect("captured input");
-        assert_eq!(input_items.len(), 4);
-        assert_eq!(input_items[1]["type"], json!("function_call"));
-        assert_eq!(input_items[1]["name"], json!("reasoningStop"));
-        assert_eq!(input_items[2]["type"], json!("function_call_output"));
-        assert!(!input_items[2]["output"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("stop_message_auto"));
-        assert_eq!(input_items[3]["role"], json!("user"));
-        let guidance = input_items[3]["content"][0]["text"]
+        assert_eq!(input_items.len(), 2);
+        assert_eq!(input_items[0]["role"], json!("user"));
+        assert_eq!(input_items[1]["role"], json!("user"));
+        let guidance = input_items[1]["content"][0]["text"]
             .as_str()
             .expect("guidance text");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
-        assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
-        assert!(guidance.contains("继续。"));
-        assert!(!guidance.contains("如果能收尾就直接说做完"));
+        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
+        let serialized = serde_json::to_string(input_items).unwrap();
+        assert!(!serialized.contains("reasoningStop"));
+        assert!(!serialized.contains("stop_message_auto"));
+        assert!(!serialized.contains("function_call_output"));
+        assert!(!serialized.contains("repeatCount"));
     }
 }

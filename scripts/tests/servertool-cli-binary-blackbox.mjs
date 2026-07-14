@@ -100,6 +100,7 @@ const forbiddenStoplessTokens = [
     flowId: 'stop_message_flow',
     repeatCount: 1,
     maxRepeats: 3,
+    triggerHint: 'no_schema',
   }, 'internal input stays status-only');
   console.log('  [PASS] stop_message_auto natural-user stdout');
 }
@@ -167,15 +168,16 @@ const forbiddenStoplessTokens = [
   console.log('  [PASS] invalid flowId fails fast');
 }
 
-// RED TEST 7: repeatCount > maxRepeats fails fast
+// RED TEST 7: repeatCount at/above maxRepeats fails fast because stopless must
+// pass the third consecutive stop through instead of projecting another CLI.
 {
   const stderr = runExpectFailure('stop_message_auto', {
     continuationPrompt: 'continue with schema',
-    repeatCount: 4,
+    repeatCount: 3,
     maxRepeats: 3,
   });
   assert.ok(stderr.includes('SERVERTOOL_CLI_INVALID_FIELD: repeatCount/maxRepeats'), stderr);
-  console.log('  [PASS] repeatCount > maxRepeats fails fast');
+  console.log('  [PASS] repeatCount >= maxRepeats fails fast');
 }
 
 console.log('[servertool-cli-blackbox] all tests passed');

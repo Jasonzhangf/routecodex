@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use crate::hub_bridge_actions::{convert_bridge_input_to_chat_messages, BridgeInputToChatInput};
 use crate::shared_json_utils::read_trimmed_string;
 use crate::shared_responses_conversation_utils::normalize_responses_request_input_for_chat_codec;
+use crate::stopless_current_turn::is_stopless_internal_tool_name;
 
 // feature_id: conversion.shared.responses_openai
 // canonical_builder: stage_a_conversion_shared_responses_openai_owner_boundary
@@ -93,6 +94,20 @@ fn input_contains_tool_continuation_signals(input: &[Value]) -> bool {
     })
 }
 
+fn tool_definition_name(tool: &Value) -> Option<&str> {
+    let row = tool.as_object()?;
+    row.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| row.get("function")?.as_object()?.get("name")?.as_str())
+}
+
+fn strip_stopless_internal_tool_definitions(tools: Vec<Value>) -> Vec<Value> {
+    tools
+        .into_iter()
+        .filter(|tool| !tool_definition_name(tool).is_some_and(is_stopless_internal_tool_name))
+        .collect()
+}
+
 fn build_request_from_responses_payload(
     payload_row: &Map<String, Value>,
     context: &Value,
@@ -116,7 +131,8 @@ fn build_request_from_responses_payload(
     let tools = context_row
         .get("toolsNormalized")
         .and_then(|v| v.as_array())
-        .cloned();
+        .cloned()
+        .map(strip_stopless_internal_tool_definitions);
     let prefer_chat_messages_shortcut = !has_tool_continuation_signals;
     let messages = if prefer_chat_messages_shortcut {
         if let Some(messages) = chat_messages {
@@ -266,6 +282,7 @@ pub fn run_responses_openai_response_codec_json(
 mod tests {
     use super::*;
     use crate::anthropic_openai_codec::build_anthropic_from_openai_chat_json;
+    use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
     use serde_json::json;
 
     #[test]
@@ -664,14 +681,13 @@ mod tests {
             .find(|message| {
                 message["content"]
                     .as_str()
-                    .is_some_and(|text| text.contains("上一轮执行结果：repeatCount=2/3"))
+                    .is_some_and(|text| text == STOPLESS_TRANSPARENT_CONTINUATION_PROMPT)
             })
             .expect("latest stopless guidance message");
         let guidance = guidance_message["content"].as_str().expect("guidance text");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=2/3"));
-        assert!(guidance.contains("继续。"));
-        assert!(!guidance.contains("如果能收尾就直接说做完"));
-        assert!(guidance.contains("stopreason 取值：0=finished，1=blocked，2=continue_needed"));
+        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
+        assert!(!guidance.contains("repeatCount"));
+        assert!(!guidance.contains("stopreason"));
         assert!(!guidance.contains("stop_message_auto"));
     }
 
@@ -816,15 +832,21 @@ mod tests {
         assert!(!serialized.contains("tool_calls"));
         assert!(!serialized.contains("\"role\":\"tool\""));
         assert!(!serialized.contains("stop_message_auto"));
-        let guidance = messages
+        assert!(!serialized.contains("repeatCount"));
+        assert!(!serialized.contains("reasoningStop"));
+        assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
+        let latest_user = messages
             .iter()
             .filter(|message| message["role"] == json!("user"))
             .filter_map(|message| message["content"].as_str())
-            .find(|content| content.contains("上一轮执行结果：repeatCount=1/3"))
-            .expect("stopless guidance");
-        assert!(guidance.contains("继续。"));
-        assert!(serialized.contains("继续修正 stop schema 并继续执行"));
-        assert_eq!(value["request"]["tools"][1]["name"], json!("reasoningStop"));
+            .find(|content| *content == "继续修正 stop schema 并继续执行")
+            .expect("real user turn after stopless pair");
+        assert_eq!(latest_user, "继续修正 stop schema 并继续执行");
+        let tools = value["request"]["tools"].as_array().expect("request tools");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], json!("exec_command"));
+        let tools = serde_json::to_string(tools).expect("tools json");
+        assert!(!tools.contains("reasoningStop"));
     }
 
     #[test]

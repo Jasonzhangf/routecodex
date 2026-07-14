@@ -6,6 +6,10 @@ use crate::shared_json_utils::{
     args_contain_direct_or_nested_key, read_optional_bool, read_string_array_command,
     read_trimmed_string, read_workdir_from_args,
 };
+use crate::stopless_current_turn::{
+    is_stopless_transparent_continuation_prompt, scan_stopless_current_turn_slice,
+    StoplessCurrentTurnScan, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT,
+};
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -1651,7 +1655,7 @@ fn parse_stopless_tool_output_payload(value: &Value) -> Option<Map<String, Value
 }
 
 fn is_normalized_stop_hook_name(raw_name: &str) -> bool {
-    matches!(raw_name.trim(), "reasoningStop" | "stop_message_auto")
+    crate::stopless_current_turn::is_stopless_internal_tool_name(raw_name)
 }
 
 fn is_stopless_tool_output_record(row: &Map<String, Value>) -> bool {
@@ -1697,174 +1701,6 @@ fn is_stop_hook_function_call(row: &Map<String, Value>) -> bool {
         .any(|marker| cmd.contains(marker))
 }
 
-fn read_stopless_schema_feedback_text(
-    row: &Map<String, Value>,
-    _repeat_count: u32,
-) -> Option<String> {
-    let feedback = row
-        .get("schemaFeedback")
-        .or_else(|| row.get("schema_feedback"))?
-        .as_object()?;
-    let reason_code = read_trimmed_string(feedback.get("reasonCode"))
-        .or_else(|| read_trimmed_string(feedback.get("reason_code")))?;
-    let missing_fields = feedback
-        .get("missingFields")
-        .or_else(|| feedback.get("missing_fields"))
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| read_trimmed_string(Some(item)))
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-    if reason_code == "stop_schema_continue_next_step" {
-        return None;
-    }
-    if missing_fields.is_empty() && reason_code != "stop_schema_continue_next_step" {
-        return None;
-    }
-    let joined = missing_fields.join(", ");
-    match reason_code.as_str() {
-        "stop_schema_missing" => Some(if joined.is_empty() {
-            "继续。".to_string()
-        } else {
-            format!("继续；按上一轮反馈补齐字段：{joined}。")
-        }),
-        "stop_schema_reason_missing" => Some("继续；按上一轮反馈补齐 reason。".to_string()),
-        "stop_schema_continue_next_step" => None,
-        "stop_schema_terminal_missing_fields" => {
-            Some(format!("继续；按上一轮反馈补齐终态字段：{joined}。"))
-        }
-        "stop_schema_needs_user_input_missing_next_step" => {
-            Some("你表示需要用户输入，但 next_step 里还没有写出要问用户的具体问题；把问题直接写进 next_step。".to_string())
-        }
-        "stop_schema_next_step_missing" => {
-            Some(format!("继续；按上一轮反馈补齐 next_step：{joined}。"))
-        }
-        "stop_schema_current_goal_missing" => {
-            Some("继续；按上一轮反馈补齐 current_goal。".to_string())
-        }
-        "stop_schema_continue_without_next_step" => {
-            Some("继续；按上一轮反馈补齐 next_step。".to_string())
-        }
-        _ => Some(format!("先补齐这些字段：{joined}。")),
-    }
-}
-
-fn render_stopless_schema_guidance_text(schema_guidance: &Value) -> Option<String> {
-    let guidance = schema_guidance.as_object()?;
-    let required_fields = guidance
-        .get("requiredFields")
-        .or_else(|| guidance.get("required_fields"))
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| read_trimmed_string(Some(item)))
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-    let stopreason_values = guidance
-        .get("stopreasonValues")
-        .or_else(|| guidance.get("stopreason_values"))
-        .and_then(Value::as_object);
-    let sample = guidance
-        .get("sample")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| format!("最小可复制样本：{value}"));
-    let mut lines = Vec::<String>::new();
-    if !required_fields.is_empty() {
-        lines.push(format!(
-            "按上一轮反馈补齐这些字段：{}",
-            required_fields.join(", ")
-        ));
-    }
-    lines.push(
-        "必填关系：stopreason 必须是数字 0/1/2；stopreason=0 需要 has_evidence=1 且 evidence 非空；stopreason=1 需要 reason 非空；stopreason=2 必须写 next_step，下一轮只执行 next_step；needs_user_input=true 时 next_step 必须直接写要问用户的问题。".to_string(),
-    );
-    if let Some(values) = stopreason_values {
-        let finished = values.get("finished").and_then(Value::as_i64).unwrap_or(0);
-        let blocked = values.get("blocked").and_then(Value::as_i64).unwrap_or(1);
-        let continue_needed = values
-            .get("continueNeeded")
-            .or_else(|| values.get("continue_needed"))
-            .and_then(Value::as_i64)
-            .unwrap_or(2);
-        lines.push(format!(
-            "stopreason 取值：{finished}=finished，{blocked}=blocked，{continue_needed}=continue_needed。"
-        ));
-    }
-    if let Some(sample) = sample {
-        lines.push(sample);
-    }
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n"))
-    }
-}
-
-fn read_stopless_tool_result_snapshot_text(row: &Map<String, Value>) -> Option<String> {
-    let repeat_count = row
-        .get("repeatCount")
-        .or_else(|| row.get("repeat_count"))
-        .and_then(Value::as_u64)
-        .map(|value| value as u32);
-    let max_repeats = row
-        .get("maxRepeats")
-        .or_else(|| row.get("max_repeats"))
-        .and_then(Value::as_u64)
-        .map(|value| value as u32);
-    let schema_feedback = row
-        .get("schemaFeedback")
-        .or_else(|| row.get("schema_feedback"))
-        .and_then(Value::as_object);
-    let reason_code = schema_feedback
-        .and_then(|feedback| {
-            feedback
-                .get("reasonCode")
-                .or_else(|| feedback.get("reason_code"))
-        })
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let missing_fields = schema_feedback
-        .and_then(|feedback| {
-            feedback
-                .get("missingFields")
-                .or_else(|| feedback.get("missing_fields"))
-        })
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| read_trimmed_string(Some(item)))
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
-    if repeat_count.is_none() && reason_code.is_none() && missing_fields.is_empty() {
-        return None;
-    }
-    let mut segments = Vec::<String>::new();
-    if let Some(repeat) = repeat_count {
-        if let Some(max) = max_repeats {
-            segments.push(format!("repeatCount={repeat}/{max}"));
-        } else {
-            segments.push(format!("repeatCount={repeat}"));
-        }
-    }
-    if let Some(reason) = reason_code {
-        segments.push(format!("reasonCode={reason}"));
-    }
-    if !missing_fields.is_empty() {
-        segments.push(format!("missingFields={}", missing_fields.join(", ")));
-    }
-    Some(format!("上一轮执行结果：{}。", segments.join("；")))
-}
-
 fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
     let trimmed = raw.trim();
     if let Some(row) = parse_stopless_tool_output_payload(&Value::String(trimmed.to_string())) {
@@ -1872,61 +1708,7 @@ fn build_stop_hook_guidance_text_from_output(raw: &str) -> String {
             if let Some(prompt) = read_continue_next_step_prompt(&row) {
                 return prompt;
             }
-            let mut parts = Vec::<String>::new();
-            let repeat_count = row
-                .get("repeatCount")
-                .and_then(Value::as_u64)
-                .map(|value| value as u32)
-                .unwrap_or(1);
-            if let Some(snapshot) = read_stopless_tool_result_snapshot_text(&row) {
-                parts.push(snapshot);
-            }
-            if let Some(schema_feedback) = read_stopless_schema_feedback_text(&row, repeat_count) {
-                parts.push(schema_feedback);
-            }
-            if let Some(prompt) = read_trimmed_string(row.get("continuationPrompt"))
-                .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
-            {
-                parts.push(prompt);
-            }
-            if let Some(schema_guidance) = row
-                .get("schemaGuidance")
-                .or_else(|| row.get("schema_guidance"))
-                .and_then(render_stopless_schema_guidance_text)
-            {
-                parts.push(schema_guidance);
-            } else if let Some((reason_code, missing_fields)) =
-                read_stopless_schema_feedback_context(&row)
-            {
-                let Some(trigger_hint) = derive_stopless_trigger_hint_from_reason(&reason_code)
-                else {
-                    parts.push(format!(
-                        "STOPLESS_CLI_RESULT_MALFORMED: schemaFeedback.reasonCode={reason_code} 没有注册的修复引导；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
-                    ));
-                    return parts.join("\n");
-                };
-                let guidance = serde_json::json!({
-                    "triggerHint": trigger_hint,
-                    "requiredFields": missing_fields,
-                    "sample": "{\"stopreason\":2,\"reason\":\"当前状态\",\"current_goal\":\"当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"下一步动作\",\"needs_user_input\":false}",
-                    "stopreasonValues": {
-                        "finished": 0,
-                        "blocked": 1,
-                        "continueNeeded": 2
-                    }
-                });
-                if let Some(schema_guidance) = render_stopless_schema_guidance_text(&guidance) {
-                    parts.push(schema_guidance);
-                }
-            } else if !is_legal_minimal_stopless_output(&row) {
-                parts.push(
-                    "STOPLESS_CLI_RESULT_MALFORMED: 缺少 schemaGuidance，且 schemaFeedback.reasonCode/missingFields 不完整；不能伪造默认 schema guidance。请重新运行 reasoningStop 生成合法 CLI 输出。"
-                        .to_string(),
-                );
-            }
-            if !parts.is_empty() {
-                return parts.join("\n");
-            }
+            return STOPLESS_TRANSPARENT_CONTINUATION_PROMPT.to_string();
         }
     }
     trimmed.to_string()
@@ -1944,64 +1726,6 @@ fn read_continue_next_step_prompt(row: &Map<String, Value>) -> Option<String> {
     }
     read_trimmed_string(row.get("continuationPrompt"))
         .or_else(|| read_trimmed_string(row.get("continuation_prompt")))
-}
-
-fn is_legal_minimal_stopless_output(row: &Map<String, Value>) -> bool {
-    let trigger_hint = row
-        .get("input")
-        .or_else(|| row.get("input_json"))
-        .and_then(Value::as_object)
-        .and_then(|input| {
-            read_trimmed_string(input.get("triggerHint"))
-                .or_else(|| read_trimmed_string(input.get("trigger_hint")))
-        })
-        .or_else(|| read_trimmed_string(row.get("triggerHint")))
-        .or_else(|| read_trimmed_string(row.get("trigger_hint")));
-    matches!(
-        trigger_hint.as_deref(),
-        Some("no_schema" | "non_terminal_schema")
-    )
-}
-
-fn read_stopless_schema_feedback_context(
-    row: &Map<String, Value>,
-) -> Option<(String, Vec<String>)> {
-    let feedback = row
-        .get("schemaFeedback")
-        .or_else(|| row.get("schema_feedback"))?
-        .as_object()?;
-    let reason_code = read_trimmed_string(
-        feedback
-            .get("reasonCode")
-            .or_else(|| feedback.get("reason_code")),
-    )?;
-    let missing_fields = feedback
-        .get("missingFields")
-        .or_else(|| feedback.get("missing_fields"))
-        .and_then(Value::as_array)?
-        .iter()
-        .filter_map(|item| read_trimmed_string(Some(item)))
-        .collect::<Vec<String>>();
-    if missing_fields.is_empty() && reason_code != "stop_schema_continue_next_step" {
-        return None;
-    }
-    Some((reason_code, missing_fields))
-}
-
-fn derive_stopless_trigger_hint_from_reason(reason_code: &str) -> Option<&'static str> {
-    match reason_code {
-        "stop_schema_missing" => Some("no_schema"),
-        "stop_schema_continue_next_step" => Some("non_terminal_schema"),
-        "stop_schema_stopreason_missing_or_non_numeric"
-        | "stop_schema_reason_missing"
-        | "stop_schema_forcestop_reason_missing"
-        | "stop_schema_terminal_missing_fields"
-        | "stop_schema_needs_user_input_missing_next_step"
-        | "stop_schema_current_goal_missing"
-        | "stop_schema_next_step_missing"
-        | "stop_schema_continue_without_next_step" => Some("invalid_schema"),
-        _ => None,
-    }
 }
 
 fn is_stopless_guidance_message(entry: &Value) -> bool {
@@ -2030,7 +1754,8 @@ fn is_stopless_guidance_message(entry: &Value) -> bool {
     }) else {
         return false;
     };
-    text.contains("上一轮执行结果：repeatCount=")
+    is_stopless_transparent_continuation_prompt(text)
+        || text.contains("上一轮执行结果：repeatCount=")
         || text.contains("按下面 schema 补齐缺失字段")
         || text.contains("收尾时至少带上这些字段")
         || text.contains("stopreason")
@@ -2065,11 +1790,11 @@ fn collapse_auto_stop_hook_pairs_in_history(items: Vec<Value>) -> Vec<Value> {
         .filter_map(Value::as_object)
         .filter_map(is_stop_hook_output_call)
         .collect();
-    let latest_stopless_call_id = items
-        .iter()
-        .rev()
-        .filter_map(Value::as_object)
-        .find_map(is_stop_hook_output_call);
+    let latest_stopless_call_id =
+        match scan_stopless_current_turn_slice(&items, |row| is_stop_hook_output_call(row)) {
+            StoplessCurrentTurnScan::Evidence(call_id) => Some(call_id),
+            StoplessCurrentTurnScan::ResetByUserTurn | StoplessCurrentTurnScan::None => None,
+        };
     let latest_stopless_guidance = latest_stopless_call_id.as_ref().and_then(|latest_call_id| {
         items
             .iter()
@@ -6497,6 +6222,7 @@ mod tests {
         publish_responses_record_plan_json, restore_responses_continuation_payload,
         resume_responses_conversation_payload,
     };
+    use crate::stopless_current_turn::STOPLESS_TRANSPARENT_CONTINUATION_PROMPT;
     use serde_json::{json, Value};
     use std::sync::{LazyLock, Mutex};
 
@@ -7978,9 +7704,41 @@ mod tests {
         assert!(!serialized.contains("reasoningStop"));
         assert!(!serialized.contains("stop_message_auto"));
         let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3。"));
-        assert!(guidance.contains("继续。"));
-        assert!(guidance.contains("stopreason"));
+        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
+        assert!(!guidance.contains("repeatCount"));
+        assert!(!guidance.contains("stopreason"));
+    }
+
+    #[test]
+    fn continuation_history_preserves_real_user_continue_after_stopless_pair() {
+        let input =
+            crate::shared_responses_conversation_utils::collapse_auto_stop_hook_pairs_in_history(
+                vec![
+                    json!({
+                        "type": "function_call",
+                        "call_id": "call_stopless_before_real_continue",
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    }),
+                    json!({
+                        "type": "function_call_output",
+                        "call_id": "call_stopless_before_real_continue",
+                        "output": "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"maxRepeats\":3}"
+                    }),
+                    json!({
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "继续执行" }]
+                    }),
+                ],
+            );
+
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], json!("user"));
+        assert_eq!(input[0]["content"][0]["text"], json!("继续执行"));
+        let serialized = serde_json::to_string(&input).unwrap();
+        assert!(!serialized.contains("call_stopless_before_real_continue"));
+        assert!(!serialized.contains(STOPLESS_TRANSPARENT_CONTINUATION_PROMPT));
     }
 
     #[test]
@@ -8056,9 +7814,9 @@ mod tests {
         assert!(!serialized.contains("继续执行中"));
         assert!(!serialized.contains("\"type\":\"function_call_output\""));
         let guidance = input[1]["content"][0]["text"].as_str().expect("guidance");
-        assert!(guidance.contains("上一轮执行结果：repeatCount=3/3。"));
-        assert!(guidance.contains("继续。"));
-        assert!(guidance.contains("stopreason"));
+        assert_eq!(guidance, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
+        assert!(!guidance.contains("repeatCount"));
+        assert!(!guidance.contains("stopreason"));
 
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         let full_input = meta.get("fullInput").and_then(Value::as_array).unwrap();
@@ -8076,13 +7834,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
         );
-        assert!(text.contains(
-            "上一轮执行结果：repeatCount=1；reasonCode=stop_schema_missing；missingFields=stopreason。"
-        ));
-        assert!(text.contains("继续。"));
-        assert!(text.contains("继续；按上一轮反馈补齐字段：stopreason。"));
-        assert!(text.contains("按上一轮反馈补齐这些字段：stopreason"));
-        assert!(!text.contains("每个字段都要写具体内容"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
     }
 
     #[test]
@@ -8090,9 +7842,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"next_step\"]}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=1；reasonCode=stop_schema_next_step_missing；missingFields=next_step。"));
-        assert!(text.contains("继续；按上一轮反馈补齐 next_step"));
-        assert!(text.contains("按上一轮反馈补齐这些字段：next_step"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
     }
 
     #[test]
@@ -8113,8 +7863,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"continuationPrompt\":\"继续。\",\"input\":{\"flowId\":\"stop_message_flow\",\"repeatCount\":1,\"maxRepeats\":3,\"triggerHint\":\"no_schema\"}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
-        assert!(text.contains("继续。"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal no_schema CLI output is legal and must not be treated as malformed: {text}"
@@ -8126,8 +7875,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"继续\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"sessionId\":\"stopless-live-1782780421308\",\"requestId\":\"openai-responses-XLC.key1-glm-5.2-20260630T084701341-424854-5137\",\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"non_terminal_schema\"}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=1/3。"));
-        assert!(text.contains("继续。"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
         assert!(
             !text.contains("STOPLESS_CLI_RESULT_MALFORMED"),
             "minimal non_terminal_schema CLI output is legal and must not be treated as malformed: {text}"
@@ -8139,15 +7887,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"continuationPrompt\":\"继续。\",\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"schemaGuidance\":{\"requiredFields\":[\"stopreason\"],\"sample\":\"{\\\"stopreason\\\":2,\\\"reason\\\":\\\"当前状态\\\",\\\"current_goal\\\":\\\"当前目标\\\",\\\"has_evidence\\\":0,\\\"evidence\\\":\\\"\\\",\\\"next_step\\\":\\\"下一步动作\\\",\\\"needs_user_input\\\":false}\",\"stopreasonValues\":{\"finished\":0,\"blocked\":1,\"continueNeeded\":2}}}"
         );
-        assert!(text.contains("上一轮执行结果：repeatCount=2；reasonCode=stop_schema_missing；missingFields=stopreason。"));
-        assert!(text.contains("继续；按上一轮反馈补齐字段：stopreason。"));
-        assert!(text.contains("按上一轮反馈补齐这些字段：stopreason"));
-        assert!(text.contains("stopreason=0 需要 has_evidence=1 且 evidence 非空"));
-        assert!(text.contains("stopreason=1 需要 reason 非空"));
-        assert!(text.contains("stopreason=2 必须写 next_step"));
-        assert!(text.contains("needs_user_input=true 时 next_step 必须直接写要问用户的问题"));
-        assert!(text.contains("最小可复制样本："));
-        assert!(!text.contains("每个字段都要写具体内容"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
     }
 
     #[test]
@@ -8155,8 +7895,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_unknown_future_reason\",\"missingFields\":[\"next_step\"]}}"
         );
-        assert!(text.contains("STOPLESS_CLI_RESULT_MALFORMED"));
-        assert!(text.contains("没有注册的修复引导"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
         assert!(!text.contains("triggerHint"));
         assert!(!text.contains("no_schema"));
         assert!(!text.contains("本轮缺失字段：stopreason, reason, has_evidence"));
@@ -8167,8 +7906,7 @@ mod tests {
         let text = build_stop_hook_guidance_text_from_output(
             "{\"ok\":true,\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"repeatCount\":2,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[]}}"
         );
-        assert!(text.contains("STOPLESS_CLI_RESULT_MALFORMED"));
-        assert!(text.contains("schemaFeedback.reasonCode/missingFields 不完整"));
+        assert_eq!(text, STOPLESS_TRANSPARENT_CONTINUATION_PROMPT);
         assert!(!text.contains("no_schema"));
         assert!(!text.contains("本轮缺失字段：stopreason, reason, has_evidence"));
     }
