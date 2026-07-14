@@ -1,12 +1,13 @@
 use axum::body::{to_bytes, Body};
 use axum::extract::{Request, State};
-use axum::http::{Response, StatusCode};
-use axum::routing::{any, get};
+use axum::http::{header::CONTENT_TYPE, Response, StatusCode};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config::{V3Config05ManifestPublished, V3DebugManifest, V3ServerManifest};
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
 };
+use routecodex_v3_error::{project_v3_http_boundary_error, V3HttpBoundaryErrorKind};
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, execute_v3_foundation_pending_runtime,
     execute_v3_responses_direct_dry_run_runtime,
@@ -100,12 +101,12 @@ pub async fn spawn_v3_server_aggregate(
             .parse()
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
         let listener = TcpListener::bind(addr).await?;
-        bound.push((server, listener));
+        let bound_addr = listener.local_addr()?;
+        bound.push((server, listener, bound_addr));
     }
 
     let mut listeners = Vec::with_capacity(bound.len());
-    for (server, listener) in bound {
-        let addr = listener.local_addr()?;
+    for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = build_v3_listener_router(V3ListenerState {
             server,
@@ -143,17 +144,19 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(models_endpoint))
-        .route("/v1/responses", any(pending_endpoint))
-        .route("/v1/messages", any(pending_endpoint))
-        .route("/v1/chat/completions", any(pending_endpoint))
+        .route("/v1/responses", post(pending_endpoint))
+        .route("/v1/messages", post(pending_endpoint))
+        .route("/v1/chat/completions", post(pending_endpoint))
         .route(
             "/v1beta/models/:model/generateContent",
-            any(pending_endpoint),
+            post(pending_endpoint),
         )
-        .route("/_routecodex/debug/status", any(debug_status))
-        .route("/_routecodex/debug/logs", any(debug_logs))
-        .route("/_routecodex/debug/snapshots", any(debug_snapshots))
-        .route("/_routecodex/debug/dry-run", any(debug_dry_run))
+        .route("/_routecodex/debug/status", get(debug_status))
+        .route("/_routecodex/debug/logs", get(debug_logs))
+        .route("/_routecodex/debug/snapshots", get(debug_snapshots))
+        .route("/_routecodex/debug/dry-run", post(debug_dry_run))
+        .method_not_allowed_fallback(method_not_allowed)
+        .fallback(path_not_found)
         .with_state(Arc::new(state))
 }
 
@@ -178,7 +181,25 @@ async fn pending_endpoint(
 ) -> Response<Body> {
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
-    let payload = read_json_payload(request).await;
+    let endpoint = endpoint_protocol(&path);
+    if !state
+        .server
+        .endpoints
+        .iter()
+        .any(|declared| declared == endpoint)
+    {
+        return error_output_response(project_http_input_error(
+            V3HttpBoundaryErrorKind::EndpointNotEnabled,
+            format!(
+                "endpoint protocol {endpoint} is not enabled on server {}",
+                state.server.id
+            ),
+        ));
+    }
+    let payload = match read_json_payload(request).await {
+        Ok(payload) => payload,
+        Err(projected) => return error_output_response(projected),
+    };
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let is_responses = path == "/v1/responses";
@@ -273,7 +294,10 @@ async fn debug_dry_run(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
-    let payload = read_json_payload(request).await;
+    let payload = match read_json_payload(request).await {
+        Ok(payload) => payload,
+        Err(projected) => return error_output_response(projected),
+    };
     let fixture_id = match required_dry_run_string(&payload, "fixture_id") {
         Ok(value) => value,
         Err(error) => {
@@ -503,13 +527,82 @@ fn build_v3_debug_runtime_from_manifest(
     })
 }
 
-async fn read_json_payload(request: Request) -> serde_json::Value {
-    match to_bytes(request.into_body(), 1024 * 1024).await {
-        Ok(bytes) if bytes.is_empty() => json!({}),
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| json!({"raw_body_bytes": bytes.len()})),
-        Err(error) => json!({"body_read_error": error.to_string()}),
+const V3_MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+
+async fn read_json_payload(
+    request: Request,
+) -> Result<serde_json::Value, routecodex_v3_error::V3Error06ClientProjected> {
+    let content_type = request
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let Some(content_type) = content_type else {
+        return Err(project_http_input_error(
+            V3HttpBoundaryErrorKind::ContentTypeRequired,
+            "content-type application/json is required",
+        ));
+    };
+    if !content_type
+        .split(';')
+        .next()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+    {
+        return Err(project_http_input_error(
+            V3HttpBoundaryErrorKind::ContentTypeUnsupported,
+            format!("unsupported content-type {content_type}"),
+        ));
     }
+    let bytes = to_bytes(request.into_body(), V3_MAX_REQUEST_BODY_BYTES)
+        .await
+        .map_err(|error| {
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::BodyTooLarge,
+                format!("request body exceeds {V3_MAX_REQUEST_BODY_BYTES} bytes: {error}"),
+            )
+        })?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        project_http_input_error(
+            V3HttpBoundaryErrorKind::MalformedJson,
+            format!("malformed JSON request body: {error}"),
+        )
+    })
+}
+
+async fn method_not_allowed() -> Response<Body> {
+    error_output_response(project_http_input_error(
+        V3HttpBoundaryErrorKind::MethodNotAllowed,
+        "HTTP method is not allowed for this endpoint",
+    ))
+}
+
+async fn path_not_found() -> Response<Body> {
+    error_output_response(project_http_input_error(
+        V3HttpBoundaryErrorKind::PathNotFound,
+        "HTTP path is not registered",
+    ))
+}
+
+fn endpoint_protocol(path: &str) -> &'static str {
+    match path {
+        "/v1/responses" => "responses",
+        "/v1/messages" => "anthropic",
+        "/v1/chat/completions" => "openai_chat",
+        _ if path.starts_with("/v1beta/models/") && path.ends_with("/generateContent") => "gemini",
+        _ => "unknown",
+    }
+}
+
+fn project_http_input_error(
+    kind: V3HttpBoundaryErrorKind,
+    message: impl Into<String>,
+) -> routecodex_v3_error::V3Error06ClientProjected {
+    project_v3_http_boundary_error(kind, message)
+}
+
+fn error_output_response(
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+) -> Response<Body> {
+    responses_direct_output_response(build_v3_server_16_http_frame_from_v3_error_06(projected))
 }
 
 fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {

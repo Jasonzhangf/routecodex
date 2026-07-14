@@ -22,8 +22,26 @@ const fixtures = [
   {
     name: 'server route shortcut',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
-    mutation: '\nfn forbidden_route_shortcut() { hit_opaque_target_once(); }\n',
+    mutation: '\nfn forbidden_route_shortcut() { hit_opaque_target_plan_once(); }\n',
     diagnostic: /Server cannot select routes or interpret targets/,
+  },
+  {
+    name: 'virtual router expands target internals',
+    file: 'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
+    mutation: '\nfn forbidden_target_expansion(manifest: &V3Config05ManifestPublished) { let _ = &manifest.forwarders; }\n',
+    diagnostic: /Virtual Router must return an opaque target and cannot interpret Target or Provider internals/,
+  },
+  {
+    name: 'virtual router reads provider availability',
+    file: 'v3/crates/routecodex-v3-virtual-router/src/lib.rs',
+    mutation: '\nuse routecodex_v3_provider_responses::V3ProviderAvailabilityReader;\n',
+    diagnostic: /Virtual Router cannot depend on Provider health or availability/,
+  },
+  {
+    name: 'target re-enters virtual router',
+    file: 'v3/crates/routecodex-v3-target/src/lib.rs',
+    mutation: '\nfn forbidden_router_reentry(router: V3VirtualRouter, plan: routecodex_v3_virtual_router::V3Router06RoutePoolResolved) { let _ = router.hit_opaque_target_plan_once(plan, 0); }\n',
+    diagnostic: /Target production source cannot re-enter Virtual Router/,
   },
   {
     name: 'provider identity special case',
@@ -67,6 +85,27 @@ const fixtures = [
     mutation: '\n// "stopped_before_provider_send": true\n',
     diagnostic: /P6 Dry Run must execute the Provider pipeline/,
   },
+  {
+    name: 'synthetic malformed JSON payload',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutation: '\nfn forbidden_synthetic_payload() { let _ = serde_json::json!({"raw_body_bytes": 1}); }\n',
+    diagnostic: /cannot synthesize business payload/,
+  },
+  {
+    name: 'broad business endpoint method handler',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutation: '\nfn forbidden_any_route() { let _ = Router::new().route("/v1/responses", any(pending_endpoint)); }\n',
+    diagnostic: /broad any handler is forbidden/,
+  },
+  {
+    name: 'listener task spawned before aggregate bind preflight',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    transform: (source) => source.replace(
+      'bound.push((server, listener, bound_addr));',
+      'tokio::spawn(async {});\n        bound.push((server, listener, bound_addr));',
+    ),
+    diagnostic: /bind the complete enabled listener set before spawning/,
+  },
 ];
 
 const failures = [];
@@ -80,12 +119,12 @@ for (const fixture of fixtures) {
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');
     const testModule = source.indexOf('#[cfg(test)]');
-    writeFileSync(
-      target,
-      testModule === -1
+    const mutated = fixture.transform
+      ? fixture.transform(source)
+      : testModule === -1
         ? source + fixture.mutation
-        : source.slice(0, testModule) + fixture.mutation + source.slice(testModule),
-    );
+        : source.slice(0, testModule) + fixture.mutation + source.slice(testModule);
+    writeFileSync(target, mutated);
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${fixture.name}: gate unexpectedly passed`);

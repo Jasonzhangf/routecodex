@@ -1,0 +1,156 @@
+version: 1
+status: h1_typed_skeleton_and_static_registry_bound
+features:
+  - feature_id: v3.config_server_full_function
+    owner_crates: [routecodex-v3-config, routecodex-v3-server, routecodex-v3-error]
+    owner_files:
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+    resource_bindings:
+      - v3.config.authoring_parsed
+      - v3.config.schema_validated
+      - v3.config.resource_registry
+      - v3.config.published_manifest
+      - v3.config.hub_pipeline_declarations
+      - v3.config.route_pool_match_declarations
+      - v3.server.listener_set
+      - v3.server.validated_http_input
+      - v3.error.chain
+    entry_symbols:
+      - compile_hub_v1
+      - compile_server_execution
+      - compile_pool_match
+      - compile_provider_health
+      - spawn_v3_server_aggregate
+      - read_json_payload
+      - project_v3_http_boundary_error
+    allowed_paths:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-cli
+    forbidden_paths: [v3/crates/routecodex-v3-provider-responses/src, src, sharedmodule]
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-workspace
+    runtime_status: config_and_server_bound_p6_preserved
+
+  - feature_id: v3.hub_pipeline_static_skeleton
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+    resource_bindings:
+      - v3.config.hub_pipeline_declarations
+      - v3.hub.static_hook_registry
+      - v3.hub.entry_protocol
+      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
+      - v3.hub.resolved_target
+      - v3.hub.provider_protocol
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.hub.response_semantic
+    entry_symbols:
+      - compile_v3_hub_v1_static_registry
+      - compile_v3_hub_v1_static_registry_from_config
+      - validate_v3_hub_v1_hook_manifest
+      - build_v3_hub_req_inbound_01_client_raw
+      - build_v3_provider_resp_inbound_01_raw
+    adjacent_builder_symbols:
+      - build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01
+      - build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
+      - build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+      - build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04
+      - build_v3_hub_req_target_06_from_v3_hub_req_execution_05
+      - build_v3_hub_req_outbound_07_from_v3_hub_req_target_06
+      - build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07
+      - build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08
+      - build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01
+      - build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02
+      - build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03
+      - build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+      - build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
+    config_owner_file: v3/crates/routecodex-v3-config/src/validate.rs
+    config_symbols:
+      - compile_hub_v1
+      - compile_server_execution
+      - compile_models
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+    required_gates:
+      - npm run verify:v3-p6-freeze
+      - npm run test:v3-p6-freeze-red-fixtures
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-h1-source-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: typed_skeleton_only
+    pending_runtime:
+      - Hub v1 Provider transport connection
+      - Server entry cutover
+      - P6 Direct hook migration
+      - Relay
+      - continuation save restore
+      - additional protocol implementations
+
+  - feature_id: v3.virtual_router_full_function
+    owner_crates: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-runtime]
+    owner_files:
+      - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-runtime/src/foundation.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+    resource_bindings:
+      - v3.config.route_pool_match_declarations
+      - v3.route.request_facts
+      - v3.route.selection_plan
+      - v3.route.opaque_target
+      - v3.target.candidate_set
+      - v3.target.concrete_provider
+    entry_symbols:
+      - build_v3_router_request_facts_from_v3_req_04
+      - V3VirtualRouter::classify_request_with_facts
+      - V3VirtualRouter::resolve_route_pool_plan
+      - V3VirtualRouter::hit_opaque_target_plan_once
+      - V3TargetInterpreter::expand_candidates
+      - V3TargetInterpreter::select_available
+    allowed_paths:
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-runtime
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+    required_gates:
+      - npm run test:v3-p5-router-target
+      - npm run test:v3-p5-server-blackbox
+      - npm run test:v3-responses-direct-blackbox
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: source_bound_cli_replay_verified

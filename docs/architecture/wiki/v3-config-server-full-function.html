@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V3 Config and Server Full-Function Review</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 1080px; margin: 2rem auto; padding: 0 1rem; color: #172033; }
+    h1, h2 { color: #0d3b66; }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: .75rem; overflow-x: auto; }
+    .node { border: 1px solid #8aa4bf; border-radius: 8px; padding: .75rem; background: #f5f9fd; }
+    .error { border-color: #bf6b6b; background: #fff6f6; }
+    code { background: #edf2f7; padding: .1rem .25rem; }
+    li { margin: .35rem 0; }
+  </style>
+</head>
+<body>
+  <h1>V3 Config and Server Full-Function Review</h1>
+  <p>Scope: deterministic declaration manifest, atomic listeners, strict HTTP boundary, P6 Responses Direct preserved.</p>
+  <h2>Config compile chain</h2>
+  <div class="flow" id="config-flow">
+    <div class="node">V3Config01FileSource</div><div class="node">V3Config02AuthoringParsed</div>
+    <div class="node">V3Config03SchemaValidated</div><div class="node">V3Config04ResourceRegistryBuilt</div>
+    <div class="node">V3Config05ManifestPublished</div>
+  </div>
+  <h2>Server boundary</h2>
+  <div class="flow" id="server-flow">
+    <div class="node">V3ServerStartup01ListenerSetPreflight</div><div class="node">Bind complete listener set</div>
+    <div class="node">Validate method/path/content-type/body</div><div class="node">V3Server03HttpRequestRaw</div>
+    <div class="node">P6 Responses Direct or explicit not_implemented</div>
+  </div>
+  <h2>Invalid input</h2>
+  <div class="flow" id="error-flow">
+    <div class="node error">V3Error01SourceRaised</div><div class="node error">V3Error02Classified</div>
+    <div class="node error">V3Error03TargetLocalAction</div><div class="node error">V3Error04TargetExhaustionDecision</div>
+    <div class="node error">V3Error05ExecutionDecision → V3Error06ClientProjected</div>
+  </div>
+  <h2>Review checklist</h2>
+  <ul>
+    <li>Config IO only through <code>V3ConfigStore</code>.</li>
+    <li>Manifest contains declarations/indexes; no selected route/provider, resolved secret, or request decision.</li>
+    <li>All enabled listeners bind before any serving task starts.</li>
+    <li>Invalid HTTP input enters Error01-06 before Runtime; no synthetic payload.</li>
+    <li>Only <code>/v1/responses</code> executes P6; other protocols remain explicit <code>not_implemented</code>.</li>
+    <li>Relay, continuation runtime, Chat Process, Hub cutover, P6 deletion, V2/live/global install remain out of scope.</li>
+  </ul>
+  <p><a href="v3-config-server-full-function.md">Markdown review</a> · <a href="../../goals/v3-config-server-full-function-plan.md">Canonical plan</a></p>
+</body>
+</html>

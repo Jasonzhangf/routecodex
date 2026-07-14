@@ -29,10 +29,12 @@ version = 3
 bind = "127.0.0.1"
 port = {port_a}
 routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
 [servers.b]
 bind = "127.0.0.1"
 port = {port_b}
 routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
 [providers.test]
 type = "responses"
 base_url = "http://127.0.0.1:9/v1"
@@ -274,6 +276,7 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
         assert_eq!(health["manifest_version"], 3);
         let pending = client
             .post(format!("http://{}/v1/messages", listener.addr))
+            .json(&json!({}))
             .send()
             .await
             .unwrap();
@@ -757,4 +760,117 @@ async fn one_bind_failure_prevents_aggregate_start() {
         rebound.is_ok(),
         "aggregate failure must release earlier preflight binds"
     );
+}
+
+#[tokio::test]
+async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
+    let mut strict_manifest = manifest(free_port(), free_port());
+    for server in strict_manifest.servers.values_mut() {
+        server.endpoints = vec!["responses".to_string()];
+    }
+    let handle = spawn_v3_server_aggregate(strict_manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    let cases = [
+        (
+            client
+                .post(format!("{base}/v1/messages"))
+                .header("content-type", "application/json")
+                .body("{}")
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::NOT_IMPLEMENTED,
+            "endpoint_not_enabled",
+        ),
+        (
+            client
+                .get(format!("{base}/v1/responses"))
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+        ),
+        (
+            client
+                .post(format!("{base}/v1/unknown"))
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::NOT_FOUND,
+            "path_not_found",
+        ),
+        (
+            client
+                .post(format!("{base}/v1/responses"))
+                .body(r#"{"input":"hello"}"#)
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "content_type_required",
+        ),
+        (
+            client
+                .post(format!("{base}/v1/responses"))
+                .header("content-type", "text/plain")
+                .body(r#"{"input":"hello"}"#)
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "content_type_unsupported",
+        ),
+        (
+            client
+                .post(format!("{base}/v1/responses"))
+                .header("content-type", "application/json")
+                .body("{")
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::BAD_REQUEST,
+            "malformed_json",
+        ),
+        (
+            client
+                .post(format!("{base}/v1/responses"))
+                .header("content-type", "application/json")
+                .body(vec![b'x'; 1024 * 1024 + 1])
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body_too_large",
+        ),
+    ];
+
+    for (response, expected_status, expected_code) in cases {
+        assert_eq!(response.status(), expected_status);
+        assert_eq!(
+            response.headers()["x-routecodex-v3-error-node"],
+            "V3Error06ClientProjected"
+        );
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], expected_code);
+        assert_eq!(body["error"]["stage"], "V3Server03HttpRequestRaw");
+    }
+
+    let logs: Value = client
+        .get(format!("{base}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !serde_json::to_string(&logs)
+            .unwrap()
+            .contains("V3Server03HttpRequestRaw"),
+        "invalid HTTP input must not enter Runtime"
+    );
+    handle.shutdown().await;
 }

@@ -15,11 +15,17 @@ const requiredFiles = [
   'docs/goals/v3-responses-direct-mvp-test-design.md',
   'docs/goals/v3-responses-direct-mvp-implementation-plan.md',
   'docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md',
+  'docs/goals/v3-hub-h2-p6-responses-direct-characterization.md',
+  'docs/goals/v3-config-server-full-function-plan.md',
+  'docs/goals/v3-virtual-router-full-function-plan.md',
   'docs/architecture/v3-resource-operation-map.yml',
+  'docs/architecture/v3-function-map.yml',
   'docs/architecture/v3-mainline-call-map.yml',
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-responses-direct-mainline.md',
   'docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md',
+  'docs/architecture/wiki/v3-config-server-full-function.md',
+  'docs/architecture/wiki/v3-config-server-full-function.html',
 ];
 const requiredNodes = [
   'V3Config01FileSource', 'V3Config02AuthoringParsed', 'V3Config03SchemaValidated',
@@ -38,6 +44,7 @@ const requiredNodes = [
   'V3Error03TargetLocalAction', 'V3Error04TargetExhaustionDecision',
   'V3Error05ExecutionDecision', 'V3Error06ClientProjected',
   'V3ProviderHealthStateMutated', 'V3ProviderAvailabilityProjected',
+  'V3RouterRequestFacts',
 ];
 
 const fail = (message) => failures.push(message);
@@ -61,8 +68,11 @@ const p6AnchoredResourceIds = new Set([
   'v3.provider.transport_request',
   'v3.response.provider_raw',
 ]);
-const hubV1PendingResourceIds = new Set([
+const hubV1AnchoredResourceIds = new Set([
   'v3.config.hub_pipeline_declarations',
+  'v3.hub.static_hook_registry',
+]);
+const hubV1PendingResourceIds = new Set([
   'v3.hub.entry_protocol',
   'v3.hub.continuation_ownership',
   'v3.hub.execution_plan',
@@ -73,13 +83,27 @@ const hubV1PendingResourceIds = new Set([
   'v3.hub.response_semantic',
   'v3.continuation.remote_binding',
   'v3.continuation.local_context_truth',
-  'v3.hub.static_hook_registry',
 ]);
-const hubV1PendingStepIds = new Set([
+const hubV1AnchoredStepIds = new Set([
   'v3-hub-req-01', 'v3-hub-req-02', 'v3-hub-req-03', 'v3-hub-req-04',
   'v3-hub-req-05', 'v3-hub-req-06', 'v3-hub-req-07', 'v3-hub-req-08',
   'v3-hub-resp-01', 'v3-hub-resp-02', 'v3-hub-resp-03', 'v3-hub-resp-04',
   'v3-hub-resp-05',
+]);
+const hubV1EdgePairs = new Map([
+  ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized']],
+  ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqContinuation03Classified']],
+  ['v3-hub-req-03', ['V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed']],
+  ['v3-hub-req-04', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned']],
+  ['v3-hub-req-05', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved']],
+  ['v3-hub-req-06', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic']],
+  ['v3-hub-req-07', ['V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload']],
+  ['v3-hub-req-08', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest']],
+  ['v3-hub-resp-01', ['V3ProviderRespInbound01Raw', 'V3HubRespInbound02Normalized']],
+  ['v3-hub-resp-02', ['V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed']],
+  ['v3-hub-resp-03', ['V3HubRespChatProcess03Governed', 'V3HubRespContinuation04Committed']],
+  ['v3-hub-resp-04', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic']],
+  ['v3-hub-resp-05', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
 ]);
 
 for (const file of requiredFiles) if (!fs.existsSync(abs(file))) fail(`${file}: missing`);
@@ -88,6 +112,7 @@ const combinedDocs = requiredFiles.map(read).join('\n');
 for (const phrase of [
   'V3ConfigStore', 'TargetPoolExhausted', 'Static hook', 'config.v3.toml',
   'Provider owns', 'Dry run', 'P1 — Full Config compiler',
+  'v3.virtual_router_full_function', 'v3.route.selection_plan',
 ]) if (!combinedDocs.includes(phrase)) fail(`V3 docs: missing contract phrase ${phrase}`);
 for (const token of ['big_skeleton', 'small_skeleton']) {
   if (combinedDocs.includes(token)) fail(`V3 docs: forbidden naming token ${token}`);
@@ -159,9 +184,11 @@ for (const file of requiredFiles.filter((entry) => entry.endsWith('.md'))) {
 }
 
 const resourceMap = yaml('docs/architecture/v3-resource-operation-map.yml');
+const functionMap = yaml('docs/architecture/v3-function-map.yml');
 const mainlineMap = yaml('docs/architecture/v3-mainline-call-map.yml');
 const verificationMap = yaml('docs/architecture/v3-verification-map.yml');
 if (resourceMap.version !== 2) fail('v3-resource-operation-map.yml: version must be 2');
+if (functionMap.version !== 1) fail('v3-function-map.yml: version must be 1');
 if (mainlineMap.version !== 2) fail('v3-mainline-call-map.yml: version must be 2');
 if (verificationMap.version !== 2) fail('v3-verification-map.yml: version must be 2');
 
@@ -181,7 +208,10 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
     fail(`${where}: P6 resource must be anchored after source binding`);
   }
   if (hubV1PendingResourceIds.has(resource.resource_id) && resource.binding_status !== 'binding_pending') {
-    fail(`${where}: Hub v1 resource must remain binding_pending before source implementation`);
+    fail(`${where}: unimplemented Hub v1 business resource must remain binding_pending`);
+  }
+  if (hubV1AnchoredResourceIds.has(resource.resource_id) && resource.binding_status !== 'anchored') {
+    fail(`${where}: implemented Hub v1 H1 resource must be anchored`);
   }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
@@ -200,11 +230,30 @@ for (const chainId of [
   if (!chains.some((chain) => chain.chain_id === chainId)) fail(`mainline: missing chain ${chainId}`);
 }
 const allEdges = chains.flatMap((chain) => array(chain.edges));
-for (const stepId of hubV1PendingStepIds) {
+for (const stepId of hubV1AnchoredStepIds) {
   const edge = allEdges.find((candidate) => candidate.step_id === stepId);
   if (!edge) fail(`mainline: missing Hub v1 edge ${stepId}`);
-  else if (edge.status !== 'binding_pending') {
-    fail(`mainline: ${stepId} must remain binding_pending before source implementation`);
+  else if (edge.status !== 'anchored' || edge.binding_kind !== 'h1_typed_test') {
+    fail(`mainline: ${stepId} must bind the verified H1 typed builder without claiming runtime execution`);
+  } else {
+    const [fromNode, toNode] = hubV1EdgePairs.get(stepId);
+    if (edge.from_node !== fromNode || edge.to_node !== toNode) {
+      fail(`mainline: ${stepId} must remain adjacent ${fromNode} -> ${toNode}`);
+    }
+  }
+}
+
+const h1Function = array(functionMap.features).find((entry) => entry.feature_id === 'v3.hub_pipeline_static_skeleton');
+if (!h1Function) fail('function map: missing v3.hub_pipeline_static_skeleton');
+for (const [field, fileField] of [
+  ['entry_symbols', 'owner_file'],
+  ['adjacent_builder_symbols', 'owner_file'],
+  ['config_symbols', 'config_owner_file'],
+]) {
+  const file = h1Function?.[fileField];
+  if (!file || !fs.existsSync(abs(file))) fail(`function map: missing ${fileField}`);
+  else for (const symbol of array(h1Function?.[field])) {
+    if (!read(file).includes(symbol)) fail(`function map: ${symbol} absent from ${file}`);
   }
 }
 for (const [index, edge] of allEdges.entries()) {
@@ -254,6 +303,26 @@ for (const featureId of ['v3.hub_pipeline_static_skeleton', 'v3.responses_direct
     if (!String(gate).startsWith('npm run ')) fail(`verification map: invalid gate ${gate}`);
   }
 }
+const h1Feature = array(verificationMap.features)
+  .find((entry) => entry.feature_id === 'v3.hub_pipeline_static_skeleton');
+for (const gate of [
+  'npm run verify:v3-p6-freeze',
+  'npm run test:v3-p6-freeze-red-fixtures',
+  'npm run verify:v3-static-hook-registry',
+  'npm run test:v3-h1-source-red-fixtures',
+  'npm run test:v3-compile-fail',
+  'npm run verify:v3-cargo-fmt',
+  'npm run verify:v3-clippy',
+  'npm run test:v3-workspace',
+]) if (!array(h1Feature?.required_gates).includes(gate)) fail(`verification map: H1 missing required gate ${gate}`);
+const h2Feature = array(verificationMap.features)
+  .find((entry) => entry.feature_id === 'v3.responses_direct_h2_equivalence_harness');
+if (!h2Feature) fail('verification map: missing v3.responses_direct_h2_equivalence_harness');
+for (const gate of [
+  'npm run verify:v3-h2-equivalence-harness',
+  'npm run test:v3-h2-equivalence-red-fixtures',
+  'npm run test:v3-h2-p6-controlled-replay',
+]) if (!array(h2Feature?.required_gates).includes(gate)) fail('verification map: H2 missing required gate ' + gate);
 const p6Feature = array(verificationMap.features)
   .find((entry) => entry.feature_id === 'v3.responses_direct_mvp_architecture');
 for (const gate of [
@@ -273,6 +342,16 @@ for (const gate of [
   'npm run test:v3-source-gate-red-fixtures',
   'npm run test:v3-compile-fail',
 ]) if (!array(providerFeature?.required_gates).includes(gate)) fail(`verification map: Provider feature missing required gate ${gate}`);
+
+const configServerFeature = array(verificationMap.features)
+  .find((entry) => entry.feature_id === 'v3.config_server_full_function');
+if (!configServerFeature) fail('verification map: missing v3.config_server_full_function');
+for (const gate of [
+  'npm run verify:v3-module-boundaries',
+  'npm run test:v3-source-gate-red-fixtures',
+  'npm run test:v3-workspace',
+  'npm run build:v3-cli',
+]) if (!array(configServerFeature?.required_gates).includes(gate)) fail(`verification map: Config/Server missing required gate ${gate}`);
 
 if (failures.length) {
   console.error('[verify:v3-architecture-docs] failed');

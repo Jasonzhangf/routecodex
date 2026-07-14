@@ -24,6 +24,9 @@ const read = (path) => readFileSync(path, 'utf8');
 for (const path of all) {
   const text = read(path);
   const productionText = text.replace(/#\[cfg\(test\)\][\s\S]*/, '');
+  const semanticProductionText = productionText
+    .replace(/\.method_not_allowed_fallback\(method_not_allowed\)/g, '')
+    .replace(/\.fallback\(path_not_found\)/g, '');
   const isTest = path.includes('/tests/');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
@@ -57,7 +60,7 @@ for (const path of all) {
   if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
     fail('full lifecycle executor outside runtime crate: ' + path);
   }
-  if (!isTest && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(productionText)) {
+  if (!isTest && /run_.*pipeline|dynamic.*hook|discover.*hook|fallback|sanitize|repair|raw replay|forced relay/i.test(semanticProductionText)) {
     fail('forbidden V3 MVP lifecycle/fallback wording in source: ' + path);
   }
   if (!isTest && !isErrorOwner && /pub struct V3Error0[1-6]/.test(text)) {
@@ -96,7 +99,7 @@ const serverSource = files('v3/crates/routecodex-v3-server/src').map(read).join(
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
   fail('Server must project Runtime output and cannot build or classify Error nodes');
 }
-if (/route_groups|resolve_default_pool|hit_opaque_target_once|expand_candidates|select_available/.test(serverSource)) {
+if (/route_groups|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|expand_candidates|select_available/.test(serverSource)) {
   fail('Server cannot select routes or interpret targets');
 }
 if (!/build_v3_server_16_http_frame_from_v3_resp_15/.test(serverSource)
@@ -105,6 +108,31 @@ if (!/build_v3_server_16_http_frame_from_v3_resp_15/.test(serverSource)
 }
 if (/unwrap_or\("application\/json"\)/.test(serverSource)) {
   fail('Server cannot default a missing V3Resp15 content-type during Server16 framing');
+}
+if (/route\(\s*"\/v1\/(?:responses|messages|chat\/completions)"\s*,\s*any\(/.test(serverSource)) {
+  fail('business endpoints require explicit method dispatch; broad any handler is forbidden');
+}
+if (/raw_body_bytes|body_read_error|unwrap_or_else\([^)]*serde_json::from_slice/.test(serverSource)) {
+  fail('Server cannot synthesize business payload from malformed JSON or body read failure');
+}
+if (!/read_json_payload[\s\S]*Result<serde_json::Value,[\s\S]*V3Error06ClientProjected/.test(serverSource)
+    || !/V3HttpBoundaryErrorKind::MalformedJson/.test(serverSource)
+    || !/V3HttpBoundaryErrorKind::BodyTooLarge/.test(serverSource)) {
+  fail('Server HTTP body boundary must fail through typed Error projection before Runtime');
+}
+if (!/\.method_not_allowed_fallback\(method_not_allowed\)/.test(serverSource)
+    || !/\.fallback\(path_not_found\)/.test(serverSource)) {
+  fail('Server must explicitly project unsupported method and path errors');
+}
+const bindPush = serverSource.indexOf('bound.push((server, listener, bound_addr))');
+const listenerSpawn = serverSource.indexOf('tokio::spawn');
+if (bindPush === -1 || listenerSpawn === -1 || listenerSpawn < bindPush) {
+  fail('Server must bind the complete enabled listener set before spawning any listener task');
+}
+
+const configTypes = read('v3/crates/routecodex-v3-config/src/types.rs');
+if (/pub provider_type: String[\s\S]{0,80}serde\(default/.test(configTypes)) {
+  fail('provider wire protocol cannot have an implicit Config default');
 }
 
 const debugSource = files('v3/crates/routecodex-v3-debug/src').map(read).join('\n');
@@ -136,7 +164,7 @@ if (/forwarders|providers|base_url|auth_alias|wire_model|Reqwest|Transport/.test
 }
 
 const targetSource = files('v3/crates/routecodex-v3-target/src').map(read).join('\n');
-if (/classify_request|resolve_default_pool|hit_opaque_target_once|V3VirtualRouter::/.test(targetSource.replace(/#\[cfg\(test\)\][\s\S]*/, ''))) {
+if (/classify_request|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|V3VirtualRouter::/.test(targetSource.replace(/#\[cfg\(test\)\][\s\S]*/, ''))) {
   fail('Target production source cannot re-enter Virtual Router');
 }
 

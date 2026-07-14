@@ -4,6 +4,11 @@ use serde::Serialize;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum V3ErrorSourceKind {
+    InvalidRequest,
+    UnsupportedMediaType,
+    PayloadTooLarge,
+    MethodNotAllowed,
+    PathNotFound,
     PendingEndpoint,
     ProviderFailure,
     TargetPoolExhausted,
@@ -100,6 +105,11 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
     source: V3Error01SourceRaised,
 ) -> V3Error02Classified {
     let (class, terminal_state) = match source.source_kind {
+        V3ErrorSourceKind::InvalidRequest
+        | V3ErrorSourceKind::UnsupportedMediaType
+        | V3ErrorSourceKind::PayloadTooLarge
+        | V3ErrorSourceKind::MethodNotAllowed
+        | V3ErrorSourceKind::PathNotFound => ("client_input", "already_terminal"),
         V3ErrorSourceKind::PendingEndpoint => ("pending_endpoint", "already_terminal"),
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
@@ -161,6 +171,11 @@ pub fn build_v3_error_04_target_exhaustion_decision_from_v3_error_03(
         || matches!(
             local_action.classified.source.source_kind,
             V3ErrorSourceKind::PendingEndpoint
+                | V3ErrorSourceKind::InvalidRequest
+                | V3ErrorSourceKind::UnsupportedMediaType
+                | V3ErrorSourceKind::PayloadTooLarge
+                | V3ErrorSourceKind::MethodNotAllowed
+                | V3ErrorSourceKind::PathNotFound
                 | V3ErrorSourceKind::TargetPoolExhausted
                 | V3ErrorSourceKind::RuntimeFailure
                 | V3ErrorSourceKind::ClientDisconnect
@@ -197,6 +212,11 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
 ) -> V3Error06ClientProjected {
     let source = &execution.exhaustion.local_action.classified.source;
     let status = match source.source_kind {
+        V3ErrorSourceKind::InvalidRequest => 400,
+        V3ErrorSourceKind::UnsupportedMediaType => 415,
+        V3ErrorSourceKind::PayloadTooLarge => 413,
+        V3ErrorSourceKind::MethodNotAllowed => 405,
+        V3ErrorSourceKind::PathNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
         V3ErrorSourceKind::ProviderFailure => 502,
         V3ErrorSourceKind::TargetPoolExhausted => 503,
@@ -237,6 +257,59 @@ pub const V3_ERROR_CHAIN_NODE_IDS: [&str; 6] = [
     "V3Error05ExecutionDecision",
     "V3Error06ClientProjected",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3HttpBoundaryErrorKind {
+    MalformedJson,
+    ContentTypeRequired,
+    ContentTypeUnsupported,
+    BodyTooLarge,
+    MethodNotAllowed,
+    PathNotFound,
+    EndpointNotEnabled,
+}
+
+pub fn project_v3_http_boundary_error(
+    kind: V3HttpBoundaryErrorKind,
+    detail: impl Into<String>,
+) -> V3Error06ClientProjected {
+    let (source_kind, code) = match kind {
+        V3HttpBoundaryErrorKind::MalformedJson => {
+            (V3ErrorSourceKind::InvalidRequest, "malformed_json")
+        }
+        V3HttpBoundaryErrorKind::ContentTypeRequired => (
+            V3ErrorSourceKind::UnsupportedMediaType,
+            "content_type_required",
+        ),
+        V3HttpBoundaryErrorKind::ContentTypeUnsupported => (
+            V3ErrorSourceKind::UnsupportedMediaType,
+            "content_type_unsupported",
+        ),
+        V3HttpBoundaryErrorKind::BodyTooLarge => {
+            (V3ErrorSourceKind::PayloadTooLarge, "body_too_large")
+        }
+        V3HttpBoundaryErrorKind::MethodNotAllowed => {
+            (V3ErrorSourceKind::MethodNotAllowed, "method_not_allowed")
+        }
+        V3HttpBoundaryErrorKind::PathNotFound => {
+            (V3ErrorSourceKind::PathNotFound, "path_not_found")
+        }
+        V3HttpBoundaryErrorKind::EndpointNotEnabled => {
+            (V3ErrorSourceKind::PendingEndpoint, "endpoint_not_enabled")
+        }
+    };
+    let source =
+        build_v3_error_01_source_raised(source_kind, "V3Server03HttpRequestRaw", code, detail);
+    let classified = build_v3_error_02_classified_from_v3_error_01(source);
+    let action = build_v3_error_03_target_local_action_from_v3_error_02(
+        classified,
+        V3ErrorActionScope::None,
+        0,
+    );
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
+    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
+    build_v3_error_06_client_projected_from_v3_error_05(execution)
+}
 
 pub fn project_v3_pending_endpoint_error(
     event: V3Debug01NodeEventRegistered,

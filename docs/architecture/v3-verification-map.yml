@@ -1,9 +1,49 @@
 version: 2
-status: p6_source_and_local_live_verified_hub_v1_contract_defined
-scope: routecodex-v3-p0-p6-plus-hub-v1-contract
+status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
+scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+  - feature_id: v3.config_server_full_function
+    status: source_and_controlled_cli_verification_required
+    change_risk: high
+    owner_kind: rust_v3_config_server_error
+    owner_scope: "Complete deterministic Config declaration compiler and strict atomic multi-listener HTTP Server boundary while preserving P6 Responses Direct"
+    owner_modules:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-cli
+    design:
+      - docs/goals/v3-config-server-full-function-plan.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+    test_design:
+      - docs/goals/v3-config-server-full-function-plan.md
+    required_contract:
+      - V3ConfigStore is the only config file IO owner
+      - Manifest contains declarations and typed indexes only
+      - pool match Hub hooks execution modes continuation scope provider protocol capability health and concurrency declarations fail fast
+      - every enabled listener binds before any listener task starts
+      - invalid method path content type JSON or body size enters Error01-06 before Runtime
+      - only responses executes P6 while other business protocols return explicit not_implemented
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "Config positive/negative contracts, Server boundary blackboxes, architecture gates, fmt, clippy, workspace, and CLI build pass."
+      runtime: "Actual V3 CLI config check/status, aggregate multi-listener HTTP probes, invalid-input probes, Debug probes, and controlled-upstream P6 replay pass."
+      forbidden_claim: "Do not claim Relay, continuation runtime, Chat Process governance, other provider protocols, Hub v1 cutover, P6 deletion, global install, or production replacement."
+
   - feature_id: v3.hub_pipeline_static_skeleton
-    status: contract_defined_binding_pending
+    status: h1_typed_skeleton_and_static_registry_implemented
     change_risk: critical
     owner_kind: rust_project_v3
     owner_scope: "Fixed Rust Hub v1 request/response skeleton, static hook registry, four independent branch axes, continuation immutable interval, and P6 migration/deletion contract"
@@ -41,10 +81,61 @@ features:
       - npm run verify:v3-module-boundaries
       - npm run test:v3-source-gate-red-fixtures
       - npm run test:v3-hub-skeleton-doc-red-fixtures
+      - npm run verify:v3-p6-freeze
+      - npm run test:v3-p6-freeze-red-fixtures
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-h1-source-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
     completion_rule:
-      source: "Current phase is complete only when design, maps, Wiki, and gates agree while all Hub v1 runtime bindings remain honestly pending."
-      runtime: "No runtime completion claim is allowed until typed nodes, static registry, P6 hook migration, sole-entry cutover, old-chain deletion, workspace tests, and actual CLI controlled-upstream replay pass."
-      forbidden_claim: "Contract-defined Hub v1 is not an implemented Hub Pipeline, Relay, continuation, or provider protocol."
+      source: "H1 is complete only when opaque typed nodes, unique adjacent builders, static callable hooks, Config declarations, P6 freeze gates, maps, Wiki, fmt, Clippy, and workspace tests agree."
+      runtime: "H1 is a source-only typed skeleton. Hub v1 Provider network execution, Server entry cutover, P6 migration, Relay, continuation, and additional protocols remain pending."
+      forbidden_claim: "H1 typed skeleton is not a usable Hub v1 request path, Relay, continuation, additional provider protocol, or P6 migration."
+
+  - feature_id: v3.responses_direct_h2_equivalence_harness
+    status: characterization_harness_verified
+    change_risk: high
+    owner_kind: rust_project_v3_test_harness
+    owner_scope: "H2 pre-migration P6 Responses Direct behavior baseline, paired equivalence tests, controlled-upstream CLI replay, and sanitized evidence artifact"
+    owner_modules:
+      - v3/crates/routecodex-v3-cli/tests/h2_p6_controlled_replay.rs
+      - scripts/architecture/verify-v3-h2-equivalence-harness.mjs
+      - scripts/tests/v3-h2-equivalence-red-fixtures.mjs
+    design:
+      - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+      - docs/design/v3-existing-hub-provider-path-audit.md
+    test_design:
+      - docs/goals/v3-hub-h2-p6-responses-direct-characterization.md
+    required_contract:
+      - P6 remains frozen as the migration source and is not extended into Hub v1
+      - replay starts the actual routecodex-v3 CLI server entry and controlled upstreams
+      - replay does not call internal Runtime kernels, Server library entrypoints, Provider helpers, or H1 Rust symbols
+      - JSON and SSE prove provider wire, raw provider response, client response, and one response exit
+      - target-local reselection proves one Virtual Router hit and no upper-pool return
+      - default pool exhaustion proves terminal Error01-06 only after every selected default candidate fails
+      - Dry Run uses the same request lifecycle and replaces only the transport effect
+      - Debug remains side-channel and cannot enter provider wire payload or client normal response body
+    required_gates:
+      - npm run verify:v3-h2-equivalence-harness
+      - npm run test:v3-h2-equivalence-red-fixtures
+      - npm run test:v3-h2-p6-controlled-replay
+      - npm run test:v3-provider-responses
+      - npm run test:v3-responses-direct-unit
+      - npm run test:v3-responses-direct-blackbox
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "H2 source completion requires the harness verifier, H2 red fixtures, P6 baseline tests, architecture docs/resource/module gates, Rust fmt/clippy/workspace, and diff check."
+      runtime: "H2 runtime evidence is the actual routecodex-v3 CLI controlled-upstream replay artifact for JSON, SSE, reselection, default exhaustion, Dry Run, Debug, and side-channel isolation."
+      forbidden_claim: "Do not claim Hub v1 Direct migrated, Server switched, Relay/continuation available, P6 deleted, global install, production runtime, or real provider compatibility."
 
   - feature_id: v3.foundation_p0_p2
     change_risk: high
@@ -280,3 +371,59 @@ features:
       source: "Router/Target focused tests, source/compile gates, P3/P4 regressions, fmt, clippy, workspace tests, and CLI build pass."
       runtime: "Actual V3 CLI multi-listener HTTP probes show one Router hit, Target expansion/selection or full six-node exhaustion, Debug evidence, no network send, exact Ctrl-C, and closed ports."
       forbidden_claim: "Do not claim P6 Provider transport, real upstream availability, relay, V2 compatibility, global install, or ~/.rcc mutation."
+  - feature_id: v3.virtual_router_full_function
+    status: source_bound_cli_replay_verified
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "Full V3 request-fact pool matching, immutable optional-plus-default plan, one-shot opaque handoff, and Target-local plan exhaustion"
+    owner_modules:
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-runtime
+    design:
+      - docs/goals/v3-virtual-router-full-function-plan.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    required_unit:
+      - typed Responses request facts preserve client model, capabilities, and deterministic input-token estimate
+      - non-default pool match and no-match/default behavior
+      - lower explicit precedence wins and only equal-best valid matches are rejected as ambiguous
+      - priority, weighted, and listener/group/pool isolated round-robin ordering
+      - optional/default semantic target deduplication without second Router hit
+      - Target internal Forwarder expansion and availability reselection across the captured plan
+    required_contract:
+      - default pool is explicit, non-empty, and captured during the original route decision
+      - Virtual Router cannot read Provider health/error or expand Forwarders/providers/keys/models
+      - Target cannot re-enter Virtual Router after the opaque handoff
+      - selection plan is non-Clone and cannot be consumed twice
+      - route facts, selection plan, and opaque target controls cannot enter provider/client payloads
+      - frozen P6 remains Responses-only; future protocol and continuation facts enter through Hub v1 typed nodes
+    required_integration:
+      - Runtime request facts select a non-default pool
+      - optional Provider failure continues through the captured default floor with one Router hit
+      - total plan exhaustion enters the global Error chain
+      - multi-listener CLI replay proves cursor and routing-group isolation
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run test:v3-p5-router-target
+      - npm run test:v3-p5-server-blackbox
+      - npm run test:v3-responses-direct-blackbox
+      - npm run test:v3-vr-full-function-cli
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "All Config match fields, Router/Target/runtime tests, source/compile gates, maps, fmt, clippy, and workspace gates pass."
+      runtime: "Actual V3 CLI multi-listener replay proves non-default, default, optional-to-default, total exhaustion, one Router hit, Debug/Error evidence, and clean shutdown."
+      forbidden_claim: "Do not claim Relay, continuation, Chat Process, other protocol Provider runtimes, Hub v1 cutover, P6 deletion, global install, production replacement, or real ~/.rcc mutation."

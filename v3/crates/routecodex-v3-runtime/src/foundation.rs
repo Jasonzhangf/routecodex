@@ -1,5 +1,6 @@
 use crate::nodes::{
-    build_v3_req_04_standardized_responses_from_v3_server_03, V3Server03HttpRequestRaw,
+    build_v3_req_04_standardized_responses_from_v3_server_03,
+    build_v3_router_request_facts_from_v3_req_04, V3Server03HttpRequestRaw,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
@@ -105,10 +106,12 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
         return project_v3_debug_failure("V3Req04StandardizedResponses", error);
     }
     let router = V3VirtualRouter::default();
-    let classified = match router.classify_request(
+    let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized);
+    let classified = match router.classify_request_with_facts(
         manifest,
         &standardized.protocol_context.server_id,
         &standardized.protocol_context.endpoint,
+        routing_facts,
     ) {
         Ok(node) => node,
         Err(error) => {
@@ -122,20 +125,20 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     if let Err(error) = debug.record_node_event(&scope, "V3Router05RequestClassified", "classified", Some(json!({"server_id": classified.server_id, "routing_group_id": classified.routing_group_id, "endpoint": classified.endpoint}))) {
         return project_v3_debug_failure("V3Router05RequestClassified", error);
     }
-    let pool = match router.resolve_default_pool(manifest, classified) {
+    let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(node) => node,
         Err(error) => {
             return project_p5_failure(
                 "V3Router06RoutePoolResolved",
-                "default_pool_unavailable",
+                "selection_plan_unavailable",
                 error.to_string(),
             )
         }
     };
-    if let Err(error) = debug.record_node_event(&scope, "V3Router06RoutePoolResolved", "resolved", Some(json!({"routing_group_id": pool.routing_group_id, "pool_id": pool.pool_id, "candidate_count": pool.targets.len()}))) {
+    if let Err(error) = debug.record_node_event(&scope, "V3Router06RoutePoolResolved", "resolved", Some(json!({"routing_group_id": plan.routing_group_id(), "tier_count": plan.tier_count(), "candidate_count": plan.candidate_count()}))) {
         return project_v3_debug_failure("V3Router06RoutePoolResolved", error);
     }
-    let hit = match router.hit_opaque_target_once(pool, 0) {
+    let hit = match router.hit_opaque_target_plan_once(plan, 0) {
         Ok(node) => node,
         Err(error) => {
             return project_p5_failure(

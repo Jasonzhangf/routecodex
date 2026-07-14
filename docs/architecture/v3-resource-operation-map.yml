@@ -1,6 +1,6 @@
 version: 2
-status: p6_source_and_local_live_verified_hub_v1_contract_defined
-scope: routecodex-v3-p0-p6-plus-hub-v1-contract
+status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
+scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 owner_feature_id: v3.foundation_p0_p2
 canonical_docs:
   - docs/design/v3-system-definition.md
@@ -120,12 +120,36 @@ resources:
     may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.route.request_facts
+    resource_kind: control_contract
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3RouterRequestFacts
+    identity: [serverId, entryProtocol, clientModel, capabilities, inputTokens]
+    allowed_writers: [build_v3_router_request_facts_from_v3_req_04]
+    allowed_readers: [V3VirtualRouter::classify_request_with_facts]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.route.selection_plan
+    resource_kind: side_channel
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-virtual-router
+    owner_node: V3Router06RoutePoolResolved
+    identity: [serverId, routeGroupId, matchedPoolId, defaultPoolId, orderedOpaqueTargets]
+    allowed_writers: [V3VirtualRouter::resolve_route_pool_plan]
+    allowed_readers: [V3VirtualRouter::hit_opaque_target_plan_once]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.route.opaque_target
     resource_kind: side_channel
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-virtual-router
     owner_node: V3Router07OpaqueTargetHitOnce
-    identity: [requestId, serverId, routeGroupId, poolId, targetId]
+    identity: [requestId, serverId, routeGroupId, poolId, targetId, capturedTierPlan]
     allowed_writers: [V3Router07OpaqueTargetHitOnce]
     allowed_readers: [V3Target08KindClassified]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Resp15ClientPayload]
@@ -329,13 +353,37 @@ resources:
     lifecycle: v3.config.compile
     owner_crate: routecodex-v3-config
     owner_node: V3Config04ResourceRegistryBuilt
-    identity: [skeletonVersion, pipelineId, hookSetId, protocolId, capabilityId]
-    allowed_writers: [V3ConfigStore, V3Config04ResourceRegistryBuilt]
+    identity: [skeletonVersion, protocolIds, hookIds, capabilityIds, executionModes, continuationScopeKeys]
+    allowed_writers: [compile_hub_v1, compile_server_execution]
     allowed_readers: [V3Config05ManifestPublished, V3HubStaticHookRegistryCompiler, V3HubRuntimeKernel]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, dynamic_loader]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
+  - resource_id: v3.config.route_pool_match_declarations
+    resource_kind: config_contract
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config04ResourceRegistryBuilt
+    identity: [routeGroupId, poolId, precedence, entryProtocol, models, requiredCapabilities, tokenRange]
+    allowed_writers: [compile_pool_match]
+    allowed_readers: [V3Config05ManifestPublished, V3VirtualRouter]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.server.validated_http_input
+    resource_kind: transport
+    lifecycle: v3.server.http_boundary
+    owner_crate: routecodex-v3-server
+    owner_node: V3Server03HttpRequestRaw
+    identity: [serverId, method, path, contentType, bodySize]
+    allowed_writers: [read_json_payload]
+    allowed_readers: [build_v3_server_03_http_request_raw, project_v3_http_boundary_error]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.hub.continuation_ownership
     resource_kind: side_channel
     lifecycle: v3.hub_pipeline.v1
@@ -450,12 +498,12 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubStaticHookRegistry
     identity: [skeletonVersion, hookSetId, hookSlot]
-    allowed_writers: [V3HubStaticHookRegistryCompiler]
+    allowed_writers: [compile_v3_hub_v1_static_registry]
     allowed_readers: [V3HubRuntimeKernel]
     forbidden_writers: [routecodex-v3-config, routecodex-v3-server, dynamic_loader, filesystem_scanner]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.error.source
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline

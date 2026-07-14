@@ -58,8 +58,24 @@ or fallback is allowed between save and restore.
 ## Current-state review
 
 - P6 Responses Direct: implemented and verified, but not the final Hub topology.
-- Hub v1 nodes/static registry: contract defined, binding pending.
+- P6 freeze: source gate plus eight mutation fixtures reject Chat Process, Relay, continuation,
+  additional protocol, provider-specific branching, dynamic hook, second lifecycle, and second
+  response exit expansion.
+- Hub v1 H1 nodes: implemented in Rust as opaque types with private fields. Thirteen adjacent
+  builders are source-bound through `all_adjacent_builders_form_the_fixed_typed_topology`; this is
+  a typed-test binding, not a production request-path binding.
+- Hub v1 static registry: thirteen closed callable slots compile deterministically. Every H1 hook
+  returns explicit `not_implemented`; missing, duplicate, unknown, incompatible node pair, or
+  Config mismatch fails startup validation.
+- Config declarations: `V3Config02AuthoringParsed -> V3Config04ResourceRegistryBuilt ->
+  V3Config05ManifestPublished` publishes the closed skeleton, protocols, hooks, capabilities, and
+  allowed server execution facts. It publishes no selected request branch.
 - Remote continuation: pending hook implementation.
 - Local continuation/Relay: pending hook implementation.
 - Other protocols: pending hook implementation.
 - P6 deletion: required after Hub v1 Direct cutover; permanent dual paths are forbidden.
+
+Canonical bindings: [V3 function map](../v3-function-map.yml),
+[V3 mainline call map](../v3-mainline-call-map.yml),
+[V3 resource map](../v3-resource-operation-map.yml), and
+[V3 verification map](../v3-verification-map.yml).

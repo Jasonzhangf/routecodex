@@ -17,7 +17,7 @@ mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_provider_responses::V3ProviderAvailabilityProjection;
-    use routecodex_v3_virtual_router::V3VirtualRouter;
+    use routecodex_v3_virtual_router::{V3RouterRequestFacts, V3VirtualRouter};
 
     struct Availability {
         blocked: BTreeSet<String>,
@@ -84,6 +84,10 @@ targets = [{ kind = "forwarder", id = "inner" }]
 [route_groups.g.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "outer", priority = 1 }]
+[route_groups.g.pools.tools]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }
+targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", priority = 1 }]
 "#;
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap()
     }
@@ -102,10 +106,38 @@ targets = [{ kind = "forwarder", id = "outer", priority = 1 }]
         let classified = router
             .classify_request(manifest, "s", "/v1/responses")
             .unwrap();
-        let pool = router.resolve_default_pool(manifest, classified).unwrap();
-        let hit = router.hit_opaque_target_once(pool, 0).unwrap();
+        let plan = router
+            .resolve_route_pool_plan(manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
         target
             .expand_candidates(manifest, target.classify_kind(hit), sample)
+            .unwrap()
+    }
+
+    fn expanded_tools() -> V3Target09CandidateSetExpanded {
+        let manifest = manifest();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client".into()),
+                    capabilities: BTreeSet::from(["tools".into()]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
             .unwrap()
     }
 
@@ -125,6 +157,31 @@ targets = [{ kind = "forwarder", id = "outer", priority = 1 }]
             .unwrap();
         assert_eq!(selected.route.hit_count, 1);
         assert_eq!(selected.candidate.provider_id, "b");
+        assert_eq!(selected.attempts, 2);
+    }
+
+    #[test]
+    fn optional_exhaustion_continues_inside_captured_default_floor() {
+        let expanded = expanded_tools();
+        assert_eq!(expanded.route.hit_count, 1);
+        assert_eq!(expanded.route.target_plan[0].pool_id, "tools");
+        assert!(expanded
+            .route
+            .target_plan
+            .iter()
+            .any(|entry| entry.pool_id == "default"));
+        let selected = V3TargetInterpreter::default()
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::from(["a:ka:m".into()]),
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(selected.route.hit_count, 1);
+        assert_eq!(selected.candidate.provider_id, "b");
+        assert_eq!(selected.candidate.path[0], "pool:default");
         assert_eq!(selected.attempts, 2);
     }
 
@@ -213,7 +270,7 @@ pub struct V3Target10ConcreteProviderSelected {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3TargetExhaustion {
-    pub route: V3Router07OpaqueTargetHitOnce,
+    pub route: Box<V3Router07OpaqueTargetHitOnce>,
     pub attempted_candidates: Vec<String>,
 }
 
@@ -261,22 +318,46 @@ impl V3TargetInterpreter {
         classified: V3Target08KindClassified,
         deterministic_sample: u64,
     ) -> Result<V3Target09CandidateSetExpanded, V3TargetError> {
-        let target = manifest
+        let group = manifest
             .route_groups
             .get(&classified.route.routing_group_id)
-            .and_then(|group| group.pools.get(&classified.route.pool_id))
-            .and_then(|pool| pool.targets.get(classified.route.target_index))
-            .ok_or(V3TargetError::OpaqueTargetMissing)?;
-        let mut visited = BTreeSet::new();
-        let candidates = self.expand_route_target(
-            manifest,
-            target,
-            deterministic_sample,
-            &mut visited,
-            vec![format!("pool:{}", classified.route.pool_id)],
-        )?;
+            .ok_or(V3TargetError::SelectedPoolMissing)?;
+        let mut candidates = Vec::new();
+        let mut candidate_keys = BTreeSet::new();
+        let mut last_error = None;
+        for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
+            let target = group
+                .pools
+                .get(&entry.pool_id)
+                .and_then(|pool| pool.targets.get(entry.target_index));
+            let Some(target) = target else {
+                last_error = Some(V3TargetError::OpaqueTargetMissing);
+                continue;
+            };
+            let mut visited = BTreeSet::new();
+            match self.expand_route_target(
+                manifest,
+                target,
+                deterministic_sample.wrapping_add(plan_index as u64),
+                &mut visited,
+                vec![format!("pool:{}", entry.pool_id)],
+            ) {
+                Ok(expanded) => {
+                    for candidate in expanded {
+                        let key = format!(
+                            "{}:{}:{}",
+                            candidate.provider_id, candidate.auth_alias, candidate.model_id
+                        );
+                        if candidate_keys.insert(key) {
+                            candidates.push(candidate);
+                        }
+                    }
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
         if candidates.is_empty() {
-            return Err(V3TargetError::CandidateSetEmpty);
+            return Err(last_error.unwrap_or(V3TargetError::CandidateSetEmpty));
         }
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
@@ -312,7 +393,7 @@ impl V3TargetInterpreter {
             ));
         }
         Err(V3TargetExhaustion {
-            route: expanded.route,
+            route: Box::new(expanded.route),
             attempted_candidates: unavailable,
         })
     }

@@ -1,5 +1,6 @@
 pub mod foundation;
 pub mod hooks;
+pub mod hub_v1;
 pub mod kernel;
 pub mod nodes;
 mod shared;
@@ -9,6 +10,7 @@ pub use foundation::{
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3P5Runtime,
 };
 pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3RegisteredHook};
+pub use hub_v1::*;
 pub use kernel::{
     execute_v3_responses_direct_dry_run_runtime, execute_v3_responses_direct_runtime_kernel,
     execute_v3_responses_direct_runtime_kernel_with_default_transport,

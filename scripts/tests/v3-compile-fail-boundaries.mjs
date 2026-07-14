@@ -149,14 +149,38 @@ for (const fixture of [
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
-      'use routecodex_v3_config::V3SelectionStrategy;\nuse routecodex_v3_virtual_router::{V3Router06RoutePoolResolved, V3VirtualRouter};\nfn main() { let router = V3VirtualRouter::default(); let pool = V3Router06RoutePoolResolved { server_id: "s".into(), routing_group_id: "g".into(), pool_id: "default".into(), selection: V3SelectionStrategy::Priority, targets: Vec::new() }; let _ = router.hit_opaque_target_once(pool, 0); let _ = router.hit_opaque_target_once(pool, 0); }\n',
+      'use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};\nuse routecodex_v3_virtual_router::V3VirtualRouter;\nfn main() { let source = r#"version = 3\n[servers.s]\nbind = "127.0.0.1"\nport = 1\nrouting_group = "g"\n[providers.p]\ntype = "responses"\nbase_url = "http://p.invalid/v1"\ndefault_model = "m"\nauth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }\n[providers.p.models.m]\n[route_groups.g.pools.default]\ntargets = [{ kind = "provider_model", provider = "p", model = "m", key = "k" }]\n"#; let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap(); let router = V3VirtualRouter::default(); let classified = router.classify_request(&manifest, "s", "/v1/responses").unwrap(); let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap(); let _ = router.hit_opaque_target_plan_once(plan, 0); let _ = router.hit_opaque_target_plan_once(plan, 0); }\n',
     );
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
       encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(root, 'target') },
     });
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) fail('Virtual Router one-shot fixture unexpectedly reused a consumed pool token');
-    else if (!/use of moved value: `pool`|value used here after move/.test(diagnostic)) fail(`Router one-shot compile-fail fixture failed for wrong reason: ${diagnostic.slice(-600)}`);
+    else if (!/use of moved value: `plan`|value used here after move/.test(diagnostic)) fail(`Router one-shot compile-fail fixture failed for wrong reason: ${diagnostic.slice(-600)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+{
+  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-private-plan-compile-fail-'));
+  const sourceDir = join(root, 'src');
+  try {
+    mkdirSync(sourceDir);
+    writeFileSync(
+      join(root, 'Cargo.toml'),
+      `[package]\nname = "v3-router-private-plan-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-virtual-router = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-virtual-router')}" }\n`,
+    );
+    writeFileSync(
+      join(sourceDir, 'main.rs'),
+      'use routecodex_v3_virtual_router::V3Router06RoutePoolResolved;\nfn main() { let _ = V3Router06RoutePoolResolved { server_id: String::new(), routing_group_id: String::new(), tiers: Vec::new() }; }\n',
+    );
+    const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
+      encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(root, 'target') },
+    });
+    const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status === 0) fail('Virtual Router private plan fixture unexpectedly constructed the one-shot plan');
+    else if (!/private field|private fields|E0451/.test(diagnostic)) fail(`Router private plan fixture failed for wrong reason: ${diagnostic.slice(-600)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -191,6 +215,38 @@ for (const fixture of [
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) fail(`${fixture.name} unexpectedly constructed a provider node outside its owner`);
     else if (!/private field|private fields|E0451/.test(diagnostic)) fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-600)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+for (const fixture of [
+  {
+    name: 'Hub node private constructor',
+    code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, V3HubEntryProtocol, V3HubInvocationSource, V3HubReqInbound02Normalized, V3HubTransportIntent};\nfn main() { let previous = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let _ = V3HubReqInbound02Normalized { previous }; }\n',
+    diagnostic: /private field|E0451/,
+  },
+  {
+    name: 'Hub non-adjacent conversion',
+    code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_target_06_from_v3_hub_req_execution_05, V3HubEntryProtocol, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent};\nfn main() { let req01 = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let _ = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(req01, V3HubTargetResolution::Routed); }\n',
+    diagnostic: /mismatched types|expected `V3HubReqExecution05Planned`/,
+  },
+]) {
+  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-node-compile-fail-'));
+  const sourceDir = join(root, 'src');
+  try {
+    mkdirSync(sourceDir);
+    writeFileSync(
+      join(root, 'Cargo.toml'),
+      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-runtime = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n`,
+    );
+    writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
+    const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
+      encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(root, 'target') },
+    });
+    const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status === 0) fail(`${fixture.name} unexpectedly compiled`);
+    else if (!fixture.diagnostic.test(diagnostic)) fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-800)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

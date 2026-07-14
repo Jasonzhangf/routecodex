@@ -3166,8 +3166,27 @@
 - Non-GPT Responses providers may use RouteCodex-local continuation. Local context is immutable from response Chat Process save through next request Chat Process restore; only round-trip-equivalent normalization, scope validation, storage/transport, expiry, and release are allowed.
 - Contract/maps/gates are defined only; all Hub v1 edges/resources remain `binding_pending`. No Hub v1 runtime, Relay, continuation, or additional provider protocol implementation is claimed.
 
+# 2026-07-14: V3 H2 P6 equivalence baseline is verified
+
+- Marker: `routecodex-v3-h2-p6-equivalence-harness-verified-20260714`.
+- `v3.responses_direct_h2_equivalence_harness` is the required pre-migration baseline for moving P6 Responses Direct behind Hub v1 hooks. It starts the actual `routecodex-v3` CLI server and controlled upstreams; it must not call internal Runtime kernels, Server library entrypoints, Provider helpers, or H1 symbols.
+- Required H2 coverage: JSON, SSE, Target-local reselection with one Router hit, terminal default exhaustion through Error01-06, Dry Run with provider pipeline executed but no network send, Debug side-channel isolation, full client/provider/raw/client response payload observations, secret redaction, and listener/upstream port closure.
+- Verification truth: H2 verifier/red fixtures, controlled replay, P6 provider/unit/blackbox, V3 fmt/clippy/workspace, architecture/module/resource/function/mainline gates, compile-fail, diff check, and latest evidence artifact audit passed. Verification-map status is `characterization_harness_verified`.
+- Boundary: this does not migrate Hub v1 Direct, switch Server entry, implement Relay/continuation/servertool/other protocols, delete P6, touch V2, mutate `~/.rcc`, global install, restart production, or call a real provider.
+
 # 2026-07-14: Error action backoff is always three seconds
 
 - `src/server/runtime/http-server/executor/request-executor-error-action-queue.ts` is the sole owner and returns a fixed `3000ms` delay for every consecutive error in the same category/scope.
 - Do not restore a `1s/2s/3s` or `1s/3s/5s` sequence in provider, executor, or projection layers. Tests, server help, function map, verification map, and error-chain audit docs must assert the same fixed delay.
 - Verified by five focused Jest suites (36 tests), function-map compile gate, resource-operation map gate, diff check, and stale-contract scan.
+
+# 2026-07-14: V3 Hub v1 H1 typed skeleton is source-verified
+
+- Marker: `routecodex-v3-hub-h1-static-registry-verified-20260714`.
+- P6 Responses Direct remains the only running baseline, but its lifecycle is source-frozen against Chat Process, Relay, continuation, additional entry protocols, provider identity/family/model-prefix branching, dynamic hooks/fallback, second lifecycle, Server->Provider shortcuts, and second response exits.
+- Hub v1 H1 owns only the Rust typed skeleton and startup contracts: opaque request/response node types with private fields, 13 unique adjacent builders, four independent branch-axis enums, a closed callable 13-slot static hook registry, deterministic Config manifest validation, and explicit `not_implemented` hooks for unimplemented business branches.
+- Config publishes Hub v1 skeleton/protocol/hook/capability/execution/continuation scope declarations only. It must not choose request-specific Direct/Relay, continuation owner, target, provider, model, or hook plan.
+- H1 map binding rule: builder edges may be `anchored` only as `binding_kind: h1_typed_test` when tied to real test caller plus real builder symbols; this is not production Runtime call binding. Unimplemented Hub business resources remain `binding_pending`.
+- Verified gates: P6 freeze/source red fixtures, H1 static registry/source red fixtures, H1 Runtime tests, Config contract, compile-fail private-field/non-adjacent boundaries, architecture/resource/module/rust-only gates, source/doc red fixtures, cargo fmt, Clippy, workspace tests, and diff check.
+- Compile-fail fixture rule: for private node construction evidence, use a valid publicly built previous node and then attempt the private field write. Avoid `todo!()` or wrong field names because they can fail for unrelated warning or unknown-field diagnostics.
+- Not completed by H1: Hub v1 Provider network execution, Server `/v1/responses` cutover, Relay, continuation save/restore, additional provider protocols, P6 migration/deletion, global install, `~/.rcc`, live runtime, or real provider traffic.

@@ -29,17 +29,17 @@ const fixtures = [
     diagnostic: /missing invariant Physically delete/,
   },
   {
-    name: 'pending Hub edge falsely anchored',
+    name: 'bound Hub edge removed',
     file: 'docs/architecture/v3-mainline-call-map.yml',
-    from: 'step_id: v3-hub-req-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: binding_pending',
-    to: 'step_id: v3-hub-req-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: anchored',
-    diagnostic: /v3-hub-req-01 must remain binding_pending/,
+    from: 'step_id: v3-hub-req-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized',
+    to: 'step_id: v3-hub-req-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized_REMOVED',
+    diagnostic: /v3-hub-req-01 must remain adjacent/,
   },
   {
     name: 'pending continuation truth falsely anchored',
     file: 'docs/architecture/v3-resource-operation-map.yml',
     resourceId: 'v3.continuation.local_context_truth',
-    diagnostic: /Hub v1 resource must remain binding_pending/,
+    diagnostic: /unimplemented Hub v1 business resource must remain binding_pending/,
   },
 ];
 

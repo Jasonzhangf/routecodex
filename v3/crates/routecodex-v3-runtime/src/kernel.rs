@@ -256,12 +256,14 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
 
     let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
     trace.push("V3Req04StandardizedResponses");
+    let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized);
 
     let router = V3VirtualRouter::default();
-    let classified = match router.classify_request(
+    let classified = match router.classify_request_with_facts(
         manifest,
         &standardized.protocol_context.server_id,
         &standardized.protocol_context.endpoint,
+        routing_facts,
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -273,7 +275,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
         }
     };
     trace.push("V3Router05RequestClassified");
-    let pool = match router.resolve_default_pool(manifest, classified) {
+    let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(value) => value,
         Err(error) => {
             return error_output(
@@ -284,7 +286,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
         }
     };
     trace.push("V3Router06RoutePoolResolved");
-    let hit = match router.hit_opaque_target_once(pool, 0) {
+    let hit = match router.hit_opaque_target_plan_once(plan, 0) {
         Ok(value) => value,
         Err(error) => {
             return error_output(
@@ -730,6 +732,79 @@ mod tests {
         assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     }
 
+    #[tokio::test]
+    async fn matched_optional_failure_uses_captured_default_without_router_reentry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct OptionalFailsDefaultSucceeds {
+            sends: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ResponsesTransport for OptionalFailsDefaultSucceeds {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                let attempt = self.sends.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
+                    assert_eq!(request.provider_id(), "optional");
+                    return Err(V3ProviderError::Transport {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        reason: "optional exhausted".to_string(),
+                    });
+                }
+                assert_eq!(request.provider_id(), "default");
+                assert_eq!(request.body()["model"], "wire-default");
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_default","output_text":"ok"}"#.to_vec(),
+                ))
+            }
+        }
+
+        let transport = OptionalFailsDefaultSucceeds {
+            sends: AtomicUsize::new(0),
+        };
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &optional_default_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({
+                    "model": "client-model",
+                    "input": "hello",
+                    "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}]
+                }),
+            },
+            crate::register_responses_direct_hooks(),
+            &transport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            output
+                .node_trace
+                .iter()
+                .filter(|node| **node == "V3Router07OpaqueTargetHitOnce")
+                .count(),
+            1
+        );
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    }
+
     fn test_manifest() -> V3Config05ManifestPublished {
         let authoring = parse_v3_config_02_authoring(
             r#"
@@ -795,6 +870,46 @@ targets = [
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+        )
+        .unwrap();
+        compile_v3_config_05_manifest(authoring).unwrap()
+    }
+
+    fn optional_default_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.optional]
+type = "responses"
+base_url = "http://optional.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OPTIONAL_KEY" }] }
+[providers.optional.models.test]
+wire_name = "wire-optional"
+
+[providers.default]
+type = "responses"
+base_url = "http://default.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
+[providers.default.models.test]
+wire_name = "wire-default"
+
+[route_groups.default.pools.tools]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-model"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }
+targets = [{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 1 }]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default", model = "test", key = "key", priority = 1 }]
 "#,
         )
         .unwrap();

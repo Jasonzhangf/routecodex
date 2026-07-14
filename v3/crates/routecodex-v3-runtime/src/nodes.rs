@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -76,6 +76,80 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             method: raw.method,
         },
         body: raw.body,
+    }
+}
+
+pub fn build_v3_router_request_facts_from_v3_req_04(
+    standardized: &V3Req04StandardizedResponses,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let body = &standardized.body;
+    let mut capabilities = BTreeSet::from(["text".to_string()]);
+    if body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty())
+    {
+        capabilities.insert("tools".to_string());
+    }
+    if body.get("reasoning").is_some() {
+        capabilities.insert("reasoning".to_string());
+    }
+    if body
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
+            })
+        })
+    {
+        capabilities.insert("tool_outputs".to_string());
+    }
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        capabilities.insert("streaming".to_string());
+    }
+
+    routecodex_v3_virtual_router::V3RouterRequestFacts {
+        entry_protocol: "responses".to_string(),
+        client_model: body
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+        capabilities,
+        input_tokens: estimate_v3_routing_input_tokens(body),
+    }
+}
+
+fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
+    let chars = ["input", "instructions", "tools"]
+        .iter()
+        .filter_map(|field| body.get(*field))
+        .map(estimate_v3_structured_chars)
+        .sum::<usize>();
+    if chars == 0 {
+        0
+    } else {
+        (chars as f64 / 3.2).ceil() as u64
+    }
+}
+
+fn estimate_v3_structured_chars(value: &Value) -> usize {
+    match value {
+        Value::Null => 0,
+        Value::Bool(value) => usize::from(*value) + 4,
+        Value::Number(value) => value.to_string().len(),
+        Value::String(value) => value.chars().count(),
+        Value::Array(values) => values.iter().map(estimate_v3_structured_chars).sum(),
+        Value::Object(values) => values
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "metadata" | "client_metadata"))
+            .map(|(key, value)| key.len() + estimate_v3_structured_chars(value))
+            .sum(),
     }
 }
 

@@ -11,6 +11,8 @@ pub struct V3Config01FileSource {
 #[serde(deny_unknown_fields)]
 pub struct V3Config02AuthoringParsed {
     pub version: u16,
+    #[serde(default)]
+    pub pipelines: V3PipelinesAuthoringConfig,
     pub servers: BTreeMap<String, V3ServerAuthoringConfig>,
     pub providers: BTreeMap<String, V3ProviderAuthoringConfig>,
     #[serde(default)]
@@ -22,6 +24,21 @@ pub struct V3Config02AuthoringParsed {
     pub debug: V3DebugAuthoringConfig,
     #[serde(default)]
     pub error: V3ErrorAuthoringConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3PipelinesAuthoringConfig {
+    #[serde(default)]
+    pub hub_v1: Option<V3HubV1AuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3HubV1AuthoringConfig {
+    pub skeleton: String,
+    pub entry_protocols: Vec<String>,
+    pub hooks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -73,6 +90,24 @@ pub struct V3ServerAuthoringConfig {
     pub endpoints: Vec<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub execution: Option<V3ServerExecutionAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ServerExecutionAuthoringConfig {
+    pub allowed_modes: Vec<String>,
+    pub allowed_invocation_sources: Vec<String>,
+    pub allowed_transports: Vec<String>,
+    pub continuation: V3ContinuationPolicyAuthoringConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ContinuationPolicyAuthoringConfig {
+    pub allowed_owners: Vec<String>,
+    pub scope_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +126,17 @@ pub struct V3ProviderAuthoringConfig {
     #[serde(default)]
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
+    pub health: Option<V3ProviderHealthAuthoringConfig>,
+    #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderHealthAuthoringConfig {
+    pub enabled: bool,
+    pub failure_threshold: u32,
+    pub cooldown_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,9 +259,28 @@ pub struct V3RouteGroupAuthoringConfig {
 pub struct V3RoutePoolAuthoringConfig {
     #[serde(default)]
     pub selection: V3SelectionPolicy,
+    #[serde(default, rename = "match")]
+    pub match_rule: Option<V3RoutePoolMatchAuthoringConfig>,
     pub targets: Vec<V3RoutePoolTargetAuthoringConfig>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3RoutePoolMatchAuthoringConfig {
+    #[serde(default)]
+    pub precedence: Option<i32>,
+    #[serde(default)]
+    pub entry_protocol: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub min_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub max_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +334,7 @@ pub enum V3SelectionStrategy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Config04ResourceRegistryBuilt {
     pub version: u16,
+    pub hub_v1: Option<V3HubV1Manifest>,
     pub servers: BTreeMap<String, V3ServerManifest>,
     pub providers: BTreeMap<String, V3ProviderManifest>,
     pub forwarders: BTreeMap<String, V3ForwarderManifest>,
@@ -282,6 +347,7 @@ pub struct V3Config04ResourceRegistryBuilt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Config05ManifestPublished {
     pub version: u16,
+    pub hub_v1: Option<V3HubV1Manifest>,
     pub servers: BTreeMap<String, V3ServerManifest>,
     pub providers: BTreeMap<String, V3ProviderManifest>,
     pub forwarders: BTreeMap<String, V3ForwarderManifest>,
@@ -289,6 +355,13 @@ pub struct V3Config05ManifestPublished {
     pub features: BTreeMap<String, bool>,
     pub debug: V3DebugManifest,
     pub error: V3ErrorManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3HubV1Manifest {
+    pub skeleton: String,
+    pub entry_protocols: Vec<String>,
+    pub hooks: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,6 +373,21 @@ pub struct V3ServerManifest {
     pub routing_group: String,
     pub endpoints: Vec<String>,
     pub features: BTreeMap<String, bool>,
+    pub execution: Option<V3ServerExecutionManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ServerExecutionManifest {
+    pub allowed_modes: Vec<String>,
+    pub allowed_invocation_sources: Vec<String>,
+    pub allowed_transports: Vec<String>,
+    pub continuation: V3ContinuationPolicyManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ContinuationPolicyManifest {
+    pub allowed_owners: Vec<String>,
+    pub scope_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,6 +401,7 @@ pub struct V3ProviderManifest {
     pub models: BTreeMap<String, V3ProviderModelManifest>,
     pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
+    pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub features: BTreeMap<String, bool>,
 }
 
@@ -397,8 +486,19 @@ pub struct V3RouteGroupManifest {
 pub struct V3RoutePoolManifest {
     pub id: String,
     pub selection: V3SelectionPolicy,
+    pub match_rule: Option<V3RoutePoolMatchManifest>,
     pub targets: Vec<V3RoutePoolTargetManifest>,
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RoutePoolMatchManifest {
+    pub precedence: i32,
+    pub entry_protocol: Option<String>,
+    pub models: Vec<String>,
+    pub required_capabilities: Vec<String>,
+    pub min_input_tokens: Option<u64>,
+    pub max_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

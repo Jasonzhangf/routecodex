@@ -869,8 +869,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
+ "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-server",
+ "serde_json",
  "tokio",
 ]
 

@@ -30550,3 +30550,28 @@ Pure Rust NAPI candidates:
 - `error.backoff_action_queue` now blocks for `3000ms` after every error in the same category/scope; the old cycling sequence is removed from the sole owner.
 - Contracts, maps, audit docs, and focused tests were synchronized. Five Jest suites passed with 36 tests; function-map and resource-operation gates passed.
 - Existing V3 and V3-related dirty worktree changes were preserved and excluded from this change.
+
+# 2026-07-14T23:42 CST: V3 Hub v1 H2 P6 equivalence baseline verified
+
+- H2 owner `v3.responses_direct_h2_equivalence_harness` now has a CLI-only controlled-upstream replay baseline for the current P6 Responses Direct path before Hub v1 hook migration.
+- Harness guard rejects internal Runtime/Server/Provider calls and H1 symbol dependency; red fixtures reject H1 coupling, helper execution, missing scenarios, and secret/debug leakage.
+- Replay evidence covers JSON, SSE, Target-local reselection, default exhaustion with Error01-06, Dry Run no-network, Debug side-channel isolation, exact payload observations, secret redaction, and port closure.
+- Verification-map status is `characterization_harness_verified`. Scope remains H2 baseline only: no Hub v1 migration, Server cutover, Relay/continuation, P6 deletion, V2, `~/.rcc`, global install, production restart, or real provider request.
+
+# 2026-07-14 23:18 CST: V3 Hub v1 H1 implementation progress
+- P6 freeze owner: `scripts/architecture/verify-v3-p6-freeze.mjs`; positive source gate plus eight mutation fixtures reject Chat Process, Relay, continuation, additional entry protocols, provider identity/family/model-prefix branching, dynamic hooks, second lifecycle, and second response exit while preserving the existing Responses Direct kernel.
+- H1 Runtime owner: `v3/crates/routecodex-v3-runtime/src/hub_v1.rs`; 15 opaque request/response node types use private stage fields, 13 adjacent builders, four independent branch axes, 13 callable static hook slots, explicit `not_implemented`, and deterministic missing/duplicate/unknown/incompatible validation.
+- H1 Config owner: existing `V3Config02AuthoringParsed -> V3Config04ResourceRegistryBuilt -> V3Config05ManifestPublished`; publishes closed Hub skeleton/protocol/hook/capability/server execution declarations only. Request-specific execution/continuation/target decisions remain absent.
+- Red-first evidence: Runtime integration compile initially failed on absent H1 symbols; Config contract compile initially failed on absent `manifest.hub_v1`. Both turned green after unique-owner implementation.
+- Current focused evidence: Config contract 15 passed; H1 registry 3 passed; typed topology 2 passed; P6 freeze 8 mutations rejected; H1 source 6 mutations rejected; extended compile-fail gate passed including private constructor and non-adjacent conversion.
+- Map state: new `docs/architecture/v3-function-map.yml`; H1 builder mainline bindings use real test caller + real builder symbols and explicitly identify `binding_kind: h1_typed_test`, not production runtime execution. Config/static-registry resources anchored; unimplemented business resources remain `binding_pending`.
+- Concurrent work boundary: active `v3.config_server_full_function` and `v3.virtual_router_full_function` runs are editing shared Config/VR surfaces. Preserve their additions; do not reset/checkout. Architecture gate currently observes their transient VR symbol/map drift until their source/map integration settles.
+
+# 2026-07-14 23:40 CST: V3 Hub v1 H1 typed skeleton closeout verified
+- Marker: `routecodex-v3-hub-h1-static-registry-verified-20260714`.
+- Final H1 source state: P6 remains the only running Responses Direct baseline and is frozen by `verify:v3-p6-freeze` plus eight red mutations. Hub v1 has an opaque typed Rust skeleton, 13 unique adjacent builders, four independent branch-axis enums, closed callable 13-slot static hook registry, deterministic manifest validation, and explicit `not_implemented` for unimplemented branches.
+- Config state: Hub v1 declarations are authoring/manifest declarations only; Config publishes skeleton/protocol/hook/capability/execution/continuation scope facts and still does not choose Direct/Relay, continuation owner, target, provider, model, or per-request hook plan.
+- Compile-fail correction: the Hub private-constructor fixture must use a real public builder to produce the previous node and then attempt the private field write. Using `todo!()` or a wrong field name can fail for an unrelated warning/unknown-field reason and weaken boundary evidence.
+- Verification passed: `verify:v3-p6-freeze`, `test:v3-p6-freeze-red-fixtures`, `verify:v3-static-hook-registry`, `test:v3-h1-source-red-fixtures`, Runtime H1 tests, Config contract, `test:v3-compile-fail`, `verify:v3-architecture-docs`, `verify:v3-resource-map`, `verify:v3-module-boundaries`, `verify:v3-rust-only`, `test:v3-source-gate-red-fixtures`, `test:v3-hub-skeleton-doc-red-fixtures`, `verify:v3-cargo-fmt`, `verify:v3-clippy`, `test:v3-workspace`, and `git diff --check`.
+- Architecture review: no Provider network integration, no Server entry cutover, no P6 migration/deletion, no Relay or continuation implementation, no provider-specific Hub branch, no dynamic hook/fallback, no second lifecycle, and no second response exit were introduced.
+- Remaining boundary: Hub v1 request path is not usable yet; H2 must migrate P6 Responses Direct behavior into Hub v1 static hooks and prove old-P6 vs Hub-v1 equivalence before any entry switch or P6 deletion.

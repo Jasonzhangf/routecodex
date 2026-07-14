@@ -24,6 +24,7 @@ const nodes = [
   'V3Error03TargetLocalAction', 'V3Error04TargetExhaustionDecision',
   'V3Error05ExecutionDecision', 'V3Error06ClientProjected',
   'V3ProviderHealthStateMutated', 'V3ProviderAvailabilityProjected',
+  'V3RouterRequestFacts', 'v3.route.selection_plan',
 ];
 const combined = docs.map((file) => readFileSync(file, 'utf8')).join('\n');
 const missing = nodes.filter((node) => !combined.includes(node));

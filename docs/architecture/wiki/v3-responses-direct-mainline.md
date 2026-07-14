@@ -4,6 +4,8 @@
 
 This is the human review surface for the RouteCodex V3 Rust foundation and first business lifecycle. The order is Config -> Server -> Debug -> Error/Provider health -> Virtual Router/Target -> Responses direct Pipeline/Provider.
 
+Virtual Router classification consumes typed `V3RouterRequestFacts`; pool-match planning and the non-empty default floor remain inside the Router owner before the one opaque target hit.
+
 Canonical documents:
 
 - [V3 system definition](../../design/v3-system-definition.md)
@@ -50,8 +52,8 @@ The clean built-CLI controlled-upstream replay is recorded in the P6 local-live 
 | Config file IO | `routecodex-v3-config::V3ConfigStore` | no other crate opens or writes `config.v3.toml` |
 | Listener lifecycle | `routecodex-v3-server` | all enabled listeners start or aggregate startup fails |
 | Full request lifecycle | `routecodex-v3-runtime` | no flow module or CLI owns a second lifecycle |
-| Route hit | `routecodex-v3-virtual-router` | exactly one opaque target hit |
-| Target expansion/reselection | `routecodex-v3-target` | internal failures never re-enter Virtual Router |
+| Route hit | `routecodex-v3-virtual-router` | typed request facts compile one optional-plus-default plan and consume it once |
+| Target expansion/reselection | `routecodex-v3-target` | expands the captured opaque plan; internal failures never re-enter Virtual Router |
 | Error taxonomy/actions | `routecodex-v3-error` | no local retry/cooldown policy copies |
 | Health state/action execution | Provider runtime | provider/auth/model state never moves to Router/Error |
 | Logs/snapshots/dry run | `routecodex-v3-debug` | side-channel only; same runtime kernel replay |
@@ -124,10 +126,34 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 
 ## P5 contract binding
 
-- `routecodex-v3-virtual-router` exclusively owns listener route-group resolution, explicit `default` pool resolution, and the single opaque target hit.
-- `routecodex-v3-target` exclusively owns direct/nested Forwarder expansion, deterministic policy ordering, read-only Provider availability checks, and target-local reselection/exhaustion.
+- `routecodex-v3-virtual-router` exclusively owns listener route-group resolution, typed request-fact matching, the immutable optional-plus-default plan, deterministic pool ordering, and the single opaque plan hit.
+- `routecodex-v3-target` exclusively owns direct/nested Forwarder expansion, read-only Provider availability checks, and target-local reselection/exhaustion across every opaque entry captured by the original Router hit.
 - `execute_v3_p5_routing_runtime` is the no-network P5 terminal path. It records adjacent nodes `03` through `10` through the shared Debug runtime and maps only full exhaustion into the existing six-node Error chain.
 - P6 transport remains a later node and is not invoked by the P5 Server path.
+
+### Full Virtual Router extension
+
+```mermaid
+flowchart LR
+  R4[V3Req04StandardizedResponses] --> RF[v3.route.request_facts]
+  RF --> VR5[V3Router05RequestClassified]
+  VR5 --> PM{non-default pool match}
+  PM -->|none| DF[mandatory default floor]
+  PM -->|one or more| PR[lowest explicit precedence]
+  PR -->|one best| OP[matched optional pool]
+  PR -->|equal best| AE[explicit ambiguity error]
+  OP --> SP[V3Router06RoutePoolResolved optional + default immutable plan]
+  DF --> SP
+  SP --> VR7[V3Router07OpaqueTargetHitOnce]
+  VR7 --> TI[V3TargetInterpreter expands and reselects internally]
+```
+
+- `v3.route.request_facts` is a control resource built from the current normalized request. It is not copied into Provider or client payloads.
+- `v3.route.selection_plan` captures the matched optional pool, mandatory default floor, declared selection policy, and opaque target order before the one visible hit.
+- A target repeated in optional and default tiers is deduplicated by semantic target identity while retaining first-declared plan order.
+- Round-robin cursor identity is `server/listener + routing group + pool`; different listeners cannot share cursor state.
+- Provider health, key availability, transport failure, retry and cooldown are absent from Virtual Router. Target/Provider/Error remain their unique owners.
+- Config publishes explicit precedence, optional closed entry-protocol, model/capability and token-range match criteria. Lower precedence wins; only equal-best matches are ambiguous. Config rejects a `default` match declaration, a non-default pool without a match, missing precedence, unknown protocols, empty predicates and invalid token ranges before startup.
 
 ## P5 live evidence
 
