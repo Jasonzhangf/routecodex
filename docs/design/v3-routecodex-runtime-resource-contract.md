@@ -9,6 +9,11 @@ V3 must make every request path pass through typed resources and adjacent nodes.
 
 The runtime kernel is the only executor. Flow modules register static hooks and return typed plans/effects; they do not own complete lifecycles.
 
+Current binding baseline: P0-P5 are verified through `V3Target10ConcreteProviderSelected` and stop
+before provider send. P6 nodes/resources `11-16` remain `binding_pending`. Existing prototype code
+does not change this contract state. `routecodex-v3-provider-responses` is one generic Rust
+Responses protocol Provider; deployment provider identities never select implementation branches.
+
 ## Required lifecycle skeleton
 
 ```text

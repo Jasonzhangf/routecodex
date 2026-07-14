@@ -47,6 +47,14 @@ const yaml = (file) => {
   catch (error) { fail(`${file}: YAML parse failed: ${error.message}`); return {}; }
 };
 const array = (value) => Array.isArray(value) ? value : [];
+const p6PendingStepIds = new Set(['v3-rd-09', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14']);
+const p6PendingResourceIds = new Set([
+  'v3.responses_direct.policy',
+  'v3.provider.responses_wire_payload',
+  'v3.provider.transport_request',
+  'v3.response.provider_raw',
+  'v3.response.client_payload',
+]);
 
 for (const file of requiredFiles) if (!fs.existsSync(abs(file))) fail(`${file}: missing`);
 
@@ -57,6 +65,24 @@ for (const phrase of [
 ]) if (!combinedDocs.includes(phrase)) fail(`V3 docs: missing contract phrase ${phrase}`);
 for (const token of ['big_skeleton', 'small_skeleton']) {
   if (combinedDocs.includes(token)) fail(`V3 docs: forbidden naming token ${token}`);
+}
+const p6ContractDocs = [
+  'docs/goals/v3-responses-direct-mvp-implementation-plan.md',
+  'docs/goals/v3-responses-direct-mvp-test-design.md',
+  'docs/design/v3-system-definition.md',
+  'docs/design/v3-routecodex-runtime-resource-contract.md',
+  'docs/architecture/wiki/v3-responses-direct-mainline.md',
+].map(read).join('\n');
+for (const phrase of [
+  'P0-P5',
+  'binding_pending',
+  'generic',
+  'routecodex-v3-provider-responses',
+  'prototype',
+  'Runtime kernel is the only full lifecycle executor',
+]) if (!p6ContractDocs.includes(phrase)) fail(`P6 contract docs: missing calibration phrase ${phrase}`);
+if (/\b(?:cc|asxs)\b/.test(p6ContractDocs)) {
+  fail('P6 contract docs: deployment provider identity leaked into generic Provider contract');
 }
 
 for (const file of requiredFiles.filter((entry) => entry.endsWith('.md'))) {
@@ -89,6 +115,9 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
   for (const field of ['identity', 'allowed_writers', 'allowed_readers', 'forbidden_writers']) {
     if (!Array.isArray(resource[field]) || resource[field].length === 0) fail(`${where}: missing ${field}`);
   }
+  if (p6PendingResourceIds.has(resource.resource_id) && resource.binding_status !== 'binding_pending') {
+    fail(`${where}: P6 resource must remain binding_pending before implementation source binding`);
+  }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
   if (resource.resource_id !== 'v3.response.client_payload' && resource.may_enter_client_body === true) {
@@ -118,6 +147,18 @@ for (const [index, edge] of allEdges.entries()) {
       if (edge[field] && !fs.existsSync(abs(edge[field]))) fail(`${where}: missing source ${edge[field]}`);
     }
   }
+  if (p6PendingStepIds.has(edge.step_id)) {
+    if (edge.status !== 'binding_pending') fail(`${where}: ${edge.step_id} must remain binding_pending`);
+    for (const field of ['caller_file', 'callee_file', 'caller_symbol', 'callee_symbol']) {
+      if (edge[field]) fail(`${where}: ${edge.step_id} binding_pending edge must not invent ${field}`);
+    }
+    if (edge.owner_feature_id !== 'v3.responses_direct_mvp_architecture') {
+      fail(`${where}: ${edge.step_id} must use P6 feature owner`);
+    }
+  }
+}
+for (const stepId of p6PendingStepIds) {
+  if (!allEdges.some((edge) => edge.step_id === stepId)) fail(`mainline: missing P6 edge ${stepId}`);
 }
 
 const reviewSurface = read('docs/architecture/wiki/v3-responses-direct-mainline.md')
@@ -131,6 +172,15 @@ for (const featureId of ['v3.responses_direct_mvp_architecture', 'v3.debug_error
     if (!String(gate).startsWith('npm run ')) fail(`verification map: invalid gate ${gate}`);
   }
 }
+const p6Feature = array(verificationMap.features)
+  .find((entry) => entry.feature_id === 'v3.responses_direct_mvp_architecture');
+for (const gate of [
+  'npm run verify:v3-architecture-docs',
+  'npm run verify:v3-module-boundaries',
+  'npm run test:v3-source-gate-red-fixtures',
+  'npm run test:v3-compile-fail',
+  'npm run test:v3-workspace',
+]) if (!array(p6Feature?.required_gates).includes(gate)) fail(`verification map: P6 missing required gate ${gate}`);
 
 if (failures.length) {
   console.error('[verify:v3-architecture-docs] failed');

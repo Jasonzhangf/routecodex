@@ -4,7 +4,10 @@
 
 This document defines the complete V3 module surface before the request pipeline is implemented. V3 is a new Rust project under `v3/`; it does not execute V2 code and does not provide V2 config compatibility.
 
-The first executable business lifecycle is `/v1/responses` direct. Relay, continuation, servertool, and the remaining protocol flows stay explicit pending nodes; they are not removed from the architecture and cannot be implemented as independent lifecycles.
+The first planned executable business lifecycle is `/v1/responses` direct. P0-P5 currently stop
+before provider send; P6 Responses direct remains contract-bound and `binding_pending`. Relay,
+continuation, servertool, and remaining protocol flows stay explicit pending nodes; they are not
+removed from architecture and cannot be implemented as independent lifecycles.
 
 ## System invariants
 
@@ -72,7 +75,7 @@ Server consumes one published manifest and binds every enabled, unique listener.
 | --- | --- |
 | `GET /health` | implemented per listener; identifies server ID and manifest revision |
 | `GET /v1/models` | implemented from the model catalog before Responses live closeout |
-| `POST /v1/responses` | first complete business lifecycle |
+| `POST /v1/responses` | P5 no-network path verified; P6 Provider/response nodes pending |
 | `POST /v1/messages` | pipeline node present; explicit `not_implemented` until Anthropic flow |
 | `POST /v1/chat/completions` | pipeline node present; explicit `not_implemented` until OpenAI Chat flow |
 | Gemini generic entry | pipeline node present; explicit `not_implemented` until Gemini flow |

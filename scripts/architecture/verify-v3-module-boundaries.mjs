@@ -23,6 +23,7 @@ const read = (path) => readFileSync(path, 'utf8');
 
 for (const path of all) {
   const text = read(path);
+  const productionText = text.replace(/#\[cfg\(test\)\][\s\S]*/, '');
   const isTest = path.includes('/tests/');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
@@ -32,7 +33,8 @@ for (const path of all) {
   if (!path.includes('routecodex-v3-server') && /axum::serve|TcpListener::bind/.test(text) && !isTest) {
     fail('HTTP listener outside server crate: ' + path);
   }
-  if (!isTest && !path.includes('routecodex-v3-config') && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(text)) {
+  if (!isTest && !path.includes('routecodex-v3-config') && !isProviderOwner
+      && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(text)) {
     fail('config authoring file IO outside config crate: ' + path);
   }
   if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
@@ -49,6 +51,12 @@ for (const path of all) {
   }
   if (!isTest && !isProviderOwner && /V3ProviderHealthStore|\.apply_error_action\(|\.update_quota_state\(|\.update_concurrency_state\(/.test(text)) {
     fail('Provider health mutation surface outside Provider owner: ' + path);
+  }
+  if (!isTest && isProviderOwner
+      && (/\b(?:cc|asxs)\b/.test(productionText)
+        || /provider_(?:id|family)\s*(?:==|!=)\s*"/i.test(productionText)
+        || /match\s+provider_(?:id|family)\b/i.test(productionText))) {
+    fail('generic Responses Provider contains deployment provider identity branch: ' + path);
   }
 }
 

@@ -38,7 +38,9 @@ flowchart LR
   O15 --> S16[V3Server16HttpFrame]
 ```
 
-Only the expanded Config chain is currently anchored. Early Server/direct prototype code exists, but the expanded Router/Target/Error/Debug contract is not fully bound. Responses direct is therefore not usable or complete.
+P0-P5 are anchored through `V3Target10ConcreteProviderSelected` and stop before Provider send.
+P6 transitions `10->11->12->13->14->15->16` remain `binding_pending`. Early Responses direct
+prototype code exists, but prototype symbols/tests are not P6 binding or completion evidence.
 
 ## Ownership review
 
@@ -128,7 +130,7 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 ## P5 live evidence
 
 - The actual built `v3/target/debug/routecodex-v3` loaded `v3/fixtures/config.p5.toml` and started listeners `45454` (`p5_success`) and `45455` (`p5_exhausted`) in one process.
-- The `45454` request traversed `V3Server03HttpRequestRaw -> V3Req04StandardizedResponses -> V3Router05..07 -> V3Target08..10`, hit Router once, skipped disabled `cc`, reselected `asxs` inside Target on attempt 2, and returned `stopped_before_provider_send=true` plus `x-routecodex-v3-no-network-send: true`.
+- The `45454` request traversed `V3Server03HttpRequestRaw -> V3Req04StandardizedResponses -> V3Router05..07 -> V3Target08..10`, hit Router once, skipped one disabled fixture candidate, reselected the next fixture candidate inside Target on attempt 2, and returned `stopped_before_provider_send=true` plus `x-routecodex-v3-no-network-send: true`.
 - The `45455` request hit Router once, expanded one disabled candidate, emitted availability-skip and target-exhausted Debug events, then returned `503 selected_target_exhausted` through the complete six-node Error chain.
 - The exact PTY process received Ctrl-C and both `45454` and `45455` were confirmed closed.
 
@@ -142,3 +144,4 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - Debug snapshot -> live request/response truth.
 - Pending endpoint -> handler-local hard-coded error response.
 - Flow module -> independent complete lifecycle.
+- Generic Responses Provider -> deployment provider ID or provider-family branch.

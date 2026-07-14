@@ -46,6 +46,7 @@ features:
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-rust-only
       - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
       - npm run verify:v3-static-hook-registry
       - npm run verify:v3-resource-map
       - npm run test:v3-compile-fail
@@ -59,10 +60,10 @@ features:
       forbidden_claim: "Do not claim P3 Debug persistence, P4 Error policy runtime, P5 Router/Target runtime, P6 Responses provider execution, or full V3 MVP usable from P0-P2 evidence."
 
   - feature_id: v3.responses_direct_mvp_architecture
-    status: pending_after_foundation
+    status: p6_binding_pending_after_p5
     change_risk: high
     owner_kind: rust_project_v3
-    owner_scope: "P6 Responses direct Pipeline/Provider business lifecycle after P0-P2 foundation"
+    owner_scope: "P6 generic Responses direct Runtime/Provider lifecycle after verified P0-P5 foundation"
     owner_modules:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-provider-responses
@@ -73,12 +74,30 @@ features:
       - docs/goals/v3-responses-direct-mvp-implementation-plan.md
     test_design:
       - docs/goals/v3-responses-direct-mvp-test-design.md
+    required_contract:
+      - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame
+      - Runtime remains the only complete lifecycle executor
+      - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
+      - Server and CLI cannot import or call Provider transport
+      - no relay continuation servertool other protocol V2 compatibility fallback repair sanitize or raw replay
+      - all unverified P6 resources and edges remain binding_pending without invented symbols or paths
     required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
       - npm run test:v3-responses-direct-unit
       - npm run test:v3-responses-direct-blackbox
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
     completion_rule:
-      source: "Pending P6: provider wire/client response blackboxes are intentionally not part of P0-P2 completion."
+      source: "Pending P6: red source/compile-fail evidence must precede implementation; then every adjacent edge/resource requires verified source binding and all mapped gates."
       runtime: "Pending P6: controlled or real upstream Responses request must traverse Runtime/Provider before this feature can be marked usable."
+      forbidden_claim: "Prototype symbols/tests do not prove P6 complete. Do not claim relay, continuation, servertool, other protocols, V2 compatibility, global install, real ~/.rcc mutation, or production replacement."
   - feature_id: v3.debug_error_foundation
     status: p3_p4_source_and_live_verified
     change_risk: high
