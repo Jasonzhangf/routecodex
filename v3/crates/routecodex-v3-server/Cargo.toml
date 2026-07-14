@@ -1,0 +1,18 @@
+[package]
+name = "routecodex-v3-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum.workspace = true
+routecodex-v3-config = { path = "../routecodex-v3-config" }
+routecodex-v3-debug = { path = "../routecodex-v3-debug" }
+routecodex-v3-error = { path = "../routecodex-v3-error" }
+routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
