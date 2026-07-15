@@ -38,7 +38,149 @@ pub struct V3PipelinesAuthoringConfig {
 pub struct V3HubV1AuthoringConfig {
     pub skeleton: String,
     pub entry_protocols: Vec<String>,
-    pub hooks: Vec<String>,
+    pub hook_set_id: String,
+    pub resources: BTreeMap<String, V3HubResourceAuthoringConfig>,
+    pub hooks: Vec<V3HubHookAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3HubResourceAuthoringConfig {
+    pub kind: V3HubResourceKind,
+    pub scope: V3HubResourceScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3HubHookAuthoringConfig {
+    pub hook_id: String,
+    pub node: V3HubFixedNode,
+    pub phase: V3HubHookPhase,
+    pub requirement: V3HubHookRequirement,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub priority: i32,
+    pub order: u32,
+    pub allowed_resources: Vec<String>,
+    pub forbidden_resources: Vec<String>,
+    #[serde(default)]
+    pub profile: Option<V3HubHookProfile>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum V3HubFixedNode {
+    V3HubReqInbound01ClientRaw,
+    V3HubReqInbound02Normalized,
+    V3HubReqContinuation03Classified,
+    V3HubReqChatProcess04Governed,
+    V3HubReqExecution05Planned,
+    V3HubReqTarget06Resolved,
+    V3HubReqOutbound07ProviderSemantic,
+    V3ProviderReqOutbound08WirePayload,
+    V3ProviderReqOutbound09TransportRequest,
+    V3ProviderRespInbound01Raw,
+    V3HubRespInbound02Normalized,
+    V3HubRespChatProcess03Governed,
+    V3HubRespContinuation04Committed,
+    V3HubRespOutbound05ClientSemantic,
+    V3ServerRespOutbound06ClientFrame,
+}
+
+impl V3HubFixedNode {
+    pub const ALL: [Self; 15] = [
+        Self::V3HubReqInbound01ClientRaw,
+        Self::V3HubReqInbound02Normalized,
+        Self::V3HubReqContinuation03Classified,
+        Self::V3HubReqChatProcess04Governed,
+        Self::V3HubReqExecution05Planned,
+        Self::V3HubReqTarget06Resolved,
+        Self::V3HubReqOutbound07ProviderSemantic,
+        Self::V3ProviderReqOutbound08WirePayload,
+        Self::V3ProviderReqOutbound09TransportRequest,
+        Self::V3ProviderRespInbound01Raw,
+        Self::V3HubRespInbound02Normalized,
+        Self::V3HubRespChatProcess03Governed,
+        Self::V3HubRespContinuation04Committed,
+        Self::V3HubRespOutbound05ClientSemantic,
+        Self::V3ServerRespOutbound06ClientFrame,
+    ];
+
+    pub const fn node_id(self) -> &'static str {
+        match self {
+            Self::V3HubReqInbound01ClientRaw => "V3HubReqInbound01ClientRaw",
+            Self::V3HubReqInbound02Normalized => "V3HubReqInbound02Normalized",
+            Self::V3HubReqContinuation03Classified => "V3HubReqContinuation03Classified",
+            Self::V3HubReqChatProcess04Governed => "V3HubReqChatProcess04Governed",
+            Self::V3HubReqExecution05Planned => "V3HubReqExecution05Planned",
+            Self::V3HubReqTarget06Resolved => "V3HubReqTarget06Resolved",
+            Self::V3HubReqOutbound07ProviderSemantic => "V3HubReqOutbound07ProviderSemantic",
+            Self::V3ProviderReqOutbound08WirePayload => "V3ProviderReqOutbound08WirePayload",
+            Self::V3ProviderReqOutbound09TransportRequest => {
+                "V3ProviderReqOutbound09TransportRequest"
+            }
+            Self::V3ProviderRespInbound01Raw => "V3ProviderRespInbound01Raw",
+            Self::V3HubRespInbound02Normalized => "V3HubRespInbound02Normalized",
+            Self::V3HubRespChatProcess03Governed => "V3HubRespChatProcess03Governed",
+            Self::V3HubRespContinuation04Committed => "V3HubRespContinuation04Committed",
+            Self::V3HubRespOutbound05ClientSemantic => "V3HubRespOutbound05ClientSemantic",
+            Self::V3ServerRespOutbound06ClientFrame => "V3ServerRespOutbound06ClientFrame",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum V3HubHookPhase {
+    Entry,
+    Exit,
+}
+
+impl V3HubHookPhase {
+    pub const ALL: [Self; 2] = [Self::Entry, Self::Exit];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Entry => "entry",
+            Self::Exit => "exit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3HubHookRequirement {
+    Required,
+    Optional,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3HubHookProfile {
+    Servertool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3HubResourceKind {
+    Control,
+    Continuation,
+    Debug,
+    Error,
+    Snapshot,
+    ProviderHealth,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3HubResourceScope {
+    Server,
+    Listener,
+    RoutingGroup,
+    Session,
+    Request,
+    Provider,
+    Hook,
+    Debug,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -361,7 +503,32 @@ pub struct V3Config05ManifestPublished {
 pub struct V3HubV1Manifest {
     pub skeleton: String,
     pub entry_protocols: Vec<String>,
-    pub hooks: Vec<String>,
+    pub hook_set_id: String,
+    pub resources: BTreeMap<String, V3HubResourceManifest>,
+    pub hooks: Vec<V3HubHookManifest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3HubResourceManifest {
+    pub resource_id: String,
+    pub kind: V3HubResourceKind,
+    pub scope: V3HubResourceScope,
+    pub may_enter_provider_body: bool,
+    pub may_enter_client_body: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3HubHookManifest {
+    pub hook_id: String,
+    pub node: V3HubFixedNode,
+    pub phase: V3HubHookPhase,
+    pub requirement: V3HubHookRequirement,
+    pub enabled: bool,
+    pub priority: i32,
+    pub order: u32,
+    pub allowed_resources: Vec<String>,
+    pub forbidden_resources: Vec<String>,
+    pub profile: Option<V3HubHookProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

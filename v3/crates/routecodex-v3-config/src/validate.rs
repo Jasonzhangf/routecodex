@@ -66,22 +66,6 @@ pub(crate) fn publish_manifest(
 }
 
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];
-const HUB_V1_HOOKS: [&str; 13] = [
-    "hub_v1.req_inbound_normalize.not_implemented",
-    "hub_v1.req_continuation_classify.not_implemented",
-    "hub_v1.req_chat_process.not_implemented",
-    "hub_v1.req_execution_plan.not_implemented",
-    "hub_v1.req_target_resolve.not_implemented",
-    "hub_v1.req_provider_semantic.not_implemented",
-    "hub_v1.provider_wire_build.not_implemented",
-    "hub_v1.provider_transport.not_implemented",
-    "hub_v1.resp_inbound_normalize.not_implemented",
-    "hub_v1.resp_chat_process.not_implemented",
-    "hub_v1.resp_continuation_commit.not_implemented",
-    "hub_v1.resp_client_project.not_implemented",
-    "hub_v1.server_frame.not_implemented",
-];
-
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
 ) -> Result<Option<V3HubV1Manifest>, V3ConfigError> {
@@ -113,33 +97,142 @@ fn compile_hub_v1(
             "hub_v1 entry_protocols must declare all closed protocols",
         ));
     }
-
-    let hooks = authoring
-        .hooks
-        .iter()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
-    if hooks.len() != authoring.hooks.len() {
-        return Err(validation("hub_v1 hooks contain duplicate hook"));
+    if authoring.hook_set_id.trim().is_empty() {
+        return Err(validation("hub_v1 hook_set_id is empty"));
     }
-    for hook in &hooks {
-        if !HUB_V1_HOOKS.contains(hook) {
-            return Err(validation(format!("hub_v1 unknown hook {hook}")));
+    let resources = authoring
+        .resources
+        .into_iter()
+        .map(|(resource_id, resource)| {
+            require_id("hub_v1 resource", &resource_id)?;
+            Ok((
+                resource_id.clone(),
+                V3HubResourceManifest {
+                    resource_id,
+                    kind: resource.kind,
+                    scope: resource.scope,
+                    may_enter_provider_body: false,
+                    may_enter_client_body: false,
+                },
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>, V3ConfigError>>()?;
+
+    let mut hook_ids = BTreeSet::new();
+    let mut slots = BTreeSet::new();
+    let mut hooks = Vec::with_capacity(authoring.hooks.len());
+    for hook in authoring.hooks {
+        let expected_id = format!(
+            "hub_v1.{}.{}.not_implemented",
+            hook.node.node_id(),
+            hook.phase.as_str()
+        );
+        if hook.hook_id != expected_id {
+            return Err(validation(format!("hub_v1 unknown hook {}", hook.hook_id)));
+        }
+        if !hook_ids.insert(hook.hook_id.clone()) {
+            return Err(validation(format!(
+                "hub_v1 duplicate hook {}",
+                hook.hook_id
+            )));
+        }
+        if !slots.insert((hook.node, hook.phase)) {
+            return Err(validation(format!(
+                "hub_v1 duplicate hook slot {} {}",
+                hook.node.node_id(),
+                hook.phase.as_str()
+            )));
+        }
+        if hook.requirement == V3HubHookRequirement::Required && !hook.enabled {
+            return Err(validation(format!(
+                "hub_v1 required hook {} cannot be disabled",
+                hook.hook_id
+            )));
+        }
+        let allowed = hook
+            .allowed_resources
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let forbidden = hook
+            .forbidden_resources
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if allowed.len() != hook.allowed_resources.len()
+            || forbidden.len() != hook.forbidden_resources.len()
+        {
+            return Err(validation(format!(
+                "hub_v1 hook {} has duplicate resource declaration",
+                hook.hook_id
+            )));
+        }
+        for resource_id in allowed.union(&forbidden) {
+            if !resources.contains_key(resource_id) {
+                return Err(validation(format!(
+                    "hub_v1 hook {} references unknown resource {resource_id}",
+                    hook.hook_id
+                )));
+            }
+        }
+        if let Some(resource_id) = allowed.intersection(&forbidden).next() {
+            return Err(validation(format!(
+                "hub_v1 hook {} both allows and forbids resource {resource_id}",
+                hook.hook_id
+            )));
+        }
+        if hook.profile == Some(V3HubHookProfile::Servertool)
+            && !matches!(
+                hook.node,
+                V3HubFixedNode::V3HubReqChatProcess04Governed
+                    | V3HubFixedNode::V3HubRespChatProcess03Governed
+            )
+        {
+            return Err(validation(format!(
+                "hub_v1 servertool profile is forbidden at node {}",
+                hook.node.node_id()
+            )));
+        }
+        hooks.push(V3HubHookManifest {
+            hook_id: hook.hook_id,
+            node: hook.node,
+            phase: hook.phase,
+            requirement: hook.requirement,
+            enabled: hook.enabled,
+            priority: hook.priority,
+            order: hook.order,
+            allowed_resources: allowed.into_iter().collect(),
+            forbidden_resources: forbidden.into_iter().collect(),
+            profile: hook.profile,
+        });
+    }
+    for node in V3HubFixedNode::ALL {
+        for phase in V3HubHookPhase::ALL {
+            if !slots.contains(&(node, phase)) {
+                return Err(validation(format!(
+                    "hub_v1 hook set is missing required {} hook for {}",
+                    phase.as_str(),
+                    node.node_id()
+                )));
+            }
         }
     }
-    if hooks.len() != HUB_V1_HOOKS.len() {
-        return Err(validation("hub_v1 hook set is missing a required hook"));
-    }
+    hooks.sort_by(|left, right| {
+        (left.priority, left.order, left.hook_id.as_str()).cmp(&(
+            right.priority,
+            right.order,
+            right.hook_id.as_str(),
+        ))
+    });
     Ok(Some(V3HubV1Manifest {
         skeleton: "hub_v1".to_string(),
         entry_protocols: HUB_V1_ENTRY_PROTOCOLS
             .iter()
             .map(|value| (*value).to_string())
             .collect(),
-        hooks: HUB_V1_HOOKS
-            .iter()
-            .map(|value| (*value).to_string())
-            .collect(),
+        hook_set_id: authoring.hook_set_id,
+        resources,
+        hooks,
     }))
 }
 

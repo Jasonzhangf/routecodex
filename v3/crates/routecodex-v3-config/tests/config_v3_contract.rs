@@ -1,6 +1,7 @@
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
-    V3ConfigStore, V3RouteTargetKind, V3SelectionStrategy,
+    V3ConfigStore, V3HubFixedNode, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
+    V3RouteTargetKind, V3SelectionStrategy,
 };
 use std::fs;
 
@@ -327,31 +328,138 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
         hub.entry_protocols,
         vec!["responses", "anthropic", "gemini", "openai_chat"]
     );
-    assert_eq!(hub.hooks.len(), 13);
+    assert_eq!(hub.hooks.len(), 30);
+    assert_eq!(hub.resources.len(), 6);
+    assert!(hub
+        .resources
+        .values()
+        .all(|resource| !resource.may_enter_provider_body && !resource.may_enter_client_body));
+    for node in V3HubFixedNode::ALL {
+        for phase in V3HubHookPhase::ALL {
+            assert!(hub
+                .hooks
+                .iter()
+                .any(|hook| hook.node == node && hook.phase == phase));
+        }
+    }
+    let servertool = hub
+        .hooks
+        .iter()
+        .filter(|hook| hook.profile == Some(V3HubHookProfile::Servertool))
+        .collect::<Vec<_>>();
+    assert_eq!(servertool.len(), 2);
+    assert!(servertool.iter().all(|hook| matches!(
+        hook.node,
+        V3HubFixedNode::V3HubReqChatProcess04Governed
+            | V3HubFixedNode::V3HubRespChatProcess03Governed
+    )));
     assert!(!format!("{hub:?}").contains("selected_target"));
     assert!(!format!("{hub:?}").contains("selected_execution_mode"));
 }
 
 #[test]
 fn rejects_invalid_hub_v1_declarations_fail_fast() {
-    for invalid in [
-        HUB_V1_DECLARATION.replace("skeleton = \"hub_v1\"", "skeleton = \"hub_v2\""),
-        HUB_V1_DECLARATION.replace(
-            "\"hub_v1.server_frame.not_implemented\"",
-            "\"hub_v1.unknown\"",
+    for (invalid, expected) in [
+        (
+            HUB_V1_DECLARATION.replace("skeleton = \"hub_v1\"", "skeleton = \"hub_v2\""),
+            "skeleton must be hub_v1",
         ),
-        HUB_V1_DECLARATION.replace("\"hub_v1.server_frame.not_implemented\",", ""),
-        HUB_V1_DECLARATION.replace(
-            "\"hub_v1.server_frame.not_implemented\"",
-            "\"hub_v1.req_inbound_normalize.not_implemented\"",
+        (
+            HUB_V1_DECLARATION.replace(
+                "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented",
+                "hub_v1.unknown",
+            ),
+            "unknown hook",
         ),
-        HUB_V1_DECLARATION.replace("\"responses\"", "\"unsupported\""),
+        (
+            HUB_V1_DECLARATION.replace("  { hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\", requirement = \"required\", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },\n", ""),
+            "missing required exit hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "{ hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\"",
+                "{ hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"entry\"",
+            ),
+            "duplicate hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace("\"responses\"", "\"unsupported\""),
+            "unknown entry protocol",
+        ),
     ] {
         let raw = format!("{}\n{}\n{}", FULL_CONFIG, invalid, HUB_V1_SERVER_EXECUTION);
         let err =
             compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
-        assert!(err.to_string().contains("hub_v1"), "{err}");
+        assert!(err.to_string().contains(expected), "{err}");
     }
+}
+
+#[test]
+fn enforces_hook_resource_profile_and_optional_contracts() {
+    let implicit_permissions = HUB_V1_DECLARATION.replacen(
+        ", allowed_resources = [], forbidden_resources = []",
+        ", forbidden_resources = []",
+        1,
+    );
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, implicit_permissions, HUB_V1_SERVER_EXECUTION
+    );
+    assert!(parse_v3_config_02_authoring(&raw).is_err());
+
+    let cases = [
+        (
+            HUB_V1_DECLARATION.replace(
+                "allowed_resources = [\"metadata_center\"]",
+                "allowed_resources = [\"unknown_resource\"]",
+            ),
+            "unknown resource",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "allowed_resources = [\"metadata_center\"], forbidden_resources = []",
+                "allowed_resources = [\"metadata_center\"], forbidden_resources = [\"metadata_center\"]",
+            ),
+            "both allows and forbids",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "node = \"V3HubReqInbound02Normalized\", phase = \"entry\", requirement = \"required\", priority",
+                "node = \"V3HubReqInbound02Normalized\", phase = \"entry\", requirement = \"required\", enabled = false, priority",
+            ),
+            "required hook",
+        ),
+        (
+            HUB_V1_DECLARATION.replace(
+                "forbidden_resources = [\"continuation_store\"]",
+                "forbidden_resources = [\"continuation_store\"], profile = \"servertool\"",
+            ),
+            "servertool profile is forbidden",
+        ),
+    ];
+    for (invalid, expected) in cases {
+        let raw = format!("{}\n{}\n{}", FULL_CONFIG, invalid, HUB_V1_SERVER_EXECUTION);
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    let raw = format!(
+        "{}\n{}\n{}",
+        FULL_CONFIG, HUB_V1_DECLARATION, HUB_V1_SERVER_EXECUTION
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap();
+    let hooks = &manifest.hub_v1.unwrap().hooks;
+    assert!(hooks.windows(2).all(|pair| {
+        (pair[0].priority, pair[0].order, pair[0].hook_id.as_str())
+            <= (pair[1].priority, pair[1].order, pair[1].hook_id.as_str())
+    }));
+    let optional = hooks
+        .iter()
+        .find(|hook| hook.requirement == V3HubHookRequirement::Optional)
+        .expect("typed optional hook");
+    assert!(!optional.enabled);
 }
 
 #[test]
@@ -482,20 +590,39 @@ const HUB_V1_DECLARATION: &str = r#"
 [pipelines.hub_v1]
 skeleton = "hub_v1"
 entry_protocols = ["responses", "anthropic", "gemini", "openai_chat"]
+hook_set_id = "hub_v1.default"
+resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
 hooks = [
-  "hub_v1.req_inbound_normalize.not_implemented",
-  "hub_v1.req_continuation_classify.not_implemented",
-  "hub_v1.req_chat_process.not_implemented",
-  "hub_v1.req_execution_plan.not_implemented",
-  "hub_v1.req_target_resolve.not_implemented",
-  "hub_v1.req_provider_semantic.not_implemented",
-  "hub_v1.provider_wire_build.not_implemented",
-  "hub_v1.provider_transport.not_implemented",
-  "hub_v1.resp_inbound_normalize.not_implemented",
-  "hub_v1.resp_chat_process.not_implemented",
-  "hub_v1.resp_continuation_commit.not_implemented",
-  "hub_v1.resp_client_project.not_implemented",
-  "hub_v1.server_frame.not_implemented",
+  { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.entry.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "entry", requirement = "required", priority = 0, order = 0, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = ["continuation_store"] },
+  { hook_id = "hub_v1.V3HubReqContinuation03Classified.entry.not_implemented", node = "V3HubReqContinuation03Classified", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqContinuation03Classified.exit.not_implemented", node = "V3HubReqContinuation03Classified", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
 ]
 "#;
 
