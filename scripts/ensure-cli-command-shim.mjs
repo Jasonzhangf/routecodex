@@ -49,14 +49,31 @@ function normalizeCliPath(value) {
   return value.split(path.sep).join('/');
 }
 
-function buildShimContent({ binName, repoCliPath, globalCliPath, defaultInstallRoot, preferReleaseSnapshot }) {
+function buildShimContent({
+  binName,
+  repoCliPath,
+  globalCliPath,
+  currentRelativePath,
+  defaultInstallRoot,
+  preferReleaseSnapshot,
+  native
+}) {
   const localHome = normalizeCliPath(path.join(os.homedir(), '.rcc'));
+  const launchCurrent = native ? 'exec "$CURRENT_CLI" "$@"' : 'exec node "$CURRENT_CLI" "$@"';
+  const launchGlobal = native ? 'exec "$GLOBAL_CLI" "$@"' : 'exec node "$GLOBAL_CLI" "$@"';
+  const launchRepo = native ? 'exec "$REPO_CLI" "$@"' : 'exec node "$REPO_CLI" "$@"';
+  const nodeRequirement = native ? '' : `if ! command -v node >/dev/null 2>&1; then
+  echo "${binName}: node is required but was not found in PATH" >&2
+  exit 127
+fi
+
+`;
   const releaseSnapshotBlock = `if [ -f "$CURRENT_CLI" ]; then
   export ROUTECODEX_INSTALL_ROOT="\${ROUTECODEX_INSTALL_ROOT:-$CURRENT_INSTALL}"
   export RCC_INSTALL_ROOT="\${RCC_INSTALL_ROOT:-$CURRENT_INSTALL}"
   export ROUTECODEX_BASEDIR="\${ROUTECODEX_BASEDIR:-$CURRENT_INSTALL}"
   export RCC_BASEDIR="\${RCC_BASEDIR:-$CURRENT_INSTALL}"
-  exec node "$CURRENT_CLI" "$@"
+  ${launchCurrent}
 fi`;
   const devOnlySnapshotBlock = `if [ -f "$CURRENT_CLI" ]; then
   echo "${binName}: dev shim refused release snapshot and only fell back to current install because no dev build was found" >&2
@@ -64,25 +81,25 @@ fi`;
   export RCC_INSTALL_ROOT="\${RCC_INSTALL_ROOT:-$CURRENT_INSTALL}"
   export ROUTECODEX_BASEDIR="\${ROUTECODEX_BASEDIR:-$CURRENT_INSTALL}"
   export RCC_BASEDIR="\${RCC_BASEDIR:-$CURRENT_INSTALL}"
-  exec node "$CURRENT_CLI" "$@"
+  ${launchCurrent}
 fi`;
 
   const resolutionBlock = preferReleaseSnapshot
     ? `${releaseSnapshotBlock}
 
 if [ -n "$GLOBAL_ROOT" ] && [ -f "$GLOBAL_CLI" ]; then
-  exec node "$GLOBAL_CLI" "$@"
+  ${launchGlobal}
 fi
 
 if [ -f "$REPO_CLI" ]; then
-  exec node "$REPO_CLI" "$@"
+  ${launchRepo}
 fi`
     : `if [ -n "$GLOBAL_ROOT" ] && [ -f "$GLOBAL_CLI" ]; then
-  exec node "$GLOBAL_CLI" "$@"
+  ${launchGlobal}
 fi
 
 if [ -f "$REPO_CLI" ]; then
-  exec node "$REPO_CLI" "$@"
+  ${launchRepo}
 fi
 
 ${devOnlySnapshotBlock}`;
@@ -106,17 +123,12 @@ resolve_rcc_home() {
 GLOBAL_ROOT="$(npm root -g 2>/dev/null || true)"
 RCC_HOME_DIR="$(resolve_rcc_home)"
 CURRENT_INSTALL="$RCC_HOME_DIR/install/current"
-CURRENT_CLI="$CURRENT_INSTALL/dist/cli.js"
+CURRENT_CLI="$CURRENT_INSTALL/${normalizeCliPath(currentRelativePath)}"
 REPO_CLI="${normalizeCliPath(repoCliPath)}"
 GLOBAL_CLI="${normalizeCliPath(globalCliPath)}"
 DEFAULT_INSTALL_ROOT="${defaultInstallRoot}"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "${binName}: node is required but was not found in PATH" >&2
-  exit 127
-fi
-
-${resolutionBlock}
+${nodeRequirement}${resolutionBlock}
 
 echo "${binName}: unable to locate CLI entrypoint" >&2
 echo "  tried release snapshot: $CURRENT_CLI" >&2
@@ -128,24 +140,27 @@ exit 127
 `;
 }
 
-function writeShim(shimDir, binName, packageName) {
+function writeShim(shimDir, binName, packageName, options = {}) {
   if (process.platform === 'win32') {
     return null;
   }
 
   const preferReleaseSnapshot = shouldPreferReleaseSnapshot(binName);
   const shimPath = path.join(shimDir, binName);
-  const repoCliPath = path.join(REPO_ROOT, 'dist', 'cli.js');
+  const currentRelativePath = options.currentRelativePath || path.join('dist', 'cli.js');
+  const repoCliPath = path.join(REPO_ROOT, currentRelativePath);
   const globalCliPath = packageName.startsWith('@')
-    ? path.join('${GLOBAL_ROOT}', ...packageName.split('/'), 'dist', 'cli.js')
-    : path.join('${GLOBAL_ROOT}', packageName, 'dist', 'cli.js');
+    ? path.join('${GLOBAL_ROOT}', ...packageName.split('/'), currentRelativePath)
+    : path.join('${GLOBAL_ROOT}', packageName, currentRelativePath);
   const defaultInstallRoot = normalizeCliPath(path.join(os.homedir(), '.rcc', 'install', 'current'));
   const content = buildShimContent({
     binName,
     repoCliPath,
     globalCliPath,
+    currentRelativePath,
     defaultInstallRoot,
-    preferReleaseSnapshot
+    preferReleaseSnapshot,
+    native: options.native === true
   });
 
   fs.mkdirSync(shimDir, { recursive: true });
@@ -160,6 +175,10 @@ function main() {
   for (const shimDir of shimDirs) {
     installed.push(writeShim(shimDir, 'routecodex', 'routecodex'));
     installed.push(writeShim(shimDir, 'rcc', 'routecodex'));
+    installed.push(writeShim(shimDir, 'routecodex-v3', 'routecodex', {
+      currentRelativePath: path.join('dist', 'bin', 'routecodex-v3'),
+      native: true
+    }));
   }
 
   for (const file of installed.filter(Boolean)) {

@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "dist/cli.js"
+    "routecodex": "dist/cli.js",
+    "routecodex-v3": "dist/bin/routecodex-v3"
   },
   "exports": {
     ".": {
@@ -407,7 +408,7 @@
     "verify:architecture-mainline-binding-pending-gate": "node scripts/architecture/verify-architecture-mainline-binding-pending-gate.mjs",
     "verify:function-map-required-tests-bidir": "node scripts/architecture/verify-function-map-required-tests-bidir.mjs",
     "verify:architecture-topology-doc-sync": "node scripts/architecture/verify-architecture-topology-doc-sync.mjs",
-    "build:base": "npm run verify:architecture-review-surface-light && npm run verify:function-map-compile-gate && npm run verify:models-capability-contract && npm run verify:responses-function-tool-normalization-rust-only && npm run verify:responses-direct-tool-shape-contract && npm run verify:responses-history-protocol-contract && npm run verify:responses-request-compat-rust-only && npm run llmswitch:ensure && node scripts/build-core.mjs && npm run verify:servertool-rust-only && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
+    "build:base": "npm run verify:architecture-review-surface-light && npm run verify:function-map-compile-gate && npm run verify:models-capability-contract && npm run verify:responses-function-tool-normalization-rust-only && npm run verify:responses-direct-tool-shape-contract && npm run verify:responses-history-protocol-contract && npm run verify:responses-request-compat-rust-only && npm run llmswitch:ensure && node scripts/build-core.mjs && npm run verify:servertool-rust-only && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-v3-cli-bin.mjs && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "verify:architecture-wiki-node-id-consistency": "node scripts/architecture/verify-architecture-wiki-node-id-consistency.mjs",
     "verify-mainline-call-map-binding-state": "node scripts/architecture/verify-mainline-call-map-binding-state.mjs",
     "verify:function-map-test-coverage-integrity": "node scripts/architecture/verify-function-map-test-coverage-integrity.mjs",
