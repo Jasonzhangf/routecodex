@@ -30610,3 +30610,13 @@ Pure Rust NAPI candidates:
 - Resource isolation: compiled resource declarations keep `may_enter_provider_body=false` and `may_enter_client_body=false`; current-node hook payload access is a scoped borrow through `borrow_v3_hub_current_node()`, not retained/full-cloned/JSON-round-tripped/SSE-materialized/debug-snapshotted live truth.
 - Verification: focused resource/config tests, static-hook verifier, H1 red fixture, dedicated resource verifier/red fixture, compile-fail borrowed-view lifetime fixture, V3 architecture/resource/module/rust-only gates, cargo fmt, Clippy `-D warnings`, full V3 workspace, and `git diff --check` passed with run-private Cargo targets.
 - Boundary: this does not complete Relay request/response runtime, live Relay, servertool runtime execution, continuation E2E, Server cutover, P6 deletion, global install, `~/.rcc`, or production replacement.
+
+# 2026-07-15: V3 Relay architecture review surface locked
+
+- Claim `feature_id:v3.hub_relay_gate_review_surface` owns docs/maps/wiki/gates only.
+- Four worker feature rows now expose resource bindings, mainline bindings, allowed/forbidden paths, npm-backed gates, verification contracts, and completion limits.
+- Architecture verifier checks reverse mainline/resource bindings, function/verification gate equality, package script existence, fixed node IDs, and copy-budget contract.
+- Doc red fixtures reject fractional node IDs, copy-budget removal, missing D feature row, and broken request mainline reverse binding; fixture now copies `package.json` because package wiring is verifier input.
+- Required D gates passed: architecture docs, resource map, module boundaries, Rust-only, static hook registry, 11 doc red mutations, compile-fail, and diff check.
+- Architecture review found no second lifecycle, non-adjacent shortcut, servertool owner escape, continuation immutable-interval semantic work, payload fallback, P6 deletion, V2/runtime/live/global-install mutation.
+- Boundary: only Relay architecture review surface/contracts/maps/gates are locked. Live Relay, usable continuation, servertool runtime hooks, and P6 deletion remain pending.

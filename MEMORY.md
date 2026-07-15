@@ -3223,3 +3223,12 @@
 - Servertool hook profile is only valid at `V3HubReqChatProcess04Governed` and `V3HubRespChatProcess03Governed`; do not move servertool to inbound/outbound, provider runtime, direct path, or a separate lifecycle.
 - Resource declarations are side-channel only for this slice: `may_enter_provider_body=false` and `may_enter_client_body=false`. Current node payloads are accessed through scoped borrowed views; do not retain, full-clone, JSON-round-trip, SSE-materialize, or snapshot-copy hook payloads as live truth.
 - Verified gates: resource/config focused tests, static hook verifier, H1 source red fixtures, dedicated resource verifier/red fixtures, compile-fail borrowed-view lifetime boundary, architecture/resource/module/rust-only gates, cargo fmt, Clippy, V3 workspace tests, and diff check. This marker does not prove live Relay, request/response runtime completion, continuation E2E, Server cutover, P6 deletion, global install, `~/.rcc`, or production replacement.
+
+# 2026-07-15: V3 Relay architecture review surface is locked
+
+- Marker: `routecodex-v3-relay-architecture-review-surface-locked-20260715`.
+- `v3.hub_relay_request_semantics`, `v3.hub_relay_response_semantics`, `v3.hub_relay_runtime_resources_hooks`, and `v3.hub_relay_gate_review_surface` are mutually queryable through V3 resource/function/mainline/verification maps and the Relay wiki.
+- D gate requires every worker row to bind declared resources and existing mainline steps, match npm-backed gates in function and verification maps, and expose allowed/forbidden paths plus completion limits.
+- Fixed node IDs reject fractional/reused forms such as `03a`, `03_1`, and `03.5`; copy budget rejects unbounded deep copy, full SSE materialization, and Debug/snapshot copies as business or continuation truth.
+- Verified D gates: `verify:v3-architecture-docs`, `verify:v3-resource-map`, `verify:v3-module-boundaries`, `verify:v3-rust-only`, `verify:v3-static-hook-registry`, `test:v3-hub-skeleton-doc-red-fixtures` with 11 rejected mutations, `test:v3-compile-fail`, and `git diff --check`.
+- This marker proves only Relay contracts/maps/wiki/gates. It does not prove live Relay, usable continuation, servertool runtime hooks, Hub v1 cutover, P6 deletion, global install/restart, `~/.rcc`, or production replacement.
