@@ -127,12 +127,11 @@ pub fn characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
 pub fn characterize_v3_anthropic_hub_response_semantic_to_client_projection(
     semantic: V3AnthropicHubResponseSemantic,
 ) -> Result<V3AnthropicClientProjection, V3AnthropicCodecError> {
-    reject_side_channel_fields(&semantic.payload)?;
-    require_object(&semantic.payload)?;
-    match semantic.trace.transport_intent {
-        V3HubTransportIntent::Json => validate_json_response(&semantic.payload)?,
-        V3HubTransportIntent::Sse => validate_sse_event(&semantic.payload)?,
-    }
+    validate_v3_anthropic_hub_response_payload_for_client_projection(
+        &semantic.payload,
+        semantic.trace.entry_protocol,
+        semantic.trace.transport_intent,
+    )?;
     Ok(V3AnthropicClientProjection {
         payload: semantic.payload,
         trace: trace(
@@ -142,6 +141,23 @@ pub fn characterize_v3_anthropic_hub_response_semantic_to_client_projection(
     })
 }
 
+pub fn validate_v3_anthropic_hub_response_payload_for_client_projection(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<(), V3AnthropicCodecError> {
+    if entry_protocol != V3HubEntryProtocol::Anthropic {
+        return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
+    }
+    reject_side_channel_fields(payload)?;
+    require_object(payload)?;
+    match transport_intent {
+        V3HubTransportIntent::Json => validate_json_response(payload)?,
+        V3HubTransportIntent::Sse => validate_sse_event(payload)?,
+    }
+    Ok(())
+}
+
 impl V3AnthropicHubRequestSemantic {
     pub fn payload(&self) -> &Value {
         &self.payload
@@ -149,6 +165,10 @@ impl V3AnthropicHubRequestSemantic {
 
     pub fn trace(&self) -> &V3AnthropicCodecTrace {
         &self.trace
+    }
+
+    pub fn into_payload(self) -> Value {
+        self.payload
     }
 }
 

@@ -5,6 +5,8 @@ mod relay_request;
 pub use relay_request::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
+mod anthropic_relay_hooks;
+pub use anthropic_relay_hooks::*;
 mod resource_hooks;
 pub use resource_hooks::*;
 
