@@ -13,8 +13,10 @@ const v2Adapter = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-n
 const v3Cargo = 'v3/crates/routecodex-v3-provider-responses/Cargo.toml';
 const v3Adapter = 'v3/crates/routecodex-v3-provider-responses/src/shared.rs';
 const v3Projection = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
+const v3Nodes = 'v3/crates/routecodex-v3-runtime/src/nodes.rs';
+const v3Server = 'v3/crates/routecodex-v3-server/src/lib.rs';
 
-for (const file of [coreCargo, coreSource, v2Workspace, v2Cargo, v2Adapter, v3Cargo, v3Adapter, v3Projection]) {
+for (const file of [coreCargo, coreSource, v2Workspace, v2Cargo, v2Adapter, v3Cargo, v3Adapter, v3Projection, v3Nodes, v3Server]) {
   if (!fs.existsSync(path.join(root, file))) failures.push(`${file}: required shared SSE transport surface missing`);
 }
 
@@ -63,8 +65,29 @@ if (failures.length === 0) {
   }
 
   const v3ProjectionSource = read(v3Projection);
-  if (v3ProjectionSource.includes('raw.into_body_bytes().await')) {
-    failures.push(`${v3Projection}: V3 SSE projection still materializes the complete provider stream`);
+  const v3NodesSource = read(v3Nodes);
+  const v3ServerSource = read(v3Server);
+  for (const [pattern, reason] of [
+    [/raw\.into_body_bytes\(\)\.await/, 'raw response body materialization'],
+    [/let\s+mut\s+client_bytes\s*=\s*Vec::new\(\)/, 'client SSE byte accumulator'],
+    [/client_bytes\.extend_from_slice\(/, 'client SSE full-stream append'],
+    [/V3ClientBody::Bytes\(client_bytes\)/, 'SSE projected as complete byte body'],
+  ]) {
+    if (pattern.test(v3ProjectionSource)) failures.push(v3Projection + ': V3 SSE projection still materializes the complete provider stream via ' + reason);
+  }
+  if (!/V3ClientBody[\s\S]*Sse\(/.test(v3NodesSource)) {
+    failures.push(v3Nodes + ': V3 client payload contract lacks a streaming SSE body variant');
+  }
+  const anthropicProjection = slice(v3ServerSource, 'fn anthropic_relay_output_response', 'async fn debug_status');
+  for (const [pattern, reason] of [
+    [/let\s+mut\s+bytes\s*=\s*Vec::new\(\)/, 'Anthropic server byte accumulator'],
+    [/bytes\.extend_from_slice\(/, 'Anthropic server full-response append'],
+    [/format!\("event: \{name\}\\ndata: \{data\}\\n\\n"\)/, 'manual SSE writer'],
+    [/Body::from\(body\)/, 'Anthropic SSE Body::from materialized bytes'],
+    [/unwrap_or_default\(\)/, 'Anthropic SSE silently converts missing events to an empty stream'],
+    [/Ok\(None\)/, 'Anthropic SSE silently skips malformed events'],
+  ]) {
+    if (pattern.test(anthropicProjection)) failures.push(v3Server + ': Anthropic Relay SSE output bypasses shared streaming encoder via ' + reason);
   }
 }
 
@@ -77,3 +100,10 @@ if (failures.length > 0) {
 console.log('[verify:sse-transport-core-shared] ok');
 console.log('- V2 and V3 use one Rust SSE framing owner');
 console.log('- transport core contains no business semantics or full-stream materialization');
+
+function slice(text, from, to) {
+  const start = text.indexOf(from);
+  if (start < 0) return '';
+  const end = text.indexOf(to, start + from.length);
+  return end >= 0 ? text.slice(start, end) : text.slice(start);
+}

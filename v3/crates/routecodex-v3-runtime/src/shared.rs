@@ -1,5 +1,5 @@
-use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
-use futures_util::StreamExt;
+use crate::nodes::{V3ClientBody, V3ClientSseStream, V3Resp15ClientPayload};
+use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
 };
@@ -11,14 +11,54 @@ use sse_transport_core::{
     SseTransportLimits,
 };
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum V3RemoteContinuationObservation {
-    Pending { response_id: String },
+    Pending {
+        response_id: String,
+    },
     Terminal,
+    Streaming {
+        state: V3SseRemoteContinuationObservationState,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default)]
+pub struct V3SseRemoteContinuationObservationState {
+    inner: Arc<Mutex<V3SseRemoteContinuationObservationInner>>,
+}
+
+#[derive(Debug, Default)]
+struct V3SseRemoteContinuationObservationInner {
+    pending_response_id: Option<String>,
+}
+
+impl V3SseRemoteContinuationObservationState {
+    pub(crate) fn pending_response_id(&self) -> Result<Option<String>, String> {
+        self.inner
+            .lock()
+            .map(|inner| inner.pending_response_id.clone())
+            .map_err(|error| error.to_string())
+    }
+
+    fn record_pending_response_id(&self, response_id: &str) -> Result<(), V3Error01SourceRaised> {
+        self.inner
+            .lock()
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ProviderResp14Raw",
+                    "sse_remote_continuation_observer_poisoned",
+                    error.to_string(),
+                )
+            })?
+            .pending_response_id = Some(response_id.to_string());
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct V3ProviderResponseProjection {
     pub client_payload: V3Resp15ClientPayload,
     pub remote_continuation: V3RemoteContinuationObservation,
@@ -95,31 +135,94 @@ pub(crate) async fn project_provider_raw_to_client_payload(
 }
 
 async fn project_sse_stream(
-    mut stream: V3ProviderSseStream,
+    stream: V3ProviderSseStream,
 ) -> Result<(V3ClientBody, V3RemoteContinuationObservation), V3Error01SourceRaised> {
-    let mut client_bytes = Vec::new();
-    let mut pending_response_id = None;
-    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(provider_body_source)?;
-        client_bytes.extend_from_slice(&chunk);
-        let frames = decoder
-            .push(build_sse_transport_in_01_raw_chunk(&chunk))
-            .map_err(sse_transport_source)?;
-        for frame in frames {
-            observe_sse_frame_remote_continuation(
-                frame.frame().fields(),
-                &mut pending_response_id,
-            )?;
+    let observation_state = V3SseRemoteContinuationObservationState::default();
+    let client_stream = observed_sse_client_stream(stream, observation_state.clone());
+    Ok((
+        V3ClientBody::Sse(client_stream),
+        V3RemoteContinuationObservation::Streaming {
+            state: observation_state,
+        },
+    ))
+}
+
+fn observed_sse_client_stream(
+    stream: V3ProviderSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+) -> V3ClientSseStream {
+    struct ObservedState {
+        stream: V3ProviderSseStream,
+        decoder: SseIncrementalDecoder,
+        pending_response_id: Option<String>,
+        observation_state: V3SseRemoteContinuationObservationState,
+        done: bool,
+    }
+
+    Box::pin(stream::unfold(
+        ObservedState {
+            stream,
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            pending_response_id: None,
+            observation_state,
+            done: false,
+        },
+        |mut state| async move {
+            if state.done {
+                return None;
+            }
+            match state.stream.next().await {
+                Some(Ok(chunk)) => {
+                    let result = observe_sse_remote_continuation_chunk(
+                        &chunk,
+                        &mut state.decoder,
+                        &mut state.pending_response_id,
+                        &state.observation_state,
+                    )
+                    .map(|()| chunk);
+                    if result.is_err() {
+                        state.done = true;
+                    }
+                    Some((result, state))
+                }
+                Some(Err(error)) => {
+                    state.done = true;
+                    Some((Err(provider_body_source(error)), state))
+                }
+                None => {
+                    let decoder = std::mem::replace(
+                        &mut state.decoder,
+                        SseIncrementalDecoder::new(SseTransportLimits::default()),
+                    );
+                    match decoder.finish().map_err(sse_transport_source) {
+                        Ok(()) => None,
+                        Err(error) => {
+                            state.done = true;
+                            Some((Err(error), state))
+                        }
+                    }
+                }
+            }
+        },
+    ))
+}
+
+fn observe_sse_remote_continuation_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    pending_response_id: &mut Option<String>,
+    observation_state: &V3SseRemoteContinuationObservationState,
+) -> Result<(), V3Error01SourceRaised> {
+    let frames = decoder
+        .push(build_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(sse_transport_source)?;
+    for frame in frames {
+        observe_sse_frame_remote_continuation(frame.frame().fields(), pending_response_id)?;
+        if let Some(response_id) = pending_response_id.as_deref() {
+            observation_state.record_pending_response_id(response_id)?;
         }
     }
-    decoder.finish().map_err(sse_transport_source)?;
-    Ok((
-        V3ClientBody::Bytes(client_bytes),
-        pending_response_id.map_or(V3RemoteContinuationObservation::Terminal, |response_id| {
-            V3RemoteContinuationObservation::Pending { response_id }
-        }),
-    ))
+    Ok(())
 }
 
 fn observe_sse_remote_continuation_bytes(

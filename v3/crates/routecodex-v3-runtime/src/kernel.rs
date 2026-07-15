@@ -1,6 +1,7 @@
 use crate::hooks::V3HookRegistry;
 use crate::nodes::*;
 use async_trait::async_trait;
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
@@ -16,13 +17,13 @@ use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
     V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
 };
-use crate::shared::V3RemoteContinuationObservation;
+use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
@@ -57,9 +58,9 @@ impl V3ResponsesDirectContinuationScope {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct V3ResponsesDirectContinuationState {
-    store: Mutex<V3RemoteContinuationStore>,
+    store: Arc<Mutex<V3RemoteContinuationStore>>,
 }
 
 impl V3ResponsesDirectContinuationState {
@@ -81,7 +82,7 @@ struct V3ResponsesDirectContinuationExecution<'a> {
     now_epoch_ms: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
     pub node_trace: Vec<&'static str>,
@@ -341,6 +342,7 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
     let response_payload = match output.client_payload.body {
         V3ClientBody::Json(value) => value,
         V3ClientBody::Bytes(bytes) => json!({"body_kind": "bytes", "byte_len": bytes.len()}),
+        V3ClientBody::Sse(_) => json!({"body_kind": "sse_stream"}),
     };
     crate::V3FoundationRuntimeOutput {
         status: output.client_payload.status,
@@ -797,31 +799,78 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         };
         trace.push("V3ProviderResp14Raw");
 
-        let response_projection = match hook_registry.run_response_projection(provider_raw).await {
-            Ok(projection) => projection,
-            Err(source) => {
-                if let Err(error) = release_terminal_failure_locator(
-                    continuation_state,
-                    previous_response_id.as_deref(),
-                ) {
-                    return error_output(
-                        runtime_source("V3HubRespContinuation04Committed", error),
-                        trace,
-                        &hook_registry,
-                    );
+        let mut response_projection =
+            match hook_registry.run_response_projection(provider_raw).await {
+                Ok(projection) => projection,
+                Err(source) => {
+                    if let Err(error) = release_terminal_failure_locator(
+                        continuation_state,
+                        previous_response_id.as_deref(),
+                    ) {
+                        return error_output(
+                            runtime_source("V3HubRespContinuation04Committed", error),
+                            trace,
+                            &hook_registry,
+                        );
+                    }
+                    if previous_response_id.is_some() {
+                        trace.push("V3HubRespContinuation04Committed");
+                    }
+                    return error_output(source, trace, &hook_registry);
                 }
-                if previous_response_id.is_some() {
-                    trace.push("V3HubRespContinuation04Committed");
-                }
-                return error_output(source, trace, &hook_registry);
+            };
+        if let V3RemoteContinuationObservation::Streaming { state } =
+            &response_projection.remote_continuation
+        {
+            if let (Some(continuation_state), Some(scope)) =
+                (continuation_state, continuation_scope.as_ref())
+            {
+                let body = std::mem::replace(
+                    &mut response_projection.client_payload.body,
+                    V3ClientBody::Bytes(Vec::new()),
+                );
+                response_projection.client_payload.body = match body {
+                    V3ClientBody::Sse(stream) => {
+                        let policy = V3DirectSseRemoteContinuationPolicy {
+                            state: continuation_state.clone(),
+                            scope_key: scope.key.clone(),
+                            previous_response_id: previous_response_id.clone(),
+                            selected_pin: selected_pin.clone(),
+                            selected_capability_revision: selected_capability_revision.clone(),
+                            remote_capability_error: require_remote_continuation_capabilities(
+                                manifest,
+                                &selected_pin,
+                            )
+                            .err(),
+                            now_epoch_ms,
+                            committed_pending: false,
+                        };
+                        V3ClientBody::Sse(wrap_direct_sse_remote_continuation_stream(
+                            stream,
+                            state.clone(),
+                            policy,
+                        ))
+                    }
+                    other => other,
+                };
             }
-        };
+            trace.push("V3Resp15ClientPayload");
+
+            return V3ResponsesDirectRuntimeOutput {
+                client_payload: response_projection.client_payload,
+                node_trace: trace,
+                error_chain: None,
+            };
+        }
         if let (Some(state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
             let pending_response_id = match &response_projection.remote_continuation {
                 V3RemoteContinuationObservation::Pending { response_id } => {
                     Some(response_id.clone())
                 }
                 V3RemoteContinuationObservation::Terminal => None,
+                V3RemoteContinuationObservation::Streaming { .. } => unreachable!(
+                    "streaming Responses continuation is handled before material lifecycle"
+                ),
             };
             let lifecycle_changed = previous_response_id.is_some() || pending_response_id.is_some();
             if lifecycle_changed {
@@ -918,6 +967,132 @@ fn release_terminal_failure_locator(
         ));
     }
     Ok(())
+}
+
+struct V3DirectSseRemoteContinuationPolicy {
+    state: V3ResponsesDirectContinuationState,
+    scope_key: V3RemoteContinuationScopeKey,
+    previous_response_id: Option<String>,
+    selected_pin: V3RemoteContinuationPin,
+    selected_capability_revision: String,
+    remote_capability_error: Option<String>,
+    now_epoch_ms: u64,
+    committed_pending: bool,
+}
+
+fn wrap_direct_sse_remote_continuation_stream(
+    source: V3ClientSseStream,
+    observation_state: V3SseRemoteContinuationObservationState,
+    policy: V3DirectSseRemoteContinuationPolicy,
+) -> V3ClientSseStream {
+    struct StreamState {
+        source: V3ClientSseStream,
+        observation_state: V3SseRemoteContinuationObservationState,
+        policy: V3DirectSseRemoteContinuationPolicy,
+        done: bool,
+    }
+
+    Box::pin(stream::unfold(
+        StreamState {
+            source,
+            observation_state,
+            policy,
+            done: false,
+        },
+        |mut state| async move {
+            if state.done {
+                return None;
+            }
+            match state.source.next().await {
+                Some(Ok(chunk)) => {
+                    let result = state
+                        .policy
+                        .commit_observed_pending(&state.observation_state)
+                        .map(|()| chunk);
+                    if result.is_err() {
+                        state.done = true;
+                    }
+                    Some((result, state))
+                }
+                Some(Err(error)) => {
+                    state.done = true;
+                    Some((Err(error), state))
+                }
+                None => match state.policy.release_terminal_previous() {
+                    Ok(()) => None,
+                    Err(error) => {
+                        state.done = true;
+                        Some((Err(error), state))
+                    }
+                },
+            }
+        },
+    ))
+}
+
+impl V3DirectSseRemoteContinuationPolicy {
+    fn commit_observed_pending(
+        &mut self,
+        observation_state: &V3SseRemoteContinuationObservationState,
+    ) -> Result<(), V3Error01SourceRaised> {
+        if self.committed_pending {
+            return Ok(());
+        }
+        let Some(response_id) = observation_state
+            .pending_response_id()
+            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?
+        else {
+            return Ok(());
+        };
+        if let Some(error) = self.remote_capability_error.clone() {
+            return Err(runtime_source("V3HubRespContinuation04Committed", error));
+        }
+        let locator = V3RemoteContinuationLocator::new_direct(
+            response_id,
+            self.scope_key.clone(),
+            self.selected_pin.clone(),
+            self.selected_capability_revision.clone(),
+            self.now_epoch_ms,
+            self.now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
+        );
+        let input = V3RemoteContinuationCommitInput::locator_only(locator);
+        let mut store = self
+            .state
+            .store
+            .lock()
+            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
+        let commit = match self.previous_response_id.as_deref() {
+            Some(previous_response_id) => store.rebind_for_resp04(previous_response_id, input),
+            None => store.commit(input),
+        };
+        commit.map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
+        self.committed_pending = true;
+        self.previous_response_id = None;
+        Ok(())
+    }
+
+    fn release_terminal_previous(&mut self) -> Result<(), V3Error01SourceRaised> {
+        if self.committed_pending {
+            return Ok(());
+        }
+        let Some(previous_response_id) = self.previous_response_id.take() else {
+            return Ok(());
+        };
+        let mut store = self
+            .state
+            .store
+            .lock()
+            .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
+        if !store.release(&previous_response_id) {
+            return Err(runtime_source(
+                "V3HubRespContinuation04Committed",
+                format!(
+                    "terminal locator {previous_response_id} was not present at Resp04 release"
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn capability_revision_for_pin(
@@ -1040,6 +1215,9 @@ fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
         V3ClientBody::Bytes(bytes) => json!({
             "body_kind": "bytes",
             "byte_len": bytes.len()
+        }),
+        V3ClientBody::Sse(_) => json!({
+            "body_kind": "sse_stream"
         }),
     }
 }
@@ -1179,10 +1357,14 @@ mod tests {
         )
         .await;
         assert_eq!(output.client_payload.status, 200);
-        assert_eq!(
-            output.client_payload.body,
-            V3ClientBody::Json(json!({"id":"resp_test","output_text":"ok"}))
-        );
+        match output.client_payload.body {
+            V3ClientBody::Json(value) => {
+                assert_eq!(value, json!({"id":"resp_test","output_text":"ok"}));
+            }
+            V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+                panic!("direct JSON response must remain JSON")
+            }
+        }
         assert_eq!(
             output.node_trace,
             vec![
@@ -1241,6 +1423,7 @@ mod tests {
                 assert!(body["error"]["message"].as_str().unwrap().contains("boom"))
             }
             V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
+            V3ClientBody::Sse(_) => panic!("error response must be JSON"),
         }
     }
 

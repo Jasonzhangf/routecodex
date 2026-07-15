@@ -3,6 +3,7 @@ use axum::extract::{Request, State};
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
@@ -19,12 +20,18 @@ use routecodex_v3_runtime::{
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
-    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
 };
 use serde_json::json;
+use sse_transport_core::{
+    build_sse_transport_in_02_from_fields, build_sse_transport_in_03_from_sse_transport_in_02,
+    build_sse_transport_out_04_from_sse_transport_in_03, SseField,
+};
+use std::fmt;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -47,7 +54,7 @@ pub struct V3ServerStartup01ListenerSetPreflight {
     pub listeners: Vec<V3ServerManifest>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct V3Server16HttpFrame {
     pub status: u16,
     pub content_type: String,
@@ -58,10 +65,23 @@ pub struct V3Server16HttpFrame {
     pub node_trace: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
 pub enum V3Server16Body {
     Json(serde_json::Value),
     Bytes(Vec<u8>),
+    Sse(V3ClientSseStream),
+}
+
+impl fmt::Debug for V3Server16Body {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(value) => formatter.debug_tuple("Json").field(value).finish(),
+            Self::Bytes(bytes) => formatter
+                .debug_struct("Bytes")
+                .field("byte_len", &bytes.len())
+                .finish(),
+            Self::Sse(_) => formatter.write_str("Sse(<server-event-stream>)"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -573,28 +593,60 @@ fn anthropic_relay_output_response(
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = if stream {
-        let mut bytes = Vec::new();
-        for event in output
-            .client_response
-            .get("events")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if let (Some(name), Some(data)) = (
-                event.get("event").and_then(serde_json::Value::as_str),
-                event.get("data"),
-            ) {
-                bytes.extend_from_slice(format!("event: {name}\ndata: {data}\n\n").as_bytes());
-            }
-        }
-        bytes
+        anthropic_relay_sse_body(output.client_response)
     } else {
-        serde_json::to_vec(&output.client_response).expect("typed V3 Anthropic Relay projection")
+        Body::from(
+            serde_json::to_vec(&output.client_response)
+                .expect("typed V3 Anthropic Relay projection"),
+        )
     };
     builder
-        .body(Body::from(body))
+        .body(body)
         .expect("typed V3 Anthropic Relay response")
+}
+
+fn anthropic_relay_sse_body(client_response: serde_json::Value) -> Body {
+    let Some(events) = client_response
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+    else {
+        return Body::from_stream(stream::once(async {
+            Err::<Vec<u8>, io::Error>(io::Error::other(
+                "typed V3 Anthropic Relay SSE projection is missing events",
+            ))
+        }));
+    };
+    Body::from_stream(stream::iter(
+        events
+            .into_iter()
+            .map(|event| anthropic_relay_sse_event_chunk(&event)),
+    ))
+}
+
+fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>, io::Error> {
+    let (Some(name), Some(data)) = (
+        event.get("event").and_then(serde_json::Value::as_str),
+        event.get("data"),
+    ) else {
+        return Err(io::Error::other(
+            "typed V3 Anthropic Relay SSE event is missing event or data",
+        ));
+    };
+    let decoded = build_sse_transport_in_02_from_fields(vec![
+        SseField::Named {
+            name: "event".to_string(),
+            value: name.to_string(),
+        },
+        SseField::Named {
+            name: "data".to_string(),
+            value: data.to_string(),
+        },
+    ])
+    .map_err(|error| io::Error::other(error.to_string()))?;
+    let validated = build_sse_transport_in_03_from_sse_transport_in_02(decoded)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(build_sse_transport_out_04_from_sse_transport_in_03(&validated).into_bytes())
 }
 
 async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -717,6 +769,11 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
+        V3Server16Body::Sse(stream) => {
+            return builder
+                .body(v3_client_sse_body(stream))
+                .expect("typed response")
+        }
     };
     builder.body(Body::from(body)).expect("typed response")
 }
@@ -737,8 +794,19 @@ fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body
             serde_json::to_vec(&value).expect("V3Server16 JSON projection")
         }
         V3Server16Body::Bytes(bytes) => bytes,
+        V3Server16Body::Sse(stream) => {
+            return builder
+                .body(v3_client_sse_body(stream))
+                .expect("typed response")
+        }
     };
     builder.body(Body::from(body)).expect("typed response")
+}
+
+fn v3_client_sse_body(stream: V3ClientSseStream) -> Body {
+    Body::from_stream(stream.map(|result| {
+        result.map_err(|error| io::Error::other(format!("{}: {}", error.code, error.message)))
+    }))
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_resp_15(
@@ -759,6 +827,7 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
         body: match payload.body {
             V3ClientBody::Json(value) => V3Server16Body::Json(value),
             V3ClientBody::Bytes(bytes) => V3Server16Body::Bytes(bytes),
+            V3ClientBody::Sse(stream) => V3Server16Body::Sse(stream),
         },
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: if error_chain.is_empty() {

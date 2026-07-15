@@ -7,14 +7,15 @@ publish.workspace = true
 
 [dependencies]
 axum.workspace = true
+futures-util.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
 routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
 serde_json.workspace = true
+sse-transport-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core" }
 tokio.workspace = true
 
 [dev-dependencies]
-futures-util.workspace = true
 reqwest.workspace = true
 tokio-tungstenite.workspace = true

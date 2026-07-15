@@ -1,5 +1,9 @@
+use futures_util::Stream;
+use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::pin::Pin;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -51,13 +55,29 @@ pub struct V3ResponsesDirect11Policy {
     pub request_body: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+pub type V3ClientSseStream =
+    Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+
 pub enum V3ClientBody {
     Json(Value),
     Bytes(Vec<u8>),
+    Sse(V3ClientSseStream),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl fmt::Debug for V3ClientBody {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(value) => formatter.debug_tuple("Json").field(value).finish(),
+            Self::Bytes(bytes) => formatter
+                .debug_struct("Bytes")
+                .field("byte_len", &bytes.len())
+                .finish(),
+            Self::Sse(_) => formatter.write_str("Sse(<client-event-stream>)"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct V3Resp15ClientPayload {
     pub status: u16,
     pub headers: BTreeMap<String, String>,

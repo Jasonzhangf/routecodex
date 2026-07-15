@@ -318,16 +318,22 @@ pub fn build_sse_transport_out_04_from_sse_transport_in_03(
     SseTransportOut04EncodedChunk(output)
 }
 
+pub fn build_sse_transport_in_02_from_fields(
+    fields: Vec<SseField>,
+) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
+    Ok(SseTransportIn02DecodedFrame { fields })
+}
+
+pub fn build_sse_transport_in_03_from_sse_transport_in_02(
+    frame: SseTransportIn02DecodedFrame,
+) -> Result<SseTransportIn03ValidatedFrameStream, SseTransportError> {
+    Ok(SseTransportIn03ValidatedFrameStream { frame })
+}
+
 pub fn build_sse_transport_out_04_keepalive_comment(
     comment: &str,
 ) -> SseTransportOut04EncodedChunk {
     SseTransportOut04EncodedChunk(format!(":{}\n\n", comment).into_bytes())
-}
-
-fn build_sse_transport_in_03_from_sse_transport_in_02(
-    frame: SseTransportIn02DecodedFrame,
-) -> Result<SseTransportIn03ValidatedFrameStream, SseTransportError> {
-    Ok(SseTransportIn03ValidatedFrameStream { frame })
 }
 
 fn build_sse_transport_in_02_from_sse_transport_in_01(
@@ -338,7 +344,7 @@ fn build_sse_transport_in_02_from_sse_transport_in_01(
     let body = text.trim_end_matches(['\r', '\n']);
     let mut fields = Vec::new();
     for line in body.split(['\n', '\r']).filter(|line| !line.is_empty()) {
-        if line.as_bytes().len() > limits.max_line_bytes {
+        if line.len() > limits.max_line_bytes {
             return Err(SseTransportError::LineLimitExceeded {
                 limit: limits.max_line_bytes,
             });

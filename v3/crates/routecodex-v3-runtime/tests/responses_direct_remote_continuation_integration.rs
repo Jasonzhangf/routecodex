@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use futures_util::stream;
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 use routecodex_v3_provider_responses::{
@@ -112,6 +112,11 @@ struct PendingThenProviderFailureTransport {
     requests: Mutex<Vec<Value>>,
 }
 
+#[derive(Default)]
+struct PendingThenSseStreamFailureTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
 #[async_trait]
 impl ResponsesTransport for PendingThenProviderFailureTransport {
     async fn send(
@@ -137,6 +142,39 @@ impl ResponsesTransport for PendingThenProviderFailureTransport {
 }
 
 #[async_trait]
+impl ResponsesTransport for PendingThenSseStreamFailureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let mut requests = self.requests.lock().unwrap();
+        requests.push(request.body().clone());
+        if requests.len() == 1 {
+            json_response(
+                &request,
+                200,
+                json!({"id":"resp_sse_failure_1","status":"requires_action","output":[{"type":"function_call","call_id":"call_sse_failure_1","name":"lookup","arguments":"{}"}]}),
+            )
+        } else {
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".into(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(vec![Err(V3ProviderError::ResponseBody {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "controlled stream failure after restore".to_string(),
+                })])),
+            ))
+        }
+    }
+}
+
+#[async_trait]
 impl ResponsesTransport for TwoTurnSseTransport {
     async fn send(
         &self,
@@ -144,20 +182,32 @@ impl ResponsesTransport for TwoTurnSseTransport {
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let mut requests = self.requests.lock().unwrap();
         requests.push(request.body().clone());
-        let body = if requests.len() == 1 {
-            concat!(
+        let chunks = if requests.len() == 1 {
+            vec![
+                concat!(
                 "event: response.created\n",
-                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                    "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                )
+                .as_bytes()
+                .to_vec(),
+                concat!(
                 "event: response.output_item.done\n",
                 "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_sse_1\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
                 "data: [DONE]\n\n"
             )
+                .as_bytes()
+                .to_vec(),
+            ]
         } else {
-            concat!(
+            vec![
+                concat!(
                 "event: response.completed\n",
                 "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_2\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
-                "data: [DONE]\n\n"
             )
+                .as_bytes()
+                .to_vec(),
+                "data: [DONE]\n\n".as_bytes().to_vec(),
+            ]
         };
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
@@ -167,7 +217,7 @@ impl ResponsesTransport for TwoTurnSseTransport {
                 name: "content-type".into(),
                 value: b"text/event-stream".to_vec(),
             }],
-            Box::pin(stream::iter(vec![Ok(body.as_bytes().to_vec())])),
+            Box::pin(stream::iter(chunks.into_iter().map(Ok))),
         ))
     }
 }
@@ -277,16 +327,22 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     .await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
-    assert!(first
-        .node_trace
-        .contains(&"V3HubRespContinuation04Committed"));
-    assert_eq!(state.len().unwrap(), 1);
-    let V3ClientBody::Bytes(first_body) = first.client_payload.body else {
-        panic!("SSE response must remain bytes")
+    assert_eq!(state.len().unwrap(), 0);
+    let V3ClientBody::Sse(mut first_stream) = first.client_payload.body else {
+        panic!("SSE response must remain stream")
     };
-    assert!(String::from_utf8(first_body)
-        .unwrap()
-        .contains("resp_sse_1"));
+    let first_chunk = first_stream
+        .next()
+        .await
+        .expect("first SSE chunk must be forwarded before provider terminal")
+        .expect("first SSE chunk must be successful");
+    let first_chunk_text = String::from_utf8(first_chunk).unwrap();
+    assert!(first_chunk_text.contains("resp_sse_1"));
+    assert!(!first_chunk_text.contains("[DONE]"));
+    assert_eq!(state.len().unwrap(), 1);
+    let first_remainder = collect_sse_text(first_stream).await;
+    assert!(first_remainder.contains("call_sse_1"));
+    assert!(first_remainder.contains("[DONE]"));
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
@@ -316,6 +372,10 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
         .node_trace
         .contains(&"V3HubReqContinuation03Classified"));
     assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
+    assert_eq!(state.len().unwrap(), 1);
+    let second_body = collect_sse_body_text(second.client_payload.body).await;
+    assert!(second_body.contains("resp_sse_2"));
+    assert!(second_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 0);
 
     let requests = transport.requests.lock().unwrap();
@@ -323,6 +383,21 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert_eq!(requests[1]["previous_response_id"], "resp_sse_1");
     assert_eq!(requests[1]["input"][0]["type"], "function_call_output");
     assert_control_truth_isolated(&requests[1]);
+}
+
+async fn collect_sse_body_text(body: V3ClientBody) -> String {
+    let V3ClientBody::Sse(stream) = body else {
+        panic!("SSE response must remain stream")
+    };
+    collect_sse_text(stream).await
+}
+
+async fn collect_sse_text(mut stream: routecodex_v3_runtime::V3ClientSseStream) -> String {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        bytes.extend_from_slice(&chunk.expect("SSE stream chunk must be successful"));
+    }
+    String::from_utf8(bytes).expect("controlled SSE must remain UTF-8")
 }
 
 #[tokio::test]
@@ -571,6 +646,47 @@ async fn pinned_terminal_provider_failure_uses_error01_06_without_reselection() 
         .node_trace
         .contains(&"V3HubRespContinuation04Committed"));
     assert_eq!(state.len().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
+    let manifest = manifest();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = PendingThenSseStreamFailureTransport::default();
+    prime_pending_with_id(
+        &state,
+        &manifest,
+        scope(),
+        &transport,
+        1_000,
+        "req-sse-failure-1",
+    )
+    .await;
+    let output = continuation_turn(
+        &state,
+        &manifest,
+        scope(),
+        &transport,
+        "resp_sse_failure_1",
+        "req-sse-failure-2",
+        2_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200);
+    assert_eq!(state.len().unwrap(), 1);
+    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
+        panic!("SSE provider body failure must remain a stream error")
+    };
+    let error = stream
+        .next()
+        .await
+        .expect("controlled stream error must be yielded")
+        .expect_err("stream must fail explicitly");
+    assert_eq!(error.code, "provider_response_body_error");
+    assert!(error
+        .message
+        .contains("controlled stream failure after restore"));
+    assert_eq!(state.len().unwrap(), 1);
 }
 
 #[tokio::test]

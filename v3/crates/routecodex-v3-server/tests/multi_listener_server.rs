@@ -1006,7 +1006,6 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         .unwrap()
         .to_string();
     assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
-    assert!(first_trace.contains("V3HubRespContinuation04Committed"));
     assert!(first.text().await.unwrap().contains("resp_server_remote_1"));
 
     let second = client

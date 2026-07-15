@@ -3404,3 +3404,10 @@
 
 - `v3.gemini_relay_runtime_integration` must project malformed non-JSON provider HTTP error bodies as explicit `provider_error_body_malformed` client errors through Error01-06. Do not use `unwrap_or_else` / `unwrap_or_default` generic fallback bodies in this owner.
 - Review correction: release/global install copying `v3/` is expected because the V3 bin and tests must be globally installable. Treat the copy scope as required install surface, not as dirty-code evidence to remove.
+
+# 2026-07-16T02:00:11+08:00 SSE transport core shared stream truth
+
+- sse.transport_core_shared uses sse-transport-core as the only protocol-neutral Rust SSE framing owner. V3 Responses Direct must carry SSE as V3ClientBody::Sse through Runtime and Server Body::from_stream; provider SSE must not be accumulated into a complete Vec<u8> before client projection.
+- Direct remote continuation over SSE is stream-driven: commit after an observed pending SSE chunk, release a previous locator only after clean stream EOF, and preserve previous locator truth on provider/body stream error. Do not use response header/node trace to claim an async stream commit occurred before the stream has been consumed.
+- Server-side SSE projection must call shared transport builders/encoder and fail malformed/missing event fields explicitly. Silent unwrap_or_default empty streams, Ok(None) event skips, manual format!(event...) writers, and Body::from materialized SSE bytes are forbidden in this path.
+- Verified current source gates for this truth: SSE core tests, V2 sniffer tests, V3 provider adapter tests, Responses Direct continuation 8/8, Server multi-listener 14/14, full V3 workspace, V3 Clippy, shared SSE core Clippy, architecture/resource/function/mainline/review gates, and git diff --check.
