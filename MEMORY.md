@@ -3381,3 +3381,21 @@
 - Same-protocol direct `/v1/responses` can receive HTTP 200 and then get provider failure in the SSE body (`event: response.failed` or `event: error`). Those frames must be classified before client streaming starts; router-direct HTTP status handling cannot see them because the status is already 200.
 - The legal fix is in provider runtime SSE pre-stream guards: map 401/402/403/429/5xx provider-failure frames to retryable typed provider errors with `statusCode/status/code/upstreamCode/requestExecutorProviderErrorStage`, so ErrorErr05 can exclude and reroute. Client projection, router fallback, and rate-limit-only checks are insufficient.
 - Verification evidence for the 402 fix: focused direct/guard Jest 33/33, `verify:error-pipeline-contract`, `verify:provider-failure-ban-blackbox` (`scenario402`: primary 1, backup 1, client 200), `build:base`, global install `0.90.3935`, installed `ResponsesProvider` direct SSE 402 replay, `routecodex restart --port 5520`, `/health` version `0.90.3935`, and live 5520 `/v1/responses` SSE success without provider failure frame.
+
+# 2026-07-16 V3 Hub Relay controlled Runtime closeout truth
+
+- Marker: `v3-hub-relay-controlled-closeout-20260716`.
+- `v3.hub_relay_runtime_closeout` is verified at the controlled Rust Runtime boundary. JSON and SSE traverse fixed Req01-Req09 plus Resp01-Resp06 and each reach one `V3ServerRespOutbound06ClientFrame`.
+- Local continuation is saved at Resp04, restored before next Req04 governance, and released after terminal success. The Runtime response hook profile observes `servertool.exec`; provider errors enter Error01-06 without Resp01 success projection; provider/client normal payloads exclude session/conversation, continuation-store, MetadataCenter, and RouteCodex control truth.
+- Copy-budget probes prove the controlled request/response/SSE/local-continuation/servertool surfaces do not add full payload/SSE materialization. Closeout mutation gates independently reject non-adjacent topology, late Resp04 commit, second response exit, dynamic hook discovery, P6 shortcut, fallback, hook-profile loss, and map/gate drift.
+- Current-state evidence: closeout Runtime 3/3; closeout red 10/10; copy probes 4/4; copy red 7/7; V3 architecture/resource/module/Rust-only/static-hook/fmt/Clippy/full-workspace/diff gates all pass.
+- This does not authorize or prove P6 deletion, live Relay Server cutover, `~/.rcc` mutation, global install, restart, release, real-provider compatibility, or production replacement.
+
+# 2026-07-16 V3 Gemini Relay controlled Runtime truth
+
+- Marker: `v3-gemini-relay-controlled-runtime-20260716`.
+- `v3.gemini_relay_runtime_integration` is verified at the controlled Rust Runtime and Server loopback boundary. `/v1beta/models/:model/generateContent` now compiles as a `relay` entry binding with owner `execute_v3_gemini_relay_runtime_with_default_transport`.
+- Gemini-specific semantics stay in the Gemini codec/runtime owner: dynamic URL model extraction, candidate/usage projection, `functionCall` name preservation, incremental SSE decode, malformed/non-terminal/post-terminal SSE rejection, and provider 429 Error01-06 projection.
+- Server consumes the entry binding registry and projects typed runtime output only; it does not parse candidate/functionCall/finishReason semantics. Virtual Router classifies dynamic `/v1beta/models/.../generateContent` endpoints as `gemini` facts without provider-specific Hub/Server branches.
+- Verification evidence: Gemini runtime/server tests, Gemini verifier and 10 red mutations, entry binding verifier/red fixtures, V3 resource/module/Rust-only/static-hook/wiki/manifest/fmt/Clippy/full-workspace/diff gates all pass.
+- This does not prove real Gemini upstream compatibility, live config, production cutover, credentials, or release routing beyond the controlled loopback boundary.

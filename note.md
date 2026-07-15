@@ -30853,6 +30853,15 @@ Pure Rust NAPI candidates:
 - Green runtime evidence 2026-07-15T16:44:52Z: `gemini_relay_runtime_integration` passes 4/4 for controlled JSON, SSE first-frame-before-terminal, provider 429 Error01-06, and side-channel pre-send rejection. Required forward fix: V3 VR endpoint classification now recognizes `/v1beta/models/:model/generateContent` as `gemini` instead of deriving an invalid path token.
 - Server evidence 2026-07-15T16:47:49Z: `gemini_relay_controlled` passes controlled JSON/SSE/error/isolation; `multi_listener_server` 14/14 updated away from old Gemini pending assertions.
 
+# 2026-07-16 V3 Hub Relay controlled Runtime closeout
+
+- Goal `v3.hub_relay_runtime_closeout` now has controlled JSON/SSE fixed-topology E2E, two-turn local continuation with `servertool.exec` response-hook profile, Error01-06 negative projection, side-channel isolation, one response exit, and request/response/SSE copy-budget evidence.
+- Completion audit found the original closeout red fixture was too broad: it did not independently mutate non-adjacent topology, late Resp04 commit, second response exit, or dynamic hook discovery. The verifier now locks Resp04-before-Resp05 ordering and exactly one JSON/SSE Resp06 builder per branch; the red suite rejects 10 mutations.
+- Maps now mark the controlled closeout verified; wiki Required gates and completion boundary are current. Architecture gate forward fix replaced explanatory `routecodex-v3-server endpoint binding consumer` with the real `pending_endpoint` source symbol.
+- Required gates passed on the current worktree: closeout Runtime 3/3; closeout red 10/10; copy probes 4/4; copy red 7/7; architecture docs 25/63/159; resource/module/Rust-only/static-hook; fmt; full-workspace Clippy; full V3 workspace; diff check.
+- A stale Gemini worker test briefly blocked full Clippy with an identity `map_err`; no live agent/PID remained, so a semantics-neutral one-line forward fix removed it before the final Gemini controlled-runtime gates were completed.
+- Boundary remains controlled Runtime only. No P6 deletion, live Relay cutover, `~/.rcc` mutation, global install, restart, release, real-provider compatibility, or production replacement was performed.
+
 # 2026-07-15T16:49Z direct Responses SSE 402 reroute closeout
 
 - Root cause: same-protocol direct received HTTP 200 before the SSE body emitted `response.failed/error`; the pre-stream guard only recognized rate-limit payloads, so billing/quota 402 frames bypassed ErrorErr05 and reached the client.
