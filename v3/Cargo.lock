@@ -930,6 +930,7 @@ dependencies = [
  "routecodex-v3-provider-responses",
  "routecodex-v3-target",
  "routecodex-v3-virtual-router",
+ "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",

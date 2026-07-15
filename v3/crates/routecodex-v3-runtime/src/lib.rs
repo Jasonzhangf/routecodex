@@ -3,6 +3,7 @@ pub mod hooks;
 pub mod hub_v1;
 pub mod kernel;
 pub mod nodes;
+pub mod remote_continuation;
 mod shared;
 
 pub use foundation::{
@@ -19,3 +20,4 @@ pub use kernel::{
     V3ResponsesDirectRuntimeOutput,
 };
 pub use nodes::*;
+pub use remote_continuation::*;
