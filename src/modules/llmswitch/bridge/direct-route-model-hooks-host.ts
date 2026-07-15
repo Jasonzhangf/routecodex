@@ -21,6 +21,7 @@ export interface DirectRouteResolvedSemantics {
   routeThinking?: string;
   requestThinking?: string;
   originalClientModel?: string;
+  directHistoryToolImageCleanup?: boolean;
 }
 
 export function resolveDirectSemanticClassificationNative(input: unknown): DirectRouteResolvedSemantics {

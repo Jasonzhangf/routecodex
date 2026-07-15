@@ -374,6 +374,53 @@ describe('router-direct-pipeline', () => {
       expect(openaiHandle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
+    it('applies configured historical tool image cleanup in direct hook only', async () => {
+      const responsesHandle = createMockProviderHandle('openai-responses');
+      const requestPayload = {
+        model: 'gpt-5.6',
+        input: [
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old' }] },
+          {
+            type: 'function_call_output',
+            call_id: 'old_call',
+            output: [{ type: 'input_image', image_url: 'data:image/png;base64,OLD' }]
+          },
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'new' }] },
+          {
+            type: 'function_call_output',
+            call_id: 'new_call',
+            output: [{ type: 'input_image', image_url: 'data:image/png;base64,NEW' }]
+          }
+        ]
+      };
+
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: requestPayload,
+        requestPayload,
+        target: {
+          providerKey: 'openai.key1.gpt-5.6-sol',
+          providerType: 'openai',
+          runtimeKey: responsesHandle.runtimeKey,
+          modelId: 'gpt-5.6-sol',
+          directHistoryToolImageCleanup: true,
+        },
+        routingDecision: { routeName: 'thinking', pool: ['openai.key1.gpt-5.6-sol'] },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === responsesHandle.runtimeKey ? responsesHandle : undefined,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (responsesHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, any>;
+      expect(sentPayload).not.toBe(requestPayload);
+      expect(sentPayload.input[1].output[0]).toEqual({
+        type: 'input_text',
+        text: 'historical tool image omitted',
+      });
+      expect(sentPayload.input[3].output[0].image_url).toBe('data:image/png;base64,NEW');
+      expect(requestPayload.input[1].output[0].image_url).toBe('data:image/png;base64,OLD');
+    });
+
     it('explicit passthrough preserves direct request and provider response model/thinking', async () => {
       const requestPayload = {
         model: 'client-model',

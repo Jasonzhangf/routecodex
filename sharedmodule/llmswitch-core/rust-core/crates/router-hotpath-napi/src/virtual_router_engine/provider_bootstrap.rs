@@ -115,6 +115,8 @@ struct ProviderRuntimeProfileJson {
     anthropic_thinking_budgets: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     direct_semantic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    direct_history_tool_image_cleanup: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +162,8 @@ struct ProviderProfileJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     alias_to_model: Option<BTreeMap<String, String>>,
     direct_semantic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    direct_history_tool_image_cleanup: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -175,6 +179,8 @@ struct ModelIndexEntry {
     compatibility_profiles: BTreeMap<String, String>,
     #[serde(default)]
     direct_semantics: BTreeMap<String, String>,
+    #[serde(default)]
+    direct_history_tool_image_cleanup: BTreeMap<String, bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -396,6 +402,7 @@ fn build_provider_runtime_entries(
                     anthropic_thinking: None,
                     anthropic_thinking_budgets: None,
                     direct_semantic: None,
+                    direct_history_tool_image_cleanup: None,
                 },
             );
         }
@@ -468,6 +475,11 @@ fn build_provider_profiles(
             .get(&canonical_model_id)
             .cloned()
             .unwrap_or_else(|| "routing".to_string());
+        let direct_history_tool_image_cleanup = model_info
+            .direct_history_tool_image_cleanup
+            .get(&canonical_model_id)
+            .copied()
+            .unwrap_or(false);
 
         profiles.insert(
             target_key.clone(),
@@ -502,6 +514,8 @@ fn build_provider_profiles(
                     Some(model_info.alias_to_model.clone())
                 },
                 direct_semantic: direct_semantic.clone(),
+                direct_history_tool_image_cleanup: direct_history_tool_image_cleanup
+                    .then_some(true),
             },
         );
 
@@ -515,6 +529,8 @@ fn build_provider_profiles(
             resolve_anthropic_thinking(runtime, &canonical_model_id);
         resolved_runtime.anthropic_thinking_budgets = anthropic_thinking_budgets;
         resolved_runtime.direct_semantic = Some(direct_semantic);
+        resolved_runtime.direct_history_tool_image_cleanup =
+            direct_history_tool_image_cleanup.then_some(true);
         target_runtime.insert(target_key.clone(), resolved_runtime);
     }
 
@@ -659,6 +675,7 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
     let mut alias_to_model: BTreeMap<String, String> = BTreeMap::new();
     let mut compatibility_profiles: BTreeMap<String, String> = BTreeMap::new();
     let mut direct_semantics: BTreeMap<String, String> = BTreeMap::new();
+    let mut direct_history_tool_image_cleanup: BTreeMap<String, bool> = BTreeMap::new();
     let mut seen = HashSet::new();
 
     if let Some(models_value) = provider.get("models") {
@@ -669,13 +686,16 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                         continue;
                     };
                     if let Some(model_id) = read_optional_string(model_obj.get("id")) {
-                        let direct_semantic =
-                            normalize_model_direct_semantic(&model_id, model_obj)?;
-                        direct_semantics.insert(model_id.trim().to_string(), direct_semantic);
+                        let direct_policy = normalize_model_direct_policy(&model_id, model_obj)?;
+                        let model_id = model_id.trim().to_string();
+                        direct_semantics.insert(model_id.clone(), direct_policy.semantic);
+                        if direct_policy.history_tool_image_cleanup {
+                            direct_history_tool_image_cleanup.insert(model_id.clone(), true);
+                        }
                         if let Some(profile) =
                             read_optional_string(model_obj.get("compatibilityProfile"))
                         {
-                            compatibility_profiles.insert(model_id.trim().to_string(), profile);
+                            compatibility_profiles.insert(model_id.clone(), profile);
                         }
                         push_unique_trimmed(&mut collected, &mut seen, &model_id);
                     }
@@ -706,9 +726,13 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
                     let canonical_model_id = model_name.trim().to_string();
                     push_unique_trimmed(&mut collected, &mut seen, &canonical_model_id);
                     if let Some(model_obj) = model_raw.as_object() {
-                        let direct_semantic =
-                            normalize_model_direct_semantic(&canonical_model_id, model_obj)?;
-                        direct_semantics.insert(canonical_model_id.clone(), direct_semantic);
+                        let direct_policy =
+                            normalize_model_direct_policy(&canonical_model_id, model_obj)?;
+                        direct_semantics.insert(canonical_model_id.clone(), direct_policy.semantic);
+                        if direct_policy.history_tool_image_cleanup {
+                            direct_history_tool_image_cleanup
+                                .insert(canonical_model_id.clone(), true);
+                        }
                         if let Some(profile) =
                             read_optional_string(model_obj.get("compatibilityProfile"))
                         {
@@ -745,13 +769,19 @@ fn collect_provider_models(provider: &Map<String, Value>) -> Result<ModelIndexEn
         alias_to_model,
         compatibility_profiles,
         direct_semantics,
+        direct_history_tool_image_cleanup,
     })
 }
 
-fn normalize_model_direct_semantic(
+struct ModelDirectPolicy {
+    semantic: String,
+    history_tool_image_cleanup: bool,
+}
+
+fn normalize_model_direct_policy(
     model_id: &str,
     model: &Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<ModelDirectPolicy, String> {
     for forbidden in [
         "modelPassthrough",
         "thinkingPassthrough",
@@ -764,13 +794,15 @@ fn normalize_model_direct_semantic(
             ));
         }
     }
-    Ok(
-        match validate_config_direct_02(model_id, model.get("direct"))?.semantic_class {
+    let policy = validate_config_direct_02(model_id, model.get("direct"))?;
+    Ok(ModelDirectPolicy {
+        semantic: match policy.semantic_class {
             DirectSemanticClass::Routing => "routing",
             DirectSemanticClass::Passthrough => "passthrough",
         }
         .to_string(),
-    )
+        history_tool_image_cleanup: policy.history_tool_image_cleanup,
+    })
 }
 
 fn push_model_alias(
@@ -1404,6 +1436,50 @@ mod alias_tests {
             output["targetRuntime"]["DS.key1.passthrough-model"]["directSemantic"],
             json!("passthrough")
         );
+    }
+
+    #[test]
+    fn provider_bootstrap_compiles_direct_history_tool_image_cleanup() {
+        let providers = json!({
+            "DS": {
+                "id": "DS",
+                "enabled": true,
+                "type": "openai",
+                "baseURL": "https://example.invalid/v1",
+                "auth": {
+                    "type": "apikey",
+                    "entries": [{ "alias": "key1", "apiKey": "test" }]
+                },
+                "models": {
+                    "gpt-5.6-sol": {
+                        "direct": { "historyToolImageCleanup": true }
+                    },
+                    "gpt-5.5": {}
+                }
+            }
+        });
+
+        let providers_bootstrap =
+            bootstrap_virtual_router_providers_json(providers.to_string()).unwrap();
+        let providers_bootstrap_json: Value = serde_json::from_str(&providers_bootstrap).unwrap();
+        let profiles = bootstrap_virtual_router_provider_profiles_json(
+            json!(["DS.key1.gpt-5.6-sol", "DS.key1.gpt-5.5"]).to_string(),
+            providers_bootstrap_json["aliasIndex"].to_string(),
+            providers_bootstrap_json["modelIndex"].to_string(),
+            providers_bootstrap_json["runtimeEntries"].to_string(),
+        )
+        .unwrap();
+        let output: Value = serde_json::from_str(&profiles).unwrap();
+
+        assert_eq!(
+            output["profiles"]["DS.key1.gpt-5.6-sol"]["directHistoryToolImageCleanup"],
+            json!(true)
+        );
+        assert_eq!(
+            output["targetRuntime"]["DS.key1.gpt-5.6-sol"]["directHistoryToolImageCleanup"],
+            json!(true)
+        );
+        assert!(output["profiles"]["DS.key1.gpt-5.5"]["directHistoryToolImageCleanup"].is_null());
     }
 
     #[test]

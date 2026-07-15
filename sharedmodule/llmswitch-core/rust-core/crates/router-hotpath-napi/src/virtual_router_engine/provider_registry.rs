@@ -22,6 +22,7 @@ pub(crate) struct ProviderProfile {
     pub series: Option<String>,
     pub alias_to_model: Option<BTreeMap<String, String>>,
     pub direct_semantic: String,
+    pub direct_history_tool_image_cleanup: bool,
     pub provider_specific_config: HashMap<String, Value>,
 }
 
@@ -212,6 +213,12 @@ impl ProviderRegistry {
             "directSemantic".to_string(),
             Value::String(profile.direct_semantic.clone()),
         );
+        if profile.direct_history_tool_image_cleanup {
+            target.insert(
+                "directHistoryToolImageCleanup".to_string(),
+                Value::Bool(true),
+            );
+        }
         for (key, value) in &profile.provider_specific_config {
             target.insert(key.clone(), value.clone());
         }
@@ -295,6 +302,10 @@ impl ProviderRegistry {
             .filter(|value| !value.is_empty())
             .unwrap_or("routing")
             .to_string();
+        let direct_history_tool_image_cleanup = map
+            .get("directHistoryToolImageCleanup")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         // Collect provider-specific config keys (everything not in the common schema)
         let common_keys: &[&str] = &[
             "providerKey",
@@ -321,6 +332,7 @@ impl ProviderRegistry {
             "context_tokens",
             "serverToolsDisabled",
             "directSemantic",
+            "directHistoryToolImageCleanup",
         ];
         let mut provider_specific_config: HashMap<String, Value> = HashMap::new();
         for (k, v) in map {
@@ -346,6 +358,7 @@ impl ProviderRegistry {
             series,
             alias_to_model,
             direct_semantic,
+            direct_history_tool_image_cleanup,
             provider_specific_config,
         })
     }

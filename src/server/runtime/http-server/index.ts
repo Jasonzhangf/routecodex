@@ -1928,6 +1928,7 @@ export class RouteCodexHttpServer {
         modelId: typeof target.modelId === 'string' ? target.modelId : undefined,
         routeThinking: target.routeThinking,
         directSemantic: target.directSemantic,
+        directHistoryToolImageCleanup: target.directHistoryToolImageCleanup,
       },
       routingDecision: routingDecision as { routeName?: string; pool?: string[] } | undefined,
       requestInfo: {

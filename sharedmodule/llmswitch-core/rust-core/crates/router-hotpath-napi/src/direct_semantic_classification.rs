@@ -27,11 +27,13 @@ impl DirectSemanticClass {
 #[derive(Debug, Clone)]
 pub(crate) struct ConfigDirect01AuthoringPolicy {
     pub(crate) semantics: Option<String>,
+    pub(crate) history_tool_image_cleanup: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ConfigDirect02ValidatedPolicy {
     pub(crate) semantic_class: DirectSemanticClass,
+    pub(crate) history_tool_image_cleanup: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +54,8 @@ pub(crate) struct VrDirect03ResolvedSemantics {
     pub(crate) request_thinking: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) original_client_model: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) direct_history_tool_image_cleanup: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +82,10 @@ pub(crate) fn validate_config_direct_02(
     direct_value: Option<&Value>,
 ) -> Result<ConfigDirect02ValidatedPolicy, String> {
     let authoring = match direct_value {
-        None => ConfigDirect01AuthoringPolicy { semantics: None },
+        None => ConfigDirect01AuthoringPolicy {
+            semantics: None,
+            history_tool_image_cleanup: false,
+        },
         Some(value) => {
             let direct = value.as_object().ok_or_else(|| {
                 format!(
@@ -87,7 +94,7 @@ pub(crate) fn validate_config_direct_02(
                 )
             })?;
             for key in direct.keys() {
-                if key != "semantics" {
+                if key != "semantics" && key != "historyToolImageCleanup" {
                     return Err(format!(
                         "Provider model {} direct policy contains unknown field {}",
                         model_id, key
@@ -110,7 +117,20 @@ pub(crate) fn validate_config_direct_02(
                         .to_string(),
                 ),
             };
-            ConfigDirect01AuthoringPolicy { semantics }
+            let history_tool_image_cleanup = match direct.get("historyToolImageCleanup") {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => {
+                    return Err(format!(
+                        "Provider model {} direct.historyToolImageCleanup must be boolean",
+                        model_id
+                    ))
+                }
+            };
+            ConfigDirect01AuthoringPolicy {
+                semantics,
+                history_tool_image_cleanup,
+            }
         }
     };
     let semantic_class = match authoring.semantics.as_deref() {
@@ -123,7 +143,10 @@ pub(crate) fn validate_config_direct_02(
             ))
         }
     };
-    Ok(ConfigDirect02ValidatedPolicy { semantic_class })
+    Ok(ConfigDirect02ValidatedPolicy {
+        semantic_class,
+        history_tool_image_cleanup: authoring.history_tool_image_cleanup,
+    })
 }
 
 pub(crate) fn resolve_direct_semantic_classification(
@@ -153,7 +176,24 @@ pub(crate) fn resolve_direct_semantic_classification(
         route_thinking: normalize_route_thinking(root.get("routeThinking")),
         request_thinking: request_thinking_level(payload),
         original_client_model,
+        direct_history_tool_image_cleanup: read_optional_bool(
+            root,
+            "directHistoryToolImageCleanup",
+        )?
+        .unwrap_or(false),
     })
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn read_optional_bool(root: &Map<String, Value>, key: &str) -> Result<Option<bool>, String> {
+    match root.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err(format!("direct semantic field {key} must be boolean")),
+    }
 }
 
 pub(crate) fn build_direct_req_04_projection_plan(

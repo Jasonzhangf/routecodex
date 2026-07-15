@@ -93,6 +93,8 @@ export interface RouterDirectInput {
     modelId?: string;
     /** Compiled provider/model direct semantic policy. */
     directSemantic?: unknown;
+    /** Compiled direct hook policy for historical tool-output image placeholders. */
+    directHistoryToolImageCleanup?: unknown;
   };
   routingDecision?: { routeName?: string; pool?: string[] };
   requestId?: string;
@@ -209,6 +211,7 @@ export async function executeRouterDirectPipeline(
     targetModelId: target.modelId,
     payload: input.requestPayload,
     routeThinking: target.routeThinking,
+    directHistoryToolImageCleanup: target.directHistoryToolImageCleanup,
   });
   auditContext.resolvedDirectSemantics = resolvedDirectSemantics;
 
