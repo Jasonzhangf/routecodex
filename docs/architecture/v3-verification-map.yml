@@ -95,6 +95,49 @@ features:
       runtime: "H1 is a source-only typed skeleton. Hub v1 Provider network execution, Server entry cutover, P6 migration, Relay, continuation, and additional protocols remain pending."
       forbidden_claim: "H1 typed skeleton is not a usable Hub v1 request path, Relay, continuation, additional provider protocol, or P6 migration."
 
+  - feature_id: v3.hub_relay_hook_resource_contract
+    status: contract_defined_runtime_pending
+    change_risk: critical
+    owner_kind: rust_project_v3_contract
+    owner_scope: "Relay fixed request/response pipeline, four-worker split, static entry/exit hooks, runtime resource configuration, servertool hook placement, and continuation immutable interval hardening"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-config
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+    required_contract:
+      - Relay is an execution mode inside the fixed Hub v1 skeleton, not a second lifecycle
+      - request and response sides are symmetric and every request traverses all fixed nodes
+      - continuation save and restore are separated only by semantic-equivalent normalization, scope validation, storage/transport, expiry, and release
+      - servertool is a Chat Process hook profile and cannot own a response exit or immutable-interval logic
+      - every node has static entry and exit hooks with deterministic Manifest selection
+      - Runtime resources are configured only through config.v3.toml to Manifest compilation
+      - four workers have independent claim IDs, allowed paths, forbidden paths, gates, and completion signals
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-hub-skeleton-doc-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "Contract phase is complete when design docs, four-worker plan, wiki, maps, and red fixtures agree and reject Relay shortcuts."
+      runtime: "No live Relay runtime is claimed from this feature; request/response/resource worker implementation and controlled replay remain pending."
+      forbidden_claim: "Do not claim live Relay, usable continuation runtime, servertool runtime hooks, Hub v1 cutover, P6 deletion, additional protocols, global install, or production replacement."
+
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified
     change_risk: high

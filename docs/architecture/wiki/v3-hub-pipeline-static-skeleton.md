@@ -6,6 +6,8 @@ Implementation order: [V3 Hub Pipeline Static Skeleton Plan](../../goals/v3-hub-
 
 Existing source audit: [Existing Hub and Provider Path Audit](../../design/v3-existing-hub-provider-path-audit.md)
 
+Relay contract: [V3 Hub Relay Fixed Pipeline Review](v3-hub-relay-fixed-pipeline.md)
+
 ## Fixed topology
 
 ```mermaid

@@ -3,9 +3,11 @@
 ## Status
 
 This document defines the fixed V3 Hub Pipeline topology before Relay, continuation, or additional
-provider protocols are implemented. All new Hub nodes and edges are `binding_pending`. The current
-P6 Responses Direct chain remains source-bound only as a migration source; it is not the final Hub
-Pipeline and must not be extended with more lifecycle branches.
+provider protocols are implemented. The detailed Relay execution contract is
+[V3 Hub Relay Fixed Pipeline Contract](v3-hub-relay-fixed-pipeline-contract.md). All new Hub nodes
+and edges are `binding_pending`. The current P6 Responses Direct chain remains source-bound only as
+a migration source; it is not the final Hub Pipeline and must not be extended with more lifecycle
+branches.
 
 ## Non-negotiable architecture
 
@@ -123,6 +125,11 @@ No routing, target selection, provider adaptation, Chat Process, tool governance
 tool-call/result repair, required-action inference, request rebuilding, stopless/servertool action,
 Debug replay, snapshot recovery, fallback, or success wrapping may occur in this interval. Missing,
 expired, corrupt, or mismatched context enters the global Error chain.
+
+This means no request processing and no response processing may run in the interval except
+semantic-equivalent normalization. If an operation can change what restore later sees, it must run
+before `V3HubRespContinuation04Committed` saves the context or after
+`V3HubReqChatProcess04Governed` restores it.
 
 Remote continuation stores no local Chat Process context. Its binding contains only the remote
 response ID, `continuationOwner=remote_provider`, entry protocol, server/port/group/session scope,

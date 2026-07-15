@@ -41,6 +41,20 @@ const fixtures = [
     resourceId: 'v3.continuation.local_context_truth',
     diagnostic: /unimplemented Hub v1 business resource must remain binding_pending/,
   },
+  {
+    name: 'relay worker split removed',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: 'feature_id:v3.hub_relay_request_semantics',
+    to: 'feature_id:v3.hub_relay_request_removed',
+    diagnostic: /Relay contract docs: missing invariant feature_id:v3\.hub_relay_request_semantics/,
+  },
+  {
+    name: 'relay immutable interval normalization rule removed',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: 'semantic-equivalent normalization',
+    to: 'arbitrary processing',
+    diagnostic: /Relay contract docs: missing invariant semantic-equivalent normalization/,
+  },
 ];
 
 const failures = [];

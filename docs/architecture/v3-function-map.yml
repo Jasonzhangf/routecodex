@@ -108,6 +108,67 @@ features:
       - continuation save restore
       - additional protocol implementations
 
+  - feature_id: v3.hub_relay_hook_resource_contract
+    owner_crate: routecodex-v3-runtime
+    owner_file: docs/design/v3-hub-relay-fixed-pipeline-contract.md
+    resource_bindings:
+      - v3.config.hub_pipeline_declarations
+      - v3.hub.static_hook_registry
+      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
+      - v3.hub.resolved_target
+      - v3.hub.provider_protocol
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.hub.response_semantic
+      - v3.continuation.remote_binding
+      - v3.continuation.local_context_truth
+    entry_symbols:
+      - V3HubReqInbound01ClientRaw
+      - V3HubReqChatProcess04Governed
+      - V3ProviderReqOutbound09TransportRequest
+      - V3ProviderRespInbound01Raw
+      - V3HubRespChatProcess03Governed
+      - V3HubRespContinuation04Committed
+      - V3ServerRespOutbound06ClientFrame
+    design_docs:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    allowed_paths:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-architecture-docs.mjs
+      - scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-hub-skeleton-doc-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: contract_only
+    parallel_workers:
+      - feature_id:v3.hub_relay_request_semantics
+      - feature_id:v3.hub_relay_response_semantics
+      - feature_id:v3.hub_relay_runtime_resources_hooks
+      - feature_id:v3.hub_relay_gate_review_surface
+
   - feature_id: v3.virtual_router_full_function
     owner_crates: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-runtime]
     owner_files:

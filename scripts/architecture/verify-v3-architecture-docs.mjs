@@ -9,12 +9,14 @@ const requiredFiles = [
   'docs/design/v3-routecodex-rust-module-boundaries.md',
   'docs/design/v3-routecodex-runtime-resource-contract.md',
   'docs/design/v3-hub-pipeline-static-skeleton-contract.md',
+  'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
   'docs/design/v3-existing-hub-provider-path-audit.md',
   'docs/goals/v3-foundation-implementation-order.md',
   'docs/goals/v3-debug-error-foundation-plan.md',
   'docs/goals/v3-responses-direct-mvp-test-design.md',
   'docs/goals/v3-responses-direct-mvp-implementation-plan.md',
   'docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md',
+  'docs/goals/v3-hub-relay-four-worker-implementation-plan.md',
   'docs/goals/v3-hub-h2-p6-responses-direct-characterization.md',
   'docs/goals/v3-config-server-full-function-plan.md',
   'docs/goals/v3-virtual-router-full-function-plan.md',
@@ -24,6 +26,7 @@ const requiredFiles = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-responses-direct-mainline.md',
   'docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md',
+  'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   'docs/architecture/wiki/v3-config-server-full-function.md',
   'docs/architecture/wiki/v3-config-server-full-function.html',
 ];
@@ -171,6 +174,37 @@ for (const forbidden of [
   /provider_family\s*==/,
   /same protocol\s*=\s*Direct/i,
 ]) if (forbidden.test(hubV1ContractDocs)) fail(`Hub v1 contract docs: forbidden design ${forbidden}`);
+
+const hubRelayContract = read('docs/design/v3-hub-relay-fixed-pipeline-contract.md');
+const hubRelayContractDocs = [
+  hubRelayContract,
+  read('docs/goals/v3-hub-relay-four-worker-implementation-plan.md'),
+  read('docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md'),
+].join('\n');
+for (const phrase of [
+  'feature_id:v3.hub_relay_request_semantics',
+  'feature_id:v3.hub_relay_response_semantics',
+  'feature_id:v3.hub_relay_runtime_resources_hooks',
+  'feature_id:v3.hub_relay_gate_review_surface',
+  'V3HubReqChatProcess04Governed',
+  'V3HubRespChatProcess03Governed',
+  'restore(normalize(save(context))) == context',
+  'Between save and restore',
+  'semantic-equivalent normalization',
+  'Servertool is a Chat Process hook profile',
+  'Runtime consumes only Manifest resources',
+  'Live Relay remains pending',
+]) if (!hubRelayContractDocs.includes(phrase)) fail(`Relay contract docs: missing invariant ${phrase}`);
+for (const phrase of [
+  'feature_id:v3.hub_relay_request_semantics',
+  'semantic-equivalent normalization',
+]) if (!hubRelayContract.includes(phrase)) fail(`Relay contract docs: missing invariant ${phrase}`);
+if (!hubRelayContractDocs.includes('Do not create a second lifecycle')) {
+  fail('Relay contract docs: missing second lifecycle ban');
+}
+if (!hubRelayContractDocs.includes('dynamic hook discovery')) {
+  fail('Relay contract docs: missing dynamic hook discovery ban');
+}
 
 for (const file of requiredFiles.filter((entry) => entry.endsWith('.md'))) {
   const text = read(file);
