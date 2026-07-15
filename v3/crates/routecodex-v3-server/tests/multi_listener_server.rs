@@ -10,7 +10,9 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{net::TcpListener, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
+
+static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn manifest(port_a: u16, port_b: u16) -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_with_debug(port_a, port_b, true, true)
@@ -407,6 +409,51 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
         assert!(serialized_logs.contains(node), "{node}");
     }
     assert!(!serialized_logs.contains("secret-p6"));
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn p6_responses_endpoint_accepts_image_payload_above_one_mib() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-large-image");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+    let image_url = format!("data:image/png;base64,{}", "A".repeat(1_200_000));
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model": "client-test",
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Describe this image."},
+                    {"type": "input_image", "image_url": image_url}
+                ]
+            }]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "V3 must preserve the V2 64MiB HTTP body contract for image-bearing requests"
+    );
+    let capture = captures.recv().await.unwrap();
+    assert!(
+        capture.body["input"][0]["content"][1]["image_url"]
+            .as_str()
+            .is_some_and(|value| value.len() > 1_000_000),
+        "provider wire request must retain the original image payload"
+    );
+
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -835,7 +882,7 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
             client
                 .post(format!("{base}/v1/responses"))
                 .header("content-type", "application/json")
-                .body(vec![b'x'; 1024 * 1024 + 1])
+                .body(vec![b'x'; 64 * 1024 * 1024 + 1])
                 .send()
                 .await
                 .unwrap(),

@@ -30657,3 +30657,8 @@ Pure Rust NAPI candidates:
 - SSE uses the shared incremental decoder across arbitrary chunk boundaries. The controlled driver receives only `case_id` and `client_request` over stdin and loads a harness-generated config through `V3ConfigStore`; Server source does not read fixture/config files or interpret route groups.
 - Focused evidence: Rust integration 3/3, controlled replay 4/4, integration verifier plus 8 negative mutations, harness verifier plus 7 mutations and 8 missing-edge red diagnostics, request/response/protocol gates, module/Rust-only/static-hook/copy-budget gates.
 - Completion boundary remains controlled repo-local Runtime integration only. Live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, and production cutover are not claimed.
+
+# 2026-07-15 V3 5555 large image request closeout
+
+- Red truth split into two layers: the live 5555 HTTP boundary rejected a 1,200,201-byte Responses request with 413 before Runtime, while the Rust routing estimator counted a 1.2MB image/video base64 string as roughly 375k text tokens.
+- The V3 Server body allocation boundary now matches the V2 default 64MiB contract and still rejects 64MiB+1. The Rust V3 routing estimator omits media bytes with fixed structural cost, including stringified structured media; the provider wire payload remains unchanged. Focused/full V3 gates passed; after managed restart, live `/v1/responses` accepted a valid 3.24MiB request containing a 2.43MiB PNG with 200 while V2 ports remained healthy.

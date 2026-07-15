@@ -596,7 +596,9 @@ fn build_v3_debug_runtime_from_manifest(
     })
 }
 
-const V3_MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+// Preserve the V2 HTTP contract: image-bearing Responses requests may contain
+// large data URLs, while the boundary still needs a finite allocation cap.
+const V3_MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 async fn read_json_payload(
     request: Request,

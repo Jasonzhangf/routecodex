@@ -147,16 +147,73 @@ fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
 fn estimate_v3_structured_chars(value: &Value) -> usize {
     match value {
         Value::Null => 0,
-        Value::Bool(value) => usize::from(*value) + 4,
+        Value::Bool(value) => value.to_string().len(),
         Value::Number(value) => value.to_string().len(),
-        Value::String(value) => value.chars().count(),
+        Value::String(value) => estimate_v3_text_or_structured_chars(value),
         Value::Array(values) => values.iter().map(estimate_v3_structured_chars).sum(),
-        Value::Object(values) => values
-            .iter()
-            .filter(|(key, _)| !matches!(key.as_str(), "metadata" | "client_metadata"))
-            .map(|(key, value)| key.len() + estimate_v3_structured_chars(value))
-            .sum(),
+        Value::Object(values) => {
+            if detect_v3_media_kind(values).is_some() {
+                let type_len = values
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(str::len)
+                    .unwrap_or(5);
+                return type_len + "[omitted_media]".len();
+            }
+            values
+                .iter()
+                .filter(|(key, _)| !matches!(key.as_str(), "metadata" | "client_metadata"))
+                .map(|(key, value)| key.len() + estimate_v3_structured_chars(value))
+                .sum()
+        }
     }
+}
+
+fn estimate_v3_text_or_structured_chars(raw: &str) -> usize {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if likely_json {
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return estimate_v3_structured_chars(&parsed);
+        }
+    }
+    raw.chars().count()
+}
+
+fn detect_v3_media_kind(values: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    let type_value = values
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if type_value.contains("video") {
+        return Some("video");
+    }
+    if type_value.contains("image") {
+        return Some("image");
+    }
+    if values.contains_key("video_url") {
+        return Some("video");
+    }
+    if values.contains_key("image_url") {
+        return Some("image");
+    }
+    let data = values
+        .get("data")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if data.starts_with("data:video/") {
+        return Some("video");
+    }
+    if data.starts_with("data:image/") {
+        return Some("image");
+    }
+    None
 }
 
 pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
@@ -167,5 +224,89 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         target: selected,
         request_id: standardized.protocol_context.request_id.clone(),
         request_body: standardized.body.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_v3_router_request_facts_for_entry;
+    use serde_json::json;
+
+    #[test]
+    fn v3_routing_token_estimate_omits_image_payload_bytes() {
+        let base = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image." }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+        let with_image = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image." },
+                        {
+                            "type": "input_image",
+                            "image_url": {
+                                "url": format!("data:image/png;base64,{}", "A".repeat(1_200_000))
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+
+        let base_tokens = build_v3_router_request_facts_for_entry(&base, "responses").input_tokens;
+        let image_tokens =
+            build_v3_router_request_facts_for_entry(&with_image, "responses").input_tokens;
+
+        assert!(
+            image_tokens <= base_tokens + 8,
+            "V3 routing token estimate must omit image/base64 bytes like the V2 Rust estimator; base={base_tokens}, image={image_tokens}"
+        );
+    }
+
+    #[test]
+    fn v3_routing_token_estimate_omits_stringified_media_payloads() {
+        let base_input = serde_json::to_string(&json!([
+            { "type": "input_text", "text": "Summarize this clip." }
+        ]))
+        .unwrap();
+        let base = json!({
+            "model": "gpt-5.6-sol",
+            "input": base_input,
+            "tools": []
+        });
+        let stringified = serde_json::to_string(&json!([
+            { "type": "input_text", "text": "Summarize this clip." },
+            {
+                "type": "input_video",
+                "video_url": format!("data:video/mp4;base64,{}", "B".repeat(1_200_000))
+            }
+        ]))
+        .unwrap();
+        let with_video = json!({
+            "model": "gpt-5.6-sol",
+            "input": stringified,
+            "tools": []
+        });
+
+        let base_tokens = build_v3_router_request_facts_for_entry(&base, "responses").input_tokens;
+        let video_tokens =
+            build_v3_router_request_facts_for_entry(&with_video, "responses").input_tokens;
+
+        assert!(
+            video_tokens <= base_tokens + 12,
+            "V3 routing token estimate must omit stringified media/base64 bytes like the V2 Rust estimator; base={base_tokens}, video={video_tokens}"
+        );
     }
 }

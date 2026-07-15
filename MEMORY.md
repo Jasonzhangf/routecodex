@@ -3269,3 +3269,9 @@
 - Node traces are evidence only when appended after the actual owning action. Req05 must precede VR/Target selection; Req06 carries selected-target truth; Responses wire and transport construction must finish before Req08/Req09 trace emission.
 - A Server-owned controlled driver must keep fixture/config authoring IO outside Server semantics: accept only case input over stdin and load the harness config through `V3ConfigStore`. It must not read expected fixture fields or recreate route selection.
 - This truth does not establish live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, or production cutover.
+
+# 2026-07-15 V3 Responses image body/token boundary truth
+
+- HTTP request byte limits and routing token estimates are separate contracts. V3 Server uses the V2-compatible finite 64MiB request-body cap for allocation safety; it must not reuse the former 1MiB cap as a model-context limit.
+- V3 routing token estimation is Rust-owned and follows the established media-omission behavior: image/video URL or base64 bytes, including stringified structured content, contribute only fixed structural cost. This omission is estimation-only; provider wire payloads retain the original media unchanged.
+- Required regression pair: a valid image-bearing Responses request above 1MiB reaches the provider, while a request above 64MiB still returns typed 413. Live 5555 accepted a 3.24MiB valid PNG request with HTTP 200 after managed restart.
