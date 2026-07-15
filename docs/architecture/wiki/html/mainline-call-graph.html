@@ -881,6 +881,35 @@
         <tr><td>stage-a-p0-06</td><td><code>ResponsesRequestInbound -&gt; OpenAiChatCanonical</code></td><td>anchored</td><td><code>run_responses_openai_request_codec_json -&gt; run_responses_openai_response_codec_json</code></td><td></td><td><code>conversion.shared.responses_openai</code>&lt;br/&gt;OpenAI Responses to OpenAI Chat protocol normalization and response projection</td></tr>
         </tbody>
         </table>
+        <h2>sse.transport_core_shared.mainline</h2>
+        <p>Protocol-neutral streaming bytes move only through the shared Rust SSE transport topology; V2 and V3 adapters converge on the same encoder.</p>
+        <p>Entry contract: <code>SseTransportIn01RawChunk</code> via <code>docs/goals/v3-sse-transport-core-extraction-plan.md</code></p>
+        <pre class="mermaid">flowchart LR
+          SseTransportOut04EncodedChunk[&quot;SseTransportOut04EncodedChunk&quot;]
+          SseTransportIn03ValidatedFrameStream[&quot;SseTransportIn03ValidatedFrameStream&quot;]
+          SseTransportIn02DecodedFrame[&quot;SseTransportIn02DecodedFrame&quot;]
+          SseTransportIn01RawChunk[&quot;SseTransportIn01RawChunk&quot;]
+          SseTransportIn01RawChunk --&gt;|sse-transport-core-01| SseTransportIn02DecodedFrame
+          SseTransportIn02DecodedFrame --&gt;|sse-transport-core-02| SseTransportIn03ValidatedFrameStream
+          SseTransportIn03ValidatedFrameStream --&gt;|sse-transport-core-03-v2| SseTransportOut04EncodedChunk
+          SseTransportIn03ValidatedFrameStream --&gt;|sse-transport-core-03-v3| SseTransportOut04EncodedChunk
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class SseTransportIn01RawChunk anchored;
+          class SseTransportIn02DecodedFrame anchored;
+          class SseTransportIn03ValidatedFrameStream anchored;
+          class SseTransportOut04EncodedChunk anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>sse-transport-core-01</td><td><code>SseTransportIn01RawChunk -&gt; SseTransportIn02DecodedFrame</code></td><td>anchored</td><td><code>push -&gt; build_sse_transport_in_02_from_sse_transport_in_01</code></td><td></td><td><code>sse.transport_core_shared</code>&lt;br/&gt;One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters</td></tr>
+        <tr><td>sse-transport-core-02</td><td><code>SseTransportIn02DecodedFrame -&gt; SseTransportIn03ValidatedFrameStream</code></td><td>anchored</td><td><code>push -&gt; build_sse_transport_in_03_from_sse_transport_in_02</code></td><td></td><td><code>sse.transport_core_shared</code>&lt;br/&gt;One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters</td></tr>
+        <tr><td>sse-transport-core-03-v2</td><td><code>SseTransportIn03ValidatedFrameStream -&gt; SseTransportOut04EncodedChunk</code></td><td>anchored</td><td><code>parse_sse_stream_chunk_with_config -&gt; build_sse_transport_out_04_from_sse_transport_in_03</code></td><td></td><td><code>sse.transport_core_shared</code>&lt;br/&gt;One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters</td></tr>
+        <tr><td>sse-transport-core-03-v3</td><td><code>SseTransportIn03ValidatedFrameStream -&gt; SseTransportOut04EncodedChunk</code></td><td>anchored</td><td><code>validated_sse_stream -&gt; build_sse_transport_out_04_from_sse_transport_in_03</code></td><td></td><td><code>sse.transport_core_shared</code>&lt;br/&gt;One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters</td></tr>
+        </tbody>
+        </table>
         <h2>Shared Multi-Reference Functions</h2>
         <table>
         <thead><tr><th>function_id</th><th>symbol</th><th>owner</th><th>note</th></tr></thead>

@@ -29,6 +29,7 @@ const requiredFiles = [
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   'docs/architecture/wiki/v3-config-server-full-function.md',
   'docs/architecture/wiki/v3-config-server-full-function.html',
+  'docs/architecture/wiki/v3-responses-direct-remote-continuation.html',
 ];
 const requiredNodes = [
   'V3Config01FileSource', 'V3Config02AuthoringParsed', 'V3Config03SchemaValidated',
@@ -94,7 +95,6 @@ const hubV1AnchoredResourceIds = new Set([
   'v3.hub.response_semantic',
 ]);
 const hubV1PendingResourceIds = new Set([
-  'v3.continuation.remote_binding',
   'v3.continuation.local_context_truth',
 ]);
 const hubV1AnchoredStepIds = new Set([

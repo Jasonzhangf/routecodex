@@ -4,6 +4,10 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
+use sse_transport_core::{
+    build_sse_transport_in_01_raw_chunk, build_sse_transport_out_04_from_sse_transport_in_03,
+    SseIncrementalDecoder, SseTransportError, SseTransportLimits,
+};
 use std::collections::VecDeque;
 use std::pin::Pin;
 
@@ -25,7 +29,7 @@ pub(crate) fn content_type(headers: &HeaderMap) -> Option<String> {
 
 struct SseState {
     source: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
-    buffer: Vec<u8>,
+    decoder: SseIncrementalDecoder,
     ready: VecDeque<Vec<u8>>,
     ended: bool,
     request_id: String,
@@ -41,7 +45,7 @@ pub(crate) fn validated_sse_stream(
 ) -> V3ProviderSseStream {
     let state = SseState {
         source: Box::pin(source),
-        buffer: Vec::new(),
+        decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
         ready: VecDeque::new(),
         ended: false,
         request_id,
@@ -54,18 +58,21 @@ pub(crate) fn validated_sse_stream(
                 return Some((Ok(event), state));
             }
             if state.ended {
-                if state.buffer.is_empty() {
-                    return None;
-                }
-                state.buffer.clear();
-                return Some((
-                    Err(V3ProviderError::MalformedSse {
-                        request_id: state.request_id.clone(),
-                        provider_id: state.provider_id.clone(),
-                        reason: "stream ended before the final event delimiter".to_string(),
-                    }),
-                    state,
-                ));
+                let decoder = std::mem::replace(
+                    &mut state.decoder,
+                    SseIncrementalDecoder::new(SseTransportLimits::default()),
+                );
+                return match decoder.finish() {
+                    Ok(()) => None,
+                    Err(error) => Some((
+                        Err(map_sse_transport_error(
+                            error,
+                            &state.request_id,
+                            &state.provider_id,
+                        )),
+                        state,
+                    )),
+                };
             }
 
             let next = match state.cancellation.clone() {
@@ -88,25 +95,30 @@ pub(crate) fn validated_sse_stream(
             };
 
             match next {
-                Some(Ok(chunk)) => {
-                    state.buffer.extend_from_slice(&chunk);
-                    while let Some(end) = event_end(&state.buffer) {
-                        let event = state.buffer.drain(..end).collect::<Vec<_>>();
-                        if let Err(reason) = validate_sse_event(&event) {
-                            state.ended = true;
-                            state.buffer.clear();
-                            return Some((
-                                Err(V3ProviderError::MalformedSse {
-                                    request_id: state.request_id.clone(),
-                                    provider_id: state.provider_id.clone(),
-                                    reason,
-                                }),
-                                state,
-                            ));
+                Some(Ok(chunk)) => match state
+                    .decoder
+                    .push(build_sse_transport_in_01_raw_chunk(&chunk))
+                {
+                    Ok(frames) => {
+                        for frame in frames {
+                            state.ready.push_back(
+                                build_sse_transport_out_04_from_sse_transport_in_03(&frame)
+                                    .into_bytes(),
+                            );
                         }
-                        state.ready.push_back(event);
                     }
-                }
+                    Err(error) => {
+                        state.ended = true;
+                        return Some((
+                            Err(map_sse_transport_error(
+                                error,
+                                &state.request_id,
+                                &state.provider_id,
+                            )),
+                            state,
+                        ));
+                    }
+                },
                 Some(Err(error)) => {
                     state.ended = true;
                     return Some((
@@ -124,45 +136,27 @@ pub(crate) fn validated_sse_stream(
     }))
 }
 
-fn event_end(buffer: &[u8]) -> Option<usize> {
-    let lf = buffer
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|i| i + 2);
-    let crlf = buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|i| i + 4);
-    match (lf, crlf) {
-        (Some(left), Some(right)) => Some(left.min(right)),
-        (Some(end), None) | (None, Some(end)) => Some(end),
-        (None, None) => None,
+fn map_sse_transport_error(
+    error: SseTransportError,
+    request_id: &str,
+    provider_id: &str,
+) -> V3ProviderError {
+    match error {
+        SseTransportError::Aborted => V3ProviderError::ClientDisconnect {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+        },
+        SseTransportError::UpstreamRead { message } => V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: message,
+        },
+        other => V3ProviderError::MalformedSse {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: other.to_string(),
+        },
     }
-}
-
-fn validate_sse_event(event: &[u8]) -> Result<(), String> {
-    let text = std::str::from_utf8(event).map_err(|error| error.to_string())?;
-    for line in text.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty()
-            || line.starts_with(':')
-            || matches_sse_field_line(line, "data")
-            || matches_sse_field_line(line, "event")
-            || matches_sse_field_line(line, "id")
-            || matches_sse_field_line(line, "retry")
-        {
-            continue;
-        }
-        return Err(format!("unsupported SSE field line {line:?}"));
-    }
-    Ok(())
-}
-
-fn matches_sse_field_line(line: &str, field: &str) -> bool {
-    line == field
-        || line
-            .strip_prefix(field)
-            .is_some_and(|tail| tail.starts_with(':'))
 }
 
 #[cfg(test)]
@@ -186,5 +180,25 @@ mod tests {
             invalid.next().await.unwrap().unwrap_err(),
             V3ProviderError::MalformedSse { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn sse_validation_preserves_utf8_unknown_field_and_done_as_opaque_data() {
+        let source = stream::iter([
+            Ok(Bytes::from_static("event: custom\r\ndata: 你".as_bytes())),
+            Ok(Bytes::from_static(
+                "好\r\nx-extra: yes\r\n\r\ndata: [DONE]\n\n".as_bytes(),
+            )),
+        ]);
+        let mut validated = validated_sse_stream(source, "req".into(), "provider".into(), None);
+        assert_eq!(
+            validated.next().await.unwrap().unwrap(),
+            "event: custom\ndata: 你好\nx-extra: yes\n\n".as_bytes()
+        );
+        assert_eq!(
+            validated.next().await.unwrap().unwrap(),
+            b"data: [DONE]\n\n"
+        );
+        assert!(validated.next().await.is_none());
     }
 }

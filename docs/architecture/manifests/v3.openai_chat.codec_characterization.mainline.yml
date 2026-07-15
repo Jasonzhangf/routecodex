@@ -1,0 +1,26 @@
+schema_version: 1
+lifecycle_id: v3.protocol.openai_chat.codec_characterization
+owner_feature: v3.protocol_openai_chat_codec_characterization
+entrypoint: V3OpenAiChatClientInput01Raw
+return_path: V3OpenAiChatClientProjection06Semantic
+canonical_docs:
+  - docs/goals/v3-openai-chat-codec-characterization-plan.md
+  - docs/goals/v3-openai-chat-codec-characterization-test-design.md
+  - docs/architecture/wiki/v3-openai-chat-codec-characterization.md
+nodes:
+  - V3OpenAiChatClientInput01Raw
+  - V3OpenAiChatHubRequest02Semantic
+  - V3OpenAiChatProviderWire03Payload
+  - V3OpenAiChatProviderRaw04Response
+  - V3OpenAiChatHubResponse05Semantic
+  - V3OpenAiChatClientProjection06Semantic
+edges:
+  - v3-protocol-openai-chat-01
+  - v3-protocol-openai-chat-02
+  - v3-protocol-openai-chat-03
+  - v3-protocol-openai-chat-04
+verification_gates:
+  - npm run test:v3-openai-chat-codec-characterization
+  - npm run verify:v3-openai-chat-codec-characterization
+  - npm run test:v3-openai-chat-codec-characterization-red-fixtures
+runtime_status: characterization_only

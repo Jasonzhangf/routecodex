@@ -90,3 +90,52 @@ Claim：`feature_id:v3.responses_direct_remote_continuation_integration`
 - Remote continuation 从 Resp04 到下一轮 Req03/Req06 的真实绑定 anchored 且有 gate。
 - JSON/SSE 两轮 controlled replay 与 5555 同入口真实重放成功。
 - 所有隔离、pin、状态机和错误负测通过；无跨 owner、fallback、payload 泄漏。
+
+## 9. Managed 5555 live finding（2026-07-15）
+
+当前 managed 5555 已证明第一轮与 V3 内部 continuation 生命周期正常，但尚未证明真实两轮成功：
+
+- JSON 第一轮与 SSE 第一轮均返回真实 provider-owned response ID、call ID 和 function call。
+- continuation 轮日志证明 Virtual Router 命中为 0、Req03 locator load 为 1、Req06 exact pin 为 1。
+- JSON/SSE continuation 轮都在 provider transport 返回 502；Error01-06 正确投影到客户端。
+- 将相同两轮请求直接发给当前 upstream HTTP `/responses`，第二轮返回 HTTP 400，明确说明
+  `previous_response_id` 只支持 Responses WebSocket v2；`store=true` 与 `store=false` 结果相同。
+
+因此当前缺口不是 locator、scope、Router、pin、terminal release 或 HTTP error projection。唯一未完成的
+runtime owner 是 Provider-owned Responses WebSocket v2 transport。`live_5555_pending` 必须保留到真实
+JSON/SSE 两轮均成功。
+
+## 10. Provider Responses WebSocket v2 slice
+
+官方 WebSocket Mode 合同：连接 `/v1/responses`，每轮发送一个 `response.create` JSON event；续接轮只发送
+新的 input items 与 `previous_response_id`。`stream` 和 `background` 是 HTTP transport 字段，不进入
+WebSocket event。server events 与 Responses streaming event model 同序；同一连接一次只允许一个 in-flight
+response。`store=false` 的 continuation state 只存在于当前连接内，ID 不在连接缓存时返回
+`previous_response_not_found`；4xx/5xx 会驱逐被引用的缓存状态。
+
+实现边界：
+
+- Config/Manifest 必须显式声明 provider Responses transport：`http` 或 `websocket_v2`，以及 WS endpoint。
+- `remote_continuation` 只能在 provider transport 为 `websocket_v2` 时发布；HTTP-only provider 宣告该能力
+  必须在 Config compile 阶段 fail-fast。
+- 第一次可能产生 provider-owned continuation 的请求与后续请求必须使用同一 provider/model/auth/transport
+  pin；不能先走 HTTP 再为第二轮新建 WebSocket。
+- WebSocket connection/cache 是 Provider Runtime resource。Hub、Server、continuation store 只能持有 opaque
+  transport pin，不拥有 socket，不恢复 history/tool/context。
+- JSON client intent 从 terminal `response.completed.response` 投影；SSE client intent 将每个 WebSocket
+  server event按 Responses SSE framing 等价投影，业务事件语义仍由现有 response pipeline 消费。
+- handshake/auth/protocol/provider error/client disconnect 必须进入唯一 Error01-06；禁止 HTTP retry、Relay、
+  local materialization、full-history rebuild 或跨 provider reselection。
+
+实施顺序：
+
+1. 先补 resource/function/mainline/verification map 和本测试设计中的 transport-bound contract。
+2. 写 Config compile red tests 与 controlled WebSocket handshake/event/state red tests。
+3. 在 `routecodex-v3-provider-responses` 实现唯一 WebSocket v2 connection owner、event parser、correlation、
+   cancellation 和 terminal projection。
+4. 将 existing Provider transport request 扩展为 typed HTTP/WebSocket request；Hub 固定主线与 Resp04/Req03/
+   Req06 生命周期保持不变。
+5. 绿化 focused/full gates 后，仅使用经过 Config compile 的现有 managed profile 做 live replay；不得改 provider
+   credential。若当前 provider 未提供可握手的 WS endpoint，保留 live pending 并报告外部 transport 缺口。
+
+官方合同来源：<https://developers.openai.com/api/docs/guides/websocket-mode>。

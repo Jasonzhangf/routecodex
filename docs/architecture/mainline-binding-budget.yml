@@ -162,6 +162,16 @@ chains:
       SSE-to-JSON, Gemini JSON-to-SSE, and Gemini SSE-to-JSON projection edges
       are anchored to native/Rust owners; malformed semantics must fail fast
       and must not synthesize fallback error frames.
+  - chain_id: sse.transport_core_shared.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Shared Rust SSE transport is fully anchored from raw chunk through
+      decoded and validated frames to the V2 and V3 encoded adapter exits.
+      Transport remains protocol-neutral and may not own business termination,
+      continuation, tool, or servertool semantics.
   - chain_id: stage_a.p0_rust_migration.mainline
     expected_total_edges: 6
     min_anchored_edges: 6

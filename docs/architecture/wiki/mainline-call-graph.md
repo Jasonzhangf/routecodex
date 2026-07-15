@@ -817,6 +817,38 @@ flowchart LR
 | stage-a-p0-05 | `HubRespInbound02Parsed -> HubRespChatProcess03Governed` | anchored | `govern_response_json -> strip_orphan_function_calls_tag_json` |  | `hub.resp_chatprocess.tool_governance`<br/>Harvest tool results, reverse apply_patch, strip internal tools |
 | stage-a-p0-06 | `ResponsesRequestInbound -> OpenAiChatCanonical` | anchored | `run_responses_openai_request_codec_json -> run_responses_openai_response_codec_json` |  | `conversion.shared.responses_openai`<br/>OpenAI Responses to OpenAI Chat protocol normalization and response projection |
 
+## sse.transport_core_shared.mainline
+
+Protocol-neutral streaming bytes move only through the shared Rust SSE transport topology; V2 and V3 adapters converge on the same encoder.
+
+Entry contract: `SseTransportIn01RawChunk` via `docs/goals/v3-sse-transport-core-extraction-plan.md`
+
+```mermaid
+flowchart LR
+  SseTransportOut04EncodedChunk["SseTransportOut04EncodedChunk"]
+  SseTransportIn03ValidatedFrameStream["SseTransportIn03ValidatedFrameStream"]
+  SseTransportIn02DecodedFrame["SseTransportIn02DecodedFrame"]
+  SseTransportIn01RawChunk["SseTransportIn01RawChunk"]
+  SseTransportIn01RawChunk -->|sse-transport-core-01| SseTransportIn02DecodedFrame
+  SseTransportIn02DecodedFrame -->|sse-transport-core-02| SseTransportIn03ValidatedFrameStream
+  SseTransportIn03ValidatedFrameStream -->|sse-transport-core-03-v2| SseTransportOut04EncodedChunk
+  SseTransportIn03ValidatedFrameStream -->|sse-transport-core-03-v3| SseTransportOut04EncodedChunk
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class SseTransportIn01RawChunk anchored;
+  class SseTransportIn02DecodedFrame anchored;
+  class SseTransportIn03ValidatedFrameStream anchored;
+  class SseTransportOut04EncodedChunk anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| sse-transport-core-01 | `SseTransportIn01RawChunk -> SseTransportIn02DecodedFrame` | anchored | `push -> build_sse_transport_in_02_from_sse_transport_in_01` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-02 | `SseTransportIn02DecodedFrame -> SseTransportIn03ValidatedFrameStream` | anchored | `push -> build_sse_transport_in_03_from_sse_transport_in_02` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-03-v2 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `parse_sse_stream_chunk_with_config -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+| sse-transport-core-03-v3 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `validated_sse_stream -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |

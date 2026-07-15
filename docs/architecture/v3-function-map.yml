@@ -1,6 +1,56 @@
 version: 1
 status: h1_typed_skeleton_and_static_registry_bound
 features:
+  - feature_id: v3.managed_server_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    resource_bindings:
+      - v3.config.source_identity
+      - v3.config.published_manifest
+      - v3.server.listener_set
+      - v3.lifecycle.instance_declaration
+      - v3.lifecycle.pid_cache
+      - v3.lifecycle.control_channel
+      - v3.lifecycle.operation_lock
+    entry_symbols:
+      - V3ManagedLifecycle::declaration
+      - V3ManagedLifecycle::start
+      - V3ManagedLifecycle::status
+      - V3ManagedLifecycle::restart
+      - V3ManagedLifecycle::stop
+      - V3ManagedLifecycle::run_managed_child
+    allowed_paths:
+      - v3/crates/routecodex-v3-lifecycle
+      - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-config/src/store.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-config/Cargo.toml
+      - docs/goals/v3-managed-live-server-lifecycle-plan.md
+      - docs/goals/v3-managed-server-lifecycle-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-managed-server-lifecycle.md
+    forbidden_paths:
+      - sharedmodule/llmswitch-core
+      - src
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+    required_gates:
+      - npm run verify:v3-managed-server-lifecycle
+      - npm run test:v3-managed-server-lifecycle-red-fixtures
+      - npm run test:v3-managed-server-lifecycle
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: managed_lifecycle_source_and_live_5555_pending
+
   - feature_id: v3.config_server_full_function
     owner_crates: [routecodex-v3-config, routecodex-v3-server, routecodex-v3-error]
     owner_files:
@@ -560,6 +610,35 @@ features:
       - provider transport
       - live Anthropic replay
 
+  - feature_id: v3.protocol_openai_chat_codec_characterization
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+    resource_bindings: [v3.hub.entry_protocol, v3.hub.provider_protocol, v3.request.provider_semantic, v3.hub.provider_wire_payload, v3.response.provider_raw, v3.hub.response_semantic, v3.response.client_payload]
+    mainline_bindings: [v3-protocol-openai-chat-01, v3-protocol-openai-chat-02, v3-protocol-openai-chat-03, v3-protocol-openai-chat-04]
+    entry_symbols:
+      - characterize_v3_openai_chat_client_input_to_hub_semantic
+      - characterize_v3_openai_chat_hub_semantic_to_provider_wire
+      - characterize_v3_openai_chat_provider_raw_to_hub_response_semantic
+      - characterize_v3_openai_chat_hub_response_semantic_to_client_projection
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs
+      - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
+      - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
+      - docs/goals/v3-openai-chat-codec-characterization-test-design.md
+    forbidden_paths: [src, sharedmodule, v3/crates/routecodex-v3-server/src, v3/crates/routecodex-v3-provider-responses/src, ~/.rcc]
+    required_gates:
+      - npm run test:v3-openai-chat-codec-characterization
+      - npm run verify:v3-openai-chat-codec-characterization
+      - npm run test:v3-openai-chat-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    runtime_status: openai_chat_codec_characterization_only
+    pending_runtime: [hook registration, Hub runtime integration, Server entry, provider transport, live replay]
+
   - feature_id: v3.virtual_router_full_function
     owner_crates: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-runtime]
     owner_files:
@@ -660,6 +739,85 @@ features:
       - pinned Target resolution wiring
       - Server endpoint integration
       - continuation live replay
+
+  - feature_id: v3.responses_direct_remote_continuation_integration
+    owner_crates: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-target]
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-target/src/lib.rs
+    resource_bindings:
+      - v3.continuation.remote_binding
+      - v3.request.normal_payload
+      - v3.target.concrete_provider
+      - v3.provider.responses_raw
+      - v3.provider.responses_transport_capability
+      - v3.provider.responses_websocket_connection
+    mainline_bindings:
+      - v3-rci-01
+      - v3-rci-02
+      - v3-rci-03
+      - v3-rci-04
+    entry_symbols:
+      - V3ResponsesDirectContinuationState
+      - V3ResponsesDirectContinuationScope
+      - execute_v3_responses_direct_runtime_kernel_with_continuation
+      - execute_v3_responses_direct_runtime_kernel_core
+      - V3RemoteContinuationStore::load_for_req03
+      - V3RemoteContinuationLocator::validate_capability_revision
+      - V3TargetInterpreter::resolve_exact_provider_model_auth
+      - build_responses_direct_continuation_scope
+      - V3RemoteContinuationObservation
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs
+      - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
+      - docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.responses_direct_remote_continuation.mainline.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+      - scripts/architecture/verify-v3-responses-direct-remote-continuation.mjs
+      - scripts/tests/v3-responses-direct-remote-continuation-red-fixtures.mjs
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+      - src
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-responses-direct-remote-continuation
+      - npm run verify:v3-responses-direct-remote-continuation
+      - npm run test:v3-responses-direct-remote-continuation-red-fixtures
+      - npm run test:v3-h4-remote-continuation
+      - npm run verify:v3-p6-freeze
+      - npm run verify:v3-h2-equivalence-harness
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: source_and_controlled_json_sse_http_replay_verified_websocket_v2_transport_binding_pending_live_5555_pending
+    pending_runtime:
+      - Config and Manifest transport-bound remote continuation capability
+      - Provider-owned Responses WebSocket v2 connection and event transport
+      - controlled WebSocket JSON and SSE two-turn replay
+      - current managed 5555 real JSON and SSE two-turn success
 
   - feature_id: v3.anthropic_relay_runtime_integration
     owner_crates: [routecodex-v3-runtime, routecodex-v3-server]

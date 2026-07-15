@@ -1076,13 +1076,14 @@ pub fn apply_req_process_tool_governance(
             current_turn_evidence,
             StoplessCurrentTurnEvidence::ResetByUserTurn
         );
-        let has_terminal_stopless_turn = match &current_turn_evidence {
-            StoplessCurrentTurnEvidence::CliOutput(row) => stopless_cli_output_is_terminal(row),
-            StoplessCurrentTurnEvidence::Guidance(_)
-            | StoplessCurrentTurnEvidence::TransparentContinuation
-            | StoplessCurrentTurnEvidence::ResetByUserTurn
-            | StoplessCurrentTurnEvidence::None => false,
-        } || metadata_has_terminal_stopless_runtime_control(&metadata);
+        let has_terminal_stopless_turn =
+            match &current_turn_evidence {
+                StoplessCurrentTurnEvidence::CliOutput(row) => stopless_cli_output_is_terminal(row),
+                StoplessCurrentTurnEvidence::Guidance(_)
+                | StoplessCurrentTurnEvidence::TransparentContinuation
+                | StoplessCurrentTurnEvidence::ResetByUserTurn
+                | StoplessCurrentTurnEvidence::None => false,
+            } || metadata_has_terminal_stopless_runtime_control(&metadata);
         let current_turn_stopless = match &current_turn_evidence {
             StoplessCurrentTurnEvidence::CliOutput(row) => {
                 if !stopless_cli_output_is_terminal(row) {
@@ -1113,7 +1114,9 @@ pub fn apply_req_process_tool_governance(
                     &metadata_center,
                 )
             }
-            StoplessCurrentTurnEvidence::ResetByUserTurn | StoplessCurrentTurnEvidence::None => None,
+            StoplessCurrentTurnEvidence::ResetByUserTurn | StoplessCurrentTurnEvidence::None => {
+                None
+            }
         };
         if let Some(stopless) = current_turn_stopless {
             write_stopless_runtime_control(&mut metadata, stopless);

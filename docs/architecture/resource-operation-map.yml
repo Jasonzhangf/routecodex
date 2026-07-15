@@ -1836,6 +1836,58 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
+  - resource_id: sse.transport_raw_chunk
+    resource_kind: transport
+    lifecycle: sse.transport_core_shared.mainline
+    identity: [streamId, chunkSequence]
+    owner_feature_id: sse.transport_core_shared
+    owner_node: SseTransportIn01RawChunk
+    allowed_readers: [build_sse_transport_in_02_from_sse_transport_in_01]
+    allowed_writers: [build_sse_transport_in_01_raw_chunk]
+    forbidden_writers: [HubReqChatProcess03Governed, HubRespChatProcess03Governed, MetadataCenter, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:sse-transport-core-shared, npm run verify:resource-operation-map]
+
+  - resource_id: sse.transport_decoded_frame
+    resource_kind: transport
+    lifecycle: sse.transport_core_shared.mainline
+    identity: [streamId, frameSequence]
+    owner_feature_id: sse.transport_core_shared
+    owner_node: SseTransportIn02DecodedFrame
+    allowed_readers: [build_sse_transport_in_03_from_sse_transport_in_02]
+    allowed_writers: [build_sse_transport_in_02_from_sse_transport_in_01]
+    forbidden_writers: [HubReqChatProcess03Governed, HubRespChatProcess03Governed, MetadataCenter, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:sse-transport-core-shared, npm run verify:resource-operation-map]
+
+  - resource_id: sse.transport_validated_frame_stream
+    resource_kind: transport
+    lifecycle: sse.transport_core_shared.mainline
+    identity: [streamId, frameSequence]
+    owner_feature_id: sse.transport_core_shared
+    owner_node: SseTransportIn03ValidatedFrameStream
+    allowed_readers: [build_sse_transport_out_04_from_sse_transport_in_03]
+    allowed_writers: [build_sse_transport_in_03_from_sse_transport_in_02]
+    forbidden_writers: [HubReqChatProcess03Governed, HubRespChatProcess03Governed, MetadataCenter, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:sse-transport-core-shared, npm run verify:resource-operation-map]
+
+  - resource_id: sse.transport_encoded_chunk
+    resource_kind: transport
+    lifecycle: sse.transport_core_shared.mainline
+    identity: [streamId, frameSequence]
+    owner_feature_id: sse.transport_core_shared
+    owner_node: SseTransportOut04EncodedChunk
+    allowed_readers: [V2SseTransportAdapter, V3SseTransportAdapter, ServerRespOutbound05ClientFrame]
+    allowed_writers: [build_sse_transport_out_04_from_sse_transport_in_03]
+    forbidden_writers: [HubReqChatProcess03Governed, HubRespChatProcess03Governed, MetadataCenter, continuation.scope_state]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    required_gates: [npm run verify:sse-transport-core-shared, npm run verify:resource-operation-map]
+
 mainline_resource_flows:
   - chain_id: request.mainline
     step_id: req-00
@@ -2459,6 +2511,30 @@ mainline_resource_flows:
     step_id: stage-a-p0-02
     consumes: [request.normal_payload]
     produces: [stage_a.protocol_canonical]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.transport_core_shared.mainline
+    step_id: sse-transport-core-01
+    consumes: [sse.transport_raw_chunk]
+    produces: [sse.transport_decoded_frame]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.transport_core_shared.mainline
+    step_id: sse-transport-core-02
+    consumes: [sse.transport_decoded_frame]
+    produces: [sse.transport_validated_frame_stream]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.transport_core_shared.mainline
+    step_id: sse-transport-core-03-v2
+    consumes: [sse.transport_validated_frame_stream]
+    produces: [sse.transport_encoded_chunk]
+    side_channel_reads: []
+    side_channel_writes: []
+  - chain_id: sse.transport_core_shared.mainline
+    step_id: sse-transport-core-03-v3
+    consumes: [sse.transport_validated_frame_stream]
+    produces: [sse.transport_encoded_chunk]
     side_channel_reads: []
     side_channel_writes: []
   - chain_id: stage_a.p0_rust_migration.mainline

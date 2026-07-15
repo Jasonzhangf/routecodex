@@ -2300,10 +2300,7 @@ mod tests {
         assert_eq!(second.no_change_count, 1);
 
         let third = evaluate_stop_schema_gate("普通停止文本", 2, 3, "", 0);
-        assert_eq!(
-            third.reason_code,
-            "stop_schema_loop_guard_passthrough"
-        );
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
         assert_eq!(third.action, StopSchemaGateAction::AllowStop);
         assert!(!third.count_budget);
     }
@@ -2354,10 +2351,7 @@ mod tests {
 
         let exhausted = evaluate_stop_schema_gate("普通停止文本", 3, 3, "", 0);
         assert_eq!(exhausted.action, StopSchemaGateAction::AllowStop);
-        assert_eq!(
-            exhausted.reason_code,
-            "stop_schema_loop_guard_passthrough"
-        );
+        assert_eq!(exhausted.reason_code, "stop_schema_loop_guard_passthrough");
         assert!(!exhausted.count_budget);
     }
 
@@ -2673,10 +2667,7 @@ mod tests {
         );
         assert_eq!(third.no_change_count, 3);
         assert_eq!(third.action, StopSchemaGateAction::AllowStop);
-        assert_eq!(
-            third.reason_code,
-            "stop_schema_loop_guard_passthrough"
-        );
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
     }
 
     /// Different schema texts get different hashes -> no_change_count resets
@@ -2756,10 +2747,7 @@ mod tests {
             second.no_change_count,
         );
         assert_eq!(third.action, StopSchemaGateAction::AllowStop);
-        assert_eq!(
-            third.reason_code,
-            "stop_schema_loop_guard_passthrough"
-        );
+        assert_eq!(third.reason_code, "stop_schema_loop_guard_passthrough");
         assert!(third.observation_hash.len() > 0);
     }
 

@@ -1,6 +1,6 @@
 use servertool_core::hook_skeleton_contract::{
-    ServertoolHookDirection, ServertoolHookRequiredness, ServertoolHookSpec, ServertoolReqHookPhase,
-    ServertoolRespHookPhase,
+    ServertoolHookDirection, ServertoolHookRequiredness, ServertoolHookSpec,
+    ServertoolReqHookPhase, ServertoolRespHookPhase,
 };
 
 pub(crate) const STOPLESS_REQUEST_HOOK_ID: &str = "stop_message_auto";
@@ -63,6 +63,9 @@ mod tests {
             plan.projection.input_node,
             "ChatProcReqContinuation03CanonicalRestored"
         );
-        assert_eq!(plan.projection.output_node, "ServertoolReqHook01ResultParsed");
+        assert_eq!(
+            plan.projection.output_node,
+            "ServertoolReqHook01ResultParsed"
+        );
     }
 }

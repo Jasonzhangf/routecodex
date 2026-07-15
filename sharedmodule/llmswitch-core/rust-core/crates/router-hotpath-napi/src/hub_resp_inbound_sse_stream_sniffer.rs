@@ -3,6 +3,10 @@ use napi_derive::napi;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use sse_transport_core::{
+    build_sse_transport_in_01_raw_chunk, build_sse_transport_out_04_from_sse_transport_in_03,
+    SseIncrementalDecoder, SseTransportLimits,
+};
 
 // feature_id: sse.event_type_validation
 // Strict SSE event validation is owned by Rust; TS callers may only provide
@@ -388,28 +392,51 @@ fn parse_sse_event_with_config(
     result
 }
 
-fn normalize_sse_newlines(input: &str) -> String {
-    input.replace("\r\n", "\n").replace('\r', "\n")
-}
-
 fn parse_sse_stream_chunk_with_config(
     sse_buffer: &str,
     config: &SseParserConfigInput,
     flush_tail: bool,
 ) -> SseStreamChunkParseOutput {
-    let normalized = normalize_sse_newlines(sse_buffer);
-    let mut segments: Vec<&str> = normalized.split("\n\n").collect();
-    let remaining_buffer = if flush_tail {
-        String::new()
-    } else {
-        segments.pop().unwrap_or("").to_string()
+    let max_event_size = config.max_event_size.max(1);
+    let limits = SseTransportLimits {
+        max_line_bytes: max_event_size,
+        max_frame_bytes: max_event_size,
+        max_buffer_bytes: max_event_size,
     };
-
-    let events: Vec<SseParseResultOutput> = segments
+    let mut decoder = SseIncrementalDecoder::new(limits);
+    let frames = match decoder.push(build_sse_transport_in_01_raw_chunk(sse_buffer.as_bytes())) {
+        Ok(frames) => frames,
+        Err(error) => {
+            return SseStreamChunkParseOutput {
+                events: vec![SseParseResultOutput {
+                    success: false,
+                    event: None,
+                    error: Some(error.to_string()),
+                    raw_data: String::new(),
+                }],
+                remaining_buffer: String::new(),
+            };
+        }
+    };
+    let mut events = frames
         .into_iter()
-        .filter(|chunk| !chunk.trim().is_empty())
-        .map(|event_data| parse_sse_event_with_config(event_data, config))
-        .collect();
+        .map(|frame| {
+            let encoded = build_sse_transport_out_04_from_sse_transport_in_03(&frame).into_bytes();
+            let event_text = String::from_utf8(encoded)
+                .expect("validated SSE transport frame must remain UTF-8");
+            parse_sse_event_with_config(event_text.trim_end_matches(['\r', '\n']), config)
+        })
+        .collect::<Vec<_>>();
+    let mut remaining_buffer = String::from_utf8(decoder.remaining_bytes().to_vec())
+        .expect("input SSE buffer originated as UTF-8 text");
+    if flush_tail && !remaining_buffer.is_empty() {
+        events.push(SseParseResultOutput {
+            success: false,
+            event: None,
+            error: Some("SSE stream ended before the final frame delimiter".to_string()),
+            raw_data: std::mem::take(&mut remaining_buffer),
+        });
+    }
 
     SseStreamChunkParseOutput {
         events,
@@ -684,7 +711,7 @@ event: response.completed\ndata: {\"type\":\"response.completed\"";
     }
 
     #[test]
-    fn parse_sse_stream_chunk_with_config_flushes_tail() {
+    fn parse_sse_stream_chunk_with_config_rejects_unterminated_tail() {
         let config = SseParserConfigInput {
             enable_strict_validation: true,
             max_event_size: 1024 * 1024,
@@ -693,7 +720,11 @@ event: response.completed\ndata: {\"type\":\"response.completed\"";
         let chunk = "event: response.completed\ndata: {\"type\":\"response.completed\"}";
         let output = parse_sse_stream_chunk_with_config(chunk, &config, true);
         assert_eq!(output.events.len(), 1);
-        assert!(output.events[0].success);
+        assert!(!output.events[0].success);
+        assert_eq!(
+            output.events[0].error.as_deref(),
+            Some("SSE stream ended before the final frame delimiter")
+        );
         assert_eq!(output.remaining_buffer, "");
     }
 

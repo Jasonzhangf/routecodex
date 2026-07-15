@@ -2,6 +2,18 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+  - chain_id: v3.server.managed_lifecycle
+    owner_feature_id: v3.managed_server_lifecycle
+    summary: "One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, spawns one detached child, publishes PID/control identity, and gracefully stops the exact instance without port takeover or broad kill."
+    manifest: docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
+    edges:
+      - { step_id: v3-life-01, from_node: V3Lifecycle01ValidatedConfig, to_node: V3Lifecycle02InstanceDeclared, caller_symbol: V3ManagedLifecycle::start, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: V3ManagedLifecycle::declaration, callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.config.source_identity, v3.config.published_manifest], produces: [v3.lifecycle.instance_declaration], side_channel_reads: [v3.secret.provider_auth_handle], side_channel_writes: [] } }
+      - { step_id: v3-life-02, from_node: V3Lifecycle02InstanceDeclared, to_node: V3Lifecycle03OperationLocked, caller_symbol: V3ManagedLifecycle::start, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: acquire_operation_lock, callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.lifecycle.instance_declaration], produces: [v3.lifecycle.operation_lock], side_channel_reads: [], side_channel_writes: [v3.lifecycle.operation_lock] } }
+      - { step_id: v3-life-03, from_node: V3Lifecycle03OperationLocked, to_node: V3Lifecycle04ChildSpawned, caller_symbol: V3ManagedLifecycle::start, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: Command::spawn, callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.lifecycle.operation_lock, v3.lifecycle.instance_declaration], produces: [], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-life-04, from_node: V3Lifecycle04ChildSpawned, to_node: V3Lifecycle05IdentityPublished, caller_symbol: V3ManagedLifecycle::run_managed_child, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: write_json_atomic, callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.lifecycle.instance_declaration, v3.server.listener_set], produces: [v3.lifecycle.pid_cache, v3.lifecycle.control_channel], side_channel_reads: [], side_channel_writes: [v3.lifecycle.pid_cache, v3.lifecycle.control_channel] } }
+      - { step_id: v3-life-05, from_node: V3Lifecycle05IdentityPublished, to_node: V3Lifecycle06LiveControlled, caller_symbol: V3ManagedLifecycle::status, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: send_control, callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.lifecycle.instance_declaration, v3.lifecycle.pid_cache, v3.lifecycle.control_channel], produces: [], side_channel_reads: [v3.lifecycle.pid_cache, v3.lifecycle.control_channel], side_channel_writes: [] } }
+      - { step_id: v3-life-06, from_node: V3Lifecycle06LiveControlled, to_node: V3Lifecycle07GracefullyStopped, caller_symbol: V3ManagedLifecycle::stop, caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs, callee_symbol: V3ServerAggregateHandle::shutdown, callee_file: v3/crates/routecodex-v3-server/src/lib.rs, status: anchored, owner_feature_id: v3.managed_server_lifecycle, resource_flow: { consumes: [v3.lifecycle.instance_declaration, v3.lifecycle.control_channel, v3.server.listener_set], produces: [], side_channel_reads: [v3.lifecycle.control_channel], side_channel_writes: [] } }
+
   - chain_id: v3.config.compile
     owner_feature_id: v3.config_interpreter_contract
     summary: "Unique config.v3 read/parse/validate/registry/publish chain."
@@ -141,6 +153,14 @@ chains:
       - { step_id: v3-protocol-anthropic-02, from_node: V3AnthropicHubRequest02Semantic, to_node: V3AnthropicProviderWire03Payload, caller_symbol: request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs, callee_symbol: characterize_v3_anthropic_hub_semantic_to_provider_wire, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_anthropic_codec_characterization, resource_flow: { consumes: [v3.request.provider_semantic, v3.hub.provider_protocol], produces: [v3.hub.provider_wire_payload], side_channel_reads: [], side_channel_writes: [] } }
       - { step_id: v3-protocol-anthropic-03, from_node: V3AnthropicProviderRaw04Response, to_node: V3AnthropicHubResponse05Semantic, caller_symbol: sse_characterization_preserves_individual_reasoning_and_tool_events_without_materialization, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs, callee_symbol: characterize_v3_anthropic_provider_raw_to_hub_response_semantic, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_anthropic_codec_characterization, resource_flow: { consumes: [v3.response.provider_raw, v3.hub.provider_protocol], produces: [v3.hub.response_semantic], side_channel_reads: [], side_channel_writes: [] } }
       - { step_id: v3-protocol-anthropic-04, from_node: V3AnthropicHubResponse05Semantic, to_node: V3AnthropicClientProjection06Semantic, caller_symbol: sse_characterization_preserves_individual_reasoning_and_tool_events_without_materialization, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs, callee_symbol: characterize_v3_anthropic_hub_response_semantic_to_client_projection, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_anthropic_codec_characterization, resource_flow: { consumes: [v3.hub.response_semantic, v3.hub.entry_protocol], produces: [v3.response.client_payload], side_channel_reads: [], side_channel_writes: [] } }
+  - chain_id: v3.protocol.openai_chat.characterization
+    owner_feature_id: v3.protocol_openai_chat_codec_characterization
+    summary: "Characterization-only native OpenAI Chat JSON/event codec evidence; no hook or runtime edge."
+    edges:
+      - { step_id: v3-protocol-openai-chat-01, from_node: V3OpenAiChatClientInput01Raw, to_node: V3OpenAiChatHubRequest02Semantic, caller_symbol: request_preserves_messages_multiple_tool_calls_and_matching_results, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs, callee_symbol: characterize_v3_openai_chat_client_input_to_hub_semantic, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_openai_chat_codec_characterization, resource_flow: { consumes: [v3.hub.entry_protocol], produces: [v3.request.provider_semantic], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-protocol-openai-chat-02, from_node: V3OpenAiChatHubRequest02Semantic, to_node: V3OpenAiChatProviderWire03Payload, caller_symbol: request_preserves_messages_multiple_tool_calls_and_matching_results, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs, callee_symbol: characterize_v3_openai_chat_hub_semantic_to_provider_wire, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_openai_chat_codec_characterization, resource_flow: { consumes: [v3.request.provider_semantic, v3.hub.provider_protocol], produces: [v3.hub.provider_wire_payload], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-protocol-openai-chat-03, from_node: V3OpenAiChatProviderRaw04Response, to_node: V3OpenAiChatHubResponse05Semantic, caller_symbol: sse_characterization_preserves_individual_delta_events_without_materialization, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs, callee_symbol: characterize_v3_openai_chat_provider_raw_to_hub_response_semantic, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_openai_chat_codec_characterization, resource_flow: { consumes: [v3.response.provider_raw, v3.hub.provider_protocol], produces: [v3.hub.response_semantic], side_channel_reads: [], side_channel_writes: [] } }
+      - { step_id: v3-protocol-openai-chat-04, from_node: V3OpenAiChatHubResponse05Semantic, to_node: V3OpenAiChatClientProjection06Semantic, caller_symbol: sse_characterization_preserves_individual_delta_events_without_materialization, caller_file: v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs, callee_symbol: characterize_v3_openai_chat_hub_response_semantic_to_client_projection, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs, status: anchored, binding_kind: protocol_characterization_test, owner_feature_id: v3.protocol_openai_chat_codec_characterization, resource_flow: { consumes: [v3.hub.response_semantic, v3.hub.entry_protocol], produces: [v3.response.client_payload], side_channel_reads: [], side_channel_writes: [] } }
   - chain_id: v3.hub_pipeline.v1.relay_payload_copy_runtime_probes
     owner_feature_id: v3.hub_relay_payload_copy_runtime_probes
     summary: "Test-only probes bind copy-budget observations to existing Relay nodes without adding a runtime edge or second truth."
@@ -490,6 +510,70 @@ chains:
           produces: [v3.continuation.remote_binding]
           side_channel_reads: []
           side_channel_writes: [v3.continuation.remote_binding]
+        status: anchored
+  - chain_id: v3.responses_direct.remote_continuation.integration
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    summary: "Responses Direct remote continuation commits provider-owned identity at Resp04, loads direct scope at the next Req03, resolves the immutable exact pin at Req06, and rejoins the single Direct provider/response exit without Virtual Router re-entry."
+    edges:
+      - step_id: v3-rci-01
+        from_node: V3Server03HttpRequestRaw
+        to_node: V3HubReqContinuation03Classified
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3RemoteContinuationStore::load_for_req03
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.responses_direct_remote_continuation_integration
+        binding_kind: responses_direct_runtime_source
+        resource_flow:
+          consumes: [v3.request.normal_payload, v3.continuation.remote_binding]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: [v3.continuation.remote_binding]
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-rci-02
+        from_node: V3HubReqContinuation03Classified
+        to_node: V3HubReqTarget06Resolved
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3TargetInterpreter::resolve_exact_provider_model_auth
+        callee_file: v3/crates/routecodex-v3-target/src/lib.rs
+        owner_feature_id: v3.responses_direct_remote_continuation_integration
+        binding_kind: responses_direct_runtime_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding, v3.config.published_manifest]
+          produces: [v3.target.concrete_provider]
+          side_channel_reads: [v3.continuation.remote_binding]
+          side_channel_writes: [v3.target.concrete_provider]
+        status: anchored
+      - step_id: v3-rci-03
+        from_node: V3ProviderResp14Raw
+        to_node: V3HubRespContinuation04Committed
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3RemoteContinuationStore::commit
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.responses_direct_remote_continuation_integration
+        binding_kind: responses_direct_runtime_source
+        resource_flow:
+          consumes: [v3.response.provider_raw, v3.target.concrete_provider]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: [v3.target.concrete_provider]
+          side_channel_writes: [v3.continuation.remote_binding]
+        status: anchored
+      - step_id: v3-rci-04
+        from_node: V3HubRespContinuation04Committed
+        to_node: V3Resp15ClientPayload
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3ResponsesDirectRuntimeOutput
+        callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        owner_feature_id: v3.responses_direct_remote_continuation_integration
+        binding_kind: responses_direct_runtime_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding, v3.response.provider_raw]
+          produces: [v3.response.client_payload]
+          side_channel_reads: [v3.continuation.remote_binding]
+          side_channel_writes: []
         status: anchored
   - chain_id: v3.anthropic_relay.controlled_runtime
     owner_feature_id: v3.anthropic_relay_runtime_integration

@@ -387,9 +387,7 @@ fn current_timestamp_ms() -> HubPipelineResult<u64> {
     timestamp_ms_from_system_time(std::time::SystemTime::now())
 }
 
-pub(crate) fn timestamp_ms_from_system_time(
-    now: std::time::SystemTime,
-) -> HubPipelineResult<u64> {
+pub(crate) fn timestamp_ms_from_system_time(now: std::time::SystemTime) -> HubPipelineResult<u64> {
     now.duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .map_err(|error| {

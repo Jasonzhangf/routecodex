@@ -2,6 +2,51 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+  - feature_id: v3.managed_server_lifecycle
+    change_risk: high
+    owner_kind: rust_project_v3
+    owner_scope: "Managed process control for one V3 aggregate instance; request/response Runtime remains the only business lifecycle."
+    owner_modules:
+      - v3/crates/routecodex-v3-lifecycle
+      - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-config/src/store.rs
+    design:
+      - docs/goals/v3-managed-live-server-lifecycle-plan.md
+      - docs/goals/v3-managed-server-lifecycle-test-design.md
+    contract:
+      - docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-managed-server-lifecycle.md
+    required_unit:
+      - Config-owned source identity is stable, source-sensitive, deterministic, and secret-free
+      - deterministic identity and strict state schema
+      - exclusive operation lock and auth-handle preflight
+      - no resolved secret in lifecycle projection
+      - wrong identity, stale state, already-running, and already-stopped failures
+    required_integration:
+      - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+      - stable instance identity and changed PID/start nonce across restart
+      - all listeners close on one stop
+      - lifecycle state, argv, log, and evidence contain no resolved secret
+      - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
+    required_gates:
+      - npm run verify:v3-managed-server-lifecycle
+      - npm run test:v3-managed-server-lifecycle-red-fixtures
+      - npm run test:v3-managed-server-lifecycle
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    completion_rule:
+      source: "Lifecycle whitebox, negative, CLI blackbox, architecture/resource/module, fmt, Clippy, workspace, and secret/broad-kill gates pass."
+      runtime: "5555 is owned by the managed instance rather than an agent exec session; managed restart preserves real JSON/SSE Responses and leaves V2 5520/10000/4444 healthy."
+      forbidden_claim: "Do not claim completion from source or temporary-port evidence alone; no unknown-process takeover, broad kill, fallback, second supervisor, SSE/continuation/Anthropic ownership, or secret persistence is allowed."
+
   - feature_id: v3.config_server_full_function
     status: source_and_controlled_cli_verified
     change_risk: high
@@ -388,6 +433,39 @@ features:
       source: "The slice is complete only when focused JSON/SSE/tool/reasoning/error tests, mutation fixtures, owner maps, module/Rust/resource gates, fmt, and diff check pass."
       runtime: "Characterization is source/test evidence only; H6 hook registration and runtime integration remain pending."
       forbidden_claim: "Do not claim H6 hook registration, Hub v1 runtime integration, Server exposure, Provider transport, Gemini/OpenAI Chat, live Anthropic compatibility, global install, restart, or production replacement."
+
+  - feature_id: v3.protocol_openai_chat_codec_characterization
+    status: characterization_source_verified
+    change_risk: high
+    owner_kind: rust_project_v3_protocol_codec_characterization
+    owner_scope: "Native OpenAI Chat protocol codec characterization only"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs
+      - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
+      - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
+    mainline_bindings: [v3-protocol-openai-chat-01, v3-protocol-openai-chat-02, v3-protocol-openai-chat-03, v3-protocol-openai-chat-04]
+    design: [docs/goals/v3-openai-chat-codec-characterization-plan.md]
+    test_design: [docs/goals/v3-openai-chat-codec-characterization-test-design.md]
+    required_contract:
+      - native OpenAI Chat request and response payloads remain semantically unchanged
+      - missing duplicate and orphan tool-call identities fail explicitly without repair
+      - SSE input is one already-framed event and is never byte-parsed or materialized
+      - internal side-channel fields fail closed
+      - no Hub hook Server runtime Provider transport continuation Relay or fallback is added
+    required_gates:
+      - npm run test:v3-openai-chat-codec-characterization
+      - npm run verify:v3-openai-chat-codec-characterization
+      - npm run test:v3-openai-chat-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_rule:
+      source: "Complete only when focused tests, source gate, mutation fixtures, maps, architecture gates, fmt, and diff check pass."
+      runtime: "Characterization is not runtime wiring or live compatibility evidence."
+      forbidden_claim: "Do not claim Server/runtime/provider/continuation/Relay/SSE transport/live completion."
 
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified
@@ -832,3 +910,56 @@ features:
       source: "Controlled Runtime integration is complete only when focused tests, four-fixture controlled replay, source/red gates, maps/wiki, architecture/resource/module/Rust-only/static-hook/copy-budget gates, fmt, Clippy, workspace, and diff checks pass."
       runtime: "Evidence is limited to the built repo-local controlled Server-owned driver and loopback upstream; it does not establish live 5555 or production compatibility."
       forbidden_claim: "Do not claim live 5555, continuation E2E, P6 deletion, global installation, restart, release, production cutover, or real-provider compatibility."
+  - feature_id: v3.responses_direct_remote_continuation_integration
+    status: source_and_controlled_json_sse_http_replay_verified_websocket_v2_transport_binding_pending_live_5555_pending
+    change_risk: high
+    owner_kind: rust_v3_responses_direct_remote_continuation_runtime
+    owner_scope: "Resp04 immutable locator commit/release, next Req03 scope load/classification, Req06 exact provider/model/auth resolution, and Server-scoped JSON/SSE two-turn replay"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    design:
+      - docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
+      - docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md
+      - .agents/skills/rcc-dev-skills/references/25-protocol-sse-continuation-boundary.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.responses_direct_remote_continuation.mainline.yml
+    required_unit:
+      - JSON and SSE function-call turns commit at Resp04 and terminal tool-output turns release
+      - continuation turns load only at Req03 and consume the exact provider model auth pin at Req06
+      - continuation turns never enter Virtual Router or target-local provider reselection
+      - missing locator entry owner scope pin capability expiry and availability mismatches enter Error01-06
+      - still-running replaces only the matching locator and terminal failure releases only the matching locator
+      - provider and client normal payloads exclude internal scope pin route auth capability and owner truth
+      - Config rejects remote_continuation on HTTP-only providers and contradictory WebSocket declarations
+      - Provider WebSocket v2 owns handshake auth correlation cancellation terminal projection and connection-local continuation state
+      - WebSocket provider or protocol errors enter Error01-06 without HTTP retry Relay local materialization or provider reselection
+    required_blackbox:
+      - Server JSON two-turn controlled upstream with session-id thread-id and x-codex-turn-metadata
+      - Server SSE two-turn controlled upstream with one first-turn Router hit and zero continuation Router hits
+      - controlled Responses WebSocket v2 JSON and SSE two-turn replay on one exact provider model auth transport pin
+      - current 5555 same-entry real two-turn replay after all offline gates pass
+    required_gates:
+      - npm run test:v3-responses-direct-remote-continuation
+      - npm run verify:v3-responses-direct-remote-continuation
+      - npm run test:v3-responses-direct-remote-continuation-red-fixtures
+      - npm run test:v3-h4-remote-continuation
+      - npm run verify:v3-p6-freeze
+      - npm run verify:v3-h2-equivalence-harness
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "All source bindings maps manifests gates and JSON/SSE controlled replays pass with one Runtime kernel and one response exit."
+      runtime: "The current 5555 same-entry two-turn Responses request completes and samples/logs prove the actual two-turn provider-owned continuation."
+      forbidden_claim: "Do not claim Relay/local materialization, P6 expansion, V2 change, credential/config mutation, global install, restart, or production replacement."

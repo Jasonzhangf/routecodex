@@ -713,9 +713,18 @@ fn reap_inactive_runtime_files(
     let control_path = instance_dir.join("control.json");
     if control_path.exists() {
         let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != expected.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap control record for a different instance".to_string(),
+            ));
+        }
         let socket_path = PathBuf::from(control.socket_path);
-        if socket_path == managed_control_socket_path(&control.instance_id) && socket_path.exists()
-        {
+        if socket_path != managed_control_socket_path(&expected.instance_id) {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap non-canonical managed control socket path".to_string(),
+            ));
+        }
+        if socket_path.exists() {
             fs::remove_file(socket_path)?;
         }
     }
@@ -889,5 +898,44 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         ));
         assert!(instance_dir.join("pid.cache").exists());
         assert!(instance_dir.join("status.json").exists());
+    }
+
+    #[test]
+    fn foreign_control_record_is_never_reaped_from_terminal_state() {
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&declaration.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+        write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+        write_status(
+            &instance_dir,
+            &declaration.instance_id,
+            V3ManagedRunState::Stopped,
+            Some("terminal cleanup permitted only for owned control truth".to_string()),
+        )
+        .unwrap();
+        let foreign_instance_id = format!("{}-foreign", declaration.instance_id);
+        let foreign_socket = managed_control_socket_path(&foreign_instance_id);
+        fs::write(&foreign_socket, b"foreign-control-socket-marker").unwrap();
+        write_json_atomic(
+            &instance_dir.join("control.json"),
+            &V3ManagedControlRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: foreign_instance_id,
+                socket_path: foreign_socket.display().to_string(),
+                start_nonce: "foreign".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            reap_inactive_runtime_files(&instance_dir, &declaration),
+            Err(V3LifecycleError::IdentityMismatch(_))
+        ));
+        assert!(foreign_socket.exists());
+        let _ = fs::remove_file(foreign_socket);
     }
 }

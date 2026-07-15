@@ -29,6 +29,9 @@ for (const symbol of [
   'pub async fn stop', 'pub async fn run_managed_child', 'acquire_operation_lock',
   'spawn_v3_server_aggregate', 'handle.shutdown().await', 'serde(deny_unknown_fields)',
   'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure',
+  'foreign_control_record_is_never_reaped_from_terminal_state',
+  'refusing to reap control record for a different instance',
+  'refusing to reap non-canonical managed control socket path',
 ]) requireText(lifecycle, symbol, 'lifecycle source');
 if ((lifecycle.match(/#\[serde\(deny_unknown_fields\)\]/g) || []).length < 7)
   throw new Error('lifecycle state/control schemas must all deny unknown fields');

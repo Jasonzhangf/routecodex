@@ -1192,7 +1192,13 @@ fn build_unavailable_providers_details(
     let now_ms = now_ms();
     let mut blockers: Vec<ProviderUnavailableBlocker> = Vec::new();
     for provider_key in candidate_keys {
-        collect_recoverable_cooldown_for_key(core, env, provider_key, now_ms, &mut blockers);
+        collect_recoverable_cooldown_for_candidate_key(
+            core,
+            env,
+            provider_key,
+            now_ms,
+            &mut blockers,
+        );
     }
     if blockers.is_empty() {
         return None;
@@ -1361,6 +1367,22 @@ fn collect_recoverable_cooldown_for_key(
     }
 }
 
+fn collect_recoverable_cooldown_for_candidate_key(
+    core: &VirtualRouterEngineCore,
+    env: Env,
+    candidate_key: &str,
+    now_ms: i64,
+    blockers: &mut Vec<ProviderUnavailableBlocker>,
+) {
+    if let Some(target_keys) = core.forwarder_registry.expand_target_keys(candidate_key) {
+        for provider_key in target_keys {
+            collect_recoverable_cooldown_for_key(core, env, &provider_key, now_ms, blockers);
+        }
+        return;
+    }
+    collect_recoverable_cooldown_for_key(core, env, candidate_key, now_ms, blockers);
+}
+
 pub(crate) fn build_provider_not_available_error(
     core: &VirtualRouterEngineCore,
     env: Env,
@@ -1372,7 +1394,13 @@ pub(crate) fn build_provider_not_available_error(
     let mut blockers: Vec<ProviderUnavailableBlocker> = Vec::new();
 
     for provider_key in candidate_keys {
-        collect_recoverable_cooldown_for_key(core, env, provider_key, now_ms, &mut blockers);
+        collect_recoverable_cooldown_for_candidate_key(
+            core,
+            env,
+            provider_key,
+            now_ms,
+            &mut blockers,
+        );
     }
 
     let unavailable_route_pool_value = unavailable_route_pools
@@ -3882,6 +3910,118 @@ mod tests {
         assert!(
             selected.is_err(),
             "runtime active 503 cooldown must stay out of the routing pool while cooldown is active"
+        );
+    }
+
+    #[test]
+    fn route_unavailable_forwarder_cooldown_reports_wait_from_real_target() {
+        let provider_key = "cooldown.key1.gpt-5.6-sol";
+        let forwarder_id = "fwd.free.gpt-5.6-sol";
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        providers.insert(
+            provider_key.to_string(),
+            json!({
+                "providerKey": provider_key,
+                "providerType": "openai",
+                "modelId": "gpt-5.6-sol",
+                "enabled": true,
+                "modelCapabilities": {
+                    "gpt-5.6-sol": ["text", "multimodal"]
+                }
+            }),
+        );
+        core.provider_registry.load(&providers);
+        let provider_keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&provider_keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            forwarder_id.to_string(),
+            json!({
+                "forwarderId": forwarder_id,
+                "protocol": "openai",
+                "modelId": "gpt-5.6-sol",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": provider_key, "priority": 1, "disabled": false }
+                ]
+            }),
+        );
+        let provider_key_set = provider_keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_key_set)
+            .expect("forwarder load");
+        core.routing = parse_routing(&Map::from_iter([(
+            "multimodal".to_string(),
+            Value::Array(vec![json!({
+                "id": "multimodal-forwarder",
+                "priority": 100,
+                "mode": "priority",
+                "targets": [forwarder_id]
+            })]),
+        )]));
+
+        for attempt in 1..=3 {
+            core.handle_provider_error(&json!({
+                "code": "HTTP_502",
+                "message": format!("cooldown failure {attempt}"),
+                "stage": "provider.send",
+                "status": 502,
+                "errorClassification": "recoverable",
+                "runtime": {
+                    "requestId": format!("cooldown-forwarder-{attempt}"),
+                    "providerKey": provider_key,
+                    "runtimeKey": provider_key
+                }
+            }));
+        }
+
+        let error = core
+            .select_provider(
+                "default",
+                &json!({}),
+                &ClassificationResult {
+                    route_name: "default".to_string(),
+                    confidence: 1.0,
+                    reasoning: "test".to_string(),
+                    candidates: vec!["default".to_string()],
+                },
+                &RoutingFeatures {
+                    has_image_attachment: true,
+                    ..RoutingFeatures::default()
+                },
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect_err("cooled forwarder target must not become bare PROVIDER_NOT_AVAILABLE");
+
+        assert!(
+            error.starts_with("VIRTUAL_ROUTER_ERROR:HTTP_429:"),
+            "forwarder target cooldown must surface retryable wait, got {error}"
+        );
+        let payload = error
+            .strip_prefix("VIRTUAL_ROUTER_ERROR:HTTP_429:")
+            .expect("http 429 virtual router prefix");
+        let parsed: Value = serde_json::from_str(payload).expect("virtual router 429 details json");
+        let details = parsed["details"]
+            .as_object()
+            .expect("retryable provider-unavailable details");
+        assert_eq!(details["candidateProviderKeys"], json!([forwarder_id]));
+        assert!(
+            details["retryAfterMs"].as_i64().unwrap_or_default() > 0,
+            "retryAfterMs should come from real forwarder target cooldown"
+        );
+        assert_eq!(
+            details["unavailableProviders"][0]["providerKey"],
+            json!(provider_key)
+        );
+        assert_eq!(
+            details["unavailableProviders"][0]["reasons"][0]["type"],
+            json!("health_cooldown")
         );
     }
 

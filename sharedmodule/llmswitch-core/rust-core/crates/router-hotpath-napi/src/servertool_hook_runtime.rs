@@ -31,9 +31,11 @@ pub(crate) fn run_servertool_response_hooks(
 
     for hook_id in schedule.projection.hook_ids {
         if hook_id == STOPLESS_RESPONSE_HOOK_ID {
-            if let Some(output) =
-                run_stopless_response_hook(chatprocess_payload, metadata_center_snapshot, request_id)?
-            {
+            if let Some(output) = run_stopless_response_hook(
+                chatprocess_payload,
+                metadata_center_snapshot,
+                request_id,
+            )? {
                 return Ok(Some(output));
             }
         }

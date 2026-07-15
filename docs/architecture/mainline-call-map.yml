@@ -2011,6 +2011,76 @@ chains:
         side_channel_writes: []
         status: anchored
         note: "Retired Responses codec TS shell is forbidden from owning codec state or protocol conversion semantics."
+  - chain_id: sse.transport_core_shared.mainline
+    summary: "Protocol-neutral streaming bytes move only through the shared Rust SSE transport topology; V2 and V3 adapters converge on the same encoder."
+    entry_contract:
+      node: SseTransportIn01RawChunk
+      owner_doc: docs/goals/v3-sse-transport-core-extraction-plan.md
+    edges:
+      - step_id: sse-transport-core-01
+        from_node: SseTransportIn01RawChunk
+        to_node: SseTransportIn02DecodedFrame
+        caller_symbol: push
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        callee_symbol: build_sse_transport_in_02_from_sse_transport_in_01
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        owner_feature_id: sse.transport_core_shared
+        semantic_input: "arbitrary borrowed provider/client SSE byte chunk"
+        semantic_output: "decoded protocol-neutral field frame"
+        resource_flow:
+          consumes: [sse.transport_raw_chunk]
+          produces: [sse.transport_decoded_frame]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: sse-transport-core-02
+        from_node: SseTransportIn02DecodedFrame
+        to_node: SseTransportIn03ValidatedFrameStream
+        caller_symbol: push
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        callee_symbol: build_sse_transport_in_03_from_sse_transport_in_02
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        owner_feature_id: sse.transport_core_shared
+        semantic_input: "decoded SSE fields with no business interpretation"
+        semantic_output: "validated ordered frame stream"
+        resource_flow:
+          consumes: [sse.transport_decoded_frame]
+          produces: [sse.transport_validated_frame_stream]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: sse-transport-core-03-v2
+        from_node: SseTransportIn03ValidatedFrameStream
+        to_node: SseTransportOut04EncodedChunk
+        caller_symbol: parse_sse_stream_chunk_with_config
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+        callee_symbol: build_sse_transport_out_04_from_sse_transport_in_03
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        owner_feature_id: sse.transport_core_shared
+        semantic_input: "validated protocol-neutral frame for the V2 semantic parser adapter"
+        semantic_output: "encoded frame chunk delivered to the pre-existing V2 protocol semantic owner"
+        resource_flow:
+          consumes: [sse.transport_validated_frame_stream]
+          produces: [sse.transport_encoded_chunk]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: sse-transport-core-03-v3
+        from_node: SseTransportIn03ValidatedFrameStream
+        to_node: SseTransportOut04EncodedChunk
+        caller_symbol: validated_sse_stream
+        caller_file: v3/crates/routecodex-v3-provider-responses/src/shared.rs
+        callee_symbol: build_sse_transport_out_04_from_sse_transport_in_03
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+        owner_feature_id: sse.transport_core_shared
+        semantic_input: "validated protocol-neutral frame from the V3 provider byte stream"
+        semantic_output: "encoded frame chunk with reqwest backpressure and typed adapter errors"
+        resource_flow:
+          consumes: [sse.transport_validated_frame_stream]
+          produces: [sse.transport_encoded_chunk]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
 shared_multi_reference_functions:
   - function_id: architecture.mainline_chain_manifest_projection
     binding_status: confirmed
@@ -2296,6 +2366,7 @@ shared_multi_reference_functions:
     reused_by_chains:
       - error.mainline
     note: "Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract."
+
 split_bindings: []
 
 maintenance_rules:

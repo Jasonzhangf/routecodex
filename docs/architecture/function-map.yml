@@ -8920,3 +8920,63 @@ owners:
       - "Provider-specific fetch, media detection, and wire source replacement stay in Provider Runtime; Hub Pipeline and Virtual Router must not gain Anthropic image branches."
       - "A successful rewrite creates only the top-level body/messages/message/content/block/source path. Unaffected protocol values retain exact references."
       - "Fetch failure must not mutate caller-owned input; no-rewrite returns the original body reference."
+
+  - feature_id: sse.transport_core_shared
+    status: active
+    summary: "One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters"
+    owner_kind: rust_ssot
+    owner_scope: "Owns incremental byte framing, UTF-8/frame validation, canonical frame encoding, limits, and typed transport failures; never owns protocol or business event semantics"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+    resource_bindings:
+      writes:
+        - sse.transport_raw_chunk@SseTransportIn01RawChunk
+        - sse.transport_decoded_frame@SseTransportIn02DecodedFrame
+        - sse.transport_validated_frame_stream@SseTransportIn03ValidatedFrameStream
+        - sse.transport_encoded_chunk@SseTransportOut04EncodedChunk
+      reads: []
+      forbidden:
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - response.hub_semantic@HubRespChatProcess03Governed
+    canonical_types:
+      - SseTransportIn01RawChunk
+      - SseTransportIn02DecodedFrame
+      - SseTransportIn03ValidatedFrameStream
+      - SseTransportOut04EncodedChunk
+      - SseTransportError
+    canonical_builders:
+      - build_sse_transport_in_01_raw_chunk
+      - build_sse_transport_in_02_from_sse_transport_in_01
+      - build_sse_transport_in_03_from_sse_transport_in_02
+      - build_sse_transport_out_04_from_sse_transport_in_03
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - scripts/architecture/verify-sse-transport-core-shared.mjs
+      - docs/goals/v3-sse-transport-core-extraction-plan.md
+      - docs/architecture
+    forbidden_paths:
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_responses_conversation_utils.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_sse_stream_sniffer.rs
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/general_provider.rs
+      - scripts/architecture/verify-sse-transport-core-shared.mjs
+    required_gates:
+      - npm run test:sse-transport-core
+      - npm run test:v3-sse-transport-adapter
+      - npm run verify:sse-transport-core-shared
+      - npm run verify:sse-architecture-boundary
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "`[DONE]` and event names are opaque data to transport; terminal, continuation, tool, reasoning, routing, and provider semantics are forbidden."
+      - "V3 Server streaming projection remains blocked by the active remote-continuation integration claim while that path materializes the complete SSE body; the shared-core gate remains red until the semantic owner exposes a streaming-safe contract."

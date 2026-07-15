@@ -75,3 +75,46 @@ independent turns each hit Virtual Router. That exact mismatch is the required r
 
 Completion requires real Resp04/Req03/Req06 source bindings and both controlled and current-5555
 two-turn evidence. Unit-only or store-only evidence is insufficient.
+
+## Transport-bound continuation matrix（2026-07-15）
+
+| Case | Required evidence |
+| --- | --- |
+| model declares remote continuation on HTTP-only provider | Config compile rejects before Runtime |
+| WebSocket transport without endpoint | Config compile rejects missing endpoint |
+| HTTP transport with WebSocket endpoint | Config compile rejects contradictory declaration |
+| WebSocket handshake rejection | typed Provider transport error enters Error01-06; no HTTP retry |
+| WebSocket auth rejection | typed provider/auth failure; secret absent from debug/error/client payload |
+| first-turn request correlation | exactly one `response.create`; response ID binds the selected provider/model/auth/transport |
+| continuation correlation | same connection and exact pin; request carries only new input and `previous_response_id` |
+| split text/binary frames | incremental parser preserves event boundaries and UTF-8; malformed frame fails explicitly |
+| terminal JSON success | terminal `response.completed.response` becomes the JSON provider response truth |
+| terminal SSE success | server events preserve order and become equivalent Responses SSE frames plus one `[DONE]` |
+| provider `error` event | Error01-06; never projected as completed response |
+| cancellation/client disconnect | socket operation stops and returns health-neutral client disconnect truth |
+| concurrent create on one socket | rejected or serialized; never two in-flight responses on one connection |
+| still-running replacement | Resp04 atomically replaces only matching locator after a successful terminal event boundary |
+| terminal success/failure | releases only the matching locator; already-terminal reuse is rejected |
+| side-channel isolation | endpoint/pin/auth/socket/correlation/control fields never enter provider body or client payload |
+
+## HTTP-only live negative evidence
+
+The current managed provider accepts the first HTTP `/responses` turn but rejects the exact second
+turn with HTTP 400 stating that `previous_response_id` is supported only on Responses WebSocket v2.
+The same result occurs with `store=true` and `store=false`. This is the required negative sample for
+the transport-bound Config gate and proves that successful first-turn HTTP availability is not
+evidence of remote-continuation availability.
+
+## WebSocket controlled replay requirements
+
+- Controlled upstream must inspect the actual Authorization header and exact `response.create`
+  payload; expected fixture truth must not be passed into the transport implementation.
+- JSON and SSE two-turn tests must use one connection-local state owner and prove first turn Router=1,
+  continuation Router=0, Req03 load=1, Req06 pin=1.
+- Tests must pair success/failure/non-terminal/already-terminal cases and include handshake failure,
+  auth failure, protocol error, provider error, cancellation, split frames, terminal release, and
+  payload isolation.
+- A source gate must reject HTTP retry, protocol fallback, Relay/local materialization, Server-owned
+  socket state, and any second Runtime kernel or response exit.
+- `live_5555_pending` can change only after current managed 5555 completes both real JSON and SSE
+  two-turn continuation with the exact provider/model/auth/transport pin.

@@ -99,8 +99,8 @@ pub fn resolve_error_err05_route_availability_decision(
             || (route_pool_singleton_current
                 && ((!default_pool_available && excluded.is_empty())
                     || default_pool_singleton_provider)));
-    let verified_last_provider =
-        route_pool_singleton_current && (!default_pool_available || default_pool_singleton_provider);
+    let verified_last_provider = route_pool_singleton_current
+        && (!default_pool_available || default_pool_singleton_provider);
     let policy_exhausted = remaining.is_empty() && !default_pool_available;
     let reason_code = if default_pool_available {
         "default_pool_available"

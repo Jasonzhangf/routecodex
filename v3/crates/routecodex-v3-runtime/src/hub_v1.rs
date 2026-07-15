@@ -5,6 +5,8 @@ mod relay_request;
 pub use relay_request::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
+mod openai_chat_codec;
+pub use openai_chat_codec::*;
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;
 mod anthropic_relay_runtime;

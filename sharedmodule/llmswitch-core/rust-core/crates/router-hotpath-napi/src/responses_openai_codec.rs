@@ -817,16 +817,12 @@ mod tests {
         assert_eq!(latest_user, "继续修正 stop schema 并继续执行");
         let tools = value["request"]["tools"].as_array().expect("request tools");
         assert_eq!(tools.len(), 2);
-        assert!(
-            tools
-                .iter()
-                .any(|tool| tool["name"] == json!("exec_command"))
-        );
-        assert!(
-            tools
-                .iter()
-                .any(|tool| tool["name"] == json!("reasoningStop"))
-        );
+        assert!(tools
+            .iter()
+            .any(|tool| tool["name"] == json!("exec_command")));
+        assert!(tools
+            .iter()
+            .any(|tool| tool["name"] == json!("reasoningStop")));
     }
 
     #[test]

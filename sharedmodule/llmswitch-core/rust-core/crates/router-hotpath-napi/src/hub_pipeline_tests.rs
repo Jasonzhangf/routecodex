@@ -20,13 +20,11 @@ fn message_contains_exact_text(message: &Value, expected: &str) -> bool {
     if message["content"].as_str() == Some(expected) {
         return true;
     }
-    message["content"]
-        .as_array()
-        .is_some_and(|parts| {
-            parts
-                .iter()
-                .any(|part| part["text"].as_str() == Some(expected))
-        })
+    message["content"].as_array().is_some_and(|parts| {
+        parts
+            .iter()
+            .any(|part| part["text"].as_str() == Some(expected))
+    })
 }
 
 #[test]

@@ -30649,6 +30649,32 @@ Pure Rust NAPI candidates:
 - terminal success/failure/already-terminal 均显式不保存；local owner 拒绝 remote owner，不含 provider/model/auth pin，不读取 debug/snapshot，不接 Hub/Server/live Relay。
 - 证据：focused 10/10、boundary mutation fixtures 8/8、module-boundaries、rust-only、fmt、clippy `-D warnings`、V3 workspace（含 doctest）全部通过。
 - 完成边界：仅 local continuation contract/store/codec 与 boundary gates；continuation E2E、Hub wiring、live Relay 均未实现、未验证。
+# 2026-07-15T13:57+08:00 V3 Responses Direct live listener 5555
+
+- Jason authorized migrating port 5555 from the V2 aggregate to an isolated V3 server. Removed the V2 `httpserver.ports` entry and the now-dead `gateway_priority_5555` routing group from `~/.rcc/config.toml`; V2 validation passed and one aggregate restart through locator 5520 left 5520/10000/4444 healthy on 0.90.3934 while 5555 was closed.
+- Created `~/.rcc/config.v3.toml` with one listener (`responses_v3_5555`), one Responses provider (`cc_sol`), one canonical model (`gpt-5.6-sol`), and one explicit non-empty default pool. The manifest contains only an environment secret handle; runtime credential is resolved from the existing provider truth at process start and is not copied into the V3 config.
+- V3 config/provider/server tests passed (19 + 12 + 10), then the V3 server started on 0.0.0.0:5555. `/health` reports `manifest_version=3`; `/v1/models` reports provider `cc_sol`; real non-streaming `/v1/responses` returned exactly `v3-5555-ok`; real SSE returned `response.completed`, `[DONE]`, and exactly `v3-stream-ok`. Both 5520 V2 and 5555 V3 remained healthy after the probes.
+
+## 2026-07-15 V3 Responses Direct remote continuation integration checkpoint
+
+- Red baseline captured: the focused two-turn test failed at compile time only because the typed continuation state/scope/stateful entry did not exist.
+- First JSON implementation made Resp04 commit, next Req03 scope/capability load, and Req06 exact provider/model/auth resolution observable; focused JSON test passed 1/1 and H4 contract passed 12/12.
+- Architecture review rejected that green implementation as a closeout: the pinned branch currently uses a separate downstream helper and response return instead of rejoining the existing single Direct kernel loop. It must be refactored before commit; no completion claim, maps/wiki anchoring, SSE/Server/live evidence, or goal completion is allowed from this checkpoint.
+
+## 2026-07-15 V3 Responses Direct remote continuation map/gate closeout checkpoint
+
+- The continuation path now rejoins one Runtime kernel core and one response exit; focused JSON/SSE Runtime and controlled Server HTTP replay had passed before the concurrent worktree changed.
+- V3 function/mainline/resource/verification maps, machine manifest, Markdown wiki, and a dedicated HTML review surface now bind Resp04 commit/release, Req03 load/classification, and Req06 exact provider/model/auth resolution. The codec edge was restored to its own H4 chain instead of being nested under the integration chain.
+- Architecture/resource/new positive+red/P6/module/Rust-only/H2 gates pass. P6 freeze now preserves legacy topology while explicitly allowing the two stateful wrappers that delegate to the single kernel core.
+- Final rerun is blocked by unrelated concurrent Anthropic Relay compile drift in `anthropic_relay_runtime.rs` (stale Req08/Req09 builder calls). This claim does not own that file, so no cross-worker patch was made. Browser visual verification is also pending because the browser runtime exposed zero backends. No completion, live 5555 proof, commit, or MEMORY promotion is claimed.
+
+## 2026-07-15 V3 Responses Direct remote continuation offline closeout and live mismatch
+
+- Concurrent Anthropic Relay source stabilized. Focused H4 13/13, Runtime JSON/SSE 7/7, Server two-turn JSON/SSE 2/2, P6/H2, Error01-06, architecture/resource/module/Rust-only, fmt, Clippy, full workspace/doctests, CLI build, and diff checks pass.
+- Clippy closeout added `is_empty` beside the public state `len` and replaced an eight-argument debug helper with one typed continuation execution context. Server tests now serialize shared process-environment/listener state, use still-pending `/v1/chat/completions` instead of implemented Anthropic Relay, and expect the manifest's complete capability catalog.
+- Chrome headless loaded the dedicated HTML review page and rendered the first-turn, continuation-turn, error-flow, Resp04/Req03 nodes, and canonical links.
+- Current 5555 is V3 (`manifest_version=3`) but PID 126 has been resident since 13:56, before the continuation source was rebuilt. Real first turn produced a provider-owned function call but no Resp04 trace; the second turn re-entered Router05-07 and failed 502 after upstream HTTP 400. This is direct evidence that the resident process is stale, not a passing live continuation.
+- The goal explicitly forbids restart/install/config mutation. Completion therefore remains pending explicit authority to restart the existing V3 listener process without changing config, credential, port, or service ownership; no live success, commit, MEMORY promotion, or goal completion is claimed.
 # 2026-07-15T15:10+08:00: V3 Anthropic Relay controlled Runtime integration
 
 - Claim `feature_id:v3.anthropic_relay_runtime_integration` connects the Server-owned `/v1/messages` wrapper to the sole Hub v1 Req01-Req09 lifecycle, generic Responses transport, Resp01-Resp06, and Error01-06.
@@ -30658,7 +30684,40 @@ Pure Rust NAPI candidates:
 - Focused evidence: Rust integration 3/3, controlled replay 4/4, integration verifier plus 8 negative mutations, harness verifier plus 7 mutations and 8 missing-edge red diagnostics, request/response/protocol gates, module/Rust-only/static-hook/copy-budget gates.
 - Completion boundary remains controlled repo-local Runtime integration only. Live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, and production cutover are not claimed.
 
+# 2026-07-15T16:33+08:00: V3 managed live server lifecycle closeout
+
+- Claim `feature_id:v3.managed_server_lifecycle` now owns the V3 process lifecycle only: `V3Lifecycle01ValidatedConfig -> V3Lifecycle02InstanceDeclared -> V3Lifecycle03OperationLocked -> V3Lifecycle04ChildSpawned -> V3Lifecycle05IdentityPublished -> V3Lifecycle06LiveControlled -> V3Lifecycle07GracefullyStopped`.
+- Config source identity is Config-owned: `V3ConfigStore::load_snapshot_with_source_identity()` returns canonical path + SHA-256 + deterministic Manifest; lifecycle consumes that snapshot and no longer reads raw config bytes.
+- Source gates passed: managed verifier, 6 red mutations, Config source identity test, lifecycle whitebox 4/4, CLI managed blackbox 3/3 including start-CLI-exit persistence, architecture/resource/module/Rust-only/fmt/Clippy, full V3 workspace, CLI build, lifecycle-scope diff check.
+- Live cutover: copied existing `cc-sol` provider auth into owner-only `/Users/fanzhang/.rcc/secrets/v3/cc-sol.token` (dir 0700, file 0600), changed `~/.rcc/config.v3.toml` to token_file handle, config check passed, and token literal was absent from config/state/log/argv/evidence.
+- Old foreground V3 5555 was stopped only via its original exec session Ctrl-C; PID 126 exited and 5555 closed while V2 5520/10000/4444 stayed healthy. No kill/pkill/killall/port takeover was used.
+- Managed start created instance `v3-87782d1e6721ce4f567f`; child PID 88727 had PPID 1 and independent PGID. Managed restart kept instance ID and changed PID/nonce to PID 90733.
+- Live evidence before and after restart: `/health` manifest_version=3, `/v1/models` provider `cc_sol` model `gpt-5.6-sol`, real JSON exact markers completed, real SSE had `response.completed`, `[DONE]`, and exact delta/completed marker; V2 5520/10000/4444 stayed healthy.
+- Known residual from test harness iteration: four random-port `run-managed-child` orphans remained from a failed pre-fix test after TempDir state/config deletion removed lifecycle control truth; per no-kill rule they were not killed and do not own 5555/V2.
+# 2026-07-15 5520 forwarder cooldown visibility diagnosis and Rust fix
+
+- Current aggregate log truth for port 5520 is `~/.rcc/logs/server-4444.log`; the old `server-5520.log` ended on 2026-07-14 and is not the current instance log.
+- The observed early failure is not a first-provider-error projection. One historical request exhausted six provider attempts; the current fast-fail branch occurs earlier in Virtual Router selection when a multimodal route contains only forwarder candidates whose real targets are unavailable.
+- Root cause owner is Rust `vr.route_availability_floor` in `virtual_router_engine/engine/selection.rs`: cooldown diagnostics inspected candidate IDs such as `fwd.free.gpt-5.6-sol`, while health truth is stored on real target IDs such as `cc-sol.key1.gpt-5.6-sol`. The forwarder wrapper therefore hid `retryAfterMs`/`minRecoverableCooldownMs`, yielding bare `PROVIDER_NOT_AVAILABLE` instead of retryable `HTTP_429` wait truth.
+- The Rust owner now expands forwarder candidates to real target keys only for recoverable-cooldown diagnostics. Candidate identity remains the forwarder; unavailable-provider evidence names the real target. No TS retry, handler swallow, provider special case, or fallback path was added.
+- Focused forwarder cooldown test, default-floor test, singleton 503 cooldown test, rustfmt, VR/function-map/mainline/Rust-only/rustification gates, native release build, and diff check passed. The existing `priority_forwarder_retry_exclusion_exhausts_only_after_last_real_provider` test fails both the working tree and an independent clean HEAD worktree, so it is a pre-existing baseline failure rather than evidence for this change.
+- Standard `npm run install:release` failed before install/restart because the isolated build omits `v3/` while the concurrently modified architecture map references `v3/crates/routecodex-v3-provider-responses/src/shared.rs`. No live runtime was changed. Global install, aggregate restart, and real 5520 replay remain incomplete.
+
 # 2026-07-15 V3 5555 large image request closeout
 
 - Red truth split into two layers: the live 5555 HTTP boundary rejected a 1,200,201-byte Responses request with 413 before Runtime, while the Rust routing estimator counted a 1.2MB image/video base64 string as roughly 375k text tokens.
-- The V3 Server body allocation boundary now matches the V2 default 64MiB contract and still rejects 64MiB+1. The Rust V3 routing estimator omits media bytes with fixed structural cost, including stringified structured media; the provider wire payload remains unchanged. Focused/full V3 gates passed; after managed restart, live `/v1/responses` accepted a valid 3.24MiB request containing a 2.43MiB PNG with 200 while V2 ports remained healthy.
+- The V3 Server body allocation boundary now matches the V2 default 64MiB contract and still rejects 64MiB+1. The Rust V3 routing estimator omits media bytes with fixed structural cost, including stringified structured media; the provider wire payload remains unchanged.
+- Focused/full V3 gates passed. After a managed lifecycle restart, the same live `/v1/responses` entry accepted a valid 3.24MiB request containing a 2.43MiB PNG and returned 200; V2 ports 5520/10000/4444 remained healthy.
+
+# 2026-07-15T09:20Z review fixes before aggregate commit
+
+- Review found Resp04 still-running rebind deleted the old remote locator before committing the new one. A red collision test reproduced truth loss risk; V3RemoteContinuationStore::rebind_for_resp04 now validates first and replaces atomically under the existing mutex. H4 14/14, Runtime continuation 7/7, Server two-turn JSON/SSE 2/2, verifier and 8 red mutations passed.
+- Review found managed lifecycle stale cleanup accepted any matching status after a failed control probe. A red test proved Running cache was reaped; cleanup now permits only matching Stopped/Failed state and rejects caches without terminal status. Follow-up review added foreign control-socket owner validation before terminal cleanup. Lifecycle whitebox now includes the new guard, managed CLI blackbox remains 3/3, architecture verifier and 8 red mutations passed.
+- The remote-continuation verifier was aligned with the structured SSE frame observer and now rejects into_body_bytes materialization plus non-atomic rebind mutations.
+
+# 2026-07-15T09:35Z review foreign control cleanup fix
+
+- Review found terminal managed cleanup still trusted control.json after checking terminal status; a corrupted record could name a different instance's canonical socket path.
+- Red test: foreign_control_record_is_never_reaped_from_terminal_state failed before the fix because cleanup succeeded instead of returning IdentityMismatch.
+- Fix: reap_inactive_runtime_files now requires control.instance_id to match the expected declaration and socket_path to equal that instance's canonical managed socket before deleting any socket/control cache.
+- Green evidence: focused lifecycle test passed; verify:v3-managed-server-lifecycle passed; managed lifecycle red fixtures now reject 8 mutations including removing the foreign-control guard.

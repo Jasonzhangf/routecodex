@@ -13,6 +13,7 @@ napi = { version = "2", default-features = false, features = ["napi4"] }
 stop-message-core = { path = "../stop-message-core" }
 followup-core = { path = "../followup-core" }
 servertool-core = { path = "../servertool-core" }
+sse-transport-core = { path = "../sse-transport-core" }
 traffic-governor-core = { path = "../traffic-governor-core" }
 napi-derive = "2"
 serde = { version = "1", features = ["derive"] }

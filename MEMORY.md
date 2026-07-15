@@ -3262,6 +3262,11 @@
 - immutable interval 只允许 lossless codec、entry protocol/endpoint/session/conversation/port/routing-group scope 校验、expiry 和 release；禁止 remote-owner fallback、provider pin、debug/snapshot truth 或 payload rebuild。
 - terminal success/failure/already-terminal 必须返回 typed non-save 结果，不能生成或复活 continuation；此切片不代表 Hub/Server wiring、continuation E2E 或 live Relay 已完成。
 - required gates：focused contract/store tests、mutation red fixtures、V3 module-boundaries、rust-only、fmt、clippy、full workspace + doctest。
+# 2026-07-15 V3 live Responses Direct baseline
+
+- Live port ownership is now split: V2 aggregate owns 5520/10000/4444; isolated V3 owns 5555 through `~/.rcc/config.v3.toml`. The old V2 5555 listener and `gateway_priority_5555` group were physically removed from `~/.rcc/config.toml`.
+- The verified V3 minimum is one `responses_v3_5555` listener, one `cc_sol` Responses provider, canonical/wire model `gpt-5.6-sol`, and one explicit default pool. V3 auth authoring uses an environment handle, never a literal secret.
+- Verified live evidence: V3 `/health` returned manifest version 3; `/v1/models` bound the model to `provider:cc_sol`; real JSON Responses Direct returned `v3-5555-ok`; real SSE returned `v3-stream-ok`, `response.completed`, and `[DONE]`; V2 5520/10000/4444 remained healthy on 0.90.3934.
 # 2026-07-15: V3 Anthropic Relay controlled Runtime integration truth
 
 - `v3.anthropic_relay_runtime_integration` is the controlled-runtime owner for `/v1/messages -> Hub v1 Req01-Req09 -> Responses transport -> Hub v1 Resp01-Resp06 -> Anthropic projection`.
@@ -3270,8 +3275,30 @@
 - A Server-owned controlled driver must keep fixture/config authoring IO outside Server semantics: accept only case input over stdin and load the harness config through `V3ConfigStore`. It must not read expected fixture fields or recreate route selection.
 - This truth does not establish live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, or production cutover.
 
+# 2026-07-15 V3 managed live server lifecycle truth
+
+- Live V3 5555 is now owned by managed lifecycle instance `v3-87782d1e6721ce4f567f`, not a foreground agent exec session. Current verified managed child after restart was PID 90733 with PPID 1 and independent PGID 90733.
+- V3 process lifecycle truth is `routecodex-v3-lifecycle`; CLI `server start/status/restart/stop` is a thin caller, Server only supplies aggregate listener/shutdown handle, and Runtime remains the business request/response lifecycle.
+- Config source identity for lifecycle is Config-owned through `V3ConfigStore::load_snapshot_with_source_identity()`; lifecycle must consume canonical path + source SHA-256 + Manifest from Config, never read raw authoring bytes directly.
+- `~/.rcc/config.v3.toml` uses `token_file = "/Users/fanzhang/.rcc/secrets/v3/cc-sol.token"`; the token directory is 0700 and file is 0600. Config/state/log/argv/evidence were verified not to contain the token literal.
+- Verified live after managed restart: V3 `/health` reports manifest_version 3, `/v1/models` binds `provider:cc_sol` / `gpt-5.6-sol`, real JSON `/v1/responses` completed exact marker, real SSE emitted `response.completed`, `[DONE]`, and exact delta/completed marker. V2 5520/10000/4444 stayed healthy on 0.90.3934 throughout.
+- Stopping legacy foreground 5555 must use its exact owner session/control path when available. If a test managed child loses TempDir state/control truth, do not kill or take over; record the orphan and avoid claiming lifecycle control over it.
+# 2026-07-15 5520 forwarder cooldown diagnostic truth
+
+- Virtual Router route candidates may be forwarder IDs while health/cooldown truth is owned by their real provider targets. Any recoverable-cooldown/error-wait projection for a forwarder candidate must expand through `ForwarderRegistry` and inspect the real target keys; otherwise `retryAfterMs` disappears and route selection can project bare `PROVIDER_NOT_AVAILABLE` before the cooldown-wait lifecycle starts.
+- Provider status availability is not request eligibility. A provider can be globally enabled/healthy yet be excluded for one session by route capability (for example multimodal), routing instructions, request exclusions, concurrency, or health state, while another default/text/tools session selects it successfully.
+- In a multi-port aggregate, the current log truth can live under the aggregate locator log (for the observed 5520 instance, `server-4444.log`). Confirm timestamps and process lifecycle before treating `server-<requested-port>.log` as current.
+- Source-level correction is Rust Virtual Router only. Do not compensate with TS retry, handler error swallowing, provider-specific Hub logic, or a synthetic fallback pool.
+
 # 2026-07-15 V3 Responses image body/token boundary truth
 
 - HTTP request byte limits and routing token estimates are separate contracts. V3 Server uses the V2-compatible finite 64MiB request-body cap for allocation safety; it must not reuse the former 1MiB cap as a model-context limit.
 - V3 routing token estimation is Rust-owned and follows the established media-omission behavior: image/video URL or base64 bytes, including stringified structured content, contribute only fixed structural cost. This omission is estimation-only; provider wire payloads retain the original media unchanged.
 - Required regression pair: a valid image-bearing Responses request above 1MiB reaches the provider, while a request above 64MiB still returns typed 413. Live 5555 accepted a 3.24MiB valid PNG request with HTTP 200 after managed restart.
+
+# 2026-07-15 V3 review closeout invariants
+
+- Responses Direct Resp04 rebind is atomic in V3RemoteContinuationStore::rebind_for_resp04: a new locator is fully validated before the previous locator is removed, and any collision/error preserves the old continuation truth.
+- Managed lifecycle stale cleanup is terminal-only. Existing Starting, Running, or Stopping state, and runtime caches without a matching Stopped/Failed status, are never reaped merely because a control probe failed.
+- Managed lifecycle terminal cleanup must also validate control ownership before deleting sockets: control instance ID must match the expected declaration and socket path must equal that instance's canonical managed socket. A foreign/corrupted control record fails closed and leaves the foreign socket intact.
+- Focused red/green evidence covers failed rebind truth preservation, non-terminal lifecycle cache preservation, and foreign control-socket preservation; continuation JSON/SSE and managed CLI lifecycle regressions remain green.

@@ -1,5 +1,7 @@
 # V3 Foundation and Responses Direct Review
 
+[Open the remote-continuation browser review surface](v3-responses-direct-remote-continuation.html).
+
 ## Purpose
 
 This is the human review surface for the RouteCodex V3 Rust foundation and first business lifecycle. The order is Config -> Server -> Debug -> Error/Provider health -> Virtual Router/Target -> Responses direct Pipeline/Provider.
@@ -26,7 +28,10 @@ flowchart LR
   C4 --> C5[V3Config05ManifestPublished]
   C5 --> S3[V3Server03HttpRequestRaw]
   S3 --> R4[V3Req04StandardizedResponses]
-  R4 --> VR5[V3Router05RequestClassified]
+  R4 --> C{previous_response_id?}
+  C -->|new turn| VR5[V3Router05RequestClassified]
+  C -->|direct remote| HC3[V3HubReqContinuation03Classified]
+  HC3 --> HT6[V3HubReqTarget06Resolved exact pin]
   VR5 --> VR6[V3Router06RoutePoolResolved]
   VR6 --> VR7[V3Router07OpaqueTargetHitOnce]
   VR7 --> T8[V3Target08KindClassified]
@@ -36,7 +41,8 @@ flowchart LR
   D11 --> P12[V3Provider12ResponsesWirePayload]
   P12 --> P13[V3Transport13ResponsesHttpRequest]
   P13 --> PR14[V3ProviderResp14Raw]
-  PR14 --> O15[V3Resp15ClientPayload]
+  PR14 --> RC4[V3HubRespContinuation04Committed]
+  RC4 --> O15[V3Resp15ClientPayload]
   O15 --> S16[V3Server16HttpFrame]
 ```
 
@@ -44,6 +50,19 @@ P0-P5 are anchored through `V3Target10ConcreteProviderSelected`. P6 is source-bo
 `V3Server16HttpFrame`, including generic Provider JSON/SSE transport, Target-local reselection,
 full exhaustion, and same-kernel Dry Run with only Transport13 replaced by a no-network effect.
 The clean built-CLI controlled-upstream replay is recorded in the P6 local-live evidence section.
+
+Responses Direct remote continuation is now source-bound on the same fixed Runtime kernel. A new
+turn uses Virtual Router once. A turn carrying `previous_response_id` instead loads the immutable
+direct locator at `V3HubReqContinuation03Classified`, validates capability revision, resolves the
+exact provider/model/auth pin at `V3HubReqTarget06Resolved`, and rejoins the same Direct request,
+transport, response projection, Resp04, and client exit. It never enters Relay/local materialization,
+Virtual Router, or target-local reselection.
+
+The Server owns no continuation store logic. All listeners share one Runtime state, while the
+locator key isolates endpoint, session, conversation, listener port, and routing group. JSON and SSE
+controlled HTTP replay both prove first-turn Resp04 commit and next-turn Req03/Req06 exact pin. The
+current 5555 replay remains a separate completion gate until its request/sample/log evidence is
+recorded.
 
 ## Ownership review
 
@@ -58,6 +77,7 @@ The clean built-CLI controlled-upstream replay is recorded in the P6 local-live 
 | Health state/action execution | Provider runtime | provider/auth/model state never moves to Router/Error |
 | Logs/snapshots/dry run | `routecodex-v3-debug` | side-channel only; same runtime kernel replay |
 | Responses wire/transport | `routecodex-v3-provider-responses` | secret resolution occurs only at transport |
+| Responses Direct remote continuation | `routecodex-v3-runtime` | Resp04 commit/release, Req03 load, Req06 exact pin; Server only supplies typed request scope |
 
 ## Error side chain
 
@@ -105,6 +125,8 @@ P3 Debug is owned by `routecodex-v3-debug`: trace context, event ledger, raw cap
 - [x] P5 one-hit Virtual Router and Target Interpreter source binding (runtime verification evidence below).
 - [x] P6 source-bound Responses Direct lifecycle through Server frame node 16.
 - [x] P6 built CLI Responses direct JSON/SSE/reselection/exhaustion/Dry Run evidence.
+- [x] Responses Direct remote continuation source binding and controlled JSON/SSE two-turn HTTP replay.
+- [ ] Current 5555 same-entry real two-turn replay evidence.
 
 ## P2 live evidence
 
