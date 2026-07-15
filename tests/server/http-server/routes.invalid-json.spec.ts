@@ -34,7 +34,7 @@ function expectGpt55CodexContract(model: any): void {
     experimental_supported_tools: ['apply_patch', 'web_search'],
     input_modalities: ['text', 'image'],
     minimal_client_version: '0.124.0',
-    prefer_websockets: true,
+    prefer_websockets: false,
     reasoning_summary_format: 'experimental',
     shell_type: 'shell_command',
     support_verbosity: true,

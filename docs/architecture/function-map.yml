@@ -6941,7 +6941,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - "Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets`, `minimal_client_version`, modalities, reasoning, and tool metadata."
+      - "Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets=false`, `minimal_client_version`, modalities, reasoning, and tool metadata."
       - "Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields."
   - feature_id: server.responses_handler_family
     status: active

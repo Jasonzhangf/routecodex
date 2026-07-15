@@ -187,7 +187,7 @@ const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
   'gpt-5.5': {
     ...CODEX_ADVANCED_MODEL_METADATA,
     description: 'Frontier model for complex coding, research, and real-world work.',
-    prefer_websockets: true,
+    prefer_websockets: false,
     minimal_client_version: '0.124.0',
     context_window: 272000,
     max_context_window: 272000

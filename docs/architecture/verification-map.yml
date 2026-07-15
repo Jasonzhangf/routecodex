@@ -3523,7 +3523,7 @@ verification:
       - npm run build:base
     notes:
       - "`/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
-      - "Drift on capability-signaling fields is a release blocker because Codex client behavior depends on these flags."
+      - "RouteCodex proxy models must advertise `prefer_websockets=false`; Codex provider-level `supports_websockets` is the actual WebSocket trigger, and model metadata must not encourage unsupported proxy WebSocket mode."
 
   - feature_id: server.responses_handler_family
     change_risk: high
