@@ -23,6 +23,7 @@ pub enum V3RemoteProviderAvailability {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct V3RemoteContinuationScopeKey {
     pub entry_protocol: V3RemoteContinuationEntryProtocol,
     pub entry_endpoint: String,
@@ -63,6 +64,7 @@ impl V3RemoteContinuationScopeKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct V3RemoteContinuationPin {
     pub provider_id: String,
     pub model_id: String,
@@ -84,14 +86,15 @@ impl V3RemoteContinuationPin {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct V3RemoteContinuationLocator {
-    pub remote_response_id: String,
-    pub owner: V3RemoteContinuationOwner,
-    pub scope_key: V3RemoteContinuationScopeKey,
-    pub pin: V3RemoteContinuationPin,
-    pub capability_revision: String,
-    pub committed_at_epoch_ms: u64,
-    pub expires_at_epoch_ms: u64,
+    remote_response_id: String,
+    owner: V3RemoteContinuationOwner,
+    scope_key: V3RemoteContinuationScopeKey,
+    pin: V3RemoteContinuationPin,
+    capability_revision: String,
+    committed_at_epoch_ms: u64,
+    expires_at_epoch_ms: u64,
 }
 
 impl V3RemoteContinuationLocator {
@@ -116,6 +119,34 @@ impl V3RemoteContinuationLocator {
 
     pub fn is_expired_at(&self, now_epoch_ms: u64) -> bool {
         now_epoch_ms >= self.expires_at_epoch_ms
+    }
+
+    pub fn remote_response_id(&self) -> &str {
+        &self.remote_response_id
+    }
+
+    pub fn owner(&self) -> V3RemoteContinuationOwner {
+        self.owner
+    }
+
+    pub fn scope_key(&self) -> &V3RemoteContinuationScopeKey {
+        &self.scope_key
+    }
+
+    pub fn pin(&self) -> &V3RemoteContinuationPin {
+        &self.pin
+    }
+
+    pub fn capability_revision(&self) -> &str {
+        &self.capability_revision
+    }
+
+    pub fn committed_at_epoch_ms(&self) -> u64 {
+        self.committed_at_epoch_ms
+    }
+
+    pub fn expires_at_epoch_ms(&self) -> u64 {
+        self.expires_at_epoch_ms
     }
 }
 
@@ -151,15 +182,11 @@ impl V3RemoteContinuationLoadRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3RemoteContinuationCommitInput {
     pub locator: V3RemoteContinuationLocator,
-    pub local_context_attempted: bool,
 }
 
 impl V3RemoteContinuationCommitInput {
     pub fn locator_only(locator: V3RemoteContinuationLocator) -> Self {
-        Self {
-            locator,
-            local_context_attempted: false,
-        }
+        Self { locator }
     }
 }
 
@@ -182,8 +209,10 @@ pub enum V3RemoteContinuationError {
         provider_id: String,
         model_id: String,
     },
-    #[error("remote continuation store cannot persist local Chat Process context")]
-    LocalContextForbidden,
+    #[error("remote continuation expiry must be later than commit time: {remote_response_id}")]
+    InvalidExpiry { remote_response_id: String },
+    #[error("remote continuation is already committed: {remote_response_id}")]
+    AlreadyCommitted { remote_response_id: String },
     #[error("remote continuation codec error: {message}")]
     Codec { message: String },
 }
@@ -198,14 +227,24 @@ impl V3RemoteContinuationStore {
         &mut self,
         input: V3RemoteContinuationCommitInput,
     ) -> Result<(), V3RemoteContinuationError> {
-        if input.local_context_attempted {
-            return Err(V3RemoteContinuationError::LocalContextForbidden);
-        }
         if input.locator.owner != V3RemoteContinuationOwner::Direct {
             return Err(V3RemoteContinuationError::OwnerMismatch);
         }
         if input.locator.scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
             return Err(V3RemoteContinuationError::EntryProtocolMismatch);
+        }
+        if input.locator.expires_at_epoch_ms <= input.locator.committed_at_epoch_ms {
+            return Err(V3RemoteContinuationError::InvalidExpiry {
+                remote_response_id: input.locator.remote_response_id,
+            });
+        }
+        if self
+            .locators
+            .contains_key(&input.locator.remote_response_id)
+        {
+            return Err(V3RemoteContinuationError::AlreadyCommitted {
+                remote_response_id: input.locator.remote_response_id,
+            });
         }
         self.locators
             .insert(input.locator.remote_response_id.clone(), input.locator);
