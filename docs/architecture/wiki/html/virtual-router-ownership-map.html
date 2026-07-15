@@ -137,6 +137,7 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>vr.route_selection</code></td><td>virtual router route classification and selected target truth</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run verify:repo-sanity</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
+        <tr><td><code>vr.route_token_estimation</code></td><td>Virtual Router request token counting uses the retired tiktoken semantics in Rust</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs</code></td><td><code>npm run verify:vr-token-estimation-rust</code>&lt;br/&gt;<code>npm run test:vr-token-estimation-red-fixtures</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run build:native-hotpath</code></td></tr>
         <tr><td><code>vr.shared_function_library_helpers</code></td><td>Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners</td><td><code>rust_helper</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine</code></td><td><code>npm run test:vr-shared-function-library-helpers-red-fixtures</code>&lt;br/&gt;<code>npm run verify:vr-shared-function-library-helpers</code>&lt;br/&gt;<code>npm run test:vr-shared-function-library-helpers-cargo</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:llmswitch-rustification-audit</code>&lt;br/&gt;<code>npm run build:base</code></td></tr>
         <tr><td><code>vr.metadata_center_surface</code></td><td>Virtual Router read-only metadata-center-backed route surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs</code></td><td><code>npm run verify:function-map-compile-gate</code>&lt;br/&gt;<code>npm run verify:architecture-mainline-call-map</code>&lt;br/&gt;<code>npm run verify:architecture-owner-queryability</code>&lt;br/&gt;<code>npm run verify:vr-no-ts-runtime</code></td></tr>
         <tr><td><code>vr.route_retry_pin_surface</code></td><td>Virtual Router retry-provider-pin parsing and forced-target selection stay queryable as one Rust owner surface</td><td><code>rust_ssot</code></td><td><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs</code></td><td><code>npm run verify:vr-no-ts-runtime</code>&lt;br/&gt;<code>npm run verify:architecture-custom-payload-carrier-owner-queryability</code>&lt;br/&gt;<code>npm run verify:resource-operation-map</code></td></tr>
@@ -191,6 +192,57 @@
         <ul>
           <li>VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.</li>
           <li>Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.</li>
+        </ul>
+        <h2>vr.route_token_estimation</h2>
+        <p>Summary: Virtual Router request token counting uses the retired tiktoken semantics in Rust</p>
+        <p>Owner kind: <code>rust_ssot</code> Owner module: <code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs</code> Owner scope: Rust-only token estimate for longcontext classification; media payload bytes are omitted and provider aliases use the retired default encoder contract</p>
+        <p>Canonical types:</p>
+        <ul>
+          <li><code>CoreBPE</code></li>
+        </ul>
+        <p>Canonical builders:</p>
+        <ul>
+          <li><code>estimate_request_tokens</code></li>
+          <li><code>legacy_tiktoken_encoding_name</code></li>
+          <li><code>count_content_tokens</code></li>
+        </ul>
+        <p>Allowed paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/Cargo.lock</code></li>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs</code></li>
+          <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
+          <li><code>scripts/architecture/verify-vr-token-estimation-rust.mjs</code></li>
+          <li><code>scripts/tests/vr-token-estimation-red-fixtures.mjs</code></li>
+          <li><code>docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md</code></li>
+          <li><code>docs/architecture</code></li>
+        </ul>
+        <p>Forbidden paths:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/src/router</code></li>
+          <li><code>src/providers</code></li>
+          <li><code>src/server/runtime/http-server/executor</code></li>
+          <li><code>provider configuration</code></li>
+          <li><code>payload trimming</code></li>
+        </ul>
+        <p>Required tests:</p>
+        <ul>
+          <li><code>sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs</code></li>
+          <li><code>tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts</code></li>
+          <li><code>scripts/tests/vr-token-estimation-red-fixtures.mjs</code></li>
+        </ul>
+        <p>Required gates:</p>
+        <ul>
+          <li><code>npm run verify:vr-token-estimation-rust</code></li>
+          <li><code>npm run test:vr-token-estimation-red-fixtures</code></li>
+          <li><code>npm run verify:resource-operation-map</code></li>
+          <li><code>npm run verify:function-map-compile-gate</code></li>
+          <li><code>npm run build:native-hotpath</code></li>
+        </ul>
+        <p>Notes:</p>
+        <ul>
+          <li>This feature restores the retired TS tiktoken counting semantics in Rust; it must not use tiktoken-rs prefix model matching for provider aliases such as gpt-5.5/gpt-5.6-sol.</li>
+          <li>HTTP bodyLimit remains the transport allocation guard; Hub format nodes must not own a second fixed semantic payload byte cap.</li>
         </ul>
         <h2>vr.shared_function_library_helpers</h2>
         <p>Summary: Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners</p>

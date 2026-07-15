@@ -702,6 +702,30 @@ verification:
       - "If route instruction parsing changes, include routing instruction regression set."
       - "Current-turn media routing must prove a user image in the active turn still routes multimodal even when trailing tool entries make latest_role non-user."
 
+  - feature_id: vr.route_token_estimation
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml
+    contract:
+      - docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md
+      - scripts/tests/vr-token-estimation-red-fixtures.mjs
+    integration:
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    smoke:
+      - npm run verify:vr-token-estimation-rust
+      - npm run test:vr-token-estimation-red-fixtures
+      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi virtual_router_engine::features --lib -- --nocapture
+    build:
+      - npm run build:native-hotpath
+      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
+    notes:
+      - "Positive tests lock retired tiktoken model-table behavior, media byte omission, and non-media structured payload counting."
+      - "Negative gates reject char-ratio estimators, prefix-based tiktoken-rs model matching, and fixed Hub semantic payload byte caps."
+
   - feature_id: vr.shared_function_library_helpers
     change_risk: medium
     unit:
@@ -1818,30 +1842,6 @@ verification:
     notes:
       - "Positive tests prove ordered actions retain raw request/response access and mutating actions return state before the next action."
       - "Negative tests lock Some([]), non-object metadata, unmatched captured results, and source residues so take-based ownership cannot silently erase state."
-
-  - feature_id: hub.payload_size_validation_budget
-    change_risk: high
-    unit:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
-    contract:
-      - docs/goals/full-pipeline-payload-size-validation-test-design.md
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - cargo test --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi payload_size --lib -- --nocapture
-    integration:
-      - npm run verify:resource-operation-map
-      - npm run verify:function-map-compile-gate
-      - npm run verify:architecture-mainline-call-map
-    smoke:
-      - npm run verify:payload-size-validation
-      - npm run build:native-hotpath
-    build:
-      - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
-    notes:
-      - "Positive coverage proves exact UTF-8 serialized byte equivalence and unchanged under-limit behavior."
-      - "Negative coverage rejects local full-string size validation, allocation sinks, and silent serialization failure."
 
   - feature_id: hub.req_chatprocess_governance
     change_risk: high

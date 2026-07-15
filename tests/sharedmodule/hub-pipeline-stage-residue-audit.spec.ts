@@ -2831,7 +2831,7 @@ describe('hub pipeline stage residue audit', () => {
     expect(standardizerSource).not.toContain('submit_tool_outputs_input.clone()');
   });
 
-  it('payload size validation must count serialized bytes without allocating a full JSON string', () => {
+  it('Hub format nodes must not own a second fixed payload byte cap', () => {
     const crateRoot = path.join(
       process.cwd(),
       'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src',
@@ -2848,24 +2848,15 @@ describe('hub pipeline stage residue audit', () => {
       relativePath,
       source: fs.readFileSync(path.join(crateRoot, relativePath), 'utf8'),
     }));
-    const serializedSizeBuilder = ['serialized', 'json', 'size'].join('_');
-
-    expect(sharedSource).toContain('struct CountingWriter');
-    expect(sharedSource).toContain(`pub(crate) fn ${serializedSizeBuilder}`);
-    expect(sharedSource).toContain('serde_json::to_writer');
-    expect(sharedSource).not.toMatch(new RegExp(
-      `fn ${serializedSizeBuilder}[\\s\\S]{0,500}serde_json::to_(?:string|vec)`,
-    ));
+    expect(sharedSource).not.toContain('struct CountingWriter');
+    expect(sharedSource).not.toContain('serialized_json_size');
+    expect(sharedSource).not.toContain('serde_json::to_writer');
     for (const { relativePath, source } of ownerSources) {
-      expect(source).toContain(
-        `use crate::shared_json_utils::${serializedSizeBuilder};`,
-      );
-      expect(source).toContain(`${serializedSizeBuilder}(`);
+      expect(source).not.toContain('MAX_PAYLOAD_SIZE_BYTES');
+      expect(source).not.toContain('serialized_json_size');
+      expect(source).not.toMatch(/fn\s+validate_payload_size\b|validate_payload_size\(/);
       expect(source).not.toContain(
         'let payload_str = match serde_json::to_string',
-      );
-      expect(source).not.toMatch(
-        /validate_payload_size[\s\S]{0,500}serde_json::to_string/,
       );
       expect(relativePath).toMatch(/format_(?:parse|build)\.rs$/);
     }

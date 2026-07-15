@@ -125,6 +125,34 @@ prepare_isolated_build_root() {
         fi
     }
 
+    copy_v3_source() {
+        local relative="v3"
+        local source_path="$SOURCE_ROOT/$relative"
+        local target_path="$INSTALL_BUILD_ROOT/$relative"
+        if [ ! -d "$source_path" ]; then
+            return
+        fi
+        mkdir -p "$(dirname "$target_path")"
+        mkdir -p "$target_path"
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete \
+                --exclude '/target' \
+                --exclude '/node_modules' \
+                --exclude '/dist' \
+                --exclude '/coverage' \
+                --exclude '/test-results' \
+                "$source_path/" "$target_path/"
+        else
+            (cd "$source_path" && COPYFILE_DISABLE=1 tar \
+                --exclude './target' \
+                --exclude './node_modules' \
+                --exclude './dist' \
+                --exclude './coverage' \
+                --exclude './test-results' \
+                -cf - .) | (cd "$target_path" && tar -xf -)
+        fi
+    }
+
     copy_agent_collab_contract() {
         copy_isolated_path ".agent-collab/PROTOCOL.md"
         copy_isolated_path ".agent-collab/schema"
@@ -137,6 +165,7 @@ prepare_isolated_build_root() {
         src scripts config configsamples docs tests webui vendor; do
         copy_isolated_path "$item"
     done
+    copy_v3_source
     copy_isolated_path ".agents/skills/rcc-dev-skills"
     copy_agent_collab_contract
     copy_isolated_path "samples/mock-provider"

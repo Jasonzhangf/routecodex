@@ -55,19 +55,6 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:request-payload-copy-budget]
 
-  - resource_id: pipeline.payload_serialized_size
-    resource_kind: derived_measurement
-    lifecycle: request_response.mainline
-    identity: [pipelineId, stageNode, payloadOwner]
-    owner_feature_id: hub.payload_size_validation_budget
-    owner_node: PayloadSizeValidationBudget
-    allowed_readers: [HubReqInbound02Standardized, HubReqOutbound05ProviderSemantic, HubRespInbound02Parsed]
-    allowed_writers: [PayloadSizeValidationBudget]
-    forbidden_writers: [MetadataCenter, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    required_gates: [npm run verify:payload-size-validation, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
-
   - resource_id: request.protocol_context
     resource_kind: protocol_context
     lifecycle: request.mainline
@@ -288,6 +275,19 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+
+  - resource_id: vr.route_token_estimate
+    resource_kind: derived_measurement
+    lifecycle: vr.route_control_surface.mainline
+    identity: [requestId, entryEndpoint, routingGroup, model]
+    owner_feature_id: vr.route_token_estimation
+    owner_node: VrRoute04SelectedTarget
+    allowed_readers: [virtual_router_engine.classifier, vr.hit_log_record]
+    allowed_writers: [estimate_request_tokens]
+    forbidden_writers: [MetadataCenter, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:vr-token-estimation-rust, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
   - resource_id: hub.route_metadata_carrier
     resource_kind: side_channel

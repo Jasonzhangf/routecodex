@@ -14,6 +14,7 @@ Feature scope: `vr.* / virtual_router.*`
 | feature_id | summary | owner kind | owner module | required gates |
 | --- | --- | --- | --- | --- |
 | `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity`<br/>`npm run verify:resource-operation-map` |
+| `vr.route_token_estimation` | Virtual Router request token counting uses the retired tiktoken semantics in Rust | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs` | `npm run verify:vr-token-estimation-rust`<br/>`npm run test:vr-token-estimation-red-fixtures`<br/>`npm run verify:resource-operation-map`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run build:native-hotpath` |
 | `vr.shared_function_library_helpers` | Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners | `rust_helper` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run test:vr-shared-function-library-helpers-red-fixtures`<br/>`npm run verify:vr-shared-function-library-helpers`<br/>`npm run test:vr-shared-function-library-helpers-cargo`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run build:base` |
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
 | `vr.route_retry_pin_surface` | Virtual Router retry-provider-pin parsing and forced-target selection stay queryable as one Rust owner surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:architecture-custom-payload-carrier-owner-queryability`<br/>`npm run verify:resource-operation-map` |
@@ -65,6 +66,55 @@ Required gates:
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
 - Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.
+
+## vr.route_token_estimation
+
+Summary: Virtual Router request token counting uses the retired tiktoken semantics in Rust
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
+Owner scope: Rust-only token estimate for longcontext classification; media payload bytes are omitted and provider aliases use the retired default encoder contract
+
+Canonical types:
+- `CoreBPE`
+
+Canonical builders:
+- `estimate_request_tokens`
+- `legacy_tiktoken_encoding_name`
+- `count_content_tokens`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml`
+- `sharedmodule/llmswitch-core/rust-core/Cargo.lock`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+- `scripts/architecture/verify-vr-token-estimation-rust.mjs`
+- `scripts/tests/vr-token-estimation-red-fixtures.mjs`
+- `docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md`
+- `docs/architecture`
+
+Forbidden paths:
+- `sharedmodule/llmswitch-core/src/router`
+- `src/providers`
+- `src/server/runtime/http-server/executor`
+- `provider configuration`
+- `payload trimming`
+
+Required tests:
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
+- `tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts`
+- `scripts/tests/vr-token-estimation-red-fixtures.mjs`
+
+Required gates:
+- `npm run verify:vr-token-estimation-rust`
+- `npm run test:vr-token-estimation-red-fixtures`
+- `npm run verify:resource-operation-map`
+- `npm run verify:function-map-compile-gate`
+- `npm run build:native-hotpath`
+
+Notes:
+- This feature restores the retired TS tiktoken counting semantics in Rust; it must not use tiktoken-rs prefix model matching for provider aliases such as gpt-5.5/gpt-5.6-sol.
+- HTTP bodyLimit remains the transport allocation guard; Hub format nodes must not own a second fixed semantic payload byte cap.
 
 ## vr.shared_function_library_helpers
 

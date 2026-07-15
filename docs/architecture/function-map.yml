@@ -1473,6 +1473,57 @@ owners:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
       - "Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns."
 
+  - feature_id: vr.route_token_estimation
+    status: active
+    summary: "Virtual Router request token counting uses the retired tiktoken semantics in Rust"
+    owner_kind: rust_ssot
+    owner_scope: "Rust-only token estimate for longcontext classification; media payload bytes are omitted and provider aliases use the retired default encoder contract"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+    resource_bindings:
+      writes:
+        - vr.route_token_estimate@VrRoute04SelectedTarget
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+      forbidden:
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+        - metadata.request_truth@MetaReq02TruthMaterialized
+    canonical_types:
+      - CoreBPE
+    canonical_builders:
+      - estimate_request_tokens
+      - legacy_tiktoken_encoding_name
+      - count_content_tokens
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/Cargo.toml
+      - sharedmodule/llmswitch-core/rust-core/Cargo.lock
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - scripts/architecture/verify-vr-token-estimation-rust.mjs
+      - scripts/tests/vr-token-estimation-red-fixtures.mjs
+      - docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md
+      - docs/architecture
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/router
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - provider configuration
+      - payload trimming
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
+      - scripts/tests/vr-token-estimation-red-fixtures.mjs
+    required_gates:
+      - npm run verify:vr-token-estimation-rust
+      - npm run test:vr-token-estimation-red-fixtures
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run build:native-hotpath
+    migration_target: rust
+    notes:
+      - "This feature restores the retired TS tiktoken counting semantics in Rust; it must not use tiktoken-rs prefix model matching for provider aliases such as gpt-5.5/gpt-5.6-sol."
+      - "HTTP bodyLimit remains the transport allocation guard; Hub format nodes must not own a second fixed semantic payload byte cap."
+
   - feature_id: vr.shared_function_library_helpers
     status: active
     summary: "Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners"
@@ -1663,7 +1714,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule
       - tests/server/runtime/http-server
       - docs
@@ -3563,58 +3613,6 @@ owners:
       - "This feature does not create a second payload resource; it only governs borrow/take/write-back lifetime for existing request and response truth."
       - "Owned N-API action wrappers must delegate to the same borrowed core so external JSON contracts remain unchanged."
 
-  - feature_id: hub.payload_size_validation_budget
-    status: active
-    summary: "Shared allocation-free serialized JSON byte counting for Hub request and response size validation"
-    owner_kind: rust_helper
-    owner_scope: "shared exact serialized-byte measurement only; format nodes retain their existing size limits, payload ownership, error contracts, and protocol semantics"
-    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
-    resource_bindings:
-      writes:
-        - pipeline.payload_serialized_size@PayloadSizeValidationBudget
-      reads:
-        - request.normal_payload@HubReqInbound02Standardized
-        - request.provider_semantic@HubReqOutbound05ProviderSemantic
-        - response.provider_raw@HubRespInbound02Parsed
-      forbidden:
-        - metadata.request_truth@MetaReq02TruthMaterialized
-        - provider.wire_payload@ProviderReqOutbound06WirePayload
-        - response.client_payload@HubRespOutbound04ClientSemantic
-    canonical_types:
-      - CountingWriter
-    canonical_builders:
-      - serialized_json_size
-    allowed_paths:
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - docs/design/payload-copy-hotspot-inventory.md
-      - docs/goals/full-pipeline-payload-size-validation-test-design.md
-      - docs/architecture
-    forbidden_paths:
-      - src/modules/llmswitch/bridge
-      - src/server/runtime/http-server/executor
-      - src/server/handlers
-      - src/providers
-      - provider configuration
-    required_tests:
-      - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/shared_json_utils.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_format_parse.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_outbound_format_build.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_inbound_format_parse.rs
-    required_gates:
-      - npm run verify:payload-size-validation
-      - npm run verify:resource-operation-map
-      - npm run verify:function-map-compile-gate
-      - npm run build:native-hotpath
-    migration_target: rust
-    notes:
-      - "The counting writer must preserve serde_json UTF-8 byte length exactly without retaining serialized payload bytes."
-      - "The three format nodes remain semantic owners of their existing 50 MiB validation and error text."
-
   - feature_id: hub.req_chatprocess_governance
     status: active
     summary: "Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline"
@@ -5255,7 +5253,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
     forbidden_paths:
@@ -5297,7 +5294,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -5335,7 +5331,6 @@ owners:
       - normalize_responses_function_tools
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5373,7 +5368,6 @@ owners:
       - normalize_responses_tool_parameters
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5410,7 +5404,6 @@ owners:
       - apply_responses_instructions_to_input
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5446,7 +5439,6 @@ owners:
       - apply_responses_crs_request_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime

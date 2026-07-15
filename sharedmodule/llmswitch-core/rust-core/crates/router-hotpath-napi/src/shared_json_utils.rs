@@ -1,32 +1,5 @@
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{Map, Value};
-use std::io::{self, Write};
-
-// feature_id: hub.payload_size_validation_budget
-#[derive(Default)]
-struct CountingWriter {
-    bytes_written: usize,
-}
-
-impl Write for CountingWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.bytes_written = self
-            .bytes_written
-            .checked_add(buffer.len())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "serialized JSON size overflow"))?;
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-pub(crate) fn serialized_json_size<T: Serialize>(value: &T) -> Result<usize, serde_json::Error> {
-    let mut writer = CountingWriter::default();
-    serde_json::to_writer(&mut writer, value)?;
-    Ok(writer.bytes_written)
-}
 
 pub(crate) fn parse_json_with_context<T: DeserializeOwned>(
     input_json: &str,
@@ -330,22 +303,10 @@ mod tests {
         extract_balanced_json_object_at, normalize_record, normalize_record_ref,
         parse_js_number_like, parse_json_with_context, read_first_object_trimmed_string,
         read_object_trimmed_string, read_string_array_command, read_trimmed_string,
-        read_workdir_from_args, serialized_json_size, split_command_string,
-        stringify_json_with_context, value_as_object_or_empty,
+        read_workdir_from_args, split_command_string, stringify_json_with_context,
+        value_as_object_or_empty,
     };
-    use serde::{ser::Error as _, Serialize, Serializer};
     use serde_json::json;
-
-    struct FailingSerialize;
-
-    impl Serialize for FailingSerialize {
-        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            Err(S::Error::custom("forced serialization failure"))
-        }
-    }
 
     fn crate_src_path(relative: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -447,24 +408,6 @@ mod tests {
         let error = parse_json_with_context::<serde_json::Value>("{", "deserialize broken")
             .expect_err("invalid json must keep context");
         assert!(error.contains("deserialize broken:"));
-    }
-
-    #[test]
-    fn payload_size_counter_matches_materialized_utf8_json_length() {
-        let payload = json!({
-            "text": "é🙂\n\"\\",
-            "nested": [true, null, {"han": "汉字"}]
-        });
-        let expected = serde_json::to_vec(&payload).unwrap().len();
-
-        assert_eq!(serialized_json_size(&payload).unwrap(), expected);
-    }
-
-    #[test]
-    fn payload_size_counter_surfaces_serialization_failure() {
-        let error = serialized_json_size(&FailingSerialize).unwrap_err();
-
-        assert!(error.to_string().contains("forced serialization failure"));
     }
 
     #[test]

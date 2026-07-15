@@ -1131,6 +1131,45 @@ chains:
           side_channel_writes: []
         status: anchored
 
+  - chain_id: vr.route_token_estimation.mainline
+    summary: "Virtual Router derives request token estimate with Rust tiktoken before route classification; image/video bytes do not inflate the estimate."
+    entry_contract:
+      node: HubReqChatProcess03Governed
+      owner_doc: docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md
+    edges:
+      - step_id: vrt-01
+        from_node: HubReqChatProcess03Governed
+        to_node: VrRouteTokenEstimate03Derived
+        caller_symbol: route
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/route.rs
+        callee_symbol: build_routing_features
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+        owner_feature_id: vr.route_token_estimation
+        semantic_input: "governed request body plus route metadata estimate hint"
+        semantic_output: "Rust tiktoken request token estimate with media payload bytes omitted"
+        resource_flow:
+          consumes: [request.normal_payload]
+          produces: [vr.route_token_estimate]
+          side_channel_reads: [metadata.runtime_control]
+          side_channel_writes: [vr.route_token_estimate]
+        status: anchored
+      - step_id: vrt-02
+        from_node: VrRouteTokenEstimate03Derived
+        to_node: VrRoute04SelectedTarget
+        caller_symbol: classify
+        caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+        callee_symbol: long_context_threshold_tokens
+        callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+        owner_feature_id: vr.route_selection
+        semantic_input: "request feature record with estimated_tokens"
+        semantic_output: "longcontext candidate reason only when non-media token estimate crosses the threshold"
+        resource_flow:
+          consumes: [vr.route_token_estimate]
+          produces: [route.selection]
+          side_channel_reads: [vr.route_token_estimate]
+          side_channel_writes: [route.selection]
+        status: anchored
+
   - chain_id: vr.route_availability.mainline
     summary: "Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider."
     entry_contract:
