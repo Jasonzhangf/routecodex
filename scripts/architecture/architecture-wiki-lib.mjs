@@ -246,6 +246,21 @@ export const MANUAL_WIKI_PAGES = [
       'verify:hub-pipeline-native-reference-gate',
     ],
   },
+  {
+    path: `${WIKI_ROOT}/v3-openai-chat-relay-controlled-runtime.md`,
+    title: '# V3 OpenAI Chat Relay Controlled Runtime',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Status',
+      '## Single lifecycle',
+      '## JSON, SSE, error, isolation',
+      '## Ownership checklist',
+      '## Required gates',
+      'v3.openai_chat_relay_runtime_integration',
+      'Body::from_stream',
+      'Live provider compatibility',
+    ],
+  },
 ];
 
 function readText(root, relPath) {

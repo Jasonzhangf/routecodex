@@ -1012,3 +1012,48 @@ features:
       source: "Complete when controlled JSON/SSE/error/isolation tests, store matrix, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
       runtime: "Controlled Rust Runtime replay only; live provider compatibility is not claimed."
       forbidden_claim: "Do not claim OpenAI Chat, Responses Direct/remote continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
+  - feature_id: v3.openai_chat_relay_runtime_integration
+    status: controlled_json_sse_error_isolation_verified
+    change_risk: critical
+    owner_kind: rust_v3_openai_chat_relay_runtime
+    owner_scope: "Controlled /v1/chat/completions Relay through the sole Hub v1 Req01-Req09 and Resp01-Resp06 lifecycle"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    design:
+      - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
+      - docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md
+      - docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml
+    required_unit:
+      - JSON preserves messages tools prior tool-call/result identity usage finish reason and selected wire model
+      - SSE accepts arbitrary chunk boundaries and preserves tool deltas terminal finish reason and DONE order
+      - SSE first client frame is observable before provider terminal
+      - provider HTTP failure enters Error01-06 without Resp01 success projection
+      - internal side-channel fields fail before provider transport
+    required_blackbox:
+      - loopback upstream receives exactly one POST /v1/chat/completions per valid request
+      - Server JSON response preserves controlled provider semantics
+      - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
+      - Server 429 response exposes Error01-06 and does not wrap success
+      - rejected metadata_center request produces zero upstream captures
+    required_gates:
+      - npm run test:v3-openai-chat-relay-runtime-integration
+      - npm run verify:v3-openai-chat-relay-runtime-integration
+      - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - cargo fmt --manifest-path v3/Cargo.toml --all -- --check
+      - CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml --workspace -- --nocapture
+      - git diff --check
+    completion_rule:
+      source: "Complete when controlled Runtime and Server JSON/SSE/error/isolation, first-frame timing, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
+      runtime: "Controlled Rust loopback replay only; live provider compatibility is not claimed."
+      forbidden_claim: "Do not claim Responses Direct, Anthropic continuation, Provider WebSocket, live config, install, restart, release, or production cutover."

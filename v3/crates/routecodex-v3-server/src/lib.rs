@@ -10,11 +10,15 @@ use routecodex_v3_debug::{
 use routecodex_v3_error::{project_v3_http_boundary_error, V3HttpBoundaryErrorKind};
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_runtime_with_default_transport,
-    execute_v3_foundation_pending_runtime, execute_v3_responses_direct_dry_run_runtime,
+    execute_v3_foundation_pending_runtime,
+    execute_v3_openai_chat_relay_runtime_with_default_transport,
+    execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
-    register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3Resp15ClientPayload,
+    project_v3_openai_chat_relay_runtime_failure, register_responses_direct_hooks,
+    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
 };
 use serde_json::json;
@@ -209,6 +213,22 @@ async fn pending_endpoint(
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let is_responses = path == "/v1/responses";
+    if path == "/v1/chat/completions" {
+        let output = match execute_v3_openai_chat_completions_request(
+            &state.manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id,
+                payload,
+            },
+        )
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
+        };
+        return openai_chat_relay_output_response(output);
+    }
     if path == "/v1/messages" {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
         let output = match execute_v3_anthropic_messages_request(
@@ -379,6 +399,36 @@ pub async fn execute_v3_anthropic_messages_request(
     input: V3AnthropicRelayRuntimeInput,
 ) -> Result<V3AnthropicRelayRuntimeOutput, routecodex_v3_runtime::V3AnthropicRelayRuntimeError> {
     execute_v3_anthropic_relay_runtime_with_default_transport(manifest, input).await
+}
+
+pub async fn execute_v3_openai_chat_completions_request(
+    manifest: &V3Config05ManifestPublished,
+    input: V3OpenAiChatRelayRuntimeInput,
+) -> Result<V3OpenAiChatRelayRuntimeOutput, routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError> {
+    execute_v3_openai_chat_relay_runtime_with_default_transport(manifest, input).await
+}
+
+fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {
+    let content_type = match &output.client_body {
+        V3OpenAiChatRelayClientBody::Json(_) => "application/json",
+        V3OpenAiChatRelayClientBody::Sse(_) => "text/event-stream",
+    };
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(output.status).expect("typed V3 OpenAI Chat Relay status"))
+        .header("content-type", content_type)
+        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
+    if let Some(error_chain) = output.error_chain {
+        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
+    }
+    let body = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3OpenAiChatRelayClientBody::Json(client_response) => Body::from(
+            serde_json::to_vec(&client_response).expect("typed V3 OpenAI Chat Relay projection"),
+        ),
+    };
+    builder
+        .body(body)
+        .expect("typed V3 OpenAI Chat Relay response")
 }
 
 fn anthropic_relay_output_response(

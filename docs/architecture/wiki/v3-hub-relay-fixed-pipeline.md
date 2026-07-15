@@ -162,3 +162,16 @@ Relay is borrow-first and move-at-boundary:
 
 The wiki is not runtime evidence. Live Relay remains pending until a later controlled-upstream replay
 proves request and response execution through the fixed Hub v1 skeleton.
+## OpenAI Chat controlled Runtime evidence
+
+- Feature: `v3.openai_chat_relay_runtime_integration`.
+- Review surface: [V3 OpenAI Chat Relay Controlled Runtime](v3-openai-chat-relay-controlled-runtime.md).
+- Machine lifecycle: `v3.openai_chat_relay.controlled_runtime`, with
+  `v3-openai-chat-relay-01..15` bound to real Rust caller/callee symbols.
+- `/v1/chat/completions` now enters the sole Hub v1 Req01–Req09 path, calls one controlled OpenAI
+  Chat upstream, and returns through Resp01–Resp06.
+- Runtime owns incremental SSE validation/projection; Server only transports
+  `V3OpenAiChatClientStream` through `Body::from_stream`, so first-frame delivery does not wait for
+  terminal and the full stream is never materialized.
+- Controlled JSON, SSE timing, provider 429 Error01–06, and `metadata_center` pre-transport rejection
+  are verified. Live provider compatibility and production cutover remain pending.
