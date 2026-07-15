@@ -270,12 +270,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert_eq!(dry_run["dry_run"]["provider_pipeline_executed"], true);
     assert_eq!(dry_run["dry_run"]["provider_network_send"], false);
     assert_eq!(dry_run["dry_run"]["stopped_before_network_send"], true);
-    assert!(
-        dry_run["dry_run"]
-            .get("stopped_before_provider_send")
-            .is_none(),
-        "same-lifecycle dry run reaches Provider12/Transport13 and only swaps the transport effect"
-    );
+    assert_eq!(dry_run["dry_run"]["stopped_before_provider_send"], true);
     let dry_nodes = dry_run["dry_run"]["node_ids"].as_array().unwrap();
     for node in [
         "V3Provider12ResponsesWirePayload",

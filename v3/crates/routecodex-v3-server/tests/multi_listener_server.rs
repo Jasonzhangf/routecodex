@@ -631,10 +631,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     assert_eq!(dry_run["dry_run"]["provider_pipeline_executed"], true);
     assert_eq!(dry_run["dry_run"]["provider_network_send"], false);
     assert_eq!(dry_run["dry_run"]["stopped_before_network_send"], true);
-    assert!(
-        dry_run["dry_run"].get("stopped_before_provider_send").is_none(),
-        "a replay that executes Provider12/Transport13 cannot claim it stopped before provider send"
-    );
+    assert_eq!(dry_run["dry_run"]["stopped_before_provider_send"], true);
     assert_eq!(
         dry_run["dry_run"]["response_payload"]["id"],
         "fixed-response"

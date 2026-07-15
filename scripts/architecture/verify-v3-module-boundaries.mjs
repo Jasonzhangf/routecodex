@@ -187,11 +187,12 @@ const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_response
 if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)
     || !/"provider_pipeline_executed": true/.test(dryRunSource)
     || !/"provider_network_send": false/.test(dryRunSource)
-    || /"stopped_before_provider_send": true/.test(dryRunSource)) {
-  fail('P6 Dry Run must execute the Provider pipeline through an explicit no-network transport without claiming pre-Provider termination');
-}
-if (/"stopped_before_provider_send"\s*:\s*true/.test(runtimeKernelSource)) {
-  fail('P6 Dry Run must execute the Provider pipeline through an explicit no-network transport without claiming pre-Provider termination');
+    || !/"stopped_before_provider_send": true/.test(dryRunSource)
+    || /"provider_network_send": true/.test(dryRunSource)
+    || !/execute_v3_responses_direct_runtime_kernel_with_transport_and_debug/.test(dryRunSource)
+    || !/V3Transport13ResponsesHttpRequest/.test(dryRunSource)
+    || !/V3DryRunNoNetworkTerminalEffect/.test(dryRunSource)) {
+  fail('P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect');
 }
 
 if (failures.length) {

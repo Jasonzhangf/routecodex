@@ -229,6 +229,7 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
                 "provider_pipeline_executed": true,
                 "provider_network_send": false,
                 "stopped_before_network_send": true,
+                "stopped_before_provider_send": true,
                 "node_ids": output.node_trace,
                 "snapshots": transient_snapshots,
                 "response_payload": debug.redact_projection(response_payload)
@@ -241,7 +242,7 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
             .map_or("none", |_| "V3Error06ClientProjected"),
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
-        stopped_before_provider_send: false,
+        stopped_before_provider_send: true,
     }
 }
 

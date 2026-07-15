@@ -80,10 +80,10 @@ const fixtures = [
     diagnostic: /unique V3Resp15 -> V3Server16 builder/,
   },
   {
-    name: 'dry run claims pre-provider termination',
+    name: 'dry run sends provider network',
     file: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
-    mutation: '\n// "stopped_before_provider_send": true\n',
-    diagnostic: /P6 Dry Run must execute the Provider pipeline/,
+    transform: (source) => source.replace('"provider_network_send": false,', '"provider_network_send": true,'),
+    diagnostic: /P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect/,
   },
   {
     name: 'synthetic malformed JSON payload',
