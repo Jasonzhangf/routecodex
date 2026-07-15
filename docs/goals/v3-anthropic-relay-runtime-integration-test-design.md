@@ -13,6 +13,10 @@ The Runtime is the only lifecycle. Anthropic request/response differences are ow
 codec. The Hub request/response Chat Process remains provider-neutral. The Responses provider owns
 HTTP and consumes the shared structured SSE Transport contract.
 
+The machine-readable lifecycle is
+`docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml`. Its node and
+`v3-anthropic-relay-01..15` edge IDs must remain identical to the mainline call map and wiki.
+
 ## Whitebox matrix
 
 | Case | Positive contract | Negative contract |

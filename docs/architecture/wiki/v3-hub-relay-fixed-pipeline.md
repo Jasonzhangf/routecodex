@@ -6,6 +6,9 @@ Implementation plan: [V3 Hub Relay Four-Worker Implementation Plan](../../goals/
 
 Static skeleton: [V3 Hub Pipeline Static Skeleton Review](v3-hub-pipeline-static-skeleton.md)
 
+Anthropic controlled Runtime manifest:
+[v3.anthropic_relay.controlled_runtime](../manifests/v3.anthropic_relay.controlled_runtime.mainline.yml)
+
 ## One lifecycle
 
 ~~~mermaid
@@ -103,6 +106,8 @@ Relay is borrow-first and move-at-boundary:
 ## Anthropic controlled Runtime evidence
 
 - Feature: `v3.anthropic_relay_runtime_integration`.
+- Machine lifecycle: `v3.anthropic_relay.controlled_runtime`, with the same
+  `v3-anthropic-relay-01..15` edge IDs as the mainline call map.
 - Stable fixture digest: `74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e`.
 - Pre-change red state: `status=wiring_missing`, with the eight missing adjacent edges diagnosed.
 - Green controlled cases: `json_thinking_tool_use`, `sse_thinking_tool_use`, `provider_error`, and

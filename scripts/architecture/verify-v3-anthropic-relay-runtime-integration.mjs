@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
@@ -8,6 +9,7 @@ const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const driverPath = 'v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs';
 const designPath = 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md';
+const manifestPath = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const runtime = readFileSync(runtimePath, 'utf8');
 const hub = readFileSync(hubPath, 'utf8');
 const codec = readFileSync(codecPath, 'utf8');
@@ -15,7 +17,45 @@ const server = readFileSync(serverPath, 'utf8');
 const driver = readFileSync(driverPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const design = readFileSync(designPath, 'utf8');
+const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const failures = [];
+const expectedManifestNodes = [
+  'V3ServerValidatedMessagesRequest',
+  'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
+  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
+  'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
+  'V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload',
+  'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
+  'V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed',
+  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
+  'V3ServerRespOutbound06ClientFrame',
+];
+if (manifest.lifecycle_id !== 'v3.anthropic_relay.controlled_runtime') {
+  failures.push(`${manifestPath}: lifecycle_id mismatch`);
+}
+if (manifest.owner_feature_id !== 'v3.anthropic_relay_runtime_integration') {
+  failures.push(`${manifestPath}: owner_feature_id mismatch`);
+}
+if (JSON.stringify(manifest.node_ids) !== JSON.stringify(expectedManifestNodes)) {
+  failures.push(`${manifestPath}: fixed node order mismatch`);
+}
+const manifestEdges = Array.isArray(manifest.edges) ? manifest.edges : [];
+if (manifestEdges.length !== 15) failures.push(`${manifestPath}: expected 15 adjacent edges`);
+for (let index = 0; index < manifestEdges.length; index += 1) {
+  const edge = manifestEdges[index];
+  const expectedStep = `v3-anthropic-relay-${String(index + 1).padStart(2, '0')}`;
+  if (edge.step_id !== expectedStep
+      || edge.from_node !== expectedManifestNodes[index]
+      || edge.to_node !== expectedManifestNodes[index + 1]
+      || edge.status !== 'anchored') {
+    failures.push(`${manifestPath}: edge ${expectedStep} mismatch`);
+  }
+}
+if (manifest.entrypoint?.node_id !== expectedManifestNodes[0]
+    || manifest.return_path?.node_id !== expectedManifestNodes.at(-1)
+    || manifest.call_map_chain_id !== manifest.lifecycle_id) {
+  failures.push(`${manifestPath}: entrypoint/return/call-map binding mismatch`);
+}
 
 const adjacentBuilders = [
   'run_v3_anthropic_relay_runtime_req_inbound',
