@@ -1,0 +1,58 @@
+{
+  "case_id": "json_thinking_tool_use",
+  "transport": "json",
+  "expected_node_trace": [
+    "V3HubReqInbound01ClientRaw",
+    "V3HubReqInbound02Normalized",
+    "V3HubReqContinuation03Classified",
+    "V3HubReqChatProcess04Governed",
+    "V3HubReqExecution05Planned",
+    "V3HubReqTarget06Resolved",
+    "V3HubReqOutbound07ProviderSemantic",
+    "V3ProviderReqOutbound08WirePayload",
+    "V3ProviderReqOutbound09TransportRequest",
+    "V3ProviderRespInbound01Raw",
+    "V3HubRespInbound02Normalized",
+    "V3HubRespChatProcess03Governed",
+    "V3HubRespContinuation04Committed",
+    "V3HubRespOutbound05ClientSemantic",
+    "V3ServerRespOutbound06ClientFrame"
+  ],
+  "client_request": {
+    "model": "claude-client-alias",
+    "system": [{ "type": "text", "text": "Use tools exactly." }],
+    "messages": [{ "role": "user", "content": [{ "type": "text", "text": "Lookup alpha" }] }],
+    "tools": [{ "name": "lookup", "input_schema": { "type": "object", "properties": { "q": { "type": "string" } }, "required": ["q"] } }],
+    "thinking": { "type": "enabled", "budget_tokens": 512 },
+    "stream": false
+  },
+  "expected_upstream_request": {
+    "model": "responses-wire-model",
+    "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "Lookup alpha" }] }],
+    "tools": [{ "type": "function", "name": "lookup", "parameters": { "type": "object", "properties": { "q": { "type": "string" } }, "required": ["q"] } }],
+    "reasoning": { "effort": "medium" },
+    "stream": false
+  },
+  "upstream_response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "resp_json_1",
+      "status": "completed",
+      "output": [
+        { "type": "reasoning", "summary": [{ "type": "summary_text", "text": "Need lookup" }] },
+        { "type": "function_call", "call_id": "call_json_1", "name": "lookup", "arguments": "{\"q\":\"alpha\"}" }
+      ]
+    }
+  },
+  "expected_client_response": {
+    "id": "msg_json_1",
+    "type": "message",
+    "role": "assistant",
+    "stop_reason": "tool_use",
+    "content": [
+      { "type": "thinking", "thinking": "Need lookup" },
+      { "type": "tool_use", "id": "call_json_1", "name": "lookup", "input": { "q": "alpha" } }
+    ]
+  }
+}

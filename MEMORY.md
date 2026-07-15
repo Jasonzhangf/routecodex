@@ -3248,6 +3248,14 @@
 - Codec structs use unknown-field denial, so local Chat Process context, history, tool state, and other undeclared state cannot enter remote store truth.
 - Verified with 12 focused tests, V3 architecture/resource/module/Rust-only/fmt gates, Clippy `-D warnings`, full V3 workspace tests, forbidden live-wiring scans, and diff check.
 - `v3.continuation.remote_binding` intentionally remains `binding_pending`. This marker does not prove Hub Resp04 commit, Hub Req03 load/classification, pinned Target execution, Server endpoint, local continuation, Relay materialization, live replay, Server cutover, P6 deletion, global install/restart, `~/.rcc`, or production replacement.
+
+# 2026-07-15: V3 Anthropic Relay controlled-upstream harness is integration-ready and intentionally red
+
+- Marker: `routecodex-v3-anthropic-relay-controlled-replay-harness-red-ready-20260715`.
+- `gate_id:v3_anthropic_relay_controlled_replay_harness` owns four deterministic JSON fixtures, an external-driver loopback Responses upstream harness, a strict evidence schema, source verification, and mutation/red gates; it owns no Runtime, Server, Provider, P6, map, or package semantics.
+- JSON/SSE fixtures cover thinking/reasoning and tool_use; provider-error fixture requires Error01-06 polarity; isolation fixture and recursive checks forbid RouteCodex control/debug/resource fields in provider or client normal payloads.
+- With no real Runtime driver the harness exits 1 with `V3_ANTHROPIC_RELAY_WIRING_MISSING`, `status=wiring_missing`, zero upstream captures, four `not_run` cases, stable fixture digest, and eight explicit missing adjacent edges. A driver that fabricates output/trace without sending to the controlled upstream fails capture enforcement.
+- This marker proves only that the later integration worker can consume a deterministic harness and that the present unwired state cannot go falsely green. It does not prove Anthropic Relay Runtime wiring, Server entry, Responses Provider integration, live Relay, P6 expansion, install, restart, or production replacement.
 ## V3 local continuation immutable store（2026-07-15）
 
 - V3 Relay 本地 continuation 的独立真源位于 `v3/crates/routecodex-v3-runtime/src/local_continuation.rs`：只允许 `Resp04` 通过 `commit_at_resp04` 保存，只允许 `Req04` 通过 `restore_at_req04` 恢复。

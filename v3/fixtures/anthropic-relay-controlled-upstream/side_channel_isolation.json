@@ -1,0 +1,43 @@
+{
+  "case_id": "side_channel_isolation",
+  "transport": "json",
+  "expected_node_trace": [
+    "V3HubReqInbound01ClientRaw",
+    "V3HubReqInbound02Normalized",
+    "V3HubReqContinuation03Classified",
+    "V3HubReqChatProcess04Governed",
+    "V3HubReqExecution05Planned",
+    "V3HubReqTarget06Resolved",
+    "V3HubReqOutbound07ProviderSemantic",
+    "V3ProviderReqOutbound08WirePayload",
+    "V3ProviderReqOutbound09TransportRequest",
+    "V3ProviderRespInbound01Raw",
+    "V3HubRespInbound02Normalized",
+    "V3HubRespChatProcess03Governed",
+    "V3HubRespContinuation04Committed",
+    "V3HubRespOutbound05ClientSemantic",
+    "V3ServerRespOutbound06ClientFrame"
+  ],
+  "client_request": {
+    "model": "claude-client-alias",
+    "messages": [{ "role": "user", "content": "side-channel isolation" }],
+    "stream": false
+  },
+  "expected_upstream_request": {
+    "model": "responses-wire-model",
+    "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "side-channel isolation" }] }],
+    "stream": false
+  },
+  "upstream_response": {
+    "status": 200,
+    "content_type": "application/json",
+    "body": { "id": "resp_isolation_1", "status": "completed", "output": [{ "type": "output_text", "text": "clean" }] }
+  },
+  "expected_client_response": {
+    "id": "msg_isolation_1",
+    "type": "message",
+    "role": "assistant",
+    "stop_reason": "end_turn",
+    "content": [{ "type": "text", "text": "clean" }]
+  }
+}

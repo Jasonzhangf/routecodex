@@ -1,0 +1,40 @@
+{
+  "case_id": "provider_error",
+  "transport": "json",
+  "expected_node_trace": [
+    "V3HubReqInbound01ClientRaw",
+    "V3HubReqInbound02Normalized",
+    "V3HubReqContinuation03Classified",
+    "V3HubReqChatProcess04Governed",
+    "V3HubReqExecution05Planned",
+    "V3HubReqTarget06Resolved",
+    "V3HubReqOutbound07ProviderSemantic",
+    "V3ProviderReqOutbound08WirePayload",
+    "V3ProviderReqOutbound09TransportRequest",
+    "V3Error01SourceRaised",
+    "V3Error02Classified",
+    "V3Error03TargetLocalAction",
+    "V3Error04TargetExhaustionDecision",
+    "V3Error05ExecutionDecision",
+    "V3Error06ClientProjected"
+  ],
+  "client_request": {
+    "model": "claude-client-alias",
+    "messages": [{ "role": "user", "content": "trigger controlled error" }],
+    "stream": false
+  },
+  "expected_upstream_request": {
+    "model": "responses-wire-model",
+    "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "trigger controlled error" }] }],
+    "stream": false
+  },
+  "upstream_response": {
+    "status": 429,
+    "content_type": "application/json",
+    "body": { "error": { "type": "rate_limit_error", "message": "controlled rate limit" } }
+  },
+  "expected_client_response": {
+    "type": "error",
+    "error": { "type": "rate_limit_error", "message": "controlled rate limit" }
+  }
+}

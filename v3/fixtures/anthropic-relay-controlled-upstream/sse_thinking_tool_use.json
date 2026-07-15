@@ -1,0 +1,54 @@
+{
+  "case_id": "sse_thinking_tool_use",
+  "transport": "sse",
+  "expected_node_trace": [
+    "V3HubReqInbound01ClientRaw",
+    "V3HubReqInbound02Normalized",
+    "V3HubReqContinuation03Classified",
+    "V3HubReqChatProcess04Governed",
+    "V3HubReqExecution05Planned",
+    "V3HubReqTarget06Resolved",
+    "V3HubReqOutbound07ProviderSemantic",
+    "V3ProviderReqOutbound08WirePayload",
+    "V3ProviderReqOutbound09TransportRequest",
+    "V3ProviderRespInbound01Raw",
+    "V3HubRespInbound02Normalized",
+    "V3HubRespChatProcess03Governed",
+    "V3HubRespContinuation04Committed",
+    "V3HubRespOutbound05ClientSemantic",
+    "V3ServerRespOutbound06ClientFrame"
+  ],
+  "client_request": {
+    "model": "claude-client-alias",
+    "messages": [{ "role": "user", "content": [{ "type": "text", "text": "Lookup beta" }] }],
+    "tools": [{ "name": "lookup", "input_schema": { "type": "object" } }],
+    "thinking": { "type": "enabled", "budget_tokens": 512 },
+    "stream": true
+  },
+  "expected_upstream_request": {
+    "model": "responses-wire-model",
+    "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "Lookup beta" }] }],
+    "tools": [{ "type": "function", "name": "lookup", "parameters": { "type": "object" } }],
+    "reasoning": { "effort": "medium" },
+    "stream": true
+  },
+  "upstream_response": {
+    "status": 200,
+    "content_type": "text/event-stream",
+    "events": [
+      { "event": "response.reasoning_summary_text.delta", "data": { "delta": "Need beta" } },
+      { "event": "response.output_item.added", "data": { "item": { "type": "function_call", "call_id": "call_sse_1", "name": "lookup", "arguments": "" } } },
+      { "event": "response.function_call_arguments.delta", "data": { "delta": "{\"q\":\"beta\"}" } },
+      { "event": "response.completed", "data": { "response": { "id": "resp_sse_1", "status": "completed" } } }
+    ]
+  },
+  "expected_client_response": {
+    "events": [
+      { "event": "content_block_start", "data": { "type": "content_block_start", "index": 0, "content_block": { "type": "thinking", "thinking": "" } } },
+      { "event": "content_block_delta", "data": { "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": "Need beta" } } },
+      { "event": "content_block_start", "data": { "type": "content_block_start", "index": 1, "content_block": { "type": "tool_use", "id": "call_sse_1", "name": "lookup", "input": {} } } },
+      { "event": "content_block_delta", "data": { "type": "content_block_delta", "index": 1, "delta": { "type": "input_json_delta", "partial_json": "{\"q\":\"beta\"}" } } },
+      { "event": "message_stop", "data": { "type": "message_stop" } }
+    ]
+  }
+}

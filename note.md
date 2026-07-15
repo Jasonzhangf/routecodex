@@ -30635,6 +30635,14 @@ Pure Rust NAPI candidates:
 - `serde(deny_unknown_fields)` physically rejects codec input containing local context, history, tool state, or other unknown fields. The store holds locator/control facts only.
 - Verified: 12 focused H4 tests, architecture/resource/module/Rust-only/fmt gates, Clippy with `-D warnings`, full V3 workspace, forbidden live-wiring source scan, and `git diff --check`.
 - Boundary: `v3.continuation.remote_binding` remains `binding_pending`; Resp04 commit, Req03 load/classification, pinned Target execution, Server endpoint, Relay materialization, local continuation, live replay, cutover, install, restart, and production replacement remain pending.
+
+# 2026-07-15: V3 Anthropic Relay controlled-upstream harness
+
+- Claim `gate_id:v3_anthropic_relay_controlled_replay_harness` owns only test design, four deterministic fixtures, an external-driver controlled-upstream harness, strict evidence schema, and positive/negative mutation gates. Shared V3 maps/package and concurrent Runtime Anthropic hook work were not modified.
+- Scenarios cover JSON, SSE, thinking/reasoning, tool_use, provider error through Error01-06, and provider/client side-channel isolation.
+- The harness requires a real external Runtime driver, starts a loopback `/v1/responses` upstream, requires exactly one captured provider request per case, compares client projection, and validates fixture-specific ordered node traces. A cheating driver that prints expected output without hitting upstream fails all four cases with capture count zero.
+- Current unwired baseline is intentionally red: exit 1, `status=wiring_missing`, stable fixture digest, four `not_run` cases, and eight missing adjacent request/response edges. Seven mutations are rejected.
+- Boundary: this proves an integration-ready controlled-upstream harness only. It does not prove Runtime wiring, Server exposure, provider transport integration, live Relay, P6 expansion, global install, restart, or production replacement.
 ## 2026-07-15 V3 local continuation contract/store/codec
 
 - 独立 Rust 切片已实现：唯一写入口 `commit_at_resp04`，唯一读入口 `restore_at_req04`；immutable interval 仅开放 lossless codec、完整 scope 校验、expiry 与 release。
