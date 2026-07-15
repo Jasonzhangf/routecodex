@@ -97,6 +97,7 @@ for (const phrase of [
   'sse_runtime_emits_first_gemini_event_before_provider_terminal_without_materializing',
   'malformed_non_terminal_and_post_terminal_sse_fail_explicitly',
   'provider_error_enters_error01_06_without_success_projection',
+  'malformed_provider_error_body_projects_explicit_error_not_fallback',
   'side_channel_request_fails_before_provider_send',
   'response_side_channel_is_rejected_for_json_and_sse_before_client_success',
 ]) requireText(tests, testsPath, phrase);
@@ -157,6 +158,7 @@ forbid(runtime, runtimePath, [
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /into_body_bytes|collect::<Vec<u8>>|bodyText|sse_frames/i,
   /debug_snapshot|metadata_center|resource_handle|continuation_owner/,
+  /unwrap_or(?:_else|_default)/,
 ]);
 
 verifyYamlManifest();

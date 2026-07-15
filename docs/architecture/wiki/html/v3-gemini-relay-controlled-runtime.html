@@ -164,6 +164,7 @@
         <tr><td>SSE</td><td>Shared incremental decoder feeds <code>Body::from_stream</code>; first candidate frame arrives before delayed terminal; no synthetic <code>[DONE]</code></td><td>no full stream materialization or OpenAI framing</td></tr>
         <tr><td>SSE negatives</td><td>malformed JSON, stream end without terminal, and post-terminal frame fail explicitly</td><td>still-running or malformed provider streams never become success</td></tr>
         <tr><td>Error</td><td>Controlled 429 enters <code>V3Error01SourceRaised</code> through <code>V3Error06ClientProjected</code></td><td>provider failure never becomes Resp01/success</td></tr>
+        <tr><td>Malformed error body</td><td>Controlled non-JSON provider error projects <code>provider_error_body_malformed</code></td><td>provider error parsing cannot fall back to a generic hidden shape</td></tr>
         <tr><td>Isolation</td><td>request/response <code>metadata_center</code> fails before provider send or client projection</td><td>internal control truth never enters provider/client normal payload</td></tr>
         </tbody>
         </table>

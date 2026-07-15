@@ -177,6 +177,26 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct MalformedErrorTransport;
+
+#[async_trait]
+impl ResponsesTransport for MalformedErrorTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                status: 502,
+                headers: vec![],
+                body: b"not-json".to_vec(),
+            }),
+        })
+    }
+}
+
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let output = execute_v3_gemini_relay_runtime(
@@ -203,6 +223,35 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+}
+
+#[tokio::test]
+async fn malformed_provider_error_body_projects_explicit_error_not_fallback() {
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-malformed-error".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents":[{"role":"user","parts":[{"text":"malformed error"}]}],
+                "stream":false
+            }),
+        },
+        &MalformedErrorTransport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 502);
+    let client_response = match output.client_body {
+        V3GeminiRelayClientBody::Json(value) => value,
+        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
+    };
+    assert_eq!(
+        client_response["error"]["code"],
+        "provider_error_body_malformed"
+    );
+    assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
 }
 
 type ControlledSseReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, V3ProviderError>>;

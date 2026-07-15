@@ -1205,6 +1205,7 @@ features:
       - SSE emits first candidate frame before provider terminal and never appends synthetic DONE
       - malformed SSE JSON non-terminal stream end and frames after terminal finishReason fail explicitly
       - provider HTTP failure enters Error01-06 without Resp01 success projection
+      - malformed provider error body projects an explicit provider_error_body_malformed error without fallback
       - request and response internal side-channel fields fail before provider send or client success
     required_blackbox:
       - loopback upstream receives exactly one POST /v1beta/models/gemini-wire/generateContent per valid request

@@ -51,6 +51,7 @@ The request and response normal payloads must never carry RouteCodex internal si
 | SSE non-terminal end | stream closes after `finishReason: null` | explicit `ended without terminal finishReason` error | still-running response is not misclassified as terminal success |
 | SSE post-terminal | provider emits another frame after terminal `finishReason` | explicit post-terminal error | late provider frames are not appended to a completed response |
 | Provider HTTP error | controlled 429 | Error01–06 trace; no `V3ProviderRespInbound01Raw` success node | provider failure is not wrapped as success |
+| Malformed provider error body | controlled HTTP error with non-JSON body | explicit `provider_error_body_malformed` error payload and Error01–06 | provider error parsing cannot silently fall back to a generic success/error shape |
 | Request isolation | request contains `metadata_center` | codec fails before transport; capture remains empty | internal request control truth cannot enter provider body |
 | JSON response isolation | provider JSON contains `metadata_center` | codec fails before client projection | internal provider-side control truth cannot enter client body |
 | SSE response isolation | provider frame contains `metadata_center` | stream emits error before projecting provider data | side-channel leak cannot escape through streaming |

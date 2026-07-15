@@ -579,8 +579,15 @@ fn provider_error_output(
         format!("provider_http_{status}"),
         format!("provider returned HTTP {status}"),
     );
-    let body = serde_json::from_slice::<Value>(body)
-        .unwrap_or_else(|_| json!({"error":{"code":"provider_error","message":"provider error"}}));
+    let body = match serde_json::from_slice::<Value>(body) {
+        Ok(value) => value,
+        Err(error) => json!({
+            "error": {
+                "code": "provider_error_body_malformed",
+                "message": format!("provider returned HTTP {status} with malformed JSON error body: {error}")
+            }
+        }),
+    };
     error_output(source, status, body, provider_id, trace)
 }
 

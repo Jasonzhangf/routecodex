@@ -50,6 +50,7 @@ candidate, function-call, finishReason, JSON, and SSE semantics stay in the Gemi
 | SSE | Shared incremental decoder feeds `Body::from_stream`; first candidate frame arrives before delayed terminal; no synthetic `[DONE]` | no full stream materialization or OpenAI framing |
 | SSE negatives | malformed JSON, stream end without terminal, and post-terminal frame fail explicitly | still-running or malformed provider streams never become success |
 | Error | Controlled 429 enters `V3Error01SourceRaised` through `V3Error06ClientProjected` | provider failure never becomes Resp01/success |
+| Malformed error body | Controlled non-JSON provider error projects `provider_error_body_malformed` | provider error parsing cannot fall back to a generic hidden shape |
 | Isolation | request/response `metadata_center` fails before provider send or client projection | internal control truth never enters provider/client normal payload |
 
 ## Ownership checklist
