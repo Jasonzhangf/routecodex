@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 
+mod relay_request;
+pub use relay_request::*;
 mod resource_hooks;
 pub use resource_hooks::*;
 
@@ -69,6 +71,7 @@ pub struct V3HubReqInbound01ClientRaw {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubReqInbound02Normalized {
     previous: V3HubReqInbound01ClientRaw,
+    semantic_protocol: V3HubRequestSemanticProtocol,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,7 +211,10 @@ pub fn build_v3_hub_req_inbound_01_client_raw(
 pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
     input: V3HubReqInbound01ClientRaw,
 ) -> V3HubReqInbound02Normalized {
-    V3HubReqInbound02Normalized { previous: input }
+    V3HubReqInbound02Normalized {
+        previous: input,
+        semantic_protocol: V3HubRequestSemanticProtocol::Chat,
+    }
 }
 
 pub fn build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(

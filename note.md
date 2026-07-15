@@ -30593,6 +30593,14 @@ Pure Rust NAPI candidates:
 - Payload rule: provider response payload is held by `Arc<Value>` on the response side; canonical local context uses exactly one `Arc::clone`, while Resp02/Resp03 do not materialize or deep-copy the full response body/SSE/context.
 - Gates: focused Rust response tests passed in the shared tree before unrelated Config edits, then a clean verification worktree containing only the staged response slice passed focused response tests, H1 hub tests, H1 contract tests, architecture/resource/module/rust-only/static-hook/docs gates, response source/red gates, compile-fail, cargo fmt, clippy, and full V3 workspace tests.
 - Boundary: this does not complete Relay request semantics, Config/Manifest hook resources, live Relay wiring, continuation end-to-end restore/materialize, Server entry cutover, P6 deletion, global install, `~/.rcc`, or production runtime.
+# 2026-07-15T09:40 CST: V3 Relay request Req01-Req04 source slice
+
+- Claim `feature_id:v3.hub_relay_request_semantics` owns only `V3HubReqInbound01ClientRaw -> V3HubReqInbound02Normalized -> V3HubReqContinuation03Classified -> V3HubReqChatProcess04Governed`.
+- Red-first evidence: focused integration test initially failed to compile because the request hook/lookup/scope/profile types did not exist; after implementation it exposed one event-expectation drift, then finished 6/6 green including ambiguous local-plus-remote owner rejection.
+- Req02 moves the original `Value` and marks canonical Chat semantics. Req03 only classifies new/remote/local with exact entry/server/group/session scope and rejects missing, mismatched, or ambiguous owner truth. Req04 alone clones the local-context `Arc`, validates tool output, records history governance, and runs the static servertool request profile after restore.
+- Copy/topology gates reject JSON round trips, full payload clone, Req03 restore, Req04 bypass, dynamic hook discovery, independent Relay lifecycle construction, Server/Provider ownership escape, and non-adjacent Req03->Req05 conversion.
+- Verification: request focused 6/6, request source gate, 6 red mutations, compile-fail, V3 architecture/resource/module/rust-only/static-hook/doc-red/fmt, Clippy `-D warnings`, and full V3 workspace passed using a run-private Cargo target.
+- Boundary: Req05-Req09, response ownership, Config/resource hook completion, live Relay, continuation E2E, Server cutover, P6 deletion, global install, `~/.rcc`, and production runtime are not claimed.
 
 # 2026-07-15T10:12 CST: V3 Relay resource and hook declaration surface verified
 
