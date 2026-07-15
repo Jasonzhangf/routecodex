@@ -34,10 +34,11 @@ fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_s
     );
 
     let wire = characterize_v3_anthropic_hub_semantic_to_provider_wire(semantic).unwrap();
+    assert_eq!(wire.payload(), &client);
     assert_eq!(wire.payload()["messages"], client["messages"]);
     assert_eq!(wire.payload()["tools"], client["tools"]);
     assert_eq!(wire.payload()["thinking"], client["thinking"]);
-    assert_eq!(wire.payload()["anthropic_version"], "2023-06-01");
+    assert!(wire.payload().get("anthropic_version").is_none());
     assert_eq!(
         wire.trace().stage,
         V3AnthropicCodecStage::HubSemanticToProviderWire
@@ -45,7 +46,7 @@ fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_s
 }
 
 #[test]
-fn response_characterization_preserves_anthropic_sse_tool_use_reasoning_and_client_projection() {
+fn response_characterization_preserves_anthropic_json_tool_use_reasoning_and_client_projection() {
     let raw = json!({
         "id": "msg_1",
         "type": "message",
@@ -60,11 +61,14 @@ fn response_characterization_preserves_anthropic_sse_tool_use_reasoning_and_clie
     let semantic = characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
         raw.clone(),
         V3HubProviderWireProtocol::Anthropic,
-        V3HubTransportIntent::Sse,
+        V3HubTransportIntent::Json,
     )
     .unwrap();
     assert_eq!(semantic.payload(), &raw);
-    assert_eq!(semantic.trace().transport_intent, V3HubTransportIntent::Sse);
+    assert_eq!(
+        semantic.trace().transport_intent,
+        V3HubTransportIntent::Json
+    );
     assert_eq!(
         semantic.trace().stage,
         V3AnthropicCodecStage::ProviderRawToHubResponseSemantic
@@ -77,6 +81,46 @@ fn response_characterization_preserves_anthropic_sse_tool_use_reasoning_and_clie
         client.trace().stage,
         V3AnthropicCodecStage::HubResponseSemanticToClientProjection
     );
+}
+
+#[test]
+fn sse_characterization_preserves_individual_reasoning_and_tool_events_without_materialization() {
+    let events = [
+        json!({
+            "type":"content_block_start",
+            "index":0,
+            "content_block":{"type":"thinking","thinking":""}
+        }),
+        json!({
+            "type":"content_block_delta",
+            "index":0,
+            "delta":{"type":"thinking_delta","thinking":"trace"}
+        }),
+        json!({
+            "type":"content_block_start",
+            "index":1,
+            "content_block":{"type":"tool_use","id":"toolu_sse","name":"lookup","input":{}}
+        }),
+        json!({
+            "type":"content_block_delta",
+            "index":1,
+            "delta":{"type":"input_json_delta","partial_json":r#"{"q":"z"}"#}
+        }),
+        json!({"type":"message_stop"}),
+    ];
+    for event in events {
+        let semantic = characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
+            event.clone(),
+            V3HubProviderWireProtocol::Anthropic,
+            V3HubTransportIntent::Sse,
+        )
+        .unwrap();
+        assert_eq!(semantic.payload(), &event);
+        assert_eq!(semantic.trace().transport_intent, V3HubTransportIntent::Sse);
+        let client =
+            characterize_v3_anthropic_hub_response_semantic_to_client_projection(semantic).unwrap();
+        assert_eq!(client.payload(), &event);
+    }
 }
 
 #[test]
@@ -110,6 +154,14 @@ fn provider_error_characterization_is_explicit_and_protocol_bound() {
             V3HubTransportIntent::Json,
         ),
         Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic)
+    ));
+    assert!(matches!(
+        characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
+            json!({"type":"invented_event"}),
+            V3HubProviderWireProtocol::Anthropic,
+            V3HubTransportIntent::Sse,
+        ),
+        Err(V3AnthropicCodecError::MalformedSseEvent)
     ));
 }
 

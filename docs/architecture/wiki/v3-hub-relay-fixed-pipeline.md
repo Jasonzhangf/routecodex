@@ -94,6 +94,8 @@ Relay is borrow-first and move-at-boundary:
 - Runtime resources and static hook resource config: declaration surface verified; live Relay integration remains pending.
 - Relay maps/gates/wiki: architecture review surface locked by the D gates below.
 - Payload copy-budget runtime gates: pending.
+- Generic Anthropic codec: characterization source/tests only; H6 hook registration, Server exposure,
+  provider transport, and live compatibility remain pending.
 
 ## A/B/C merge checklist
 

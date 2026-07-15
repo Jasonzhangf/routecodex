@@ -349,6 +349,46 @@ features:
       runtime: "Review surface is not runtime evidence; live Relay, continuation, servertool runtime hooks, and P6 deletion remain pending."
       forbidden_claim: "Do not claim runtime implementation, live Relay, usable continuation, servertool runtime execution, P6 deletion, global install, restart, or production replacement."
 
+  - feature_id: v3.protocol_anthropic_codec_characterization
+    status: characterization_source_verified
+    change_risk: high
+    owner_kind: rust_project_v3_protocol_codec_characterization
+    owner_scope: "Generic Anthropic protocol codec characterization across client input, Hub request semantic, provider wire, provider raw, Hub response semantic, and client projection"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
+      - scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
+      - scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
+    mainline_bindings:
+      - v3-protocol-anthropic-01
+      - v3-protocol-anthropic-02
+      - v3-protocol-anthropic-03
+      - v3-protocol-anthropic-04
+    design:
+      - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
+    test_design:
+      - docs/goals/v3-anthropic-codec-characterization-test-design.md
+    required_contract:
+      - client input to Hub request semantic is Anthropic entry-protocol bound
+      - Hub request semantic to provider wire preserves messages tool_use tool_result tools system and thinking fields
+      - provider raw to Hub response semantic preserves JSON or SSE transport intent without materializing an SSE stream
+      - Hub response semantic to client projection preserves text thinking tool_use and explicit provider errors
+      - RouteCodex internal control fields fail fast instead of entering provider or client payload
+      - the module registers no Hub hook and does not modify Hub skeleton Server entry Provider runtime Gemini or OpenAI Chat
+    required_gates:
+      - npm run test:v3-anthropic-codec-characterization
+      - npm run verify:v3-anthropic-codec-characterization
+      - npm run test:v3-anthropic-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_rule:
+      source: "The slice is complete only when focused JSON/SSE/tool/reasoning/error tests, mutation fixtures, owner maps, module/Rust/resource gates, fmt, and diff check pass."
+      runtime: "Characterization is source/test evidence only; H6 hook registration and runtime integration remain pending."
+      forbidden_claim: "Do not claim H6 hook registration, Hub v1 runtime integration, Server exposure, Provider transport, Gemini/OpenAI Chat, live Anthropic compatibility, global install, restart, or production replacement."
+
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified
     change_risk: high

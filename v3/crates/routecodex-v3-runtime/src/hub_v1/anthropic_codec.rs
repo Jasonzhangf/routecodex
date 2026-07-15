@@ -1,5 +1,5 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3AnthropicCodecStage {
@@ -55,6 +55,8 @@ pub enum V3AnthropicCodecError {
     MessagesNotArray,
     #[error("Anthropic response content must be an array")]
     ContentNotArray,
+    #[error("Anthropic SSE event requires a supported type")]
+    MalformedSseEvent,
     #[error("Anthropic provider error requires error.type and error.message")]
     MalformedProviderError,
 }
@@ -85,13 +87,16 @@ pub fn characterize_v3_anthropic_hub_semantic_to_provider_wire(
     reject_side_channel_fields(&semantic.payload)?;
     require_object(&semantic.payload)?;
     require_messages_array(&semantic.payload)?;
-    let mut wire = object_clone_without_internal_fields(&semantic.payload)?;
-    wire.insert("anthropic_version".to_string(), json!("2023-06-01"));
+    let V3AnthropicHubRequestSemantic {
+        payload,
+        trace: semantic_trace,
+    } = semantic;
+    let wire = into_object(payload)?;
     Ok(V3AnthropicProviderWirePayload {
         payload: Value::Object(wire),
         trace: trace(
             V3AnthropicCodecStage::HubSemanticToProviderWire,
-            semantic.trace.transport_intent,
+            semantic_trace.transport_intent,
         ),
     })
 }
@@ -106,10 +111,9 @@ pub fn characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
     }
     reject_side_channel_fields(&payload)?;
     require_object(&payload)?;
-    if payload.get("error").is_some() {
-        validate_provider_error(&payload)?;
-    } else {
-        require_content_array(&payload)?;
+    match transport_intent {
+        V3HubTransportIntent::Json => validate_json_response(&payload)?,
+        V3HubTransportIntent::Sse => validate_sse_event(&payload)?,
     }
     Ok(V3AnthropicHubResponseSemantic {
         payload,
@@ -125,10 +129,9 @@ pub fn characterize_v3_anthropic_hub_response_semantic_to_client_projection(
 ) -> Result<V3AnthropicClientProjection, V3AnthropicCodecError> {
     reject_side_channel_fields(&semantic.payload)?;
     require_object(&semantic.payload)?;
-    if semantic.payload.get("error").is_some() {
-        validate_provider_error(&semantic.payload)?;
-    } else {
-        require_content_array(&semantic.payload)?;
+    match semantic.trace.transport_intent {
+        V3HubTransportIntent::Json => validate_json_response(&semantic.payload)?,
+        V3HubTransportIntent::Sse => validate_sse_event(&semantic.payload)?,
     }
     Ok(V3AnthropicClientProjection {
         payload: semantic.payload,
@@ -211,6 +214,33 @@ fn require_content_array(value: &Value) -> Result<(), V3AnthropicCodecError> {
     }
 }
 
+fn validate_json_response(value: &Value) -> Result<(), V3AnthropicCodecError> {
+    if value.get("error").is_some() {
+        validate_provider_error(value)
+    } else {
+        require_content_array(value)
+    }
+}
+
+fn validate_sse_event(value: &Value) -> Result<(), V3AnthropicCodecError> {
+    let object = require_object(value)?;
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(V3AnthropicCodecError::MalformedSseEvent)?;
+    match kind {
+        "message_start"
+        | "content_block_start"
+        | "content_block_delta"
+        | "content_block_stop"
+        | "message_delta"
+        | "message_stop"
+        | "ping" => Ok(()),
+        "error" => validate_provider_error(value),
+        _ => Err(V3AnthropicCodecError::MalformedSseEvent),
+    }
+}
+
 fn validate_provider_error(value: &Value) -> Result<(), V3AnthropicCodecError> {
     let Some(error) = value.get("error").and_then(Value::as_object) else {
         return Err(V3AnthropicCodecError::MalformedProviderError);
@@ -230,15 +260,11 @@ fn validate_provider_error(value: &Value) -> Result<(), V3AnthropicCodecError> {
     }
 }
 
-fn object_clone_without_internal_fields(
-    value: &Value,
-) -> Result<Map<String, Value>, V3AnthropicCodecError> {
-    let object = require_object(value)?;
-    Ok(object
-        .iter()
-        .filter(|(key, _)| !is_internal_side_channel_field(key))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect())
+fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError> {
+    match value {
+        Value::Object(object) => Ok(object),
+        _ => Err(V3AnthropicCodecError::PayloadNotObject),
+    }
 }
 
 fn reject_side_channel_fields(value: &Value) -> Result<(), V3AnthropicCodecError> {

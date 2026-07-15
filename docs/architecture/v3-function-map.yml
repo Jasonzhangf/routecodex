@@ -504,6 +504,62 @@ features:
       - continuation end-to-end restore/materialize
       - P6 cutover or deletion
 
+  - feature_id: v3.protocol_anthropic_codec_characterization
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+    resource_bindings:
+      - v3.hub.entry_protocol
+      - v3.hub.provider_protocol
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.response.provider_raw
+      - v3.hub.response_semantic
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-protocol-anthropic-01
+      - v3-protocol-anthropic-02
+      - v3-protocol-anthropic-03
+      - v3-protocol-anthropic-04
+    entry_symbols:
+      - characterize_v3_anthropic_client_input_to_hub_semantic
+      - characterize_v3_anthropic_hub_semantic_to_provider_wire
+      - characterize_v3_anthropic_provider_raw_to_hub_response_semantic
+      - characterize_v3_anthropic_hub_response_semantic_to_client_projection
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
+      - scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
+      - scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
+      - docs/goals/v3-anthropic-codec-characterization-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - package.json
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-anthropic-codec-characterization
+      - npm run verify:v3-anthropic-codec-characterization
+      - npm run test:v3-anthropic-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    runtime_status: anthropic_codec_characterization_only
+    pending_runtime:
+      - H6 Anthropic hook registration
+      - Hub v1 runtime integration
+      - Server entry exposure
+      - provider transport
+      - live Anthropic replay
+
   - feature_id: v3.virtual_router_full_function
     owner_crates: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-runtime]
     owner_files:
