@@ -25,7 +25,8 @@ The harness starts a loopback controlled Responses upstream and invokes the exec
 <driver> --fixture <case.json> --upstream-url <loopback /v1/responses URL>
 ~~~
 
-The driver must execute the real Runtime integration path and print exactly one JSON object:
+The driver must execute the real Runtime integration path, send its provider request to the supplied
+URL, and print exactly one JSON object:
 
 ~~~json
 {

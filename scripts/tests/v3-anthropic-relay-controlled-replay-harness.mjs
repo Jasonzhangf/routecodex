@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const HARNESS_ID = 'v3.anthropic_relay_controlled_replay';
 const DIAGNOSTIC = 'V3_ANTHROPIC_RELAY_WIRING_MISSING';
@@ -77,8 +77,9 @@ console.log(`[v3-anthropic-relay-controlled-replay] passed (${result.cases.lengt
 async function runWithDriver(driverPath, loaded, digestValue) {
   const captures = new Map();
   const fixtureById = new Map(loaded.map(({ value }) => [value.case_id, value]));
+  let activeFixtureId = null;
   const server = createServer(async (request, response) => {
-    const fixtureId = request.headers['x-routecodex-fixture-id'];
+    const fixtureId = activeFixtureId;
     const fixture = fixtureById.get(fixtureId);
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -112,18 +113,18 @@ async function runWithDriver(driverPath, loaded, digestValue) {
   const results = [];
   try {
     for (const { absolute, value } of loaded) {
-      const driverResult = spawnSync(driverPath, [
+      activeFixtureId = value.case_id;
+      const driverResult = await runDriver(driverPath, [
         '--fixture', absolute,
         '--upstream-url', `http://127.0.0.1:${port}/v1/responses`,
       ], {
-        encoding: 'utf8',
         env: { ...process.env, V3_ANTHROPIC_RELAY_FIXTURE_ID: value.case_id },
       });
       const captured = captures.get(value.case_id) ?? [];
       const failures = [];
-      if (driverResult.status !== 0) failures.push(`driver exit ${driverResult.status}: ${(driverResult.stderr ?? '').trim()}`);
+      if (driverResult.status !== 0) failures.push(`driver exit ${driverResult.status}: ${driverResult.stderr.trim()}`);
       let projection = null;
-      try { projection = JSON.parse((driverResult.stdout ?? '').trim()); }
+      try { projection = JSON.parse(driverResult.stdout.trim()); }
       catch { failures.push('driver stdout is not one JSON evidence object'); }
       if (captured.length !== 1) failures.push(`controlled upstream capture count ${captured.length}, expected 1`);
       else if (!deepEqual(captured[0], value.expected_upstream_request)) failures.push('provider capture differs from expected_upstream_request');
@@ -138,6 +139,7 @@ async function runWithDriver(driverPath, loaded, digestValue) {
       });
     }
   } finally {
+    activeFixtureId = null;
     await new Promise((resolveClose) => server.close(resolveClose));
   }
   const failed = results.filter((item) => item.status === 'failed');
@@ -150,6 +152,20 @@ async function runWithDriver(driverPath, loaded, digestValue) {
     missing_adjacent_edges: [],
     diagnostic: failed.length ? `controlled replay failed: ${failed.map((item) => item.case_id).join(', ')}` : 'all controlled replay cases passed',
   };
+}
+
+function runDriver(command, commandArgs, options) {
+  return new Promise((resolveDriver, rejectDriver) => {
+    const child = spawn(command, commandArgs, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', rejectDriver);
+    child.once('close', (status) => resolveDriver({ status, stdout, stderr }));
+  });
 }
 
 function parseArgs(values) {
