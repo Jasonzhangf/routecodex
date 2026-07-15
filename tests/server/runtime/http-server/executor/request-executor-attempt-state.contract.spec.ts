@@ -95,6 +95,44 @@ describe('request-executor attempt-state contract', () => {
       .toBe('primary.key1.gpt-test');
   });
 
+  it('keeps provider failure exclusion when responsesResume pins the excluded direct provider', () => {
+    const initialMetadata: Record<string, unknown> = {};
+    const center = MetadataCenter.attach(initialMetadata);
+    center.writeContinuationContext(
+      'responsesResume',
+      {
+        providerKey: 'primary.key1.gpt-test',
+        continuationOwner: 'direct',
+        restoredFromResponseId: 'resp_prev_402',
+      },
+      {
+        module: 'tests/server/runtime/http-server/executor/request-executor-attempt-state.contract.spec.ts',
+        symbol: 'keeps provider failure exclusion when responsesResume pins the excluded direct provider',
+        stage: 'test_setup'
+      }
+    );
+    const input = {
+      requestId: 'req-attempt-direct-1',
+      body: { model: 'gpt-test', input: [] },
+    } as never;
+
+    const result = prepareRequestExecutorAttemptState({
+      input,
+      providerRequestId: 'req-attempt-direct-2',
+      retryPayloadSeed: { mode: 'none' },
+      attempt: 2,
+      initialMetadata,
+      excludedProviderKeys: new Set<string>(['primary.key1.gpt-test']),
+      inboundClientHeaders: undefined,
+      clientRequestId: 'client-req-direct-402',
+      throwIfClientAbortSignalAborted: () => {},
+    });
+
+    expect(MetadataCenter.read(result.metadataForAttempt)?.readRuntimeControl().retryProviderKey)
+      .toBeUndefined();
+    expect(result.metadataForAttempt.excludedProviderKeys).toEqual(['primary.key1.gpt-test']);
+  });
+
   it('does not promote relay responsesResume providerKey into retry pin or clear excluded providers', () => {
     const initialMetadata: Record<string, unknown> = {};
     const center = MetadataCenter.attach(initialMetadata);

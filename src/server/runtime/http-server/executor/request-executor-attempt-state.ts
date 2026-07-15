@@ -7,7 +7,11 @@ import { cloneClientHeaders, decorateMetadataForAttempt } from '../executor-meta
 import { mergeMetadataPreservingDefined } from './request-executor-core-utils.js';
 import { resolveClientAbortSignalFromCarrier } from './request-executor-client-abort-block.js';
 import { restoreRequestPayloadFromRetrySeed } from './retry-payload-snapshot.js';
-import { applyMetadataCenterRustWriteResult, type MetadataCenterRustSnapshot } from '../metadata-center/dualwrite-api.js';
+import {
+  applyMetadataCenterRustWriteResult,
+  releaseMetadataCenterSlot,
+  type MetadataCenterRustSnapshot
+} from '../metadata-center/dualwrite-api.js';
 import {
   attachRuntimeCarrier,
   bindSingleRuntimeCarrierFromSources,
@@ -119,7 +123,22 @@ export function prepareRequestExecutorAttemptState(args: {
     metadataForAttempt,
     explicitRetryProviderKey: args.retryProviderKey
   });
-  if (retryProviderKey) {
+  const normalizedRetryProviderKey = retryProviderKey?.trim().toLowerCase();
+  const retryProviderIsExcluded = Boolean(
+    normalizedRetryProviderKey
+    && Array.from(args.excludedProviderKeys).some(
+      (excludedProviderKey) => excludedProviderKey.trim().toLowerCase() === normalizedRetryProviderKey
+    )
+  );
+  if (retryProviderIsExcluded) {
+    releaseMetadataCenterSlot({
+      target: metadataForAttempt,
+      family: 'runtime_control',
+      key: 'retryProviderKey',
+      writer: ATTEMPT_STATE_RUNTIME_CONTROL_WRITER,
+      reason: 'provider failure exclusion overrides continuation retry pin'
+    });
+  } else if (retryProviderKey) {
     delete metadataForAttempt.excludedProviderKeys;
     writeRuntimeControlSlot({
       target: metadataForAttempt,

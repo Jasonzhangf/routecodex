@@ -158,3 +158,19 @@
 - router-direct 不再有 auth/quota 早返特例。
 - default pool skeleton 有 gate；default 最后 provider 不会被移出到空池。
 - Focused tests、architecture gates、build、5555 live replay 全部 PASS。
+
+## 8. 2026-07-15 Responses direct continuation pin 冲突测试设计
+
+### 8.1 生命周期
+- 第一轮 Responses direct continuation 可把 `responsesResume.providerKey` 投影为 request-local `runtime_control.retryProviderKey`，保持 remote continuation provider affinity。
+- provider 执行失败进入 ErrorErr01-05 后，ErrorErr05 将当前 provider 写入 `route.retry_exclusion_set`。
+- 下一 attempt 若 continuation pin 指向已排除 provider，排除必须优先：不得删除 `excludedProviderKeys`，不得重写同 provider pin，VR 必须选择剩余 route/default provider。
+
+### 8.2 正反测试
+- 正向：continuation provider 未被排除时，仍写 `retryProviderKey`，证明正常 direct continuation affinity 不受影响。
+- 反向：continuation provider 已被 ErrorErr05 排除时，保留 `excludedProviderKeys` 且不写 pin，证明 401/402/403/429/5xx 不会重选同一失败 provider。
+- 模块黑盒：router-direct 402 + direct continuation metadata 必须调用第二 provider 并返回 200。
+- 项目黑盒：5520 真实 `/v1/responses` 重放必须看到 402 后新 provider 的 `virtual-router-hit`，不得直接出现 client-visible 402。
+
+### 8.3 已知缺口
+- 真实 upstream 402 不可确定性较高；若 live provider 当时不再返回 402，使用同入口可控 provider error fixture 重放，并明确记录未命中真实 upstream 402 的缺口。

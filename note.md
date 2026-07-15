@@ -30747,13 +30747,14 @@ Pure Rust NAPI candidates:
 - Managed 5555 is still configured as HTTP-only while declaring `remote_continuation`; the new binary correctly rejects that config. The running old binary sends the continuation through HTTP, skips Router on the second turn, and projects the upstream rejection as 502. Five candidate Upgrade paths (`responses`, `responses/ws`, `responses/websocket`, `responses/v2`, `realtime`) received zero handshake bytes before timeout.
 - No live config, provider credential, listener, or managed process was changed. Real managed 5555 JSON/SSE two-turn success remains pending a provider-verified Responses WebSocket v2 endpoint; source/controlled completion is not live completion.
 
-
 # 2026-07-15 V3 Anthropic Relay local continuation controlled closeout
 
 - Claim `feature_id:v3.anthropic_relay_local_continuation_integration` implements only Anthropic Relay local continuation in Rust Runtime. OpenAI Chat runtime and Provider WebSocket owner are intentionally untouched.
+
 - Red compile gate proved the stateful Anthropic local continuation entry was absent. Current Runtime saves pending tool-call canonical provider response at Resp04, preserves immutable store interval, restores by Anthropic `tool_result.tool_use_id` at next Req04, prepends saved reasoning/function_call before function_call_output, and releases terminal success.
 - Positive/negative evidence: JSON two-turn, SSE-first two-turn, multi-tool alias restore/release, exact-scope mismatch before provider send, provider error after restore retains truth, local store 10/10, dedicated verifier, and 7 mutation fixtures passed.
 - Project-wide gates passed for architecture docs, resource map, module boundaries, Rust-only, fmt, and focused Clippy. Full V3 workspace is currently blocked by unrelated dirty OpenAI Chat Server behavior changing `/v1/chat/completions` pending status from 501 to 500; local continuation tests are green and no OpenAI Chat owner was modified.
+
 # 2026-07-15T22:33+08:00 V3 OpenAI Chat Relay controlled Runtime closeout
 
 - Scope: `feature_id:v3.openai_chat_relay_runtime_integration` owns `/v1/chat/completions -> Hub Req01-Req09 -> Provider -> Hub Resp01-Resp06 -> client` for controlled OpenAI Chat Relay only. Responses Direct, Anthropic local continuation, Provider WebSocket, live config, credentials, install, and restart stayed out of scope.
@@ -30761,3 +30762,15 @@ Pure Rust NAPI candidates:
 - SSE fix: OpenAI Chat SSE uses the shared incremental decoder, emits client frames before provider terminal, requires terminal `finish_reason` before `[DONE]`, requires `[DONE]` before stream end, and rejects frames after `[DONE]`. Server uses `Body::from_stream` and does not parse Chat semantics or materialize a full Vec/body.
 - Controlled evidence: Runtime focused 6/6; Server loopback JSON/SSE/error/isolation 1/1; source verifier ok; 7 mutation fixtures rejected; module/Rust-only/architecture/resource/wiki/browser gates ok; cargo fmt check, Clippy workspace, full V3 workspace, and git diff check ok.
 - Remaining boundary: no live provider compatibility, global install/restart, release, or production cutover claim.
+# 2026-07-15: 5520 provider 402 reroute reselected excluded direct-continuation provider
+
+- Live request `openai-responses-router-gpt-5.6-sol-20260715T210706792-538250-5993` proved 402 did enter ErrorErr05: log emitted `switch=exclude_and_reroute`, then second VR pass selected the same `cc.key1.gpt-5.5`, then projected 402 to client.
+- Root cause: `prepareRequestExecutorAttemptState()` decorates attempt metadata with `excludedProviderKeys`, but `resolveAttemptRetryProviderKey()` recovers `responsesResume.providerKey`; current pin branch deletes `excludedProviderKeys`, so stale direct-continuation affinity overrides the new provider-failure exclusion.
+- Required contract: continuation provider pin remains valid while provider is not excluded; once ErrorErr05 excludes that provider, exclusion wins, pin is not written, and remaining providers/default pool must be tried before client projection.
+
+# 2026-07-15: 5520 provider 402 reroute fix closeout
+
+- Red test: `request-executor-attempt-state.contract.spec.ts` new direct-continuation/excluded-provider case failed before fix because `retryProviderKey` stayed `primary.key1.gpt-test` and `excludedProviderKeys` was removed.
+- Fix: `prepareRequestExecutorAttemptState()` now compares the resolved continuation/explicit retry pin with the ErrorErr05 `excludedProviderKeys`; if equal, it releases `runtime_control.retryProviderKey` and keeps the exclusion list.
+- Controlled gate: `verify:provider-failure-ban-blackbox` now includes HTTP 402 and passed with `scenario402 primaryHits=1 backupHits=1 clientStatus=200`.
+- Install/live: installed `routecodex 0.90.3934` snapshot `2026-07-15T140136Z`, restarted aggregate once through port 5520, health OK on 4444/5520/10000. Live 5520 replay returned marker `RCC_402_REROUTE_FIX2_20260715T140340Z` with HTTP 200, but upstream did not reproduce 402 during replay, so exact live 402 reroute is still covered by controlled blackbox rather than current upstream behavior.

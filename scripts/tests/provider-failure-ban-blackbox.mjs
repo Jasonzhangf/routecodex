@@ -789,6 +789,12 @@ async function main() {
     code: 'HTTP_401',
     marker: 'ok-from-backup-401'
   });
+  const result402 = await runAuthQuotaScenario({
+    label: 'HTTP_402',
+    status: 402,
+    code: 'HTTP_402',
+    marker: 'ok-from-backup-402'
+  });
   const result403 = await runAuthQuotaScenario({
     label: 'HTTP_403',
     status: 403,
@@ -810,6 +816,7 @@ async function main() {
         ok: true,
         scenario503: result503,
         scenario401: result401,
+        scenario402: result402,
         scenario403: result403,
         scenarioInsufficientQuota: resultQuota,
         portIsolation: resultPortIsolation,
