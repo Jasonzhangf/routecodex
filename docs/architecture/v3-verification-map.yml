@@ -3,7 +3,7 @@ status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
   - feature_id: v3.config_server_full_function
-    status: source_and_controlled_cli_verification_required
+    status: source_and_controlled_cli_verified
     change_risk: high
     owner_kind: rust_v3_config_server_error
     owner_scope: "Complete deterministic Config declaration compiler and strict atomic multi-listener HTTP Server boundary while preserving P6 Responses Direct"
