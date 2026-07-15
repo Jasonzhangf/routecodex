@@ -60,7 +60,7 @@ impl V3ProviderResp14Raw {
         }
     }
 
-    pub(crate) fn from_sse(
+    pub fn from_sse(
         request_id: String,
         provider_id: String,
         status: u16,

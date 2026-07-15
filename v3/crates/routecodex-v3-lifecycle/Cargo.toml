@@ -1,24 +1,18 @@
 [package]
-name = "routecodex-v3-cli"
+name = "routecodex-v3-lifecycle"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "routecodex-v3"
-path = "src/main.rs"
-
 [dependencies]
-clap.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
-routecodex-v3-lifecycle = { path = "../routecodex-v3-lifecycle" }
 routecodex-v3-server = { path = "../routecodex-v3-server" }
+serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-axum.workspace = true
-reqwest.workspace = true
-serde_json.workspace = true
 tempfile = "3"

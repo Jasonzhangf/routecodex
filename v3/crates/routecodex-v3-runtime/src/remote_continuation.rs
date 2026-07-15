@@ -148,6 +148,18 @@ impl V3RemoteContinuationLocator {
     pub fn expires_at_epoch_ms(&self) -> u64 {
         self.expires_at_epoch_ms
     }
+
+    pub fn validate_capability_revision(
+        &self,
+        current_revision: &str,
+    ) -> Result<(), V3RemoteContinuationError> {
+        if self.capability_revision != current_revision {
+            return Err(V3RemoteContinuationError::CapabilityRevisionMismatch {
+                remote_response_id: self.remote_response_id.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,6 +214,8 @@ pub enum V3RemoteContinuationError {
     ScopeMismatch { remote_response_id: String },
     #[error("remote continuation provider/model/auth pin mismatch: {remote_response_id}")]
     PinMismatch { remote_response_id: String },
+    #[error("remote continuation capability revision mismatch: {remote_response_id}")]
+    CapabilityRevisionMismatch { remote_response_id: String },
     #[error("remote continuation expired: {remote_response_id}")]
     Expired { remote_response_id: String },
     #[error("remote continuation provider unavailable: {provider_id}/{model_id}")]
@@ -227,27 +241,49 @@ impl V3RemoteContinuationStore {
         &mut self,
         input: V3RemoteContinuationCommitInput,
     ) -> Result<(), V3RemoteContinuationError> {
-        if input.locator.owner != V3RemoteContinuationOwner::Direct {
-            return Err(V3RemoteContinuationError::OwnerMismatch);
-        }
-        if input.locator.scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
-            return Err(V3RemoteContinuationError::EntryProtocolMismatch);
-        }
-        if input.locator.expires_at_epoch_ms <= input.locator.committed_at_epoch_ms {
-            return Err(V3RemoteContinuationError::InvalidExpiry {
-                remote_response_id: input.locator.remote_response_id,
-            });
-        }
-        if self
-            .locators
-            .contains_key(&input.locator.remote_response_id)
-        {
-            return Err(V3RemoteContinuationError::AlreadyCommitted {
-                remote_response_id: input.locator.remote_response_id,
-            });
-        }
+        self.validate_commit(&input.locator)?;
         self.locators
             .insert(input.locator.remote_response_id.clone(), input.locator);
+        Ok(())
+    }
+
+    pub fn rebind_for_resp04(
+        &mut self,
+        previous_remote_response_id: &str,
+        input: V3RemoteContinuationCommitInput,
+    ) -> Result<(), V3RemoteContinuationError> {
+        if !self.locators.contains_key(previous_remote_response_id) {
+            return Err(V3RemoteContinuationError::NotFound {
+                remote_response_id: previous_remote_response_id.to_string(),
+            });
+        }
+        self.validate_commit(&input.locator)?;
+        self.locators.remove(previous_remote_response_id);
+        self.locators
+            .insert(input.locator.remote_response_id.clone(), input.locator);
+        Ok(())
+    }
+
+    fn validate_commit(
+        &self,
+        locator: &V3RemoteContinuationLocator,
+    ) -> Result<(), V3RemoteContinuationError> {
+        if locator.owner != V3RemoteContinuationOwner::Direct {
+            return Err(V3RemoteContinuationError::OwnerMismatch);
+        }
+        if locator.scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
+            return Err(V3RemoteContinuationError::EntryProtocolMismatch);
+        }
+        if locator.expires_at_epoch_ms <= locator.committed_at_epoch_ms {
+            return Err(V3RemoteContinuationError::InvalidExpiry {
+                remote_response_id: locator.remote_response_id.clone(),
+            });
+        }
+        if self.locators.contains_key(&locator.remote_response_id) {
+            return Err(V3RemoteContinuationError::AlreadyCommitted {
+                remote_response_id: locator.remote_response_id.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -292,6 +328,36 @@ impl V3RemoteContinuationStore {
             return Err(V3RemoteContinuationError::ProviderUnavailable {
                 provider_id: locator.pin.provider_id.clone(),
                 model_id: locator.pin.model_id.clone(),
+            });
+        }
+        Ok(locator)
+    }
+
+    pub fn load_for_req03(
+        &self,
+        remote_response_id: &str,
+        scope_key: &V3RemoteContinuationScopeKey,
+        now_epoch_ms: u64,
+    ) -> Result<&V3RemoteContinuationLocator, V3RemoteContinuationError> {
+        if scope_key.entry_protocol != V3RemoteContinuationEntryProtocol::Responses {
+            return Err(V3RemoteContinuationError::EntryProtocolMismatch);
+        }
+        let locator = self.locators.get(remote_response_id).ok_or_else(|| {
+            V3RemoteContinuationError::NotFound {
+                remote_response_id: remote_response_id.to_string(),
+            }
+        })?;
+        if locator.owner != V3RemoteContinuationOwner::Direct {
+            return Err(V3RemoteContinuationError::OwnerMismatch);
+        }
+        if locator.scope_key != *scope_key {
+            return Err(V3RemoteContinuationError::ScopeMismatch {
+                remote_response_id: remote_response_id.to_string(),
+            });
+        }
+        if locator.is_expired_at(now_epoch_ms) {
+            return Err(V3RemoteContinuationError::Expired {
+                remote_response_id: remote_response_id.to_string(),
             });
         }
         Ok(locator)

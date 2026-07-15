@@ -38,7 +38,6 @@ for (const node of requiredP6Nodes) {
 for (const [label, pattern] of [
   ['Chat Process expansion', /ChatProcess|chat_process/i],
   ['Relay expansion', /\bRelay\b|relay_/i],
-  ['continuation expansion', /continuation|previous_response_id|response_id/i],
   ['other entry protocol expansion', /Anthropic|Gemini|OpenAiChat|chat_completions|\/v1\/messages/i],
   ['provider identity/family/model-prefix branch', /provider_(?:id|family)\s*(?:==|!=)|starts_with\([^)]*model|match\s+provider_(?:id|family)/i],
   ['same-protocol Direct inference', /same_protocol|protocol\s*==\s*[^;\n]*direct/i],
@@ -54,6 +53,8 @@ const allowedExecutors = new Set([
   'execute_v3_responses_direct_runtime_kernel_with_default_transport',
   'execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug',
   'execute_v3_responses_direct_runtime_kernel_with_transport_and_debug',
+  'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation',
+  'execute_v3_responses_direct_runtime_kernel_with_continuation',
   'execute_v3_responses_direct_dry_run_runtime',
   'execute_v3_responses_direct_runtime_kernel',
 ]);
@@ -62,7 +63,7 @@ for (const executor of lifecycleExecutors) {
 }
 
 const responsesBranch = server.match(/if is_responses \{[\s\S]*?\n    \} else \{/)?.[0] ?? '';
-if (!responsesBranch.includes('execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug')) {
+if (!responsesBranch.includes('execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation')) {
   failures.push('P6 Server entry no longer calls the frozen Runtime kernel');
 }
 if ((responsesBranch.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {
@@ -74,7 +75,7 @@ if ((responsesBranch.match(/responses_direct_output_response\(/g) ?? []).length 
 if (/routecodex_v3_provider_responses|ReqwestResponsesTransport|\.send\(/.test(responsesBranch)) {
   failures.push('P6 Server shortcut to Provider transport is forbidden');
 }
-if (/provider_(?:id|family)\s*(?:==|!=)|model_prefix|starts_with\(|\bRelay\b|continuation|ChatProcess/i.test(responsesBranch)) {
+if (/provider_(?:id|family)\s*(?:==|!=)|model_prefix|starts_with\(|\bRelay\b|ChatProcess/i.test(responsesBranch)) {
   failures.push('P6 Server entry contains forbidden branch expansion');
 }
 if (/secondary_response_exit|alternate_response_exit|second_response_exit/.test(server)) {

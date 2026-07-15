@@ -2,7 +2,7 @@ mod store;
 mod types;
 mod validate;
 
-pub use store::{default_v3_config_path, V3ConfigStore, V3ConfigWritePlan};
+pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
 pub use types::*;
 
 use std::path::Path;

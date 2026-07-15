@@ -1,8 +1,8 @@
 use crate::nodes::{
     build_v3_responses_direct_11_policy_from_v3_target_10, V3Req04StandardizedResponses,
-    V3Resp15ClientPayload, V3ResponsesDirect11Policy,
+    V3ResponsesDirect11Policy,
 };
-use crate::shared::project_provider_raw_to_client_payload;
+use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
@@ -50,8 +50,9 @@ type ProviderTransportHook = fn(
     V3Provider12ResponsesWirePayload,
 )
     -> Result<V3Transport13ResponsesHttpRequest, V3Error01SourceRaised>;
-type ResponseProjectionFuture =
-    Pin<Box<dyn Future<Output = Result<V3Resp15ClientPayload, V3Error01SourceRaised>> + Send>>;
+type ResponseProjectionFuture = Pin<
+    Box<dyn Future<Output = Result<V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
+>;
 type ResponseProjectionHook = fn(V3ProviderResp14Raw) -> ResponseProjectionFuture;
 type ErrorHook = fn(V3Error01SourceRaised, V3ErrorActionScope, usize) -> V3Error06ClientProjected;
 
@@ -108,7 +109,7 @@ impl V3HookRegistry {
     pub async fn run_response_projection(
         &self,
         raw: V3ProviderResp14Raw,
-    ) -> Result<V3Resp15ClientPayload, V3Error01SourceRaised> {
+    ) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
         (self.response_projection)(raw).await
     }
 

@@ -1,6 +1,6 @@
 use axum::body::{to_bytes, Body};
 use axum::extract::{Request, State};
-use axum::http::{header::CONTENT_TYPE, Response, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, Response, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config::{V3Config05ManifestPublished, V3DebugManifest, V3ServerManifest};
@@ -11,10 +11,11 @@ use routecodex_v3_error::{project_v3_http_boundary_error, V3HttpBoundaryErrorKin
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_foundation_pending_runtime, execute_v3_responses_direct_dry_run_runtime,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
+    execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
     V3ClientBody, V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -28,6 +29,7 @@ struct V3ListenerState {
     manifest_version: u16,
     manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
+    responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +98,7 @@ pub async fn spawn_v3_server_aggregate(
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
         build_v3_debug_runtime_from_manifest(&manifest.debug).map_err(std::io::Error::other)?;
+    let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -114,6 +117,7 @@ pub async fn spawn_v3_server_aggregate(
             manifest_version: preflight.manifest_version,
             manifest: manifest.clone(),
             debug: debug.clone(),
+            responses_direct_continuation: responses_direct_continuation.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -180,6 +184,7 @@ async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
     let endpoint = endpoint_protocol(&path);
@@ -222,7 +227,34 @@ async fn pending_endpoint(
         return anthropic_relay_output_response(output, stream);
     }
     if is_responses {
-        let output = execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
+        let continuation_scope = match build_responses_direct_continuation_scope(
+            &request_headers,
+            &request_id,
+            &state.server,
+            &path,
+        ) {
+            Ok(scope) => scope,
+            Err(message) => {
+                return error_output_response(project_http_input_error(
+                    V3HttpBoundaryErrorKind::MalformedJson,
+                    message,
+                ))
+            }
+        };
+        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3HubReqContinuation03Classified",
+                    V3DebugError::MalformedFixture(format!(
+                        "system time precedes Unix epoch: {error}"
+                    )),
+                ))
+            }
+        };
+        let output = execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
+            &state.responses_direct_continuation,
             &state.manifest,
             build_v3_server_03_http_request_raw(
                 state.server.id.clone(),
@@ -232,8 +264,10 @@ async fn pending_endpoint(
                 path,
                 payload,
             ),
+            continuation_scope,
             register_responses_direct_hooks(),
             &state.debug,
+            now_epoch_ms,
         )
         .await;
         let scope = match state
@@ -279,6 +313,65 @@ async fn pending_endpoint(
         );
         foundation_output_response(output)
     }
+}
+
+fn build_responses_direct_continuation_scope(
+    headers: &HeaderMap,
+    request_id: &str,
+    server: &V3ServerManifest,
+    endpoint: &str,
+) -> Result<V3ResponsesDirectContinuationScope, String> {
+    let turn_metadata = match headers.get("x-codex-turn-metadata") {
+        Some(value) => {
+            let text = value
+                .to_str()
+                .map_err(|error| format!("x-codex-turn-metadata is not UTF-8: {error}"))?;
+            Some(
+                serde_json::from_str::<serde_json::Value>(text)
+                    .map_err(|error| format!("x-codex-turn-metadata is not valid JSON: {error}"))?,
+            )
+        }
+        None => None,
+    };
+    let session_id = header_text(headers, "session-id")?
+        .or_else(|| {
+            turn_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("session_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| request_id.to_string());
+    let conversation_id = header_text(headers, "thread-id")?
+        .or_else(|| {
+            turn_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("thread_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| session_id.clone());
+    Ok(V3ResponsesDirectContinuationScope::responses(
+        endpoint,
+        session_id,
+        conversation_id,
+        server.port,
+        server.routing_group.clone(),
+    ))
+}
+
+fn header_text(headers: &HeaderMap, name: &str) -> Result<Option<String>, String> {
+    headers
+        .get(name)
+        .map(|value| {
+            value
+                .to_str()
+                .map(str::trim)
+                .map(ToOwned::to_owned)
+                .map_err(|error| format!("{name} is not UTF-8: {error}"))
+        })
+        .transpose()
+        .map(|value| value.filter(|value| !value.is_empty()))
 }
 
 pub async fn execute_v3_anthropic_messages_request(

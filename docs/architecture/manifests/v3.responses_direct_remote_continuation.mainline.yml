@@ -1,0 +1,50 @@
+lifecycle_id: v3.responses_direct.remote_continuation.integration
+summary: "Provider-owned Responses Direct continuation: Resp04 immutable locator commit, next Req03 scoped load, Req06 exact provider/model/auth pin, and one shared Direct provider/response exit."
+owner_feature_id: v3.responses_direct_remote_continuation_integration
+entrypoint:
+  node_id: V3Server03HttpRequestRaw
+  wiki_page: docs/architecture/wiki/v3-responses-direct-mainline.md
+  call_map_chain_id: v3.responses_direct.remote_continuation.integration
+node_ids:
+  - V3Server03HttpRequestRaw
+  - V3HubReqContinuation03Classified
+  - V3HubReqTarget06Resolved
+  - V3ProviderResp14Raw
+  - V3HubRespContinuation04Committed
+  - V3Resp15ClientPayload
+edges:
+  - step_id: v3-rci-01
+    from_node: V3Server03HttpRequestRaw
+    to_node: V3HubReqContinuation03Classified
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-rci-02
+    from_node: V3HubReqContinuation03Classified
+    to_node: V3HubReqTarget06Resolved
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-rci-03
+    from_node: V3ProviderResp14Raw
+    to_node: V3HubRespContinuation04Committed
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-rci-04
+    from_node: V3HubRespContinuation04Committed
+    to_node: V3Resp15ClientPayload
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run test:v3-responses-direct-remote-continuation
+    - npm run verify:v3-responses-direct-remote-continuation
+    - npm run test:v3-responses-direct-remote-continuation-red-fixtures
+    - npm run verify:v3-architecture-docs
+    - npm run verify:v3-resource-map

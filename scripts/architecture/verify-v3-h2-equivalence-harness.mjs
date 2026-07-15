@@ -38,7 +38,7 @@ for (const scenario of [
 
 for (const phrase of [
   'env!("CARGO_BIN_EXE_routecodex-v3")',
-  'server", "start", "--config"',
+  'server", "start", "--foreground", "--config"',
   'controlled_responses_upstream',
   'V3Router07OpaqueTargetHitOnce',
   'V3TargetLocalReselected',

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V3 Responses Direct Remote Continuation Review</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --blue: #0d3b66; --line: #8aa4bf; --panel: #f5f9fd; --pin: #fff7df; --error: #fff1f1; }
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 1120px; margin: 2rem auto; padding: 0 1rem; color: var(--ink); }
+    h1, h2 { color: var(--blue); }
+    .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+    .node { border: 1px solid var(--line); border-radius: 8px; padding: .75rem; background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+    .pin { background: var(--pin); border-color: #c7972d; }
+    .error { background: var(--error); border-color: #bf6b6b; }
+    code { background: #edf2f7; padding: .1rem .25rem; }
+    li { margin: .35rem 0; }
+  </style>
+</head>
+<body>
+  <h1>V3 Responses Direct Remote Continuation</h1>
+  <p>Review surface for <code>v3.responses_direct_remote_continuation_integration</code>. A new turn routes once; a provider-owned continuation restores an immutable locator and rejoins the same Runtime kernel without Router re-entry.</p>
+  <h2>First turn: route and commit</h2>
+  <div class="flow" id="first-turn">
+    <div class="node">V3Server03HttpRequestRaw</div><div class="node">V3Router07OpaqueTargetHitOnce</div>
+    <div class="node">V3Target10ConcreteProviderSelected</div><div class="node">V3ProviderResp14Raw</div>
+    <div class="node pin">V3HubRespContinuation04Committed</div><div class="node">V3Resp15ClientPayload</div>
+  </div>
+  <h2>Continuation turn: exact pin</h2>
+  <div class="flow" id="continuation-turn">
+    <div class="node">V3Server03HttpRequestRaw</div><div class="node pin">V3HubReqContinuation03Classified<br>scope + capability validation</div>
+    <div class="node pin">V3HubReqTarget06Resolved<br>exact provider/model/auth</div><div class="node">V3Provider12ResponsesWirePayload</div>
+    <div class="node">V3ProviderResp14Raw</div><div class="node">V3Resp15ClientPayload</div>
+  </div>
+  <h2>Error path</h2>
+  <div class="flow" id="error-flow">
+    <div class="node error">Missing / mismatched / expired locator</div><div class="node error">V3Error01SourceRaised</div>
+    <div class="node error">Error02 → Error05</div><div class="node error">V3Error06ClientProjected</div>
+  </div>
+  <h2>Review checklist</h2>
+  <ul>
+    <li>One Runtime kernel core and one response exit serve both turns.</li>
+    <li>Continuation loads only at Req03 and resolves the immutable exact pin only at Req06.</li>
+    <li>No Virtual Router re-entry, target-local reselection, Relay, or local materialization occurs.</li>
+    <li>Resp04 observes provider semantics and commits, replaces, or releases the matching locator.</li>
+    <li>Provider/client payloads contain no session, auth, owner, capability, or routing control truth.</li>
+    <li>JSON and SSE controlled HTTP replay are required; current 5555 replay remains pending.</li>
+  </ul>
+  <p><a id="markdown-link" href="v3-responses-direct-mainline.md">Canonical Markdown</a> · <a id="manifest-link" href="../manifests/v3.responses_direct_remote_continuation.mainline.yml">Machine-readable manifest</a> · <a id="plan-link" href="../../goals/v3-responses-direct-remote-continuation-integration-plan.md">Implementation plan</a></p>
+</body>
+</html>

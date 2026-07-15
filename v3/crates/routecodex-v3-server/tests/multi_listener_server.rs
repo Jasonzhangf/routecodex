@@ -80,7 +80,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" 
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "tool_outputs", "remote_continuation"]
 supports_streaming = true
 supports_thinking = true
 thinking = "optional"
@@ -226,6 +226,88 @@ async fn start_controlled_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+async fn controlled_continuation_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            accept: headers
+                .get("accept")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body: body.clone(),
+        })
+        .unwrap();
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let sse = if body.get("previous_response_id").and_then(Value::as_str)
+            == Some("resp_server_sse_1")
+        {
+            concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_server_sse_2\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"server sse done\"}]}}\n\n",
+                "data: [DONE]\n\n"
+            )
+        } else {
+            concat!(
+                "event: response.created\n",
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_server_sse_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                "event: response.output_item.done\n",
+                "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_server_sse_1\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_server_sse_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                "data: [DONE]\n\n"
+            )
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(sse))
+            .unwrap();
+    }
+    let response = if body.get("previous_response_id").and_then(Value::as_str)
+        == Some("resp_server_remote_1")
+    {
+        json!({"id":"resp_server_remote_2","status":"completed","output":[{"type":"output_text","text":"server done"}]})
+    } else {
+        json!({"id":"resp_server_remote_1","status":"requires_action","output":[{"type":"function_call","call_id":"call_server_1","name":"lookup","arguments":"{}"}]})
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&response).unwrap()))
+        .unwrap()
+}
+
+async fn start_controlled_continuation_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_continuation_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
 async fn controlled_failure_upstream() -> Response<Body> {
     Response::builder()
         .status(StatusCode::SERVICE_UNAVAILABLE)
@@ -260,6 +342,7 @@ fn free_port() -> u16 {
 
 #[tokio::test]
 async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_chain() {
+    let _test_guard = TEST_LOCK.lock().await;
     let handle = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
         .await
         .unwrap();
@@ -308,6 +391,7 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
 
 #[tokio::test]
 async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() {
+    let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
     let handle =
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
@@ -332,7 +416,10 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["canonical_model_id"], "test");
     assert_eq!(model["wire_model"], "wire-test");
     assert_eq!(model["provider_id"], "test");
-    assert_eq!(model["capabilities"], json!(["text", "tools"]));
+    assert_eq!(
+        model["capabilities"],
+        json!(["text", "tools", "tool_outputs", "remote_continuation"])
+    );
     assert_eq!(model["supports_streaming"], true);
     assert_eq!(model["supports_thinking"], true);
     assert_eq!(model["thinking"], "optional");
@@ -350,6 +437,7 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
 
 #[tokio::test]
 async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
+    let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6");
     let handle =
@@ -461,6 +549,7 @@ async fn p6_responses_endpoint_accepts_image_payload_above_one_mib() {
 
 #[tokio::test]
 async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
+    let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6");
     let handle =
@@ -502,7 +591,200 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
 }
 
 #[tokio::test]
+async fn responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_continuation_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-continuation");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let metadata = json!({
+        "session_id":"session-server-a",
+        "thread_id":"conversation-server-a",
+        "turn_id":"turn-server-1"
+    })
+    .to_string();
+    let first = client
+        .post(&endpoint)
+        .header("session-id", "session-server-a")
+        .header("thread-id", "conversation-server-a")
+        .header("x-codex-turn-metadata", &metadata)
+        .json(&json!({
+            "model":"client-test",
+            "input":"use tool",
+            "tools":[{"type":"function","name":"lookup"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let first_trace = first.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(first_trace.contains("V3HubRespContinuation04Committed"));
+    let first_body: Value = first.json().await.unwrap();
+    assert_eq!(first_body["id"], "resp_server_remote_1");
+
+    let second = client
+        .post(&endpoint)
+        .header("session-id", "session-server-a")
+        .header("thread-id", "conversation-server-a")
+        .header(
+            "x-codex-turn-metadata",
+            json!({
+                "session_id":"session-server-a",
+                "thread_id":"conversation-server-a",
+                "turn_id":"turn-server-2"
+            })
+            .to_string(),
+        )
+        .json(&json!({
+            "model":"client-test",
+            "previous_response_id":"resp_server_remote_1",
+            "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second_trace = second.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(second_trace.contains("V3HubReqContinuation03Classified"));
+    assert!(second_trace.contains("V3HubReqTarget06Resolved"));
+    assert!(!second_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(!second_trace.contains("V3TargetLocalReselected"));
+    let second_body: Value = second.json().await.unwrap();
+    assert_eq!(second_body["id"], "resp_server_remote_2");
+
+    let first_capture = captures.recv().await.unwrap();
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+    assert_eq!(second_capture.body["model"], "wire-test");
+    assert_eq!(
+        second_capture.body["previous_response_id"],
+        "resp_server_remote_1"
+    );
+    for body in [&first_capture.body, &second_capture.body] {
+        for forbidden in [
+            "session_id",
+            "thread_id",
+            "provider_id",
+            "auth_alias",
+            "continuation_owner",
+            "capability_revision",
+            "routing_group",
+        ] {
+            assert!(body.get(forbidden).is_none(), "{forbidden}: {body}");
+        }
+    }
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_continuation_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-continuation-sse");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let first = client
+        .post(&endpoint)
+        .header("session-id", "session-server-sse")
+        .header("thread-id", "conversation-server-sse")
+        .json(&json!({
+            "model":"client-test",
+            "stream":true,
+            "input":"use tool",
+            "tools":[{"type":"function","name":"lookup"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    assert_eq!(first.headers()["content-type"], "text/event-stream");
+    let first_trace = first.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(first_trace.contains("V3HubRespContinuation04Committed"));
+    assert!(first.text().await.unwrap().contains("resp_server_sse_1"));
+
+    let second = client
+        .post(&endpoint)
+        .header("session-id", "session-server-sse")
+        .header("thread-id", "conversation-server-sse")
+        .json(&json!({
+            "model":"client-test",
+            "stream":true,
+            "previous_response_id":"resp_server_sse_1",
+            "input":[{"type":"function_call_output","call_id":"call_server_sse_1","output":"ok"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    assert_eq!(second.headers()["content-type"], "text/event-stream");
+    let second_trace = second.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(second_trace.contains("V3HubReqContinuation03Classified"));
+    assert!(second_trace.contains("V3HubReqTarget06Resolved"));
+    assert!(!second_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(!second_trace.contains("V3TargetLocalReselected"));
+    assert!(second.text().await.unwrap().contains("resp_server_sse_2"));
+
+    let first_capture = captures.recv().await.unwrap();
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["stream"], true);
+    assert_eq!(second_capture.body["stream"], true);
+    assert_eq!(
+        second_capture.body["previous_response_id"],
+        "resp_server_sse_1"
+    );
+    assert_control_fields_absent(&first_capture.body);
+    assert_control_fields_absent(&second_capture.body);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+fn assert_control_fields_absent(body: &Value) {
+    for forbidden in [
+        "session_id",
+        "thread_id",
+        "provider_id",
+        "auth_alias",
+        "continuation_owner",
+        "capability_revision",
+        "routing_group",
+    ] {
+        assert!(body.get(forbidden).is_none(), "{forbidden}: {body}");
+    }
+}
+
+#[tokio::test]
 async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
+    let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, failed_shutdown) = start_controlled_failure_upstream().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
@@ -568,6 +850,7 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
 
 #[tokio::test]
 async fn p6_all_provider_failures_project_terminal_error_chain() {
+    let _test_guard = TEST_LOCK.lock().await;
     let closed_a = {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -616,6 +899,7 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 
 #[tokio::test]
 async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
+    let _test_guard = TEST_LOCK.lock().await;
     let handle = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
         .await
         .unwrap();
@@ -734,6 +1018,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
 
 #[tokio::test]
 async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic() {
+    let _test_guard = TEST_LOCK.lock().await;
     let client = reqwest::Client::new();
     let enabled = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
         .await
@@ -794,6 +1079,7 @@ async fn malformed_and_disabled_dry_run_enter_six_node_error_chain_without_panic
 
 #[tokio::test]
 async fn one_bind_failure_prevents_aggregate_start() {
+    let _test_guard = TEST_LOCK.lock().await;
     let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
     let occupied_port = occupied.local_addr().unwrap().port();
     let first_port = free_port();
@@ -808,6 +1094,7 @@ async fn one_bind_failure_prevents_aggregate_start() {
 
 #[tokio::test]
 async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
+    let _test_guard = TEST_LOCK.lock().await;
     let mut strict_manifest = manifest(free_port(), free_port());
     for server in strict_manifest.servers.values_mut() {
         server.endpoints = vec!["responses".to_string()];

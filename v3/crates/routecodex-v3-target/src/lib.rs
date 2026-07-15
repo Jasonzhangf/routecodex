@@ -268,7 +268,8 @@ pub struct V3Target10ConcreteProviderSelected {
     pub attempts: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("selected target exhausted after {attempted_candidates:?}")]
 pub struct V3TargetExhaustion {
     pub route: Box<V3Router07OpaqueTargetHitOnce>,
     pub attempted_candidates: Vec<String>,
@@ -308,6 +309,25 @@ pub struct V3TargetInterpreter {
 }
 
 impl V3TargetInterpreter {
+    pub fn resolve_exact_provider_model_auth(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        provider_id: &str,
+        model_id: &str,
+        auth_alias: &str,
+    ) -> Result<V3TargetCandidate, V3TargetError> {
+        self.expand_provider(
+            manifest,
+            Some(provider_id),
+            Some(model_id),
+            Some(auth_alias),
+            vec!["continuation:exact_pin".to_string()],
+        )?
+        .into_iter()
+        .next()
+        .ok_or(V3TargetError::CandidateSetEmpty)
+    }
+
     pub fn classify_kind(&self, route: V3Router07OpaqueTargetHitOnce) -> V3Target08KindClassified {
         V3Target08KindClassified { route }
     }
@@ -498,6 +518,7 @@ impl V3TargetInterpreter {
         let provider = manifest
             .providers
             .get(provider_id)
+            .filter(|provider| provider.enabled)
             .ok_or_else(|| V3TargetError::ProviderMissing(provider_id.to_string()))?;
         let model_id = model_id.unwrap_or(&provider.default_model);
         let model = provider

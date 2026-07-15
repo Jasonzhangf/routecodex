@@ -638,7 +638,7 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
 
 fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
     let mut child = Command::new(env!("CARGO_BIN_EXE_routecodex-v3"))
-        .args(["server", "start", "--config"])
+        .args(["server", "start", "--foreground", "--config"])
         .arg(config_path)
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")

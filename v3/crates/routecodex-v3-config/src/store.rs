@@ -4,6 +4,7 @@ use crate::{
     validate_v3_config_03_schema_from_v3_config_02, V3Config02AuthoringParsed,
     V3Config05ManifestPublished, V3ConfigError,
 };
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,13 @@ pub struct V3ConfigStore {
 pub struct V3ConfigWritePlan {
     pub path: PathBuf,
     pub serialized_toml: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct V3ConfigLoadedSnapshot {
+    pub canonical_path: PathBuf,
+    pub source_sha256: String,
+    pub manifest: V3Config05ManifestPublished,
 }
 
 impl V3ConfigStore {
@@ -33,11 +41,24 @@ impl V3ConfigStore {
     }
 
     pub fn load_snapshot(&self) -> Result<V3Config05ManifestPublished, V3ConfigError> {
+        Ok(self.load_snapshot_with_source_identity()?.manifest)
+    }
+
+    pub fn load_snapshot_with_source_identity(
+        &self,
+    ) -> Result<V3ConfigLoadedSnapshot, V3ConfigError> {
         let source = read_v3_config_01_file_source(&self.path)?;
+        let canonical_path = fs::canonicalize(&source.path)?;
+        let source_sha256 = format!("{:x}", Sha256::digest(source.raw_toml.as_bytes()));
         let parsed = parse_v3_config_02_authoring(&source.raw_toml)?;
         let validated = validate_v3_config_03_schema_from_v3_config_02(parsed)?;
         let registry = build_v3_config_04_resource_registry_from_v3_config_03(validated)?;
-        publish_v3_config_05_manifest_from_v3_config_04(registry)
+        let manifest = publish_v3_config_05_manifest_from_v3_config_04(registry)?;
+        Ok(V3ConfigLoadedSnapshot {
+            canonical_path,
+            source_sha256,
+            manifest,
+        })
     }
 
     pub fn plan_write(

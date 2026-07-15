@@ -8,6 +8,7 @@ members = [
   "crates/routecodex-v3-provider-responses",
   "crates/routecodex-v3-runtime",
   "crates/routecodex-v3-server",
+  "crates/routecodex-v3-lifecycle",
   "crates/routecodex-v3-cli",
 ]
 resolver = "2"
@@ -26,6 +27,7 @@ futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "1"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync"] }
 toml = "0.8"

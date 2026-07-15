@@ -9,7 +9,6 @@ const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-p6-freeze.mjs
 const fixtures = [
   ['Chat Process expansion', 'v3/crates/routecodex-v3-runtime/src/kernel.rs', '\nfn p6_chat_process_expansion() {}\n', /Chat Process expansion/],
   ['Relay expansion', 'v3/crates/routecodex-v3-runtime/src/hooks.rs', '\nfn p6_relay_hook() {}\n', /Relay expansion/],
-  ['continuation expansion', 'v3/crates/routecodex-v3-runtime/src/nodes.rs', '\nstruct P6ContinuationState;\n', /continuation expansion/],
   ['other protocol expansion', 'v3/crates/routecodex-v3-runtime/src/nodes.rs', '\nstruct P6AnthropicRequest;\n', /other entry protocol expansion/],
   ['provider special case', 'v3/crates/routecodex-v3-runtime/src/hooks.rs', '\nfn p6_provider_case(provider_id: &str) -> bool { provider_id == "special" }\n', /provider identity\/family/],
   ['second lifecycle', 'v3/crates/routecodex-v3-runtime/src/kernel.rs', '\npub async fn execute_v3_secondary_responses_direct_runtime() {}\n', /second lifecycle executor/],

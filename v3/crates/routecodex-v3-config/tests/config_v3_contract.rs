@@ -307,6 +307,39 @@ fn config_store_is_the_single_read_write_interface() {
 }
 
 #[test]
+fn config_source_identity_is_stable_sensitive_and_secret_free() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-config-source-identity-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("config.v3.toml");
+    fs::write(&path, FULL_CONFIG).unwrap();
+    let store = V3ConfigStore::new(&path);
+
+    let first = store.load_snapshot_with_source_identity().unwrap();
+    let repeated = store.load_snapshot_with_source_identity().unwrap();
+    assert_eq!(first.canonical_path, repeated.canonical_path);
+    assert_eq!(first.source_sha256, repeated.source_sha256);
+    assert_eq!(first.manifest.servers, repeated.manifest.servers);
+    assert_eq!(first.manifest.providers, repeated.manifest.providers);
+
+    fs::write(
+        &path,
+        format!("{FULL_CONFIG}\n# identity-only source change\n"),
+    )
+    .unwrap();
+    let changed = store.load_snapshot_with_source_identity().unwrap();
+    assert_ne!(changed.source_sha256, first.source_sha256);
+    assert_eq!(changed.manifest.servers, first.manifest.servers);
+    assert_eq!(changed.manifest.providers, first.manifest.providers);
+
+    let projection = format!("{first:?}{changed:?}");
+    assert!(!projection.contains("sk-secret-value"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn default_path_is_config_v3_toml() {
     assert_eq!(
         default_v3_config_path("/tmp/home"),

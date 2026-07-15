@@ -226,6 +226,75 @@ fn expired_locator_is_rejected_and_not_repaired() {
 }
 
 #[test]
+fn req03_rejects_capability_revision_mismatch() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+
+    let loaded = store
+        .load_for_req03("resp_remote", &scope(), 2_000)
+        .unwrap();
+    assert!(matches!(
+        loaded.validate_capability_revision("cap-rev-2"),
+        Err(V3RemoteContinuationError::CapabilityRevisionMismatch { .. })
+    ));
+    assert_eq!(store.len(), 1, "failed load must not mutate locator truth");
+}
+
+#[test]
+fn failed_resp04_rebind_preserves_previous_locator_truth() {
+    let mut store = V3RemoteContinuationStore::default();
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(locator()))
+        .unwrap();
+    let conflicting = V3RemoteContinuationLocator::new_direct(
+        "resp_conflict",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        1_100,
+        9_100,
+    );
+    store
+        .commit(V3RemoteContinuationCommitInput::locator_only(
+            conflicting.clone(),
+        ))
+        .unwrap();
+
+    let replacement = V3RemoteContinuationLocator::new_direct(
+        "resp_conflict",
+        scope(),
+        pin(),
+        "cap-rev-1",
+        2_000,
+        10_000,
+    );
+    assert!(matches!(
+        store.rebind_for_resp04(
+            "resp_remote",
+            V3RemoteContinuationCommitInput::locator_only(replacement),
+        ),
+        Err(V3RemoteContinuationError::AlreadyCommitted { .. })
+    ));
+    assert_eq!(
+        store
+            .load_for_req03("resp_remote", &scope(), 2_000)
+            .unwrap()
+            .remote_response_id(),
+        "resp_remote",
+        "failed rebind must not delete the previous continuation truth"
+    );
+    assert_eq!(
+        store
+            .load_for_req03("resp_conflict", &scope(), 2_000)
+            .unwrap(),
+        &conflicting
+    );
+    assert_eq!(store.len(), 2);
+}
+
+#[test]
 fn provider_unavailable_fails_without_cross_provider_reselection() {
     let mut store = V3RemoteContinuationStore::default();
     store
