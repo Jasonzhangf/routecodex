@@ -30649,3 +30649,11 @@ Pure Rust NAPI candidates:
 - terminal success/failure/already-terminal 均显式不保存；local owner 拒绝 remote owner，不含 provider/model/auth pin，不读取 debug/snapshot，不接 Hub/Server/live Relay。
 - 证据：focused 10/10、boundary mutation fixtures 8/8、module-boundaries、rust-only、fmt、clippy `-D warnings`、V3 workspace（含 doctest）全部通过。
 - 完成边界：仅 local continuation contract/store/codec 与 boundary gates；continuation E2E、Hub wiring、live Relay 均未实现、未验证。
+# 2026-07-15T15:10+08:00: V3 Anthropic Relay controlled Runtime integration
+
+- Claim `feature_id:v3.anthropic_relay_runtime_integration` connects the Server-owned `/v1/messages` wrapper to the sole Hub v1 Req01-Req09 lifecycle, generic Responses transport, Resp01-Resp06, and Error01-06.
+- Red baseline stayed reproducible as `status=wiring_missing` with fixture digest `74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e`; the built Server-owned driver then passed all four controlled cases with exactly one upstream capture each.
+- Architecture correction during review: real VR/Target resolution now executes after Req05 and Req06 carries the selected target; real Responses wire and HTTP request construction finish before the Req08/Req09 trace entries. Trace entries are appended only after their owning action.
+- SSE uses the shared incremental decoder across arbitrary chunk boundaries. The controlled driver receives only `case_id` and `client_request` over stdin and loads a harness-generated config through `V3ConfigStore`; Server source does not read fixture/config files or interpret route groups.
+- Focused evidence: Rust integration 3/3, controlled replay 4/4, integration verifier plus 8 negative mutations, harness verifier plus 7 mutations and 8 missing-edge red diagnostics, request/response/protocol gates, module/Rust-only/static-hook/copy-budget gates.
+- Completion boundary remains controlled repo-local Runtime integration only. Live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, and production cutover are not claimed.

@@ -82,7 +82,13 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
 pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let body = &standardized.body;
+    build_v3_router_request_facts_for_entry(&standardized.body, "responses")
+}
+
+pub fn build_v3_router_request_facts_for_entry(
+    body: &Value,
+    entry_protocol: &str,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     if body
         .get("tools")
@@ -113,7 +119,7 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
     }
 
     routecodex_v3_virtual_router::V3RouterRequestFacts {
-        entry_protocol: "responses".to_string(),
+        entry_protocol: entry_protocol.to_string(),
         client_model: body
             .get("model")
             .and_then(Value::as_str)

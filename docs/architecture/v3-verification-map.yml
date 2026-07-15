@@ -768,3 +768,67 @@ features:
       source: "H4 contract/store codec pre-module is complete when focused Rust tests, negative isolation cases, V3 maps, resource/module/Rust-only gates, fmt, and workspace tests pass."
       runtime: "No continuation live wiring, Hub Req03/Resp04 integration, pinned Target execution, Server endpoint, Relay materialization, or live replay is claimed."
       forbidden_claim: "Do not claim usable continuation runtime, local continuation, live Relay, Server cutover, P6 deletion, global install, restart, production replacement, or real ~/.rcc mutation."
+
+  - feature_id: v3.anthropic_relay_runtime_integration
+    status: controlled_runtime_integration_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_controlled_runtime_integration
+    owner_scope: "Anthropic /v1/messages controlled Relay through the sole Hub v1 request/response lifecycle and generic Responses provider transport"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
+    design:
+      - docs/goals/v3-anthropic-relay-runtime-integration-plan.md
+      - docs/goals/v3-anthropic-relay-runtime-integration-test-design.md
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    required_contract:
+      - Server /v1/messages enters the Server-owned wrapper and the sole Hub v1 Relay runtime; no Server to Provider shortcut exists
+      - Req01 through Req09 and Resp01 through Resp06 execute in fixed order and each trace node is appended only after its owning action
+      - Req05 precedes real Virtual Router and Target selection; Req06 carries the selected provider target
+      - Req08 owns the real Responses wire payload and Req09 owns the real HTTP transport request before the single upstream send
+      - Anthropic protocol differences remain in the entry and exit codec; Chat Process and Virtual Router contain no provider-specific branch
+      - provider HTTP and runtime failures enter Error01 through Error06 and never enter the successful response node chain
+      - structured SSE decoding preserves arbitrary chunk boundaries and reasoning tool terminal ordering without a second framing parser
+      - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
+      - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth
+    required_gates:
+      - npm run test:v3-anthropic-relay-runtime-integration
+      - npm run verify:v3-anthropic-relay-runtime-integration
+      - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
+      - node scripts/architecture/verify-v3-anthropic-relay-controlled-replay-harness.mjs
+      - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-mutations.mjs
+      - node scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs
+      - npm run verify:v3-relay-request-semantics
+      - npm run test:v3-relay-request-semantics-red-fixtures
+      - npm run verify:v3-relay-response-semantics
+      - npm run test:v3-relay-response-semantics-red-fixtures
+      - node scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs
+      - node scripts/tests/v3-anthropic-relay-protocol-hooks-red-fixtures.mjs
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run test:v3-relay-payload-copy-budget-red-fixtures
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    required_runtime_evidence:
+      - "Pre-change controlled harness is red with status=wiring_missing and digest 74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e."
+      - "Focused Rust integration tests pass 3/3, including split-chunk structured SSE, provider error polarity, and exact provider wire."
+      - "Controlled harness passes json_thinking_tool_use, sse_thinking_tool_use, provider_error, and side_channel_isolation with exactly one captured upstream request per case."
+      - "Positive tests lock successful JSON/SSE lifecycle and provider wire; negative tests lock no success projection for provider failure, no shortcut, no static trace, no dynamic hooks, no fallback, and no handler SSE business owner."
+    completion_rule:
+      source: "Controlled Runtime integration is complete only when focused tests, four-fixture controlled replay, source/red gates, maps/wiki, architecture/resource/module/Rust-only/static-hook/copy-budget gates, fmt, Clippy, workspace, and diff checks pass."
+      runtime: "Evidence is limited to the built repo-local controlled Server-owned driver and loopback upstream; it does not establish live 5555 or production compatibility."
+      forbidden_claim: "Do not claim live 5555, continuation E2E, P6 deletion, global installation, restart, release, production cutover, or real-provider compatibility."

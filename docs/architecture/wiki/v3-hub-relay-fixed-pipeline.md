@@ -89,13 +89,29 @@ Relay is borrow-first and move-at-boundary:
 
 - Hub v1 skeleton and static registry: implemented as source-only H1.
 - P6 Responses Direct: frozen and verified as migration baseline.
-- Relay request semantics: source slice present; combined integration and live Relay remain pending.
-- Relay response semantics: source slice verified; combined integration and live Relay remain pending.
-- Runtime resources and static hook resource config: declaration surface verified; live Relay integration remains pending.
+- Relay request semantics: source slice and Anthropic controlled integration verified; live Relay remains pending.
+- Relay response semantics: source slice and Anthropic controlled integration verified; live Relay remains pending.
+- Runtime resources and static hook resource config: declaration surface and controlled static-registry consumption verified; live Relay remains pending.
 - Relay maps/gates/wiki: architecture review surface locked by the D gates below.
-- Payload copy-budget runtime gates: pending.
-- Generic Anthropic codec: characterization source/tests only; H6 hook registration, Server exposure,
-  provider transport, and live compatibility remain pending.
+- Payload copy-budget source/red gates: verified for the controlled integration surface.
+- Anthropic Relay controlled Runtime integration: `/v1/messages` Server-owned wrapper, fixed Req01-Req09,
+  generic Responses transport, fixed Resp01-Resp06, Error01-06, and JSON/SSE client projection are
+  connected and verified against the controlled loopback upstream.
+- Live 5555 validation/cutover, remote/local continuation E2E, P6 deletion, global installation,
+  restart, release, real-provider compatibility, and production replacement remain pending.
+
+## Anthropic controlled Runtime evidence
+
+- Feature: `v3.anthropic_relay_runtime_integration`.
+- Stable fixture digest: `74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e`.
+- Pre-change red state: `status=wiring_missing`, with the eight missing adjacent edges diagnosed.
+- Green controlled cases: `json_thinking_tool_use`, `sse_thinking_tool_use`, `provider_error`, and
+  `side_channel_isolation`.
+- Every case requires exactly one captured `POST /v1/responses` request; provider error must enter
+  Error01-06 without a successful response trace; provider/client normal payloads must contain no
+  RouteCodex control, Debug, resource, or selected-target side channel.
+- The controlled driver calls `routecodex-v3-server::execute_v3_anthropic_messages_request`; it does
+  not read fixture expected request/response/trace fields and does not prove a live listener cutover.
 
 ## A/B/C merge checklist
 

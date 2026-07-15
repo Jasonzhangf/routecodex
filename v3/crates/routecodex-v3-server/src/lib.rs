@@ -9,11 +9,12 @@ use routecodex_v3_debug::{
 };
 use routecodex_v3_error::{project_v3_http_boundary_error, V3HttpBoundaryErrorKind};
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw, execute_v3_foundation_pending_runtime,
-    execute_v3_responses_direct_dry_run_runtime,
+    build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_runtime_with_default_transport,
+    execute_v3_foundation_pending_runtime, execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
-    project_v3_debug_failure, register_responses_direct_hooks, V3ClientBody,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3Resp15ClientPayload,
+    project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
+    register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
+    V3ClientBody, V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3Resp15ClientPayload,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -203,6 +204,23 @@ async fn pending_endpoint(
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let is_responses = path == "/v1/responses";
+    if path == "/v1/messages" {
+        let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
+        let output = match execute_v3_anthropic_messages_request(
+            &state.manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id,
+                payload,
+            },
+        )
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+        };
+        return anthropic_relay_output_response(output, stream);
+    }
     if is_responses {
         let output = execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
             &state.manifest,
@@ -261,6 +279,57 @@ async fn pending_endpoint(
         );
         foundation_output_response(output)
     }
+}
+
+pub async fn execute_v3_anthropic_messages_request(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+) -> Result<V3AnthropicRelayRuntimeOutput, routecodex_v3_runtime::V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_with_default_transport(manifest, input).await
+}
+
+fn anthropic_relay_output_response(
+    output: V3AnthropicRelayRuntimeOutput,
+    stream: bool,
+) -> Response<Body> {
+    let stream = stream && output.error_chain.is_none();
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(output.status).expect("typed V3 Relay status"))
+        .header(
+            "content-type",
+            if stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        )
+        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
+    if let Some(error_chain) = output.error_chain {
+        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
+    }
+    let body = if stream {
+        let mut bytes = Vec::new();
+        for event in output
+            .client_response
+            .get("events")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(name), Some(data)) = (
+                event.get("event").and_then(serde_json::Value::as_str),
+                event.get("data"),
+            ) {
+                bytes.extend_from_slice(format!("event: {name}\ndata: {data}\n\n").as_bytes());
+            }
+        }
+        bytes
+    } else {
+        serde_json::to_vec(&output.client_response).expect("typed V3 Anthropic Relay projection")
+    };
+    builder
+        .body(Body::from(body))
+        .expect("typed V3 Anthropic Relay response")
 }
 
 async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {

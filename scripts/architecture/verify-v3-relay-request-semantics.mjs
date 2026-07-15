@@ -48,7 +48,7 @@ function filesBelow(relative) {
 
 const req02 = functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01');
 const req03 = functionBody(request, 'fn classify_continuation');
-const req04 = functionBody(request, 'pub fn run');
+const req04 = functionBody(request, 'fn run_from_normalized_with_events');
 const restore = functionBody(request, 'fn restore_local_context_at_req04');
 const servertool = functionBody(request, 'fn run_servertool_profile');
 
@@ -125,6 +125,9 @@ forbidAll(request, requestPath, [
 
 requireAll(request, requestPath, [
   'pub fn compile_v3_hub_relay_request_hooks()',
+  'pub fn run(',
+  'pub fn run_from_normalized(',
+  'self.run_from_normalized_with_events(',
   'V3HubRelayRequestHookEvent::Req01Entry',
   'V3HubRelayRequestHookEvent::Req01Exit',
   'V3HubRelayRequestHookEvent::Req02Entry',

@@ -114,8 +114,8 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Req04StandardizedResponses
     identity: [requestId, endpoint]
-    allowed_writers: [V3Req04StandardizedResponses]
-    allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy]
+    allowed_writers: [V3Req04StandardizedResponses, V3HubReqInbound02Normalized]
+    allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy, V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed]
     forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload, V3DebugArtifact]
     may_enter_provider_body: true
     may_enter_client_body: false
@@ -223,7 +223,7 @@ resources:
     owner_node: V3ProviderResp14Raw
     identity: [requestId, providerId, statusCode]
     allowed_writers: [V3ProviderResp14Raw]
-    allowed_readers: [V3Resp15ClientPayload, V3Error01SourceRaised]
+    allowed_readers: [V3Resp15ClientPayload, V3ProviderRespInbound01Raw, V3Error01SourceRaised]
     forbidden_writers: [V3Server16HttpFrame, V3Provider12ResponsesWirePayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -234,8 +234,8 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Resp15ClientPayload
     identity: [requestId, endpoint, streamIntent]
-    allowed_writers: [V3Resp15ClientPayload]
-    allowed_readers: [V3Server16HttpFrame]
+    allowed_writers: [V3Resp15ClientPayload, V3HubRespOutbound05ClientSemantic]
+    allowed_readers: [V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
     forbidden_writers: [V3ProviderResp14Raw, V3Transport13ResponsesHttpRequest]
     may_enter_provider_body: false
     may_enter_client_body: true
@@ -347,7 +347,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.config.hub_pipeline_declarations
     resource_kind: config_contract
     lifecycle: v3.config.compile
@@ -395,7 +395,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubRespOutbound05ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.hub.execution_plan
     resource_kind: side_channel
     lifecycle: v3.hub_pipeline.v1
@@ -407,7 +407,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.hub.resolved_target
     resource_kind: side_channel
     lifecycle: v3.hub_pipeline.v1
@@ -419,7 +419,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.hub.provider_protocol
     resource_kind: side_channel
     lifecycle: v3.hub_pipeline.v1
@@ -431,7 +431,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, provider_family_classifier]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.request.provider_semantic
     resource_kind: normal_payload
     lifecycle: v3.hub_pipeline.v1
@@ -443,7 +443,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.hub.provider_wire_payload
     resource_kind: provider_wire
     lifecycle: v3.hub_pipeline.v1
@@ -455,7 +455,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3HubReqInbound02Normalized, V3HubReqChatProcess04Governed]
     may_enter_provider_body: true
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.hub.response_semantic
     resource_kind: normal_payload
     lifecycle: v3.hub_pipeline.v1
@@ -467,7 +467,7 @@ resources:
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.continuation.remote_binding
     resource_kind: side_channel
     lifecycle: v3.responses_continuation.remote

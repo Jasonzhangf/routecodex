@@ -85,6 +85,32 @@ pub fn compile_v3_anthropic_relay_protocol_hooks() -> V3AnthropicRelayProtocolHo
     }
 }
 
+pub fn run_v3_anthropic_relay_runtime_req_inbound(
+    raw: V3HubReqInbound01ClientRaw,
+) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError> {
+    assert_anthropic_relay_responses_axes(
+        raw.entry_protocol,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Responses,
+    )?;
+    let V3HubReqInbound01ClientRaw {
+        payload,
+        entry_protocol,
+        invocation_source,
+        transport_intent,
+    } = raw;
+    let V3HubOpaquePayload(payload) = payload;
+    let payload = super::encode_v3_anthropic_request_as_responses_semantic(payload)?;
+    Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
+        build_v3_hub_req_inbound_01_client_raw(
+            payload,
+            entry_protocol,
+            invocation_source,
+            transport_intent,
+        ),
+    ))
+}
+
 impl V3AnthropicRelayProtocolHooks {
     pub fn req_inbound(
         &self,

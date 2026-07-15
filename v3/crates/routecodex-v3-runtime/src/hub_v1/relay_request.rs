@@ -3,6 +3,7 @@ use super::{
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, V3HubContinuationOwnership,
     V3HubEntryProtocol, V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw,
+    V3HubReqInbound02Normalized,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -204,6 +205,30 @@ impl V3HubRelayRequestHooks {
             V3HubRelayRequestHookEvent::Req02Exit,
             V3HubRelayRequestHookEvent::Req03Entry,
         ]);
+        self.run_from_normalized_with_events(normalized, lookup, profile, events)
+    }
+
+    pub fn run_from_normalized(
+        &self,
+        normalized: V3HubReqInbound02Normalized,
+        lookup: &V3HubContinuationLookup,
+        profile: &V3HubServertoolRequestProfile,
+    ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
+        self.run_from_normalized_with_events(
+            normalized,
+            lookup,
+            profile,
+            vec![V3HubRelayRequestHookEvent::Req03Entry],
+        )
+    }
+
+    fn run_from_normalized_with_events(
+        &self,
+        normalized: V3HubReqInbound02Normalized,
+        lookup: &V3HubContinuationLookup,
+        profile: &V3HubServertoolRequestProfile,
+        mut events: Vec<V3HubRelayRequestHookEvent>,
+    ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let ownership = classify_continuation(lookup)?;
         let classified =
             build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(normalized, ownership);

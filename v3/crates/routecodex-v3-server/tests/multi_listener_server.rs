@@ -275,7 +275,7 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
         let pending = client
-            .post(format!("http://{}/v1/messages", listener.addr))
+            .post(format!("http://{}/v1/chat/completions", listener.addr))
             .json(&json!({}))
             .send()
             .await
@@ -575,7 +575,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     let listener = &handle.listeners[0];
     let client = reqwest::Client::new();
     let pending = client
-        .post(format!("http://{}/v1/messages", listener.addr))
+        .post(format!("http://{}/v1/chat/completions", listener.addr))
         .json(&serde_json::json!({
             "input": "hello",
             "Authorization": "Bearer sk-v3-secret"

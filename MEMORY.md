@@ -3262,3 +3262,10 @@
 - immutable interval 只允许 lossless codec、entry protocol/endpoint/session/conversation/port/routing-group scope 校验、expiry 和 release；禁止 remote-owner fallback、provider pin、debug/snapshot truth 或 payload rebuild。
 - terminal success/failure/already-terminal 必须返回 typed non-save 结果，不能生成或复活 continuation；此切片不代表 Hub/Server wiring、continuation E2E 或 live Relay 已完成。
 - required gates：focused contract/store tests、mutation red fixtures、V3 module-boundaries、rust-only、fmt、clippy、full workspace + doctest。
+# 2026-07-15: V3 Anthropic Relay controlled Runtime integration truth
+
+- `v3.anthropic_relay_runtime_integration` is the controlled-runtime owner for `/v1/messages -> Hub v1 Req01-Req09 -> Responses transport -> Hub v1 Resp01-Resp06 -> Anthropic projection`.
+- Controlled evidence truth is fixture digest `74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e` with four passing cases (`json_thinking_tool_use`, `sse_thinking_tool_use`, `provider_error`, `side_channel_isolation`) and exactly one captured upstream request per case.
+- Node traces are evidence only when appended after the actual owning action. Req05 must precede VR/Target selection; Req06 carries selected-target truth; Responses wire and transport construction must finish before Req08/Req09 trace emission.
+- A Server-owned controlled driver must keep fixture/config authoring IO outside Server semantics: accept only case input over stdin and load the harness config through `V3ConfigStore`. It must not read expected fixture fields or recreate route selection.
+- This truth does not establish live 5555, continuation E2E, P6 deletion, install/restart/release, real-provider compatibility, or production cutover.

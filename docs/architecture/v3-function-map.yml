@@ -660,3 +660,84 @@ features:
       - pinned Target resolution wiring
       - Server endpoint integration
       - continuation live replay
+
+  - feature_id: v3.anthropic_relay_runtime_integration
+    owner_crates: [routecodex-v3-runtime, routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.hub.entry_protocol
+      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
+      - v3.hub.resolved_target
+      - v3.hub.provider_protocol
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.response.provider_raw
+      - v3.hub.response_semantic
+      - v3.response.client_payload
+      - v3.error.chain
+    mainline_bindings:
+      - v3-anthropic-relay-01
+      - v3-anthropic-relay-02
+      - v3-anthropic-relay-03
+      - v3-anthropic-relay-04
+      - v3-anthropic-relay-05
+      - v3-anthropic-relay-06
+      - v3-anthropic-relay-07
+      - v3-anthropic-relay-08
+      - v3-anthropic-relay-09
+      - v3-anthropic-relay-10
+      - v3-anthropic-relay-11
+      - v3-anthropic-relay-12
+      - v3-anthropic-relay-13
+      - v3-anthropic-relay-14
+      - v3-anthropic-relay-15
+    entry_symbols:
+      - execute_v3_anthropic_messages_request
+      - execute_v3_anthropic_relay_runtime
+      - run_v3_anthropic_relay_runtime_req_inbound
+      - project_v3_responses_sse_as_anthropic_events
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
+      - scripts/architecture/verify-v3-anthropic-relay-runtime-integration.mjs
+      - scripts/tests/v3-anthropic-relay-runtime-integration-red-fixtures.mjs
+      - docs/goals/v3-anthropic-relay-runtime-integration-plan.md
+      - docs/goals/v3-anthropic-relay-runtime-integration-test-design.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - src
+      - ~/.rcc
+      - dynamic_hook_loader
+      - fallback
+    required_gates:
+      - npm run test:v3-anthropic-relay-runtime-integration
+      - npm run verify:v3-anthropic-relay-runtime-integration
+      - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: controlled_runtime_integration_verified
+    pending_runtime:
+      - live 5555 validation and cutover
+      - remote and local continuation end-to-end wiring
+      - P6 deletion
+      - global install restart release and production replacement

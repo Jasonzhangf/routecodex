@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures-util.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
@@ -15,6 +16,7 @@ routecodex-v3-target = { path = "../routecodex-v3-target" }
 routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 serde.workspace = true
 serde_json.workspace = true
+sse-transport-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core" }
 thiserror.workspace = true
 
 [dev-dependencies]

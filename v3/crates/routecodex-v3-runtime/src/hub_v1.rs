@@ -7,6 +7,10 @@ mod anthropic_codec;
 pub use anthropic_codec::*;
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;
+mod anthropic_relay_runtime;
+pub use anthropic_relay_runtime::*;
+mod anthropic_relay_runtime_codec;
+pub use anthropic_relay_runtime_codec::*;
 mod resource_hooks;
 pub use resource_hooks::*;
 
@@ -99,6 +103,7 @@ pub struct V3HubReqExecution05Planned {
 pub struct V3HubReqTarget06Resolved {
     previous: V3HubReqExecution05Planned,
     target_resolution: V3HubTargetResolution,
+    selected_target: routecodex_v3_target::V3TargetCandidate,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,10 +255,12 @@ pub fn build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
 pub fn build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
     input: V3HubReqExecution05Planned,
     target_resolution: V3HubTargetResolution,
+    selected_target: routecodex_v3_target::V3TargetCandidate,
 ) -> V3HubReqTarget06Resolved {
     V3HubReqTarget06Resolved {
         previous: input,
         target_resolution,
+        selected_target,
     }
 }
 
@@ -277,6 +284,27 @@ pub fn build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(
     input: V3ProviderReqOutbound08WirePayload,
 ) -> V3ProviderReqOutbound09TransportRequest {
     V3ProviderReqOutbound09TransportRequest { previous: input }
+}
+
+impl V3HubReqOutbound07ProviderSemantic {
+    fn selected_target(&self) -> &routecodex_v3_target::V3TargetCandidate {
+        &self.previous.selected_target
+    }
+}
+
+impl V3ProviderReqOutbound09TransportRequest {
+    fn into_provider_semantic_payload(self) -> Value {
+        self.previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .payload
+            .0
+    }
 }
 
 pub fn build_v3_provider_resp_inbound_01_raw(
@@ -629,6 +657,16 @@ mod tests {
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05,
             V3HubTargetResolution::Routed,
+            routecodex_v3_target::V3TargetCandidate {
+                provider_id: "provider".into(),
+                auth_alias: "primary".into(),
+                model_id: "model".into(),
+                wire_model: "wire-model".into(),
+                base_url: "http://127.0.0.1:1/v1".into(),
+                env_name: Some("V3_TEST_KEY".into()),
+                token_file: None,
+                path: vec!["provider".into()],
+            },
         );
         let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
             req06,

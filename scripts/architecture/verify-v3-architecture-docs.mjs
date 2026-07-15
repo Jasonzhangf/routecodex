@@ -84,8 +84,6 @@ const p6AnchoredResourceIds = new Set([
 const hubV1AnchoredResourceIds = new Set([
   'v3.config.hub_pipeline_declarations',
   'v3.hub.static_hook_registry',
-]);
-const hubV1PendingResourceIds = new Set([
   'v3.hub.entry_protocol',
   'v3.hub.continuation_ownership',
   'v3.hub.execution_plan',
@@ -94,6 +92,8 @@ const hubV1PendingResourceIds = new Set([
   'v3.request.provider_semantic',
   'v3.hub.provider_wire_payload',
   'v3.hub.response_semantic',
+]);
+const hubV1PendingResourceIds = new Set([
   'v3.continuation.remote_binding',
   'v3.continuation.local_context_truth',
 ]);

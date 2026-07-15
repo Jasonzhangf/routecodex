@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const HARNESS_ID = 'v3.anthropic_relay_controlled_replay';
@@ -110,16 +111,22 @@ async function runWithDriver(driverPath, loaded, digestValue) {
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const { port } = server.address();
+  const configRoot = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-relay-config-'));
+  const configPath = join(configRoot, 'config.v3.toml');
+  writeFileSync(configPath, controlledConfig(port));
   const results = [];
   try {
-    for (const { absolute, value } of loaded) {
+    for (const { value } of loaded) {
       activeFixtureId = value.case_id;
       const driverResult = await runDriver(driverPath, [
-        '--fixture', absolute,
-        '--upstream-url', `http://127.0.0.1:${port}/v1/responses`,
+        '--config', configPath,
       ], {
-        env: { ...process.env, V3_ANTHROPIC_RELAY_FIXTURE_ID: value.case_id },
-      });
+        env: {
+          ...process.env,
+          V3_ANTHROPIC_RELAY_FIXTURE_ID: value.case_id,
+          V3_ANTHROPIC_RELAY_TEST_KEY: 'controlled-test-token',
+        },
+      }, JSON.stringify({ case_id: value.case_id, client_request: value.client_request }));
       const captured = captures.get(value.case_id) ?? [];
       const failures = [];
       if (driverResult.status !== 0) failures.push(`driver exit ${driverResult.status}: ${driverResult.stderr.trim()}`);
@@ -141,6 +148,7 @@ async function runWithDriver(driverPath, loaded, digestValue) {
   } finally {
     activeFixtureId = null;
     await new Promise((resolveClose) => server.close(resolveClose));
+    rmSync(configRoot, { recursive: true, force: true });
   }
   const failed = results.filter((item) => item.status === 'failed');
   return {
@@ -154,9 +162,9 @@ async function runWithDriver(driverPath, loaded, digestValue) {
   };
 }
 
-function runDriver(command, commandArgs, options) {
+function runDriver(command, commandArgs, options, input) {
   return new Promise((resolveDriver, rejectDriver) => {
-    const child = spawn(command, commandArgs, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, commandArgs, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -165,7 +173,35 @@ function runDriver(command, commandArgs, options) {
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.once('error', rejectDriver);
     child.once('close', (status) => resolveDriver({ status, stdout, stderr }));
+    child.stdin.end(input);
   });
+}
+
+function controlledConfig(port) {
+  return `version = 3
+
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+endpoints = ["anthropic"]
+
+[providers.controlled]
+type = "responses"
+base_url = "http://127.0.0.1:${port}/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "V3_ANTHROPIC_RELAY_TEST_KEY" }] }
+
+[providers.controlled.models.responses-wire-model]
+wire_name = "responses-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "reasoning", "streaming"]
+
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+`;
 }
 
 function parseArgs(values) {
