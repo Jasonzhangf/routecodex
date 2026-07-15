@@ -510,6 +510,40 @@ features:
       runtime: "Characterization is not runtime wiring or live compatibility evidence."
       forbidden_claim: "Do not claim Server/runtime/provider/continuation/Relay/SSE transport/live completion."
 
+  - feature_id: v3.protocol_gemini_codec_characterization
+    status: characterization_source_verified
+    change_risk: high
+    owner_kind: rust_project_v3_protocol_codec_characterization
+    owner_scope: "Native Gemini protocol codec characterization only"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
+      - scripts/architecture/verify-v3-gemini-codec-characterization.mjs
+      - scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs
+    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
+    design: [docs/goals/v3-gemini-codec-characterization-plan.md]
+    test_design: [docs/goals/v3-gemini-codec-characterization-test-design.md]
+    required_contract:
+      - native Gemini request and response payloads remain semantically unchanged
+      - missing or orphan functionResponse identities fail explicitly without repair
+      - SSE input is one already-framed candidate event and is never byte-parsed or materialized
+      - internal side-channel fields fail closed
+      - no Hub hook Server runtime Provider transport continuation Relay or fallback is added
+      - Gemini Server endpoint remains pending_not_implemented until a separate runtime integration owner changes it
+    required_gates:
+      - npm run test:v3-gemini-codec-characterization
+      - npm run verify:v3-gemini-codec-characterization
+      - npm run test:v3-gemini-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_rule:
+      source: "Complete only when focused tests, source gate, mutation fixtures, maps, architecture gates, fmt, and diff check pass."
+      runtime: "Characterization is not runtime wiring, endpoint implementation, or live compatibility evidence."
+      forbidden_claim: "Do not claim Server/runtime/provider/continuation/Relay/SSE transport/live Gemini completion."
+
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified
     change_risk: high

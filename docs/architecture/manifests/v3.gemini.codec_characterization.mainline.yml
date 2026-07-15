@@ -1,0 +1,26 @@
+schema_version: 1
+lifecycle_id: v3.protocol.gemini.codec_characterization
+owner_feature: v3.protocol_gemini_codec_characterization
+entrypoint: V3GeminiClientInput01Raw
+return_path: V3GeminiClientProjection06Semantic
+canonical_docs:
+  - docs/goals/v3-gemini-codec-characterization-plan.md
+  - docs/goals/v3-gemini-codec-characterization-test-design.md
+  - docs/architecture/wiki/v3-gemini-codec-characterization.md
+nodes:
+  - V3GeminiClientInput01Raw
+  - V3GeminiHubRequest02Semantic
+  - V3GeminiProviderWire03Payload
+  - V3GeminiProviderRaw04Response
+  - V3GeminiHubResponse05Semantic
+  - V3GeminiClientProjection06Semantic
+edges:
+  - v3-protocol-gemini-01
+  - v3-protocol-gemini-02
+  - v3-protocol-gemini-03
+  - v3-protocol-gemini-04
+verification_gates:
+  - npm run test:v3-gemini-codec-characterization
+  - npm run verify:v3-gemini-codec-characterization
+  - npm run test:v3-gemini-codec-characterization-red-fixtures
+runtime_status: characterization_only

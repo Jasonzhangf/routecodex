@@ -7,6 +7,8 @@ mod anthropic_codec;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;
+mod gemini_codec;
+pub use gemini_codec::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod anthropic_relay_hooks;

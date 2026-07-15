@@ -705,6 +705,38 @@ features:
     runtime_status: openai_chat_codec_characterization_only
     pending_runtime: [hook registration, Hub runtime integration, Server entry, provider transport, live replay]
 
+  - feature_id: v3.protocol_gemini_codec_characterization
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+    resource_bindings: [v3.hub.entry_protocol, v3.hub.provider_protocol, v3.request.provider_semantic, v3.hub.provider_wire_payload, v3.response.provider_raw, v3.hub.response_semantic, v3.response.client_payload]
+    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
+    entry_symbols:
+      - characterize_v3_gemini_client_input_to_hub_semantic
+      - characterize_v3_gemini_hub_semantic_to_provider_wire
+      - characterize_v3_gemini_provider_raw_to_hub_response_semantic
+      - characterize_v3_gemini_hub_response_semantic_to_client_projection
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
+      - scripts/architecture/verify-v3-gemini-codec-characterization.mjs
+      - scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs
+      - docs/goals/v3-gemini-codec-characterization-test-design.md
+      - docs/goals/v3-gemini-codec-characterization-plan.md
+      - docs/architecture/manifests/v3.gemini.codec_characterization.mainline.yml
+      - docs/architecture/wiki/v3-gemini-codec-characterization.md
+    forbidden_paths: [src, sharedmodule, v3/crates/routecodex-v3-server/src, v3/crates/routecodex-v3-provider-responses/src, ~/.rcc]
+    required_gates:
+      - npm run test:v3-gemini-codec-characterization
+      - npm run verify:v3-gemini-codec-characterization
+      - npm run test:v3-gemini-codec-characterization-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    runtime_status: gemini_codec_characterization_only
+    pending_runtime: [hook registration, Hub runtime integration, Server entry, provider transport, live replay]
+
   - feature_id: v3.virtual_router_full_function
     owner_crates: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-runtime]
     owner_files:
