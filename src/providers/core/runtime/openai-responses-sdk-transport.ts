@@ -7,7 +7,7 @@ import type { PreparedHttpRequest } from './http-request-executor.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import {
   buildResponsesSseProviderError,
-  inspectResponsesSseBlockForProviderRateLimit
+  inspectResponsesSseBlockForProviderFailure
 } from './responses-sse-error-guard.js';
 
 type UnknownRecord = Record<string, unknown>;
@@ -148,10 +148,10 @@ async function prepareResponsesSseStream(response: Response): Promise<Readable> 
       if (!trimmed || trimmed.startsWith(':')) {
         continue;
       }
-      const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
-      if (rateLimitPayload) {
+      const providerFailurePayload = inspectResponsesSseBlockForProviderFailure(part);
+      if (providerFailurePayload) {
         await reader.cancel().catch(() => undefined);
-        throw buildResponsesSseProviderError(rateLimitPayload);
+        throw buildResponsesSseProviderError(providerFailurePayload);
       }
       sawSemanticFrame = true;
       break;

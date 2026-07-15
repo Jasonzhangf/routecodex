@@ -35,7 +35,19 @@ function parseResponsesSseFrame(block: string): { eventName?: string; data?: Unk
   }
 }
 
-function readErrorPayload(data: UnknownRecord | undefined): { code?: string; message?: string } {
+function pickStatusCode(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const status = Math.floor(value);
+    return status >= 100 && status <= 599 ? status : undefined;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 100 && parsed <= 599 ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readErrorPayload(data: UnknownRecord | undefined): { code?: string; message?: string; statusCode?: number } {
   if (!data) {
     return {};
   }
@@ -44,7 +56,19 @@ function readErrorPayload(data: UnknownRecord | undefined): { code?: string; mes
   const responseError = asRecord(response.error);
   return {
     code: pickString(data.code) ?? pickString(nestedError.code) ?? pickString(responseError.code),
-    message: pickString(data.message) ?? pickString(nestedError.message) ?? pickString(responseError.message)
+    message: pickString(data.message) ?? pickString(nestedError.message) ?? pickString(responseError.message),
+    statusCode:
+      pickStatusCode(data.status)
+      ?? pickStatusCode(data.statusCode)
+      ?? pickStatusCode(data.http_status)
+      ?? pickStatusCode(nestedError.status)
+      ?? pickStatusCode(nestedError.statusCode)
+      ?? pickStatusCode(nestedError.http_status)
+      ?? pickStatusCode(response.status)
+      ?? pickStatusCode(response.statusCode)
+      ?? pickStatusCode(responseError.status)
+      ?? pickStatusCode(responseError.statusCode)
+      ?? pickStatusCode(responseError.http_status)
   };
 }
 
@@ -71,17 +95,48 @@ export type ResponsesSseProviderError = Error & {
 export function buildResponsesSseProviderError(args: {
   message: string;
   code?: string;
+  statusCode?: number;
 }): ResponsesSseProviderError {
   const error = new Error(args.message) as ResponsesSseProviderError;
-  error.statusCode = 429;
-  error.status = 429;
-  error.code = 'PROVIDER_TRAFFIC_SATURATED';
+  const statusCode = pickStatusCode(args.statusCode) ?? inferResponsesSseProviderErrorStatus(args) ?? 502;
+  error.statusCode = statusCode;
+  error.status = statusCode;
+  error.code = statusCode === 429 && isResponsesSseRateLimitLike(args)
+    ? 'PROVIDER_TRAFFIC_SATURATED'
+    : `HTTP_${statusCode}`;
   if (args.code) {
     error.upstreamCode = args.code;
   }
   error.retryable = true;
   error.requestExecutorProviderErrorStage = 'provider.http';
   return error;
+}
+
+function inferResponsesSseProviderErrorStatus(args: { code?: string; message?: string }): number | undefined {
+  const code = (args.code ?? '').trim().toLowerCase();
+  const message = (args.message ?? '').trim().toLowerCase();
+  const numeric = code.match(/(?:^|[^0-9])(\d{3})(?:[^0-9]|$)/)?.[1]
+    ?? message.match(/(?:^|[^0-9])(\d{3})(?:[^0-9]|$)/)?.[1];
+  if (numeric) {
+    const status = Number.parseInt(numeric, 10);
+    if (Number.isFinite(status) && status >= 100 && status <= 599) {
+      return status;
+    }
+  }
+  if (code.includes('quota') || code.includes('billing') || code.includes('balance') || code.includes('payment')
+    || message.includes('quota') || message.includes('billing') || message.includes('balance') || message.includes('payment')) {
+    return 402;
+  }
+  if (code.includes('unauthorized') || code.includes('auth') || message.includes('unauthorized') || message.includes('invalid api key')) {
+    return 401;
+  }
+  if (code.includes('forbidden') || message.includes('forbidden') || message.includes('access denied')) {
+    return 403;
+  }
+  if (isResponsesSseRateLimitLike(args)) {
+    return 429;
+  }
+  return undefined;
 }
 
 export function buildResponsesSseIncompleteError(message = 'stream closed before response.completed'): ResponsesSseProviderError {
@@ -116,6 +171,17 @@ export function isResponsesSseCompletedBlock(block: string): boolean {
 }
 
 export function inspectResponsesSseBlockForProviderRateLimit(block: string): { code?: string; message: string } | null {
+  const failure = inspectResponsesSseBlockForProviderFailure(block);
+  if (!failure || !isResponsesSseRateLimitLike(failure)) {
+    return null;
+  }
+  return {
+    message: failure.message,
+    ...(failure.code ? { code: failure.code } : {})
+  };
+}
+
+export function inspectResponsesSseBlockForProviderFailure(block: string): { code?: string; message: string; statusCode?: number } | null {
   const parsed = parseResponsesSseFrame(block);
   const payload = readErrorPayload(parsed.data);
   const type = pickString(parsed.data?.type);
@@ -124,7 +190,8 @@ export function inspectResponsesSseBlockForProviderRateLimit(block: string): { c
     if (limitReached === true || limitReached === 'true') {
       return {
         code: pickString(parsed.data?.code) ?? 'codex.rate_limits',
-        message: pickString(parsed.data?.message) ?? 'upstream Responses SSE rate limit reached'
+        message: pickString(parsed.data?.message) ?? 'upstream Responses SSE rate limit reached',
+        statusCode: 429
       };
     }
     return null;
@@ -137,12 +204,16 @@ export function inspectResponsesSseBlockForProviderRateLimit(block: string): { c
   ) {
     return null;
   }
-  if (!isResponsesSseRateLimitLike(payload)) {
+  const statusCode = payload.statusCode ?? inferResponsesSseProviderErrorStatus(payload);
+  const shouldRaiseProviderError = statusCode !== undefined
+    && (statusCode === 401 || statusCode === 402 || statusCode === 403 || statusCode === 429 || statusCode >= 500);
+  if (!shouldRaiseProviderError && !isResponsesSseRateLimitLike(payload)) {
     return null;
   }
   return {
-    message: payload.message ?? 'upstream Responses SSE rate limit error',
-    ...(payload.code ? { code: payload.code } : {})
+    message: payload.message ?? 'upstream Responses SSE provider error',
+    ...(payload.code ? { code: payload.code } : {}),
+    ...(statusCode !== undefined ? { statusCode } : {})
   };
 }
 

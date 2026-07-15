@@ -1147,6 +1147,60 @@ describe('ResponsesProvider direct passthrough', () => {
     });
   });
 
+  test('maps direct HTTP 200 SSE response.failed billing exhaustion to retryable provider error', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-responses-direct-200-sse-billing-exhausted',
+      type: 'responses-http-provider',
+      config: {
+        providerType: 'responses',
+        providerId: 'test',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid/v1', endpoint: '/responses' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new ResponsesProvider(config, emptyDeps) as any;
+    provider.isInitialized = true;
+    provider.snapshotPhase = async () => {};
+    provider.buildRequestHeaders = async () => ({ Authorization: 'Bearer test-key-1234567890' });
+    provider.finalizeRequestHeaders = async (headers: Record<string, string>) => headers;
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.failed\n',
+        `data: ${JSON.stringify({
+          type: 'response.failed',
+          response: {
+            status: 'failed',
+            error: {
+              code: 'insufficient_quota',
+              message: 'Your account has insufficient quota',
+              status: 402
+            }
+          }
+        })}\n\n`
+      ])
+    };
+
+    const inbound = {
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello direct' }] }],
+      stream: true
+    } as any;
+
+    attachProviderRuntimeMetadata(inbound, {
+      metadata: { entryEndpoint: '/v1/responses', __responsesDirectPassthrough: true }
+    });
+
+    await expect(provider.sendRequestInternal(inbound)).rejects.toMatchObject({
+      statusCode: 402,
+      status: 402,
+      code: 'HTTP_402',
+      upstreamCode: 'insufficient_quota',
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.http'
+    });
+  });
+
   test('maps CRLF direct HTTP 200 SSE response.failed concurrency to retryable provider error', async () => {
     const config: OpenAIStandardConfig = {
       id: 'test-responses-direct-200-sse-rate-limit-crlf',

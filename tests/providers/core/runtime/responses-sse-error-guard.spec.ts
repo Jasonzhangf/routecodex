@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  inspectResponsesSseBlockForProviderFailure,
   inspectResponsesSseBlockForProviderRateLimit,
   isResponsesSseAdvisoryRateLimitsBlock,
   isResponsesSseTerminalBlock
@@ -30,6 +31,20 @@ describe('responses SSE error guard', () => {
 
     expect(result).toBeNull();
     expect(isResponsesSseAdvisoryRateLimitsBlock(block)).toBe(true);
+  });
+
+  it('maps response.failed billing frames to provider failure before direct SSE passthrough', () => {
+    const result = inspectResponsesSseBlockForProviderFailure([
+      'event: response.failed',
+      'data: {"type":"response.failed","response":{"status":"failed","error":{"code":"insufficient_quota","message":"Your account has insufficient quota","status":402}}}',
+      '',
+    ].join('\n'));
+
+    expect(result).toEqual({
+      code: 'insufficient_quota',
+      message: 'Your account has insufficient quota',
+      statusCode: 402
+    });
   });
 
   it.each([

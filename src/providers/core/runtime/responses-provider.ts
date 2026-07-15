@@ -49,7 +49,7 @@ import {
 import {
   buildResponsesSseIncompleteError,
   buildResponsesSseProviderError,
-  inspectResponsesSseBlockForProviderRateLimit
+  inspectResponsesSseBlockForProviderFailure
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
@@ -316,12 +316,12 @@ async function prepareDirectResponsesSsePassthroughStream(
     if (!trimmed || trimmed.startsWith(':')) {
       return false;
     }
-    const rateLimitPayload = inspectResponsesSseBlockForProviderRateLimit(part);
-    if (rateLimitPayload) {
+    const providerFailurePayload = inspectResponsesSseBlockForProviderFailure(part);
+    if (providerFailurePayload) {
       if (typeof iterator.return === 'function') {
         await iterator.return().catch(() => undefined);
       }
-      throw buildResponsesSseProviderError(rateLimitPayload);
+      throw buildResponsesSseProviderError(providerFailurePayload);
     }
     sawSemanticFrame = true;
     lastSemanticActivityAt = Date.now();
