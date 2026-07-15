@@ -415,3 +415,71 @@ chains:
           side_channel_reads: [v3.provider.health_state]
           side_channel_writes: [v3.provider.availability_projection]
         status: anchored
+  - chain_id: v3.responses_continuation.remote_contract_store
+    owner_feature_id: v3.remote_continuation_contract_store
+    summary: "H4 source-only direct-owner remote locator commit/load contract. It stores locator and pin control facts only and is not wired into Hub v1."
+    edges:
+      - step_id: v3-h4-remote-01
+        from_node: V3RemoteContinuationCommitInput
+        to_node: V3RemoteContinuationLocator
+        caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
+        caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+        callee_symbol: V3RemoteContinuationStore::commit
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.remote_continuation_contract_store
+        binding_kind: h4_contract_store_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: []
+          side_channel_writes: [v3.continuation.remote_binding]
+        status: anchored
+      - step_id: v3-h4-remote-02
+        from_node: V3RemoteContinuationLoadRequest
+        to_node: V3RemoteContinuationLocator
+        caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
+        caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+        callee_symbol: V3RemoteContinuationStore::load
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.remote_continuation_contract_store
+        binding_kind: h4_contract_store_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: [v3.continuation.remote_binding]
+          side_channel_writes: []
+        status: anchored
+  - chain_id: v3.responses_continuation.remote_locator_codec
+    owner_feature_id: v3.remote_continuation_contract_store
+    summary: "H4 lossless locator-only codec. Unknown local context/history/tool-state fields fail decoding."
+    edges:
+      - step_id: v3-h4-codec-01
+        from_node: V3RemoteContinuationLocator
+        to_node: V3RemoteContinuationLocatorEncoded
+        caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
+        caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+        callee_symbol: encode_v3_remote_continuation_locator
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.remote_continuation_contract_store
+        binding_kind: h4_contract_store_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: [v3.continuation.remote_binding]
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-h4-codec-02
+        from_node: V3RemoteContinuationLocatorEncoded
+        to_node: V3RemoteContinuationLocator
+        caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
+        caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+        callee_symbol: decode_v3_remote_continuation_locator
+        callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+        owner_feature_id: v3.remote_continuation_contract_store
+        binding_kind: h4_contract_store_source
+        resource_flow:
+          consumes: [v3.continuation.remote_binding]
+          produces: [v3.continuation.remote_binding]
+          side_channel_reads: []
+          side_channel_writes: [v3.continuation.remote_binding]
+        status: anchored

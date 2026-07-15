@@ -550,3 +550,57 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
     runtime_status: source_bound_cli_replay_verified
+
+  - feature_id: v3.remote_continuation_contract_store
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+    resource_bindings:
+      - v3.continuation.remote_binding
+    mainline_bindings:
+      - v3-h4-remote-01
+      - v3-h4-remote-02
+      - v3-h4-codec-01
+      - v3-h4-codec-02
+    entry_symbols:
+      - V3RemoteContinuationLocator
+      - V3RemoteContinuationScopeKey
+      - V3RemoteContinuationPin
+      - V3RemoteContinuationStore::commit
+      - V3RemoteContinuationStore::load
+      - V3RemoteContinuationStore::release
+      - encode_v3_remote_continuation_locator
+      - decode_v3_remote_continuation_locator
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/Cargo.toml
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+      - docs/goals/v3-h4-remote-continuation-contract-store-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-h4-remote-continuation
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run test:v3-workspace
+    runtime_status: remote_continuation_contract_store_codec_only
+    pending_runtime:
+      - Hub v1 Resp04 remote binding commit wiring
+      - Hub v1 Req03 remote binding load wiring
+      - pinned Target resolution wiring
+      - Server endpoint integration
+      - continuation live replay

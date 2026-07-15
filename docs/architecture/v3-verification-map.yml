@@ -681,3 +681,50 @@ features:
       source: "All Config match fields, Router/Target/runtime tests, source/compile gates, maps, fmt, clippy, and workspace gates pass."
       runtime: "Actual V3 CLI multi-listener replay proves non-default, default, optional-to-default, total exhaustion, one Router hit, Debug/Error evidence, and clean shutdown."
       forbidden_claim: "Do not claim Relay, continuation, Chat Process, other protocol Provider runtimes, Hub v1 cutover, P6 deletion, global install, production replacement, or real ~/.rcc mutation."
+  - feature_id: v3.remote_continuation_contract_store
+    status: source_contract_store_codec_verified
+    change_risk: high
+    owner_kind: rust_project_v3_isolated_continuation_module
+    owner_scope: "H4 immutable remote locator, scope/pin validation, isolated in-memory store contract, and lossless locator-only codec"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
+    design:
+      - docs/goals/v3-h4-remote-continuation-contract-store-test-design.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+      - .agents/skills/rcc-dev-skills/references/25-protocol-sse-continuation-boundary.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_unit:
+      - same Responses entry direct owner session conversation port group provider model and auth pin loads the immutable locator
+      - chat and messages entry protocols cannot hit a Responses remote locator
+      - relay owner cannot load a direct remote locator
+      - same session with different port or routing group is rejected
+      - different endpoint session or conversation is rejected
+      - provider model or auth pin mismatch is rejected
+      - expired locator is rejected
+      - provider unavailable fails explicitly without cross-provider reselection
+      - duplicate remote response ID cannot overwrite an immutable binding
+      - invalid expiry is rejected at commit
+      - codec rejects local Chat Process context history and tool-state fields
+      - release removes only the requested remote locator
+    required_contract:
+      - remote locator contains only remote response identity scope provider model auth capability revision and expiry
+      - locator fields are externally immutable after construction
+      - store and codec never save or restore local Chat Process context history or tool state
+      - no Hub v1 live wiring Server endpoint Relay materialization local continuation or Provider transport change exists
+      - v3.continuation.remote_binding remains binding_pending until Resp04 commit Req03 load and pinned Target resolution are actually wired
+    required_gates:
+      - npm run test:v3-h4-remote-continuation
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "H4 contract/store codec pre-module is complete when focused Rust tests, negative isolation cases, V3 maps, resource/module/Rust-only gates, fmt, and workspace tests pass."
+      runtime: "No continuation live wiring, Hub Req03/Resp04 integration, pinned Target execution, Server endpoint, Relay materialization, or live replay is claimed."
+      forbidden_claim: "Do not claim usable continuation runtime, local continuation, live Relay, Server cutover, P6 deletion, global install, restart, production replacement, or real ~/.rcc mutation."

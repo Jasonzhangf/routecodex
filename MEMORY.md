@@ -3239,3 +3239,12 @@
 - Runtime ownership evidence is paired: executable probes assert visible semantics and `Arc` sharing; the source gate rejects deep clone, JSON serialization roundtrip, SSE collection, Debug/snapshot truth substitution, hook-plan payload retention, canonical-sharing removal, and Req04-restore removal.
 - Verified with 4 focused Rust probes, 7 mutation fixtures, V3 module/rust-only/resource/fmt/architecture/static-hook gates, Clippy, and the full V3 workspace.
 - This marker proves copy-budget probes/gates only, not live Relay, continuation persistence/E2E, servertool execution, Server cutover, P6 deletion, install/restart, or production replacement.
+
+# 2026-07-15: V3 H4 remote continuation contract/store codec pre-module verified
+
+- Marker: `routecodex-v3-h4-remote-continuation-contract-store-verified-20260715`.
+- `v3.remote_continuation_contract_store` is the isolated Rust owner for an immutable direct remote locator, exact Responses entry/scope/provider-model-auth pin checks, expiry, commit/load/release, and a strict locator-only JSON codec.
+- Commit rejects invalid expiry and duplicate remote response IDs. Load rejects protocol/endpoint/owner/session/conversation/port/group/pin mismatch, expiry, and provider unavailability without cross-provider reselection or local-owner fallback.
+- Codec structs use unknown-field denial, so local Chat Process context, history, tool state, and other undeclared state cannot enter remote store truth.
+- Verified with 12 focused tests, V3 architecture/resource/module/Rust-only/fmt gates, Clippy `-D warnings`, full V3 workspace tests, forbidden live-wiring scans, and diff check.
+- `v3.continuation.remote_binding` intentionally remains `binding_pending`. This marker does not prove Hub Resp04 commit, Hub Req03 load/classification, pinned Target execution, Server endpoint, local continuation, Relay materialization, live replay, Server cutover, P6 deletion, global install/restart, `~/.rcc`, or production replacement.

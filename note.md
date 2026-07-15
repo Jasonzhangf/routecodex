@@ -30627,3 +30627,11 @@ Pure Rust NAPI candidates:
 - The source gate rejects full deep copy, JSON serialization roundtrip cloning, SSE collection/materialization, Debug/snapshot truth substitution, hook-planning payload retention, loss of canonical `Arc::ptr_eq`, and loss of Req04 context restore ownership.
 - Verification passed: 4 focused probes, 7 mutation fixtures, V3 module/rust-only/resource/fmt/architecture/static-hook gates, Clippy `-D warnings`, full V3 workspace tests, and diff check.
 - Completion boundary: this proves copy-budget probes/gates only. It does not prove live Relay, continuation persistence/E2E restore, servertool runtime execution, Server cutover, P6 deletion, global install, restart, or production replacement.
+
+# 2026-07-15: V3 H4 remote continuation contract/store codec pre-module
+
+- Claim `feature_id:v3.remote_continuation_contract_store` owns only the Rust locator/store/codec, focused tests, test design, and V3 map/package bindings. It does not wire Hub, Server, Provider, Relay, local continuation, V2/P6, `~/.rcc`, install, restart, or live replay.
+- The externally immutable locator binds Responses endpoint, direct owner, session/conversation, port/group, provider/model/auth pin, capability revision, commit time, and expiry. Commit rejects invalid expiry and duplicate IDs; load rejects entry/owner/scope/pin mismatch, expiry, and provider unavailability without reselection or fallback.
+- `serde(deny_unknown_fields)` physically rejects codec input containing local context, history, tool state, or other unknown fields. The store holds locator/control facts only.
+- Verified: 12 focused H4 tests, architecture/resource/module/Rust-only/fmt gates, Clippy with `-D warnings`, full V3 workspace, forbidden live-wiring source scan, and `git diff --check`.
+- Boundary: `v3.continuation.remote_binding` remains `binding_pending`; Resp04 commit, Req03 load/classification, pinned Target execution, Server endpoint, Relay materialization, local continuation, live replay, cutover, install, restart, and production replacement remain pending.
