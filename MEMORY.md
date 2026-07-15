@@ -3248,3 +3248,9 @@
 - Codec structs use unknown-field denial, so local Chat Process context, history, tool state, and other undeclared state cannot enter remote store truth.
 - Verified with 12 focused tests, V3 architecture/resource/module/Rust-only/fmt gates, Clippy `-D warnings`, full V3 workspace tests, forbidden live-wiring scans, and diff check.
 - `v3.continuation.remote_binding` intentionally remains `binding_pending`. This marker does not prove Hub Resp04 commit, Hub Req03 load/classification, pinned Target execution, Server endpoint, local continuation, Relay materialization, live replay, Server cutover, P6 deletion, global install/restart, `~/.rcc`, or production replacement.
+## V3 local continuation immutable store（2026-07-15）
+
+- V3 Relay 本地 continuation 的独立真源位于 `v3/crates/routecodex-v3-runtime/src/local_continuation.rs`：只允许 `Resp04` 通过 `commit_at_resp04` 保存，只允许 `Req04` 通过 `restore_at_req04` 恢复。
+- immutable interval 只允许 lossless codec、entry protocol/endpoint/session/conversation/port/routing-group scope 校验、expiry 和 release；禁止 remote-owner fallback、provider pin、debug/snapshot truth 或 payload rebuild。
+- terminal success/failure/already-terminal 必须返回 typed non-save 结果，不能生成或复活 continuation；此切片不代表 Hub/Server wiring、continuation E2E 或 live Relay 已完成。
+- required gates：focused contract/store tests、mutation red fixtures、V3 module-boundaries、rust-only、fmt、clippy、full workspace + doctest。

@@ -30635,3 +30635,9 @@ Pure Rust NAPI candidates:
 - `serde(deny_unknown_fields)` physically rejects codec input containing local context, history, tool state, or other unknown fields. The store holds locator/control facts only.
 - Verified: 12 focused H4 tests, architecture/resource/module/Rust-only/fmt gates, Clippy with `-D warnings`, full V3 workspace, forbidden live-wiring source scan, and `git diff --check`.
 - Boundary: `v3.continuation.remote_binding` remains `binding_pending`; Resp04 commit, Req03 load/classification, pinned Target execution, Server endpoint, Relay materialization, local continuation, live replay, cutover, install, restart, and production replacement remain pending.
+## 2026-07-15 V3 local continuation contract/store/codec
+
+- 独立 Rust 切片已实现：唯一写入口 `commit_at_resp04`，唯一读入口 `restore_at_req04`；immutable interval 仅开放 lossless codec、完整 scope 校验、expiry 与 release。
+- terminal success/failure/already-terminal 均显式不保存；local owner 拒绝 remote owner，不含 provider/model/auth pin，不读取 debug/snapshot，不接 Hub/Server/live Relay。
+- 证据：focused 10/10、boundary mutation fixtures 8/8、module-boundaries、rust-only、fmt、clippy `-D warnings`、V3 workspace（含 doctest）全部通过。
+- 完成边界：仅 local continuation contract/store/codec 与 boundary gates；continuation E2E、Hub wiring、live Relay 均未实现、未验证。

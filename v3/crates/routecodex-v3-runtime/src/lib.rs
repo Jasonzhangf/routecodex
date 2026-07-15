@@ -2,6 +2,7 @@ pub mod foundation;
 pub mod hooks;
 pub mod hub_v1;
 pub mod kernel;
+pub mod local_continuation;
 pub mod nodes;
 pub mod remote_continuation;
 mod shared;
@@ -19,5 +20,6 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_transport_and_debug,
     V3ResponsesDirectRuntimeOutput,
 };
+pub use local_continuation::*;
 pub use nodes::*;
 pub use remote_continuation::*;
