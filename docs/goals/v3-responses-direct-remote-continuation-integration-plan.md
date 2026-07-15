@@ -124,6 +124,8 @@ response。`store=false` 的 continuation state 只存在于当前连接内，ID
   transport pin，不拥有 socket，不恢复 history/tool/context。
 - JSON client intent 从 terminal `response.completed.response` 投影；SSE client intent 将每个 WebSocket
   server event按 Responses SSE framing 等价投影，业务事件语义仍由现有 response pipeline 消费。
+- SSE 返回必须持有单连接 owner guard 并逐帧读取/投影；首帧不得等待 `response.completed`。只有完整消费
+  terminal event 与 `[DONE]` 后连接才可复用，提前 drop、协议错误或 client disconnect 必须丢弃该连接。
 - handshake/auth/protocol/provider error/client disconnect 必须进入唯一 Error01-06；禁止 HTTP retry、Relay、
   local materialization、full-history rebuild 或跨 provider reselection。
 

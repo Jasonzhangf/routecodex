@@ -24,7 +24,8 @@ const cases = [
   ['Server store owner', server, 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
   ['HTTP-only remote continuation accepted', configValidate, 'let responses = compile_provider_responses(&id, provider.responses, &models)?;', 'let responses = provider.responses;', /compile_provider_responses/],
   ['WebSocket stream field leaks into event', providerTransport, 'event.remove("stream");', '// stream field leak', /event\.remove\("stream"\)/],
-  ['WebSocket fallback marker', providerTransport, 'let mut sse_frames = Vec::new();', 'let fallback_http_retry = true;\n        let mut sse_frames = Vec::new();', /fallback/i],
+  ['WebSocket SSE materialization', providerTransport, 'fn websocket_sse_stream(', 'fn materialized() { let mut sse_frames = Vec::new(); sse_frames.push(Vec::<u8>::new()); }\nfn websocket_sse_stream(', /sse_frames/],
+  ['WebSocket fallback marker', providerTransport, 'fn websocket_sse_stream(', 'fn fallback_http_retry() {}\nfn websocket_sse_stream(', /fallback/i],
 ];
 const copied = [
   runtime,

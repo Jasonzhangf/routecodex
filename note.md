@@ -30722,6 +30722,14 @@ Pure Rust NAPI candidates:
 - Fix: reap_inactive_runtime_files now requires control.instance_id to match the expected declaration and socket_path to equal that instance's canonical managed socket before deleting any socket/control cache.
 - Green evidence: focused lifecycle test passed; verify:v3-managed-server-lifecycle passed; managed lifecycle red fixtures now reject 8 mutations including removing the foreign-control guard.
 
+# 2026-07-15 WebSocket v2 commit audit fix
+
+- Audit of commit 9952c79d8 found Provider WebSocket SSE collected every event into sse_frames until response.completed, then rebuilt a stream. This violated the shared transport-only SSE contract despite the existing gates being green.
+- Red evidence: the strengthened continuation verifier rejected Vec accumulation, push, and stream reconstruction from accumulated frames.
+- Fix: Provider transport now returns an incremental stream that owns the connection guard, projects events one-by-one, emits one DONE after response.completed, and discards the connection on early drop/error/disconnect.
+- Positive test holds the terminal event behind a oneshot signal and proves send plus first delta complete before terminal release. It also exposed and fixed per-test auth env races.
+- Green evidence: continuation verifier, 13 mutation fixtures, Provider 16 tests, continuation Config/Provider/Runtime/Server stack, fmt, Clippy, full V3 workspace, SSE shared gate, module/Rust-only gates, architecture review/browser smoke, and diff check.
+
 # 2026-07-15T17:45+08:00 V3 Responses Direct remote continuation transport-bound closeout
 
 - Upstream HTTP evidence proved that `previous_response_id` is rejected with “only supported on Responses WebSocket v2”; a successful HTTP first turn therefore cannot advertise usable `remote_continuation`.

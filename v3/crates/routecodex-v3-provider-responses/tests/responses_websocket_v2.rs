@@ -13,7 +13,7 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::{
     accept_hdr_async,
     tungstenite::{
-        handshake::server::{Request, Response},
+        handshake::server::{ErrorResponse, Request, Response},
         Message,
     },
 };
@@ -22,6 +22,23 @@ struct ControlledWebSocket {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
     shutdown: oneshot::Sender<()>,
+}
+
+struct ControlledIncrementalWebSocket {
+    url: String,
+    release_terminal: oneshot::Sender<()>,
+}
+
+#[allow(clippy::result_large_err)]
+fn require_websocket_auth(
+    request: &Request,
+    response: Response,
+) -> Result<Response, ErrorResponse> {
+    assert_eq!(
+        request.headers().get("authorization").unwrap(),
+        "Bearer websocket-secret"
+    );
+    Ok(response)
 }
 
 #[allow(clippy::result_large_err)]
@@ -36,15 +53,9 @@ async fn start_controlled_websocket(binary_terminal: bool) -> ControlledWebSocke
             accepted = listener.accept() => accepted.unwrap(),
             _ = &mut shutdown_rx => return,
         };
-        let mut socket = accept_hdr_async(stream, |request: &Request, response: Response| {
-            assert_eq!(
-                request.headers().get("authorization").unwrap(),
-                "Bearer websocket-secret"
-            );
-            Ok(response)
-        })
-        .await
-        .unwrap();
+        let mut socket = accept_hdr_async(stream, require_websocket_auth)
+            .await
+            .unwrap();
         let mut turn = 0usize;
         while let Some(message) = socket.next().await {
             let message = message.unwrap();
@@ -96,6 +107,49 @@ async fn start_controlled_websocket(binary_terminal: bool) -> ControlledWebSocke
         url: format!("ws://{address}/v1/responses"),
         requests,
         shutdown: shutdown_tx,
+    }
+}
+
+async fn start_incremental_controlled_websocket() -> ControlledIncrementalWebSocket {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (release_terminal, release_terminal_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_hdr_async(stream, require_websocket_auth)
+            .await
+            .unwrap();
+        let request = socket.next().await.unwrap().unwrap();
+        assert!(matches!(request, Message::Text(_) | Message::Binary(_)));
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&json!({
+                    "type":"response.output_text.delta",
+                    "delta":"first"
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        release_terminal_rx.await.unwrap();
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&json!({
+                    "type":"response.completed",
+                    "response":{
+                        "id":"resp_ws_incremental",
+                        "status":"completed",
+                        "output":[{"type":"output_text","text":"first"}]
+                    }
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+    });
+    ControlledIncrementalWebSocket {
+        url: format!("ws://{address}/v1/responses"),
+        release_terminal,
     }
 }
 
@@ -189,10 +243,11 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
     assert!(text.contains("event: response.completed\n"));
     assert!(text.contains("data: [DONE]\n\n"));
 
-    let bad_target = V3ResponsesProviderTarget {
+    let mut bad_target = V3ResponsesProviderTarget {
         websocket_v2_url: Some("ws://127.0.0.1:1/v1/responses".into()),
         ..target(&controlled.url)
     };
+    bad_target.auth.secret = V3ProviderAuthSecretHandle::Environment("V3_WS_KEY_BINARY".into());
     let bad = build_v3_provider_12_responses_wire_payload(
         "req-ws-connect-error",
         bad_target,
@@ -209,4 +264,49 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
 
     std::env::remove_var("V3_WS_KEY_BINARY");
     let _ = controlled.shutdown.send(());
+}
+
+#[tokio::test]
+async fn websocket_v2_sse_returns_first_frame_before_terminal_event() {
+    let controlled = start_incremental_controlled_websocket().await;
+    std::env::set_var("V3_WS_KEY_INCREMENTAL", "websocket-secret");
+    let transport = ProviderResponsesTransport::default();
+    let mut selected = target(&controlled.url);
+    selected.auth.secret = V3ProviderAuthSecretHandle::Environment("V3_WS_KEY_INCREMENTAL".into());
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-incremental",
+        selected,
+        json!({"model":"client","input":"hello","stream":true}),
+    )
+    .unwrap();
+    let raw = tokio::time::timeout(
+        std::time::Duration::from_millis(250),
+        transport.send(build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap()),
+    )
+    .await
+    .expect("SSE transport must return before the terminal provider event")
+    .unwrap();
+    let mut body = match raw.into_body() {
+        routecodex_v3_provider_responses::V3ProviderResponseBody::Sse(body) => body,
+        routecodex_v3_provider_responses::V3ProviderResponseBody::Json(_) => {
+            panic!("expected incremental SSE body")
+        }
+    };
+    let first = tokio::time::timeout(std::time::Duration::from_millis(250), body.next())
+        .await
+        .expect("first provider event must be projected incrementally")
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8(first)
+        .unwrap()
+        .contains("event: response.output_text.delta"));
+
+    controlled.release_terminal.send(()).unwrap();
+    let completed = body.next().await.unwrap().unwrap();
+    assert!(String::from_utf8(completed)
+        .unwrap()
+        .contains("event: response.completed"));
+    assert_eq!(body.next().await.unwrap().unwrap(), b"data: [DONE]\n\n");
+    assert!(body.next().await.is_none());
+    std::env::remove_var("V3_WS_KEY_INCREMENTAL");
 }

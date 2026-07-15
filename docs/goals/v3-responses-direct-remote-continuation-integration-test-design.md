@@ -116,5 +116,9 @@ evidence of remote-continuation availability.
   payload isolation.
 - A source gate must reject HTTP retry, protocol fallback, Relay/local materialization, Server-owned
   socket state, and any second Runtime kernel or response exit.
+- SSE transport must return the first projected WebSocket event before the provider emits the
+  terminal event. A controlled upstream holds response.completed behind a test signal; transport
+  send and the first stream poll must complete before that signal. Full-stream Vec accumulation,
+  collect-to-Vec, or stream reconstruction from accumulated frames is forbidden.
 - `live_5555_pending` can change only after current managed 5555 completes both real JSON and SSE
   two-turn continuation with the exact provider/model/auth/transport pin.

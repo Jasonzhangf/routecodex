@@ -1,4 +1,4 @@
-use crate::raw_response::V3ProviderResp14Raw;
+use crate::raw_response::{V3ProviderResp14Raw, V3ProviderSseStream};
 use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
 use crate::wire::{
     V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
@@ -16,7 +16,7 @@ use std::sync::{
     Arc,
 };
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, OwnedMutexGuard};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -430,7 +430,7 @@ impl ProviderResponsesTransport {
                 .or_insert_with(|| Arc::new(Mutex::new(None)))
                 .clone()
         };
-        let mut connection = session.lock().await;
+        let mut connection = session.lock_owned().await;
         if connection.is_none() {
             let mut handshake = url
                 .clone()
@@ -476,7 +476,16 @@ impl ProviderResponsesTransport {
         }
         .map_err(|error| websocket_transport_error(&request_id, &provider_id, error))?;
 
-        let mut sse_frames = Vec::new();
+        if stream_intent == V3ResponsesStreamIntent::Sse {
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request_id.clone(),
+                provider_id.clone(),
+                200,
+                vec![content_type_header("text/event-stream")],
+                websocket_sse_stream(connection, request_id, provider_id, cancellation),
+            ));
+        }
+
         loop {
             let next = match cancellation.clone() {
                 Some(cancellation) => {
@@ -576,55 +585,291 @@ impl ProviderResponsesTransport {
                 });
             }
 
-            if stream_intent == V3ResponsesStreamIntent::Sse {
-                sse_frames.push(websocket_event_to_sse(event_type, &server_event)?);
-            }
             if event_type != "response.completed" {
                 continue;
             }
 
-            return match stream_intent {
-                V3ResponsesStreamIntent::Json => {
-                    let response = server_event.get("response").ok_or_else(|| {
-                        websocket_protocol_error(
-                            &request_id,
-                            &provider_id,
-                            "response.completed is missing response",
-                        )
-                    })?;
-                    let body = serde_json::to_vec(response).map_err(|error| {
-                        websocket_protocol_error(&request_id, &provider_id, error)
-                    })?;
-                    Ok(V3ProviderResp14Raw::from_json(
-                        request_id,
-                        provider_id,
-                        200,
-                        vec![content_type_header("application/json")],
-                        body,
-                    ))
-                }
-                V3ResponsesStreamIntent::Sse => {
-                    sse_frames.push(b"data: [DONE]\n\n".to_vec());
-                    Ok(V3ProviderResp14Raw::from_sse(
-                        request_id,
-                        provider_id,
-                        200,
-                        vec![content_type_header("text/event-stream")],
-                        Box::pin(stream::iter(sse_frames.into_iter().map(Ok))),
-                    ))
-                }
-            };
+            let response = server_event.get("response").ok_or_else(|| {
+                websocket_protocol_error(
+                    &request_id,
+                    &provider_id,
+                    "response.completed is missing response",
+                )
+            })?;
+            let body = serde_json::to_vec(response)
+                .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
+            return Ok(V3ProviderResp14Raw::from_json(
+                request_id,
+                provider_id,
+                200,
+                vec![content_type_header("application/json")],
+                body,
+            ));
         }
     }
 }
 
-fn websocket_event_to_sse(event_type: &str, event: &Value) -> Result<Vec<u8>, V3ProviderError> {
-    let data =
-        serde_json::to_string(event).map_err(|error| V3ProviderError::WebSocketProtocol {
-            request_id: "unknown".to_string(),
-            provider_id: "unknown".to_string(),
-            reason: error.to_string(),
-        })?;
+struct WebSocketSseState {
+    connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+    request_id: String,
+    provider_id: String,
+    cancellation: Option<V3ProviderCancellation>,
+    emit_done: bool,
+    finished: bool,
+}
+
+impl Drop for WebSocketSseState {
+    fn drop(&mut self) {
+        if !self.finished {
+            *self.connection = None;
+        }
+    }
+}
+
+fn websocket_sse_stream(
+    connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+    request_id: String,
+    provider_id: String,
+    cancellation: Option<V3ProviderCancellation>,
+) -> V3ProviderSseStream {
+    let state = WebSocketSseState {
+        connection,
+        request_id,
+        provider_id,
+        cancellation,
+        emit_done: false,
+        finished: false,
+    };
+    Box::pin(stream::unfold(state, |mut state| async move {
+        loop {
+            if state.emit_done {
+                state.emit_done = false;
+                state.finished = true;
+                return Some((Ok(b"data: [DONE]\n\n".to_vec()), state));
+            }
+            if state.finished {
+                return None;
+            }
+
+            let next = match state.connection.as_mut() {
+                Some(socket) => {
+                    next_websocket_message(
+                        socket,
+                        state.cancellation.clone(),
+                        &state.request_id,
+                        &state.provider_id,
+                    )
+                    .await
+                }
+                None => Err(websocket_protocol_error(
+                    &state.request_id,
+                    &state.provider_id,
+                    "WebSocket session is unavailable",
+                )),
+            };
+            let message = match next {
+                Ok(Some(message)) => message,
+                Ok(None) => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((
+                        Err(websocket_protocol_error(
+                            &state.request_id,
+                            &state.provider_id,
+                            "connection closed before terminal response event",
+                        )),
+                        state,
+                    ));
+                }
+                Err(error) => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((Err(error), state));
+                }
+            };
+            let bytes = match message {
+                Message::Text(text) => text.as_bytes().to_vec(),
+                Message::Binary(bytes) => bytes.to_vec(),
+                Message::Ping(payload) => {
+                    let result = match state.connection.as_mut() {
+                        Some(socket) => socket.send(Message::Pong(payload)).await,
+                        None => {
+                            state.finished = true;
+                            return Some((
+                                Err(websocket_protocol_error(
+                                    &state.request_id,
+                                    &state.provider_id,
+                                    "WebSocket session is unavailable",
+                                )),
+                                state,
+                            ));
+                        }
+                    };
+                    if let Err(error) = result {
+                        *state.connection = None;
+                        state.finished = true;
+                        return Some((
+                            Err(websocket_transport_error(
+                                &state.request_id,
+                                &state.provider_id,
+                                error,
+                            )),
+                            state,
+                        ));
+                    }
+                    continue;
+                }
+                Message::Pong(_) | Message::Frame(_) => continue,
+                Message::Close(_) => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((
+                        Err(websocket_protocol_error(
+                            &state.request_id,
+                            &state.provider_id,
+                            "connection closed before terminal response event",
+                        )),
+                        state,
+                    ));
+                }
+            };
+            let server_event: Value = match serde_json::from_slice(&bytes) {
+                Ok(event) => event,
+                Err(error) => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((
+                        Err(websocket_protocol_error(
+                            &state.request_id,
+                            &state.provider_id,
+                            error,
+                        )),
+                        state,
+                    ));
+                }
+            };
+            let event_type = match server_event.get("type").and_then(Value::as_str) {
+                Some(event_type) => event_type,
+                None => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((
+                        Err(websocket_protocol_error(
+                            &state.request_id,
+                            &state.provider_id,
+                            "server event is missing type",
+                        )),
+                        state,
+                    ));
+                }
+            };
+            if let Some(error) = websocket_server_event_error(
+                event_type,
+                &server_event,
+                &state.request_id,
+                &state.provider_id,
+            ) {
+                *state.connection = None;
+                state.finished = true;
+                return Some((Err(error), state));
+            }
+            let frame = match websocket_event_to_sse(
+                event_type,
+                &server_event,
+                &state.request_id,
+                &state.provider_id,
+            ) {
+                Ok(frame) => frame,
+                Err(error) => {
+                    *state.connection = None;
+                    state.finished = true;
+                    return Some((Err(error), state));
+                }
+            };
+            if event_type == "response.completed" {
+                state.emit_done = true;
+            }
+            return Some((Ok(frame), state));
+        }
+    }))
+}
+
+async fn next_websocket_message(
+    socket: &mut ResponsesWebSocket,
+    cancellation: Option<V3ProviderCancellation>,
+    request_id: &str,
+    provider_id: &str,
+) -> Result<Option<Message>, V3ProviderError> {
+    let next = match cancellation {
+        Some(cancellation) => {
+            tokio::select! {
+                _ = cancellation.cancelled() => {
+                    let _ = socket.close(None).await;
+                    return Err(V3ProviderError::ClientDisconnect {
+                        request_id: request_id.to_string(),
+                        provider_id: provider_id.to_string(),
+                    });
+                }
+                next = socket.next() => next,
+            }
+        }
+        None => socket.next().await,
+    };
+    next.transpose()
+        .map_err(|error| websocket_transport_error(request_id, provider_id, error))
+}
+
+fn websocket_server_event_error(
+    event_type: &str,
+    server_event: &Value,
+    request_id: &str,
+    provider_id: &str,
+) -> Option<V3ProviderError> {
+    if event_type == "error" {
+        let error = server_event.get("error").unwrap_or(server_event);
+        return Some(V3ProviderError::WebSocketProviderEvent {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            status: server_event
+                .get("status")
+                .and_then(Value::as_u64)
+                .and_then(|status| u16::try_from(status).ok()),
+            code: error
+                .get("code")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            message: error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("provider WebSocket error")
+                .to_string(),
+        });
+    }
+    if matches!(event_type, "response.failed" | "response.incomplete") {
+        return Some(V3ProviderError::WebSocketProviderEvent {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            status: None,
+            code: Some(event_type.to_string()),
+            message: server_event
+                .pointer("/response/error/message")
+                .or_else(|| server_event.pointer("/response/incomplete_details/reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("provider response did not complete")
+                .to_string(),
+        });
+    }
+    None
+}
+
+fn websocket_event_to_sse(
+    event_type: &str,
+    event: &Value,
+    request_id: &str,
+    provider_id: &str,
+) -> Result<Vec<u8>, V3ProviderError> {
+    let data = serde_json::to_string(event)
+        .map_err(|error| websocket_protocol_error(request_id, provider_id, error))?;
     Ok(format!("event: {event_type}\ndata: {data}\n\n").into_bytes())
 }
 

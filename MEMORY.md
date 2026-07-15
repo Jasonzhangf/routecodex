@@ -3303,6 +3303,12 @@
 - Managed lifecycle terminal cleanup must also validate control ownership before deleting sockets: control instance ID must match the expected declaration and socket path must equal that instance's canonical managed socket. A foreign/corrupted control record fails closed and leaves the foreign socket intact.
 - Focused red/green evidence covers failed rebind truth preservation, non-terminal lifecycle cache preservation, and foreign control-socket preservation; continuation JSON/SSE and managed CLI lifecycle regressions remain green.
 
+# 2026-07-15 V3 WebSocket SSE incremental transport invariant
+
+- Provider Responses WebSocket v2 SSE must return an incremental stream immediately after the request event is sent. It must not wait for response.completed or accumulate server events into a Vec before returning.
+- The stream owns the single connection guard until terminal drain. After response.completed it emits exactly one [DONE]; only a fully drained terminal stream keeps the connection reusable. Early stream drop, protocol/provider error, closed socket, or client disconnect discards the connection.
+- Controlled positive evidence holds response.completed behind a signal and proves transport send plus the first delta frame complete before terminal release. Source/mutation gates reject frame accumulation, collect-to-Vec, fallback, and HTTP retry.
+
 # 2026-07-15 V3 remote continuation is transport-bound
 
 - `remote_continuation` is not a model-only capability. V3 Config must reject it unless the provider declares Responses `websocket_v2` plus an explicit `ws://` or `wss://` endpoint.

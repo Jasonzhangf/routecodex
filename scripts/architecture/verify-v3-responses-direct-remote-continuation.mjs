@@ -86,6 +86,10 @@ for (const [owner, text, phrases] of [
     'Value::String("response.create".to_string())',
     'event_type == "error"',
     'event_type != "response.completed"',
+    'fn websocket_sse_stream(',
+    'OwnedMutexGuard<Option<ResponsesWebSocket>>',
+    'stream::unfold(state, |mut state| async move',
+    'impl Drop for WebSocketSseState',
     'websocket_event_to_sse',
   ]],
   [serverPath, server, [
@@ -111,6 +115,7 @@ for (const [owner, text, phrases] of [
   [websocketTestPath, websocketTests, [
     'websocket_v2_reuses_one_connection_for_exact_incremental_continuation',
     'websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_fallback',
+    'websocket_v2_sse_returns_first_frame_before_terminal_event',
     'previous_response_id',
     'data: [DONE]',
   ]],
@@ -161,6 +166,10 @@ forbid(providerTransport, providerTransportPath, [
   /fallback/i,
   /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
   /previous_response_id[\s\S]{0,200}null/,
+  /let\s+mut\s+sse_frames\s*=\s*Vec::new\s*\(\s*\)/,
+  /sse_frames\.push\s*\(/,
+  /stream::iter\s*\(\s*sse_frames/,
+  /collect\s*::<\s*Vec/,
 ]);
 
 const resp04 = runtime.indexOf('trace.push("V3HubRespContinuation04Committed")');
