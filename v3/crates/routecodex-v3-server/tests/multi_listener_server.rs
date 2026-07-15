@@ -361,6 +361,60 @@ async fn start_controlled_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+async fn controlled_anthropic_wire_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            accept: headers
+                .get("accept")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body,
+        })
+        .unwrap();
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"id":"resp_anthropic_json","status":"completed","output":[{"type":"output_text","text":"anthropic controlled"}]}"#,
+        ))
+        .unwrap()
+}
+
+async fn start_controlled_anthropic_wire_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_anthropic_wire_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
 #[allow(clippy::result_large_err)]
 async fn start_controlled_continuation_websocket() -> (
     String,
@@ -519,6 +573,139 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
         assert_eq!(body["error"]["target_exhausted"], true);
     }
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn entry_protocol_binding_dispatches_pending_and_relay_without_body_leakage() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_wire_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-entry-binding");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec![
+            "responses".to_string(),
+            "anthropic".to_string(),
+            "gemini".to_string(),
+            "openai_chat".to_string(),
+        ];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    let pending = client
+        .post(format!("{base}/v1beta/models/test/generateContent"))
+        .json(&json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}],"stream":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pending.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        pending.headers()["x-routecodex-v3-entry-protocol"],
+        "gemini"
+    );
+    assert_eq!(
+        pending.headers()["x-routecodex-v3-execution-mode"],
+        "pending_not_implemented"
+    );
+    assert_eq!(
+        pending.headers()["x-routecodex-v3-pending-owner"],
+        "execute_v3_foundation_pending_runtime"
+    );
+    assert_eq!(
+        pending.headers()["x-routecodex-v3-pending-resource"],
+        "v3.protocol.pending_projection"
+    );
+    let pending_body: Value = pending.json().await.unwrap();
+    assert_eq!(pending_body["error"]["code"], "not_implemented");
+    let serialized_pending = serde_json::to_string(&pending_body).unwrap();
+    for forbidden in [
+        "entry_protocol_bindings",
+        "protocol_profile_owner",
+        "pending_owner_symbol",
+        "pending_not_implemented",
+        "metadata_center",
+    ] {
+        assert!(
+            !serialized_pending.contains(forbidden),
+            "pending body must not leak {forbidden}"
+        );
+    }
+
+    let anthropic = client
+        .post(format!("{base}/v1/messages"))
+        .json(&json!({
+            "model":"client-test",
+            "max_tokens":64,
+            "messages":[{"role":"user","content":"hello"}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let anthropic_status = anthropic.status();
+    let anthropic_trace = anthropic.headers()["x-routecodex-v3-node-trace"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let anthropic_body_text = anthropic.text().await.unwrap();
+    assert_eq!(
+        anthropic_status,
+        StatusCode::OK,
+        "Anthropic Relay response body: {anthropic_body_text}"
+    );
+    assert!(anthropic_trace.contains("V3HubReqExecution05Planned"));
+    let anthropic_body: Value = serde_json::from_str(&anthropic_body_text).unwrap();
+    assert_eq!(anthropic_body["content"][0]["text"], "anthropic controlled");
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some("Bearer secret-entry-binding")
+    );
+    assert_eq!(capture.body["model"], "wire-test");
+    assert_eq!(capture.body["stream"], false);
+    assert!(capture.body.get("metadata_center").is_none());
+
+    let mut disabled_manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    for server in disabled_manifest.servers.values_mut() {
+        server.endpoints = vec!["responses".to_string()];
+    }
+    let disabled_handle = spawn_v3_server_aggregate(disabled_manifest).await.unwrap();
+    let disabled_base = format!("http://{}", disabled_handle.listeners[0].addr);
+    let disabled = client
+        .post(format!(
+            "{disabled_base}/v1beta/models/test/generateContent"
+        ))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(disabled.status(), StatusCode::NOT_IMPLEMENTED);
+    assert!(disabled
+        .headers()
+        .get("x-routecodex-v3-pending-owner")
+        .is_none());
+    let disabled_body: Value = disabled.json().await.unwrap();
+    assert_eq!(disabled_body["error"]["code"], "endpoint_not_enabled");
+
+    let unknown = client
+        .post(format!("{disabled_base}/v1/unknown"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    assert!(unknown
+        .headers()
+        .get("x-routecodex-v3-pending-owner")
+        .is_none());
+    let unknown_body: Value = unknown.json().await.unwrap();
+    assert_eq!(unknown_body["error"]["code"], "path_not_found");
+
+    disabled_handle.shutdown().await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]

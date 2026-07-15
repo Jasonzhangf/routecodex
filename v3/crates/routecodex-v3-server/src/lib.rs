@@ -1,6 +1,6 @@
 use axum::body::{to_bytes, Body};
 use axum::extract::{Request, State};
-use axum::http::{header::CONTENT_TYPE, HeaderMap, Response, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use routecodex_v3_config::{
@@ -337,8 +337,14 @@ async fn pending_endpoint(
         responses_direct_output_response(frame)
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
         let pending_not_implemented = execution_mode.as_str();
-        let pending_owner =
-            pending_owner_symbol.unwrap_or_else(|| "missing_pending_owner".to_string());
+        let Some(pending_owner) = pending_owner_symbol else {
+            return error_output_response(project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                format!(
+                    "entry protocol {entry_protocol} pending binding lacks explicit pending owner"
+                ),
+            ));
+        };
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -350,12 +356,12 @@ async fn pending_endpoint(
             },
             &state.debug,
         );
-        let _pending_projection = (
-            V3_PROTOCOL_PENDING_PROJECTION_RESOURCE,
+        pending_binding_output_response(
+            output,
+            &entry_protocol,
             pending_not_implemented,
-            pending_owner,
-        );
-        foundation_output_response(output)
+            &pending_owner,
+        )
     } else {
         error_output_response(project_http_input_error(
             V3HttpBoundaryErrorKind::EndpointNotEnabled,
@@ -365,6 +371,44 @@ async fn pending_endpoint(
             ),
         ))
     }
+}
+
+fn pending_binding_output_response(
+    output: V3FoundationRuntimeOutput,
+    entry_protocol: &str,
+    pending_not_implemented: &str,
+    pending_owner: &str,
+) -> Response<Body> {
+    let mut response = foundation_output_response(output);
+    insert_v3_projection_header(
+        response.headers_mut(),
+        "x-routecodex-v3-entry-protocol",
+        entry_protocol,
+    );
+    insert_v3_projection_header(
+        response.headers_mut(),
+        "x-routecodex-v3-execution-mode",
+        pending_not_implemented,
+    );
+    insert_v3_projection_header(
+        response.headers_mut(),
+        "x-routecodex-v3-pending-owner",
+        pending_owner,
+    );
+    insert_v3_projection_header(
+        response.headers_mut(),
+        "x-routecodex-v3-pending-resource",
+        V3_PROTOCOL_PENDING_PROJECTION_RESOURCE,
+    );
+    response
+}
+
+fn insert_v3_projection_header(headers: &mut HeaderMap, name: &'static str, value: &str) {
+    headers.insert(
+        name,
+        HeaderValue::from_str(value)
+            .expect("V3 binding projection header value is validated ASCII"),
+    );
 }
 
 fn build_responses_direct_continuation_scope(
