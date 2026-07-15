@@ -3317,7 +3317,6 @@
 - Runtime must reuse one Provider transport instance across the two client HTTP turns; creating a new transport per request loses connection-local `store=false` continuation truth.
 - Live completion requires a provider-verified WebSocket endpoint and real managed JSON/SSE two-turn replay. Guessing an endpoint, retaining HTTP remote-continuation capability, or using Relay/local materialization is forbidden.
 
-
 # 2026-07-15 V3 Anthropic Relay local continuation truth
 
 - Anthropic Relay local continuation is Rust Runtime owned. The legal lifecycle is `Resp04 save -> immutable store interval -> next Req04 exact-scope restore -> terminal release`; Server, OpenAI Chat Runtime, Responses Direct/remote continuation, Provider WebSocket, SSE framing, and handler projection must not own this truth.
@@ -3325,6 +3324,14 @@
 - Restore condition: next Anthropic `tool_result.tool_use_id` must match entry endpoint, session, conversation, port, routing group, owner, and expiry. Multiple tool results must resolve to the same immutable canonical context before Req04 prepends saved reasoning/function_call before function_call_output.
 - Error condition: scope mismatch fails before provider send; provider error after restore enters Error01-06 and retains saved truth. No owner/scope/store/debug/metadata/auth/route-control field may enter provider or client normal payload.
 - Verified source: controlled JSON two-turn, SSE-first two-turn, multi-tool alias, scope mismatch, provider error retention, local store matrix, verifier, and mutation gates. Live provider compatibility, install/restart, and production cutover are not proven by this source closeout.
+
+# 2026-07-15 V3 Responses WebSocket v2 transport hardening verified closeout
+
+- Provider Responses WebSocket v2 connection reuse is legal only after full terminal drain. Early SSE drop, protocol/provider error, closed socket, read cancellation, cancellation before connect/send, and client disconnect must clear the cached connection before returning or dropping the stream.
+- JSON WebSocket protocol errors are connection-poisoning events: malformed JSON, missing `type`, `response.completed` without `response`, and response serialization failure must set the Provider-owned connection slot to `None` before surfacing the typed Provider error.
+- Controlled evidence now covers reuse, early drop, provider/protocol error matrix, disconnect, strict in-flight serialization, ping/pong, binary events, split UTF-8 fragmented frames, and incremental SSE first-frame-before-terminal. Source/mutation gates reject Vec/collect/full materialization, HTTP retry/fallback, Server socket ownership, missing connection clear, and removal of the concurrency case.
+- Current verification passed: WebSocket focused 9/9, Provider package 9+4+9 plus doctests, dedicated verifier, 6 red mutations, V3 fmt, Clippy, full V3 workspace, module/Rust-only, architecture docs/resource map, and diff check. Live/provider endpoint testing remains outside this source-controlled hardening claim.
+
 # 2026-07-15 V3 OpenAI Chat Relay controlled Runtime truth
 
 - OpenAI Chat Relay controlled Runtime is Rust-owned by `v3.openai_chat_relay_runtime_integration`: Server `/v1/chat/completions` calls `execute_v3_openai_chat_relay_runtime_with_default_transport`, then returns the Runtime-provided `V3OpenAiChatRelayClientBody::{Json,Sse}`. Server must not infer client body type from the original request `stream` flag.

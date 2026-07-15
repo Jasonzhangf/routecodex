@@ -535,18 +535,24 @@ impl ProviderResponsesTransport {
                     ));
                 }
             };
-            let server_event: Value = serde_json::from_slice(&bytes)
-                .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
-            let event_type = server_event
-                .get("type")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    websocket_protocol_error(
+            let server_event: Value = match serde_json::from_slice(&bytes) {
+                Ok(event) => event,
+                Err(error) => {
+                    *connection = None;
+                    return Err(websocket_protocol_error(&request_id, &provider_id, error));
+                }
+            };
+            let event_type = match server_event.get("type").and_then(Value::as_str) {
+                Some(event_type) => event_type,
+                None => {
+                    *connection = None;
+                    return Err(websocket_protocol_error(
                         &request_id,
                         &provider_id,
                         "server event is missing type",
-                    )
-                })?;
+                    ));
+                }
+            };
 
             if event_type == "error" {
                 *connection = None;
@@ -589,15 +595,24 @@ impl ProviderResponsesTransport {
                 continue;
             }
 
-            let response = server_event.get("response").ok_or_else(|| {
-                websocket_protocol_error(
-                    &request_id,
-                    &provider_id,
-                    "response.completed is missing response",
-                )
-            })?;
-            let body = serde_json::to_vec(response)
-                .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
+            let response = match server_event.get("response") {
+                Some(response) => response,
+                None => {
+                    *connection = None;
+                    return Err(websocket_protocol_error(
+                        &request_id,
+                        &provider_id,
+                        "response.completed is missing response",
+                    ));
+                }
+            };
+            let body = match serde_json::to_vec(response) {
+                Ok(body) => body,
+                Err(error) => {
+                    *connection = None;
+                    return Err(websocket_protocol_error(&request_id, &provider_id, error));
+                }
+            };
             return Ok(V3ProviderResp14Raw::from_json(
                 request_id,
                 provider_id,

@@ -911,6 +911,57 @@ features:
       - P6 deletion
       - global install restart release and production replacement
 
+  - feature_id: v3.responses_websocket_v2_transport_hardening
+    owner_crates: [routecodex-v3-provider-responses]
+    owner_files:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
+    resource_bindings:
+      - v3.provider.responses_transport_capability
+      - v3.provider.responses_websocket_connection
+      - v3.provider.transport_request
+      - v3.response.provider_raw
+      - v3.error.chain
+    mainline_bindings:
+      - v3-ws2-01
+      - v3-ws2-02
+    entry_symbols:
+      - ProviderResponsesTransport::send_websocket_v2
+      - websocket_sse_stream
+      - next_websocket_message
+    allowed_paths:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
+      - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs
+      - scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1
+      - v3/crates/routecodex-v3-server
+      - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+      - src
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-responses-websocket-v2-transport-hardening
+      - npm run verify:v3-responses-websocket-v2-transport-hardening
+      - npm run test:v3-responses-websocket-v2-transport-hardening-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: source_and_controlled_transport_lifecycle_verified
+    pending_runtime:
+      - live provider WebSocket endpoint compatibility
+
   - feature_id: v3.anthropic_relay_local_continuation_integration
     owner_crates: [routecodex-v3-runtime]
     owner_files:
@@ -967,6 +1018,7 @@ features:
     pending_runtime:
       - live provider compatibility
       - global install restart and production cutover
+
   - feature_id: v3.openai_chat_relay_runtime_integration
     owner_crates: [routecodex-v3-runtime, routecodex-v3-server]
     owner_files:

@@ -745,6 +745,41 @@ chains:
         resource_flow: { consumes: [v3.response.client_payload], produces: [v3.response.client_payload], side_channel_reads: [], side_channel_writes: [] }
         status: anchored
 
+  - chain_id: v3.responses.websocket_v2.transport_hardening
+    owner_feature_id: v3.responses_websocket_v2_transport_hardening
+    summary: "Provider-owned WebSocket v2 request/session lifecycle; only terminal drain permits exact-session reuse, while early drop, error, disconnect, and protocol failure discard the connection."
+    edges:
+      - step_id: v3-ws2-01
+        from_node: V3Transport13ResponsesRequest
+        to_node: V3ProviderResponsesWebSocketSession
+        caller_symbol: ResponsesTransport::send
+        caller_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+        callee_symbol: ProviderResponsesTransport::send_websocket_v2
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+        owner_feature_id: v3.responses_websocket_v2_transport_hardening
+        binding_kind: provider_websocket_v2_transport_source
+        resource_flow:
+          consumes: [v3.provider.transport_request, v3.provider.responses_transport_capability]
+          produces: [v3.provider.responses_websocket_connection]
+          side_channel_reads: [v3.provider.responses_transport_capability]
+          side_channel_writes: [v3.provider.responses_websocket_connection]
+        status: anchored
+      - step_id: v3-ws2-02
+        from_node: V3ProviderResponsesWebSocketSession
+        to_node: V3ProviderResp14Raw
+        caller_symbol: ProviderResponsesTransport::send_websocket_v2
+        caller_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+        callee_symbol: websocket_sse_stream
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+        owner_feature_id: v3.responses_websocket_v2_transport_hardening
+        binding_kind: provider_websocket_v2_transport_source
+        resource_flow:
+          consumes: [v3.provider.responses_websocket_connection]
+          produces: [v3.response.provider_raw]
+          side_channel_reads: [v3.provider.responses_websocket_connection]
+          side_channel_writes: [v3.error.chain]
+        status: anchored
+
   - chain_id: v3.anthropic_relay.local_continuation
     owner_feature_id: v3.anthropic_relay_local_continuation_integration
     summary: "Resp04 local canonical save through the immutable interval to next Req04 exact-scope restore and governance."
@@ -779,6 +814,7 @@ chains:
         owner_feature_id: v3.anthropic_relay_local_continuation_integration
         resource_flow: { consumes: [v3.continuation.local_context_truth, v3.request.normal_payload, v3.hub.continuation_ownership], produces: [v3.request.normal_payload], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [] }
         status: anchored
+
   - chain_id: v3.openai_chat_relay.controlled_runtime
     owner_feature_id: v3.openai_chat_relay_runtime_integration
     summary: "Controlled /v1/chat/completions Relay through the sole Hub v1 request/response lifecycle; SSE is incrementally projected by Runtime and transported by Server without materialization."

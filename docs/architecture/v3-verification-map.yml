@@ -967,6 +967,49 @@ features:
       runtime: "The current 5555 same-entry two-turn Responses request completes and samples/logs prove the actual two-turn provider-owned continuation."
       forbidden_claim: "Do not claim Relay/local materialization, P6 expansion, V2 change, credential/config mutation, global install, restart, or production replacement."
 
+  - feature_id: v3.responses_websocket_v2_transport_hardening
+    status: source_and_controlled_transport_lifecycle_verified
+    change_risk: high
+    owner_kind: rust_v3_provider_transport_runtime
+    owner_scope: "Provider-owned WebSocket v2 connection/session guard, incremental event framing, cancellation, terminal reuse, and fail-closed discard lifecycle"
+    owner_modules:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
+    design:
+      - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_contract:
+      - terminal drain permits exact-session reuse
+      - early drop error and disconnect discard the connection
+      - provider model auth alias and WebSocket URL form the connection identity
+      - one owned guard permits only one in-flight response per connection
+      - SSE emits the first provider event before terminal and never materializes the full response
+      - transport handles ping pong text binary malformed missing type failed incomplete error and close-before-terminal
+      - cancellation before connect before reused send and during read remains client_disconnect and discards any active connection
+      - split UTF-8 WebSocket frames reassemble into one valid terminal event
+      - provider errors stay typed and no HTTP retry fallback Hub business semantics or Server socket owner exists
+    required_gates:
+      - npm run test:v3-responses-websocket-v2-transport-hardening
+      - npm run verify:v3-responses-websocket-v2-transport-hardening
+      - npm run test:v3-responses-websocket-v2-transport-hardening-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    required_runtime_evidence:
+      - "Focused controlled matrix covers exact-session reuse, early SSE drop, provider/protocol failures, read cancellation, first-frame latency, and concurrent serialization."
+      - "Mutation gate rejects retained dirty sockets, event accumulation, HTTP retry/fallback, Server socket ownership, and missing concurrency coverage."
+    completion_rule:
+      source: "Complete when focused positive/negative controlled tests, mutation/source gates, V3 maps, provider package, fmt, Clippy, full workspace, module/Rust-only, architecture review, and diff checks pass."
+      runtime: "Evidence is controlled loopback WebSocket only; live provider endpoint compatibility is not claimed."
+      forbidden_claim: "Do not claim Hub continuation changes, Anthropic/OpenAI Chat changes, Server socket ownership, live provider compatibility, install, restart, or production cutover."
+
   - feature_id: v3.anthropic_relay_local_continuation_integration
     status: controlled_json_sse_error_isolation_save_restore_release_verified
     change_risk: critical
@@ -1012,6 +1055,7 @@ features:
       source: "Complete when controlled JSON/SSE/error/isolation tests, store matrix, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
       runtime: "Controlled Rust Runtime replay only; live provider compatibility is not claimed."
       forbidden_claim: "Do not claim OpenAI Chat, Responses Direct/remote continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
+
   - feature_id: v3.openai_chat_relay_runtime_integration
     status: controlled_json_sse_error_isolation_verified
     change_risk: critical

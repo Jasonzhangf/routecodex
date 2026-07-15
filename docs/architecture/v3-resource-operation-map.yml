@@ -239,19 +239,19 @@ resources:
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, V3RemoteContinuationStore]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.provider.responses_websocket_connection
     resource_kind: runtime_handle
     lifecycle: v3.provider.responses_websocket_v2_connection_local_cache
     owner_crate: routecodex-v3-provider-responses
-    owner_node: binding_pending
-    identity: [providerId, authAlias, websocketEndpoint]
-    allowed_writers: [routecodex-v3-provider-responses]
-    allowed_readers: [routecodex-v3-provider-responses]
+    owner_node: ProviderResponsesTransport
+    identity: [providerId, modelId, authAlias, websocketEndpoint]
+    allowed_writers: [ProviderResponsesTransport]
+    allowed_readers: [ProviderResponsesTransport]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, V3RemoteContinuationStore]
     may_enter_provider_body: false
     may_enter_client_body: false
-    binding_status: binding_pending
+    binding_status: anchored
   - resource_id: v3.response.provider_raw
     resource_kind: provider_response
     lifecycle: v3.responses_direct.mainline
@@ -708,6 +708,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+
   - resource_id: v3.openai_chat.client_sse_stream
     resource_kind: client_transport_projection
     lifecycle: v3.openai_chat_relay.controlled_runtime
