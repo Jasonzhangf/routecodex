@@ -3205,3 +3205,11 @@
 - Unique owner is `v3/crates/routecodex-v3-runtime/src/hub_v1.rs` via `compile_v3_hub_relay_response_hooks()`. Resp02 only checks Relay/object response and records JSON/SSE kind; Resp03 alone harvests tool calls, servertool response action, and terminality; Resp04 alone commits `None` or one local canonical context from Resp03 finalized truth.
 - Response payload ownership is `Arc<Value>`; canonical local context uses exactly one `Arc::clone` and the source gate rejects full response/body/context materialization in governance, SSE repair, Resp05, Server handler, required_action inference, and second response exits.
 - Verification truth for this slice: focused Rust response test, H1 hub tests, H1 contract test, response semantic/source red gates, V3 architecture/resource/module/rust-only/static-hook/doc gates, compile-fail, cargo fmt, clippy, workspace tests, and diff check passed in a clean verification worktree containing only the staged response slice. The shared worktree also contains unrelated concurrent Config/request/resource edits and must not use those dirty files as response-slice proof.
+# 2026-07-15: V3 Relay request source slice Req01-Req04 is source-verified
+
+- Marker: `routecodex-v3-relay-request-source-slice-verified-20260715`.
+- Unique owner is `v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs`; scope ends at `V3HubReqChatProcess04Governed`.
+- Req02 is lossless Chat normalization; Req03 only classifies new/remote/local continuation owner with exact entry/server/group/session scope and rejects dual local+remote truth; Req04 is the sole local-context restore/tool-history/servertool request governance point.
+- Request payload moves forward without full `Value` clone or JSON round trip. Local canonical context is `Arc<Value>` and only Req04 restore performs one pointer clone.
+- Required proof is focused Rust request tests plus request source/red fixtures, compile-fail topology locks, architecture/resource/module/rust-only/static-hook/docs/fmt, Clippy, and the V3 workspace.
+- Do not cite this marker as Req05-Req09, response, resource/hook config, live Relay, continuation E2E, Server cutover, P6 deletion, global install, `~/.rcc`, or production completion.

@@ -138,6 +138,52 @@ features:
       runtime: "No live Relay runtime is claimed from this feature; request/response/resource worker implementation and controlled replay remain pending."
       forbidden_claim: "Do not claim live Relay, usable continuation runtime, servertool runtime hooks, Hub v1 cutover, P6 deletion, additional protocols, global install, or production replacement."
 
+  - feature_id: v3.hub_relay_request_semantics
+    status: request_source_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_request_source_slice
+    owner_scope: "Relay request semantic source slice from V3HubReqInbound01ClientRaw through V3HubReqChatProcess04Governed only"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - scripts/architecture/verify-v3-relay-request-semantics.mjs
+      - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-request-semantics-test-design.md
+    required_contract:
+      - Req01 and Req02 perform lossless entry normalization into Chat semantic protocol only
+      - Req03 classifies new remote-provider and RouteCodex-local continuation ownership and scope only
+      - Req03 rejects ambiguous local-plus-remote ownership instead of choosing an implicit precedence
+      - Req03 never restores local context, repairs history, runs servertool hooks, or enters Req04 governance
+      - Req04 is the only request-side local continuation restore point and runs tool/history/servertool governance after restore
+      - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
+      - required hook failures and malformed tool outputs are explicit fail-fast errors
+      - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
+    required_gates:
+      - npm run test:v3-relay-request-semantics
+      - npm run verify:v3-relay-request-semantics
+      - npm run test:v3-relay-request-semantics-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+    completion_rule:
+      source: "Relay request-side source slice is complete when focused Rust tests prove Req01-Req04 behavior and source/compile-fail gates reject Req03 restore, Req04 bypass, dynamic hooks, shortcut lifecycle, and payload copy-budget violations."
+      runtime: "No live Relay runtime, Req05-Req09 execution, response slice, resource/hook config, or continuation end-to-end restore is claimed."
+      forbidden_claim: "Do not claim response-side completion, resource/hook config completion, live Relay, continuation end-to-end completion, Server entry cutover, P6 deletion, global install, or production replacement."
+
   - feature_id: v3.hub_relay_response_semantics
     status: response_source_slice_verified
     change_risk: critical
