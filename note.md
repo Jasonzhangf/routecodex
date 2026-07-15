@@ -30762,6 +30762,14 @@ Pure Rust NAPI candidates:
 - SSE fix: OpenAI Chat SSE uses the shared incremental decoder, emits client frames before provider terminal, requires terminal `finish_reason` before `[DONE]`, requires `[DONE]` before stream end, and rejects frames after `[DONE]`. Server uses `Body::from_stream` and does not parse Chat semantics or materialize a full Vec/body.
 - Controlled evidence: Runtime focused 6/6; Server loopback JSON/SSE/error/isolation 1/1; source verifier ok; 7 mutation fixtures rejected; module/Rust-only/architecture/resource/wiki/browser gates ok; cargo fmt check, Clippy workspace, full V3 workspace, and git diff check ok.
 - Remaining boundary: no live provider compatibility, global install/restart, release, or production cutover claim.
+
+# 2026-07-16: SSE transport core V2 parser retirement closeout
+
+- Boundary correction honored: release/global install copying `v3/` is expected because the V3 bin/tests must be globally installable; this closeout did not edit install/restart/live config.
+- V2 `hub_resp_inbound_sse_stream_sniffer` no longer owns `parse_sse_line`, `assemble_sse_event`, or NAPI `assembleSseEventFromLinesJson`. It now decodes through shared `SseIncrementalDecoder` and projects semantic JSON from shared `SseField` values.
+- Maps updated so `sse.stream_parse_boundary` only lists parse stream/event NAPI owners, not a retired line assembler.
+- V2 old replay added in `tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts`: marker `direct-passthrough-sse-20260713T055458`, text `PASSTHROUGH_SSE_OK`, model/reasoning/event order/`[DONE]`, and client keepalive-stripped bytes equal provider body.
+- Current evidence: focused V2 sniffer Rust 19/19; duplicate parser residue absent outside verifier forbidden literal list; `npm run build:native-hotpath`; V2 replay Jest 5/5; `test:sse-transport-core`; `test:v3-sse-transport-adapter`; SSE/shared/architecture/resource/function/mainline/review gates; shared fmt/SSE clippy; V3 fmt/clippy/controlled replay/workspace; `git diff --check` all passed.
 # 2026-07-15: 5520 provider 402 reroute reselected excluded direct-continuation provider
 
 - Live request `openai-responses-router-gpt-5.6-sol-20260715T210706792-538250-5993` proved 402 did enter ErrorErr05: log emitted `switch=exclude_and_reroute`, then second VR pass selected the same `cc.key1.gpt-5.5`, then projected 402 to client.

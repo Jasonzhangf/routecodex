@@ -1609,7 +1609,7 @@ resources:
     owner_feature_id: sse.stream_parse_boundary
     owner_node: SseParseResult
     allowed_readers: [sse.runtime_dispatch_plan, sse.event_type_validation_plan, sse.responses_decode_projection_payload]
-    allowed_writers: [assemble_sse_event_from_lines_json, parse_sse_event_with_config_json, parse_sse_stream_with_config_json, parse_sse_stream_chunk_with_config_json]
+    allowed_writers: [parse_sse_event_with_config_json, parse_sse_stream_with_config_json, parse_sse_stream_chunk_with_config_json]
     forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, route.selection]
     may_enter_provider_body: false
     may_enter_client_body: false

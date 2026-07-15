@@ -41,6 +41,39 @@ describe('SSE unified Rust runtime dispatch direct native owner', () => {
     expect(result).toMatchObject({ id: 'resp_1', object: 'response' });
   });
 
+  it('replays the V2 direct passthrough SSE sample through shared Rust transport', async () => {
+    const marker = 'direct-passthrough-sse-20260713T055458';
+    const providerFrames = [
+      'event: response.created\n'
+        + 'data: {"type":"response.created","response":{"id":"' + marker + '","object":"response","model":"gpt-test","status":"in_progress","reasoning":{"effort":"medium"},"output":[]}}\n\n',
+      'event: response.output_text.delta\n'
+        + 'data: {"type":"response.output_text.delta","response_id":"' + marker + '","delta":"PASSTHROUGH_SSE_OK"}\n\n',
+      'event: response.completed\n'
+        + 'data: {"type":"response.completed","response":{"id":"' + marker + '","object":"response","model":"gpt-test","status":"completed","reasoning":{"effort":"medium"},"output":[{"type":"output_text","text":"PASSTHROUGH_SSE_OK"}]}}\n\n',
+      'data: [DONE]\n\n',
+    ];
+    const clientFrames = [': keepalive\n\n', ...providerFrames];
+    const providerBody = providerFrames.join('');
+    const clientBody = await collectSseBodyText(buildReadableFromSseFrames(clientFrames));
+
+    const replayed = buildJsonFromSseDirectNative({
+      protocol: 'openai-responses',
+      requestId: marker,
+      model: 'gpt-test',
+      bodyText: providerBody,
+    });
+
+    expect(replayed).toMatchObject({
+      id: marker,
+      object: 'response',
+      model: 'gpt-test',
+    });
+    expect(JSON.stringify(replayed)).toContain('PASSTHROUGH_SSE_OK');
+    expect(normalizeClientTransportKeepalive(clientBody)).toBe(providerBody);
+    expect(providerBody).toContain('PASSTHROUGH_SSE_OK');
+    expect(providerBody).toContain('data: [DONE]');
+  });
+
   it('surfaces native unknown protocol errors instead of selecting a default protocol', () => {
     expect(() => buildJsonFromSseDirectNative({
       protocol: 'unknown-protocol',
@@ -64,3 +97,11 @@ describe('SSE unified Rust runtime dispatch direct native owner', () => {
     expect(chunks.join('')).toBe('data: 1\n\ndata: [DONE]\n\n');
   });
 });
+
+function normalizeClientTransportKeepalive(body: string): string {
+  return body
+    .split('\n\n')
+    .filter((frame) => frame.trim() !== ': keepalive')
+    .map((frame) => (frame.length > 0 ? frame + '\n\n' : ''))
+    .join('');
+}

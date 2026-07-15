@@ -7488,7 +7488,6 @@ owners:
       - SseParseResult
       - SseParserConfig
     canonical_builders:
-      - assemble_sse_event_from_lines_json
       - parse_sse_event_with_config_json
       - parse_sse_stream_with_config_json
       - parse_sse_stream_chunk_with_config_json
@@ -7508,7 +7507,7 @@ owners:
       - npm run verify:resource-operation-map
     migration_target: rust
     notes:
-      - "SSE parser semantics are Rust-owned; TS may only expose required native exports and must not recreate parser recovery or success synthesis."
+      - "SSE parser semantics are Rust-owned and consume shared transport fields; TS may only expose required native exports and must not recreate parser recovery or success synthesis."
 
   - feature_id: sse.event_type_validation
     status: active

@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sse_transport_core::{
     build_sse_transport_in_01_raw_chunk, build_sse_transport_out_04_from_sse_transport_in_03,
-    SseIncrementalDecoder, SseTransportLimits,
+    SseField, SseIncrementalDecoder, SseTransportLimits,
 };
 
 // feature_id: sse.event_type_validation
@@ -116,30 +116,8 @@ fn default_max_event_size() -> usize {
     1024 * 1024
 }
 
-fn parse_sse_line(line: &str) -> Option<(String, String)> {
-    if line.trim().is_empty() {
-        return None;
-    }
-    let colon_index = line.find(':');
-    match colon_index {
-        Some(index) => {
-            let field = line[..index].trim().to_string();
-            if field.is_empty() {
-                return None;
-            }
-            let value = if line.len() > index + 1 && line.as_bytes()[index + 1] == b' ' {
-                line[index + 2..].to_string()
-            } else {
-                line[index + 1..].trim().to_string()
-            };
-            Some((field, value))
-        }
-        None => Some((line.to_string(), String::new())),
-    }
-}
-
-fn assemble_sse_event(lines: &[String]) -> Option<RawSseEvent> {
-    if lines.is_empty() {
+fn raw_sse_event_from_fields(fields: &[SseField]) -> Option<RawSseEvent> {
+    if fields.is_empty() {
         return None;
     }
 
@@ -151,24 +129,22 @@ fn assemble_sse_event(lines: &[String]) -> Option<RawSseEvent> {
         timestamp: None,
     };
 
-    for line in lines {
-        let parsed = parse_sse_line(line);
-        if parsed.is_none() {
+    for field in fields {
+        let SseField::Named { name, value } = field else {
             continue;
-        }
-        let (field, value) = parsed.unwrap();
-        match field.as_str() {
-            "id" => event.id = Some(value),
-            "event" => event.event = value,
+        };
+        match name.as_str() {
+            "id" => event.id = Some(value.clone()),
+            "event" => event.event = value.clone(),
             "data" => {
                 if event.data.is_empty() {
-                    event.data = value;
+                    event.data = value.clone();
                 } else {
                     event.data.push('\n');
-                    event.data.push_str(&value);
+                    event.data.push_str(value);
                 }
             }
-            "retry" => event.retry = Some(value),
+            "retry" => event.retry = Some(value.clone()),
             "timestamp" => event.timestamp = value.parse::<i64>().ok(),
             _ => {}
         }
@@ -266,20 +242,63 @@ fn parse_sse_event_with_config(
     sse_text: &str,
     config: &SseParserConfigInput,
 ) -> SseParseResultOutput {
+    let max_event_size = config.max_event_size.max(1);
+    let limits = SseTransportLimits {
+        max_line_bytes: max_event_size,
+        max_frame_bytes: max_event_size,
+        max_buffer_bytes: max_event_size,
+    };
+    let mut decoder = SseIncrementalDecoder::new(limits);
+    let framed_text = if sse_text.ends_with("\n\n") || sse_text.ends_with("\r\n\r\n") {
+        sse_text.to_string()
+    } else {
+        format!("{sse_text}\n\n")
+    };
+    let mut frames = match decoder.push(build_sse_transport_in_01_raw_chunk(framed_text.as_bytes()))
+    {
+        Ok(frames) => frames,
+        Err(error) => {
+            return SseParseResultOutput {
+                success: false,
+                event: None,
+                error: Some(error.to_string()),
+                raw_data: sse_text.to_string(),
+            };
+        }
+    };
+    if frames.len() != 1 {
+        return SseParseResultOutput {
+            success: false,
+            event: None,
+            error: Some("Invalid SSE event format".to_string()),
+            raw_data: sse_text.to_string(),
+        };
+    }
+    let frame = frames.remove(0);
+    let encoded = build_sse_transport_out_04_from_sse_transport_in_03(&frame).into_bytes();
+    let event_text =
+        String::from_utf8(encoded).expect("validated SSE transport frame must remain UTF-8");
+    parse_sse_event_fields_with_config(
+        frame.frame().fields(),
+        event_text.trim_end_matches(['\r', '\n']).to_string(),
+        config,
+    )
+}
+
+fn parse_sse_event_fields_with_config(
+    fields: &[SseField],
+    raw_data: String,
+    config: &SseParserConfigInput,
+) -> SseParseResultOutput {
     let mut result = SseParseResultOutput {
         success: false,
         event: None,
         error: None,
-        raw_data: sse_text.to_string(),
+        raw_data,
     };
 
     let parse_result: Result<Value, String> = (|| {
-        let lines: Vec<String> = sse_text
-            .split('\n')
-            .map(|line| line.trim_end_matches('\r').to_string())
-            .collect();
-
-        let mut raw_event = match assemble_sse_event(&lines) {
+        let mut raw_event = match raw_sse_event_from_fields(fields) {
             Some(value) => value,
             None => {
                 return Err("Invalid SSE event format".to_string());
@@ -296,10 +315,10 @@ fn parse_sse_event_with_config(
             }
         }
 
-        if config.enable_strict_validation && sse_text.len() > config.max_event_size {
+        if config.enable_strict_validation && result.raw_data.len() > config.max_event_size {
             return Err(format!(
                 "Event size {} exceeds maximum {}",
-                sse_text.len(),
+                result.raw_data.len(),
                 config.max_event_size
             ));
         }
@@ -424,7 +443,11 @@ fn parse_sse_stream_chunk_with_config(
             let encoded = build_sse_transport_out_04_from_sse_transport_in_03(&frame).into_bytes();
             let event_text = String::from_utf8(encoded)
                 .expect("validated SSE transport frame must remain UTF-8");
-            parse_sse_event_with_config(event_text.trim_end_matches(['\r', '\n']), config)
+            parse_sse_event_fields_with_config(
+                frame.frame().fields(),
+                event_text.trim_end_matches(['\r', '\n']).to_string(),
+                config,
+            )
         })
         .collect::<Vec<_>>();
     let mut remaining_buffer = String::from_utf8(decoder.remaining_bytes().to_vec())
@@ -469,14 +492,6 @@ pub fn parse_json_object_candidate_json(raw_text: String, max_bytes: i64) -> Nap
 }
 
 #[napi]
-pub fn assemble_sse_event_from_lines_json(lines_json: String) -> NapiResult<String> {
-    let lines: Vec<String> =
-        serde_json::from_str(&lines_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = assemble_sse_event(&lines);
-    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
-}
-
-#[napi]
 pub fn parse_sse_event_with_config_json(
     sse_text: String,
     config_json: String,
@@ -513,9 +528,8 @@ pub fn parse_sse_stream_chunk_with_config_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        assemble_sse_event, infer_sse_event_type_from_data, parse_json_object_candidate,
-        parse_sse_event_with_config, parse_sse_stream_chunk_with_config,
-        parse_sse_stream_with_config, SseParserConfigInput,
+        infer_sse_event_type_from_data, parse_json_object_candidate, parse_sse_event_with_config,
+        parse_sse_stream_chunk_with_config, parse_sse_stream_with_config, SseParserConfigInput,
     };
     use serde_json::{json, Value};
 
@@ -532,29 +546,39 @@ mod tests {
     }
 
     #[test]
-    fn assemble_sse_event_joins_multi_data_lines() {
-        let lines = vec![
-            "event: response.output_text.delta".to_string(),
-            "id: 9".to_string(),
-            "data: {\"delta\":\"hello\"}".to_string(),
-            "data: {\"delta\":\" world\"}".to_string(),
-            "retry: 1000".to_string(),
-            "timestamp: 1730000000".to_string(),
-        ];
-        let parsed = assemble_sse_event(&lines).expect("event");
-        assert_eq!(parsed.event, "response.output_text.delta");
-        assert_eq!(parsed.id.as_deref(), Some("9"));
-        assert_eq!(parsed.data, "{\"delta\":\"hello\"}\n{\"delta\":\" world\"}");
-        assert_eq!(parsed.retry.as_deref(), Some("1000"));
-        assert_eq!(parsed.timestamp, Some(1730000000));
+    fn parse_sse_event_with_config_consumes_shared_transport_fields() {
+        let config = SseParserConfigInput {
+            enable_strict_validation: true,
+            max_event_size: 1024 * 1024,
+            allowed_event_types: vec!["response.output_text.delta".to_string()],
+        };
+        let result = parse_sse_event_with_config(
+            "event: response.output_text.delta\nid: 9\ndata: {\"delta\":\"hello\",\ndata: \"tail\":\" world\"}\nretry: 1000\ntimestamp: 1730000000",
+            &config,
+        );
+        assert!(result.success);
+        assert!(result
+            .raw_data
+            .contains("event: response.output_text.delta"));
+        let event = result.event.expect("event");
+        assert_eq!(
+            event.get("type").and_then(Value::as_str),
+            Some("response.output_text.delta")
+        );
+        assert_eq!(event.get("sequenceNumber").and_then(Value::as_i64), Some(9));
     }
 
     #[test]
-    fn assemble_sse_event_defaults_to_message() {
-        let lines = vec!["data: {\"ok\":true}".to_string()];
-        let parsed = assemble_sse_event(&lines).expect("event");
-        assert_eq!(parsed.event, "message");
-        assert_eq!(parsed.data, "{\"ok\":true}");
+    fn parse_sse_event_with_config_defaults_message_event_from_shared_fields() {
+        let config = SseParserConfigInput {
+            enable_strict_validation: false,
+            max_event_size: 1024 * 1024,
+            allowed_event_types: vec![],
+        };
+        let result = parse_sse_event_with_config("data: {\"ok\":true}", &config);
+        assert!(result.success);
+        let event = result.event.expect("event");
+        assert_eq!(event.get("type").and_then(Value::as_str), Some("message"));
     }
 
     #[test]

@@ -254,7 +254,6 @@
   "isContextLengthExceededSignalJson",
   "isCompactionRequestJson",
   "looksLikeJsonStreamPrefixJson",
-  "assembleSseEventFromLinesJson",
   "parseSseEventWithConfigJson",
   "parseSseStreamWithConfigJson",
   "parseSseStreamChunkWithConfigJson",

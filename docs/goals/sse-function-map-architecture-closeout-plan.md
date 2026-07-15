@@ -26,7 +26,6 @@ Repository inspection on 2026-06-09 shows:
   - `src/providers/core/runtime/responses-provider.ts` uses `createResponsesSseToJsonConverter()` to decode upstream Responses SSE into provider JSON.
   - `src/server/handlers/handler-response-utils.ts` uses `createResponsesJsonToSseConverter()` to emit client-visible Responses SSE from JSON results.
 - Rust already owns low-level SSE parse helpers through NAPI calls used by `sse-to-json/parsers/sse-parser.ts`:
-  - `assembleSseEventFromLinesJson`
   - `parseSseEventWithConfigJson`
   - `parseSseStreamWithConfigJson`
 - Rust also owns some response stream effect planning via `hub_resp_outbound_sse_stream`, but the broader registry, event aggregation, event sequencing, event serialization, protocol defaults, and several compatibility decisions remain in TS.

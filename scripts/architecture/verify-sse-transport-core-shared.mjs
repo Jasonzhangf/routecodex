@@ -60,6 +60,9 @@ if (failures.length === 0) {
     if (!source.includes('build_sse_transport_in_01_raw_chunk')) failures.push(`${file}: adapter bypasses RawChunk builder`);
     if (!source.includes('build_sse_transport_out_04_from_sse_transport_in_03')) failures.push(`${file}: adapter bypasses EncodedChunk builder`);
   }
+  for (const forbidden of ['fn parse_sse_line(', 'fn assemble_sse_event(', 'assemble_sse_event_from_lines_json']) {
+    if (v2AdapterSource.includes(forbidden)) failures.push(`${v2Adapter}: duplicate V2 SSE framing parser residue ${forbidden}`);
+  }
   for (const forbidden of ['fn event_end(', 'fn validate_sse_event(', '.windows(2)', '.windows(4)']) {
     if (v3AdapterSource.includes(forbidden)) failures.push(`${v3Adapter}: duplicate SSE parser residue ${forbidden}`);
   }

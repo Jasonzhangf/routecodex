@@ -3405,6 +3405,13 @@
 - `v3.gemini_relay_runtime_integration` must project malformed non-JSON provider HTTP error bodies as explicit `provider_error_body_malformed` client errors through Error01-06. Do not use `unwrap_or_else` / `unwrap_or_default` generic fallback bodies in this owner.
 - Review correction: release/global install copying `v3/` is expected because the V3 bin and tests must be globally installable. Treat the copy scope as required install surface, not as dirty-code evidence to remove.
 
+# 2026-07-16 SSE transport core V2 parser retirement truth
+
+- V2 `hub_resp_inbound_sse_stream_sniffer` must consume shared `sse-transport-core` frames/fields via `SseIncrementalDecoder`; local line parser owners `parse_sse_line`, `assemble_sse_event`, and NAPI `assembleSseEventFromLinesJson` are retired and must not be restored.
+- Semantic SSE parsing remains outside the transport core: shared transport only decodes/encodes frames/fields, while V2 parser code maps `event/id/data/retry/timestamp` to protocol JSON and strict validation. Multi-line `data:` is joined per SSE spec before semantic JSON parse; it must not accept two independent JSON objects as one event.
+- V2 old direct passthrough SSE replay is now locked by `tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts` marker `direct-passthrough-sse-20260713T055458`: provider event sequence, model/reasoning, `PASSTHROUGH_SSE_OK`, `[DONE]`, native `buildJsonFromSseDirectNative`, and client keepalive-stripped byte equality.
+- Verification evidence: V2 sniffer Rust 19/19, native hotpath build, V2 replay Jest 5/5, SSE transport core 7/7, V3 provider adapter tests, SSE shared/source gates, resource/function/mainline/review gates, shared fmt, SSE core Clippy, V3 fmt/Clippy/controlled replay/full workspace, and `git diff --check` passed. No live config, `~/.rcc`, global install, restart, or release was changed.
+
 # 2026-07-16T02:00:11+08:00 SSE transport core shared stream truth
 
 - sse.transport_core_shared uses sse-transport-core as the only protocol-neutral Rust SSE framing owner. V3 Responses Direct must carry SSE as V3ClientBody::Sse through Runtime and Server Body::from_stream; provider SSE must not be accumulated into a complete Vec<u8> before client projection.
