@@ -39,8 +39,46 @@ pub struct V3HubV1AuthoringConfig {
     pub skeleton: String,
     pub entry_protocols: Vec<String>,
     pub hook_set_id: String,
+    pub entry_protocol_bindings: Vec<V3EntryProtocolBindingAuthoringConfig>,
     pub resources: BTreeMap<String, V3HubResourceAuthoringConfig>,
     pub hooks: Vec<V3HubHookAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3EntryProtocolBindingAuthoringConfig {
+    pub entry_protocol: String,
+    pub endpoint_patterns: Vec<String>,
+    pub execution_mode: V3EntryProtocolExecutionMode,
+    pub protocol_profile_owner: String,
+    pub implemented: bool,
+    pub forbidden_reentry_behavior: String,
+    #[serde(default)]
+    pub runtime_owner_symbol: Option<String>,
+    #[serde(default)]
+    pub runtime_owner_path: Option<String>,
+    #[serde(default)]
+    pub pending_owner_symbol: Option<String>,
+    #[serde(default)]
+    pub pending_owner_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3EntryProtocolExecutionMode {
+    Direct,
+    Relay,
+    PendingNotImplemented,
+}
+
+impl V3EntryProtocolExecutionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Relay => "relay",
+            Self::PendingNotImplemented => "pending_not_implemented",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -525,8 +563,46 @@ pub struct V3HubV1Manifest {
     pub skeleton: String,
     pub entry_protocols: Vec<String>,
     pub hook_set_id: String,
+    pub entry_protocol_bindings: Vec<V3EntryProtocolBindingManifest>,
     pub resources: BTreeMap<String, V3HubResourceManifest>,
     pub hooks: Vec<V3HubHookManifest>,
+}
+
+impl V3HubV1Manifest {
+    pub fn entry_protocol_binding_for_endpoint(
+        &self,
+        endpoint_path: &str,
+    ) -> Option<&V3EntryProtocolBindingManifest> {
+        self.entry_protocol_bindings.iter().find(|binding| {
+            binding
+                .endpoint_patterns
+                .iter()
+                .any(|pattern| entry_protocol_endpoint_pattern_matches(pattern, endpoint_path))
+        })
+    }
+}
+
+fn entry_protocol_endpoint_pattern_matches(pattern: &str, endpoint_path: &str) -> bool {
+    if pattern == endpoint_path {
+        return true;
+    }
+    pattern == "/v1beta/models/:model/generateContent"
+        && endpoint_path.starts_with("/v1beta/models/")
+        && endpoint_path.ends_with("/generateContent")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3EntryProtocolBindingManifest {
+    pub entry_protocol: String,
+    pub endpoint_patterns: Vec<String>,
+    pub execution_mode: V3EntryProtocolExecutionMode,
+    pub protocol_profile_owner: String,
+    pub implemented: bool,
+    pub forbidden_reentry_behavior: String,
+    pub runtime_owner_symbol: Option<String>,
+    pub runtime_owner_path: Option<String>,
+    pub pending_owner_symbol: Option<String>,
+    pub pending_owner_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

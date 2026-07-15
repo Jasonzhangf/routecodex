@@ -66,6 +66,25 @@ pub(crate) fn publish_manifest(
 }
 
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];
+fn expected_entry_protocol_endpoint_patterns(protocol: &str) -> Option<&'static [&'static str]> {
+    match protocol {
+        "responses" => Some(&["/v1/responses"]),
+        "anthropic" => Some(&["/v1/messages"]),
+        "openai_chat" => Some(&["/v1/chat/completions"]),
+        "gemini" => Some(&["/v1beta/models/:model/generateContent"]),
+        _ => None,
+    }
+}
+
+fn expected_entry_protocol_execution_mode(protocol: &str) -> Option<V3EntryProtocolExecutionMode> {
+    match protocol {
+        "responses" => Some(V3EntryProtocolExecutionMode::Direct),
+        "anthropic" | "openai_chat" => Some(V3EntryProtocolExecutionMode::Relay),
+        "gemini" => Some(V3EntryProtocolExecutionMode::PendingNotImplemented),
+        _ => None,
+    }
+}
+
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
 ) -> Result<Option<V3HubV1Manifest>, V3ConfigError> {
@@ -100,6 +119,10 @@ fn compile_hub_v1(
     if authoring.hook_set_id.trim().is_empty() {
         return Err(validation("hub_v1 hook_set_id is empty"));
     }
+    let entry_protocol_bindings = compile_entry_protocol_bindings(
+        authoring.entry_protocol_bindings,
+        &authoring.entry_protocols,
+    )?;
     let resources = authoring
         .resources
         .into_iter()
@@ -231,9 +254,172 @@ fn compile_hub_v1(
             .map(|value| (*value).to_string())
             .collect(),
         hook_set_id: authoring.hook_set_id,
+        entry_protocol_bindings,
         resources,
         hooks,
     }))
+}
+
+fn compile_entry_protocol_bindings(
+    authoring: Vec<V3EntryProtocolBindingAuthoringConfig>,
+    declared_protocols: &[String],
+) -> Result<Vec<V3EntryProtocolBindingManifest>, V3ConfigError> {
+    let declared = declared_protocols.iter().cloned().collect::<BTreeSet<_>>();
+    let mut protocols = BTreeSet::new();
+    let mut endpoint_patterns = BTreeSet::new();
+    let mut bindings = Vec::with_capacity(authoring.len());
+
+    for binding in authoring {
+        let entry_protocol = binding.entry_protocol.trim().to_string();
+        if entry_protocol.is_empty() {
+            return Err(validation(
+                "entry protocol binding has empty entry_protocol",
+            ));
+        }
+        if !HUB_V1_ENTRY_PROTOCOLS.contains(&entry_protocol.as_str()) {
+            return Err(validation(format!(
+                "hub_v1 unknown entry protocol binding {entry_protocol}"
+            )));
+        }
+        if !declared.contains(&entry_protocol) {
+            return Err(validation(format!(
+                "hub_v1 config allowed protocol {entry_protocol} lacks entry declaration"
+            )));
+        }
+        if !protocols.insert(entry_protocol.clone()) {
+            return Err(validation(format!(
+                "hub_v1 duplicate entry protocol binding {entry_protocol}"
+            )));
+        }
+        if binding.endpoint_patterns.is_empty() {
+            return Err(validation(format!(
+                "hub_v1 entry protocol binding {entry_protocol} endpoint_patterns is empty"
+            )));
+        }
+        let mut normalized_patterns = Vec::with_capacity(binding.endpoint_patterns.len());
+        for pattern in binding.endpoint_patterns {
+            let pattern = pattern.trim().to_string();
+            if pattern.is_empty() {
+                return Err(validation(format!(
+                    "hub_v1 entry protocol binding {entry_protocol} endpoint pattern is empty"
+                )));
+            }
+            if !endpoint_patterns.insert(pattern.clone()) {
+                return Err(validation(format!(
+                    "hub_v1 duplicate endpoint pattern {pattern}"
+                )));
+            }
+            normalized_patterns.push(pattern);
+        }
+        let expected_patterns = expected_entry_protocol_endpoint_patterns(&entry_protocol)
+            .expect("closed protocol has endpoint pattern");
+        if normalized_patterns
+            != expected_patterns
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        {
+            return Err(validation(format!(
+                "hub_v1 entry protocol binding {entry_protocol} endpoint_patterns must be {:?}",
+                expected_patterns
+            )));
+        }
+        let expected_mode = expected_entry_protocol_execution_mode(&entry_protocol)
+            .expect("closed protocol has execution mode");
+        if binding.execution_mode != expected_mode {
+            return Err(validation(format!(
+                "hub_v1 {entry_protocol} entry protocol must be {}",
+                expected_mode.as_str()
+            )));
+        }
+        if binding.protocol_profile_owner.trim().is_empty() {
+            return Err(validation(format!(
+                "hub_v1 entry protocol binding {entry_protocol} protocol_profile_owner is empty"
+            )));
+        }
+        if binding.forbidden_reentry_behavior.trim().is_empty() {
+            return Err(validation(format!(
+                "hub_v1 entry protocol binding {entry_protocol} forbidden_reentry_behavior is empty"
+            )));
+        }
+        let runtime_owner_symbol = trim_optional(binding.runtime_owner_symbol);
+        let runtime_owner_path = trim_optional(binding.runtime_owner_path);
+        let pending_owner_symbol = trim_optional(binding.pending_owner_symbol);
+        let pending_owner_path = trim_optional(binding.pending_owner_path);
+        match binding.execution_mode {
+            V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay => {
+                if !binding.implemented {
+                    return Err(validation(format!(
+                        "hub_v1 entry protocol binding {entry_protocol} direct/relay mode must be implemented"
+                    )));
+                }
+                if runtime_owner_symbol.is_none() || runtime_owner_path.is_none() {
+                    return Err(validation(format!(
+                        "hub_v1 implemented entry protocol binding {entry_protocol} must declare runtime owner symbol and path"
+                    )));
+                }
+                if pending_owner_symbol.is_some() || pending_owner_path.is_some() {
+                    return Err(validation(format!(
+                        "hub_v1 implemented entry protocol binding {entry_protocol} must not declare pending owner"
+                    )));
+                }
+            }
+            V3EntryProtocolExecutionMode::PendingNotImplemented => {
+                if binding.implemented {
+                    return Err(validation(format!(
+                        "hub_v1 pending entry protocol binding {entry_protocol} must not be implemented"
+                    )));
+                }
+                if pending_owner_symbol.is_none() || pending_owner_path.is_none() {
+                    return Err(validation(format!(
+                        "hub_v1 pending entry protocol binding {entry_protocol} must declare explicit pending owner symbol and path"
+                    )));
+                }
+                if runtime_owner_symbol.is_some() || runtime_owner_path.is_some() {
+                    return Err(validation(format!(
+                        "hub_v1 pending entry protocol binding {entry_protocol} must not declare runtime owner"
+                    )));
+                }
+            }
+        }
+
+        bindings.push(V3EntryProtocolBindingManifest {
+            entry_protocol,
+            endpoint_patterns: normalized_patterns,
+            execution_mode: binding.execution_mode,
+            protocol_profile_owner: binding.protocol_profile_owner.trim().to_string(),
+            implemented: binding.implemented,
+            forbidden_reentry_behavior: binding.forbidden_reentry_behavior.trim().to_string(),
+            runtime_owner_symbol,
+            runtime_owner_path,
+            pending_owner_symbol,
+            pending_owner_path,
+        });
+    }
+
+    if protocols != declared {
+        return Err(validation(
+            "hub_v1 entry protocol binding registry must declare all hub_v1 entry protocols",
+        ));
+    }
+    bindings.sort_by(|left, right| {
+        let left_index = HUB_V1_ENTRY_PROTOCOLS
+            .iter()
+            .position(|protocol| *protocol == left.entry_protocol)
+            .expect("validated protocol");
+        let right_index = HUB_V1_ENTRY_PROTOCOLS
+            .iter()
+            .position(|protocol| *protocol == right.entry_protocol)
+            .expect("validated protocol");
+        left_index.cmp(&right_index)
+    });
+    Ok(bindings)
+}
+
+fn trim_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn compile_servers(

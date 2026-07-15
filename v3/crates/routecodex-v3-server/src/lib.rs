@@ -3,7 +3,9 @@ use axum::extract::{Request, State};
 use axum::http::{header::CONTENT_TYPE, HeaderMap, Response, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use routecodex_v3_config::{V3Config05ManifestPublished, V3DebugManifest, V3ServerManifest};
+use routecodex_v3_config::{
+    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
+};
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
 };
@@ -26,6 +28,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+
+const V3_PROTOCOL_PENDING_PROJECTION_RESOURCE: &str = "v3.protocol.pending_projection";
 
 #[derive(Clone)]
 struct V3ListenerState {
@@ -191,17 +195,30 @@ async fn pending_endpoint(
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
-    let endpoint = endpoint_protocol(&path);
+    let Some(binding) = state
+        .manifest
+        .hub_v1
+        .as_ref()
+        .and_then(|hub| hub.entry_protocol_binding_for_endpoint(&path))
+    else {
+        return error_output_response(project_http_input_error(
+            V3HttpBoundaryErrorKind::EndpointNotEnabled,
+            format!("endpoint path {path} has no entry protocol binding"),
+        ));
+    };
+    let entry_protocol = binding.entry_protocol.clone();
+    let execution_mode = binding.execution_mode;
+    let pending_owner_symbol = binding.pending_owner_symbol.clone();
     if !state
         .server
         .endpoints
         .iter()
-        .any(|declared| declared == endpoint)
+        .any(|declared| declared == &entry_protocol)
     {
         return error_output_response(project_http_input_error(
             V3HttpBoundaryErrorKind::EndpointNotEnabled,
             format!(
-                "endpoint protocol {endpoint} is not enabled on server {}",
+                "endpoint protocol {entry_protocol} is not enabled on server {}",
                 state.server.id
             ),
         ));
@@ -212,8 +229,7 @@ async fn pending_endpoint(
     };
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
-    let is_responses = path == "/v1/responses";
-    if path == "/v1/chat/completions" {
+    if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_openai_chat_completions_request(
             &state.manifest,
             V3OpenAiChatRelayRuntimeInput {
@@ -229,7 +245,7 @@ async fn pending_endpoint(
         };
         return openai_chat_relay_output_response(output);
     }
-    if path == "/v1/messages" {
+    if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
         let output = match execute_v3_anthropic_messages_request(
             &state.manifest,
@@ -246,7 +262,7 @@ async fn pending_endpoint(
         };
         return anthropic_relay_output_response(output, stream);
     }
-    if is_responses {
+    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         let continuation_scope = match build_responses_direct_continuation_scope(
             &request_headers,
             &request_id,
@@ -319,7 +335,10 @@ async fn pending_endpoint(
             output.error_chain,
         );
         responses_direct_output_response(frame)
-    } else {
+    } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
+        let pending_not_implemented = execution_mode.as_str();
+        let pending_owner =
+            pending_owner_symbol.unwrap_or_else(|| "missing_pending_owner".to_string());
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -331,7 +350,20 @@ async fn pending_endpoint(
             },
             &state.debug,
         );
+        let _pending_projection = (
+            V3_PROTOCOL_PENDING_PROJECTION_RESOURCE,
+            pending_not_implemented,
+            pending_owner,
+        );
         foundation_output_response(output)
+    } else {
+        error_output_response(project_http_input_error(
+            V3HttpBoundaryErrorKind::EndpointNotEnabled,
+            format!(
+                "entry protocol {entry_protocol} is bound to unsupported execution mode {}",
+                execution_mode.as_str()
+            ),
+        ))
     }
 }
 
@@ -794,16 +826,6 @@ async fn path_not_found() -> Response<Body> {
         V3HttpBoundaryErrorKind::PathNotFound,
         "HTTP path is not registered",
     ))
-}
-
-fn endpoint_protocol(path: &str) -> &'static str {
-    match path {
-        "/v1/responses" => "responses",
-        "/v1/messages" => "anthropic",
-        "/v1/chat/completions" => "openai_chat",
-        _ if path.starts_with("/v1beta/models/") && path.ends_with("/generateContent") => "gemini",
-        _ => "unknown",
-    }
 }
 
 fn project_http_input_error(
