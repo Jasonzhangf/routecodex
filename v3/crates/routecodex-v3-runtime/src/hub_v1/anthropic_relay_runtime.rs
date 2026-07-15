@@ -39,6 +39,7 @@ pub struct V3AnthropicRelayRuntimeOutput {
     pub client_response: Value,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+    pub servertool_followup_required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,7 +153,14 @@ pub async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    execute_v3_anthropic_relay_runtime_inner(manifest, input, transport, None).await
+    execute_v3_anthropic_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        None,
+        V3HubRelayResponseHookProfile::empty(),
+    )
+    .await
 }
 
 pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation<T: ResponsesTransport>(
@@ -163,6 +171,36 @@ pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation<T: Respo
     scope: V3AnthropicRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile(
+        manifest,
+        input,
+        transport,
+        state,
+        scope,
+        now_epoch_ms,
+        std::iter::empty::<&'static str>(),
+    )
+    .await
+}
+
+pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile<
+    T,
+    I,
+    S,
+>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    transport: &T,
+    state: &V3AnthropicRelayLocalContinuationState,
+    scope: V3AnthropicRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+    servertool_names: I,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError>
+where
+    T: ResponsesTransport,
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
@@ -172,6 +210,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation<T: Respo
             scope,
             now_epoch_ms,
         }),
+        V3HubRelayResponseHookProfile::new(servertool_names),
     )
     .await
 }
@@ -187,6 +226,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
     local: Option<V3AnthropicRelayLocalContinuationExecution<'_>>,
+    response_hook_profile: V3HubRelayResponseHookProfile,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -333,10 +373,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let hooks = compile_v3_hub_relay_response_hooks();
         let resp02 = hooks.normalize(resp01)?;
         trace.push("V3HubRespInbound02Normalized");
-        let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
+        let resp03 = hooks.govern(resp02, &response_hook_profile)?;
         trace.push("V3HubRespChatProcess03Governed");
         let resp04 = hooks.commit(resp03)?;
         trace.push("V3HubRespContinuation04Committed");
+        let servertool_followup_required =
+            resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
         commit_or_release_local_continuation(
             local.as_ref(),
             &requested_local_ids,
@@ -353,6 +395,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             client_response,
             node_trace: trace,
             error_chain: None,
+            servertool_followup_required,
         });
     }
     let V3ProviderResponseBody::Json(bytes) = provider_body else {
@@ -372,10 +415,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
     trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
+    let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
+    let servertool_followup_required =
+        resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
     commit_or_release_local_continuation(
         local.as_ref(),
         &requested_local_ids,
@@ -394,6 +439,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         client_response,
         node_trace: trace,
         error_chain: None,
+        servertool_followup_required,
     })
 }
 
@@ -702,5 +748,6 @@ fn error_output(
         client_response,
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        servertool_followup_required: false,
     }
 }

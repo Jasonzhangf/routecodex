@@ -31,7 +31,7 @@ entry_protocol_bindings = [
   { entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
   { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
-  { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "pending_not_implemented", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = false, forbidden_reentry_behavior = "Gemini endpoint must not fall through to generic pending without explicit owner.", pending_owner_symbol = "execute_v3_foundation_pending_runtime", pending_owner_path = "v3/crates/routecodex-v3-runtime/src/foundation.rs" },
+  { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
 ]
 resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
 hooks = [
@@ -524,7 +524,7 @@ fn free_port() -> u16 {
 }
 
 #[tokio::test]
-async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_chain() {
+async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_error_chain() {
     let _test_guard = TEST_LOCK.lock().await;
     let handle = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
         .await
@@ -542,7 +542,7 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
             .unwrap();
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
-        let pending = client
+        let invalid_gemini = client
             .post(format!(
                 "http://{}/v1beta/models/test/generateContent",
                 listener.addr
@@ -551,32 +551,23 @@ async fn starts_all_listeners_and_routes_pending_endpoint_through_debug_error_ch
             .send()
             .await
             .unwrap();
-        assert_eq!(pending.status(), 501);
+        assert_eq!(invalid_gemini.status(), 500);
         assert_eq!(
-            pending.headers()["x-routecodex-v3-debug-node"],
-            "V3Debug01NodeEventRegistered"
-        );
-        assert_eq!(
-            pending.headers()["x-routecodex-v3-error-node"],
-            "V3Error06ClientProjected"
-        );
-        assert_eq!(
-            pending.headers()["x-routecodex-v3-error-chain"],
+            invalid_gemini.headers()["x-routecodex-v3-error-chain"],
             "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
         );
-        let body: serde_json::Value = pending.json().await.unwrap();
-        assert_eq!(body["error"]["code"], "not_implemented");
+        let body: serde_json::Value = invalid_gemini.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "runtime_error");
         assert_eq!(
-            body["error"]["error_node"], "V3Error06ClientProjected",
-            "pending endpoint must expose final error node"
+            body["error"]["message"],
+            "Gemini request contents must be an array"
         );
-        assert_eq!(body["error"]["target_exhausted"], true);
     }
     handle.shutdown().await;
 }
 
 #[tokio::test]
-async fn entry_protocol_binding_dispatches_pending_and_relay_without_body_leakage() {
+async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_anthropic_wire_upstream().await;
@@ -593,45 +584,6 @@ async fn entry_protocol_binding_dispatches_pending_and_relay_without_body_leakag
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
-
-    let pending = client
-        .post(format!("{base}/v1beta/models/test/generateContent"))
-        .json(&json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}],"stream":true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(pending.status(), StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(
-        pending.headers()["x-routecodex-v3-entry-protocol"],
-        "gemini"
-    );
-    assert_eq!(
-        pending.headers()["x-routecodex-v3-execution-mode"],
-        "pending_not_implemented"
-    );
-    assert_eq!(
-        pending.headers()["x-routecodex-v3-pending-owner"],
-        "execute_v3_foundation_pending_runtime"
-    );
-    assert_eq!(
-        pending.headers()["x-routecodex-v3-pending-resource"],
-        "v3.protocol.pending_projection"
-    );
-    let pending_body: Value = pending.json().await.unwrap();
-    assert_eq!(pending_body["error"]["code"], "not_implemented");
-    let serialized_pending = serde_json::to_string(&pending_body).unwrap();
-    for forbidden in [
-        "entry_protocol_bindings",
-        "protocol_profile_owner",
-        "pending_owner_symbol",
-        "pending_not_implemented",
-        "metadata_center",
-    ] {
-        assert!(
-            !serialized_pending.contains(forbidden),
-            "pending body must not leak {forbidden}"
-        );
-    }
 
     let anthropic = client
         .post(format!("{base}/v1/messages"))
@@ -1244,19 +1196,17 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .unwrap();
     let listener = &handle.listeners[0];
     let client = reqwest::Client::new();
-    let pending = client
-        .post(format!(
-            "http://{}/v1beta/models/test/generateContent",
-            listener.addr
-        ))
+    let runtime_error = client
+        .post(format!("http://{}/v1/responses", listener.addr))
         .json(&serde_json::json!({
+            "model": "test",
             "input": "hello",
             "Authorization": "Bearer sk-v3-secret"
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(pending.status(), 501);
+    assert_eq!(runtime_error.status(), 502);
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))

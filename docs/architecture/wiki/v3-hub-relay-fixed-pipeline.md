@@ -100,6 +100,9 @@ Relay is borrow-first and move-at-boundary:
 - Anthropic Relay controlled Runtime integration: `/v1/messages` Server-owned wrapper, fixed Req01-Req09,
   generic Responses transport, fixed Resp01-Resp06, Error01-06, and JSON/SSE client projection are
   connected and verified against the controlled loopback upstream.
+- Hub Relay runtime closeout: `v3.hub_relay_runtime_closeout` binds controlled JSON/SSE E2E,
+  local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation,
+  copy-budget probes, and one `V3ServerRespOutbound06ClientFrame` response exit.
 - Live 5555 validation/cutover, remote/local continuation E2E, P6 deletion, global installation,
   restart, release, real-provider compatibility, and production replacement remain pending.
 
@@ -147,8 +150,31 @@ Relay is borrow-first and move-at-boundary:
 - These are test/source gates only. They do not establish live Relay, continuation persistence, or
   servertool runtime execution.
 
+## Hub Relay runtime closeout
+
+- Feature: `v3.hub_relay_runtime_closeout`.
+- Machine lifecycle: `v3.hub_relay.runtime_closeout`, from `v3-hub-relay-closeout-01` through
+  `v3-hub-relay-closeout-14`, with adjacent edges over the fixed Req01-Req09 and Resp01-Resp06
+  topology.
+- Controlled cases prove JSON and SSE both reach exactly one `V3ServerRespOutbound06ClientFrame`.
+- The local-continuation/servertool case proves a `servertool.exec` response hook profile is
+  consumed by Runtime response governance, Resp04 saves one local context, next Req04 restores that
+  context before the current tool output, and terminal success releases it.
+- The provider-error case proves Error01-06 projection without Resp01 success projection.
+- Isolation assertions forbid session/conversation, `metadata_center`, `continuation_store`, and
+  RouteCodex control fields in provider/client normal payload.
+- Completion boundary: this is controlled Runtime evidence only. It does not authorize P6 deletion,
+  live cutover, global install, restart, release, real-provider compatibility, or production
+  replacement.
+
 ## Required gates
 
+- `npm run test:v3-hub-relay-runtime-closeout`
+- `npm run verify:v3-hub-relay-runtime-closeout`
+- `npm run test:v3-hub-relay-runtime-closeout-red-fixtures`
+- `npm run test:v3-relay-payload-copy-runtime-probes`
+- `npm run verify:v3-relay-payload-copy-budget`
+- `npm run test:v3-relay-payload-copy-budget-red-fixtures`
 - `npm run verify:v3-architecture-docs`
 - `npm run verify:v3-resource-map`
 - `npm run verify:v3-module-boundaries`
@@ -160,8 +186,10 @@ Relay is borrow-first and move-at-boundary:
 - `npm run verify:v3-clippy`
 - `npm run test:v3-workspace`
 
-The wiki is not runtime evidence. Live Relay remains pending until a later controlled-upstream replay
-proves request and response execution through the fixed Hub v1 skeleton.
+This wiki is review evidence only. Controlled Runtime closeout evidence is the focused closeout
+runtime test plus source/red gates above; live Relay Server cutover, P6 deletion, global install,
+restart, release, real-provider compatibility, and production replacement remain pending.
+Live Relay remains pending for live Server cutover and real-provider production validation.
 
 ## OpenAI Chat controlled Runtime evidence
 

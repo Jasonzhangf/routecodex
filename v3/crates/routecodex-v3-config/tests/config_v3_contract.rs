@@ -428,11 +428,11 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
         gemini.endpoint_patterns,
         vec!["/v1beta/models/:model/generateContent"]
     );
-    assert_eq!(gemini.execution_mode.as_str(), "pending_not_implemented");
-    assert!(!gemini.implemented);
+    assert_eq!(gemini.execution_mode.as_str(), "relay");
+    assert!(gemini.implemented);
     assert_eq!(
-        gemini.pending_owner_symbol.as_deref(),
-        Some("execute_v3_foundation_pending_runtime")
+        gemini.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_gemini_relay_runtime_with_default_transport")
     );
     let gemini_lookup = hub
         .entry_protocol_binding_for_endpoint("/v1beta/models/gemini-2.5-pro/generateContent")
@@ -474,7 +474,7 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
 fn rejects_invalid_hub_v1_entry_protocol_bindings_fail_fast() {
     let cases = [
         (
-            HUB_V1_DECLARATION.replace("  { entry_protocol = \"gemini\", endpoint_patterns = [\"/v1beta/models/:model/generateContent\"], execution_mode = \"pending_not_implemented\", protocol_profile_owner = \"v3.entry_protocol_registry_contract\", implemented = false, forbidden_reentry_behavior = \"Gemini endpoint must not fall through to generic pending without explicit owner.\", pending_owner_symbol = \"execute_v3_foundation_pending_runtime\", pending_owner_path = \"v3/crates/routecodex-v3-runtime/src/foundation.rs\" },\n", ""),
+            HUB_V1_DECLARATION.replace("  { entry_protocol = \"gemini\", endpoint_patterns = [\"/v1beta/models/:model/generateContent\"], execution_mode = \"relay\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\", implemented = true, forbidden_reentry_behavior = \"Gemini endpoint must not fall through to pending or direct runtime.\", runtime_owner_symbol = \"execute_v3_gemini_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\" },\n", ""),
             "entry protocol binding registry must declare all hub_v1 entry protocols",
         ),
         (
@@ -494,16 +494,16 @@ fn rejects_invalid_hub_v1_entry_protocol_bindings_fail_fast() {
             "unknown entry protocol binding legacy_chat",
         ),
         (
-            HUB_V1_DECLARATION.replace("execution_mode = \"pending_not_implemented\", protocol_profile_owner", "execution_mode = \"relay\", protocol_profile_owner"),
-            "gemini entry protocol must be pending_not_implemented",
+            HUB_V1_DECLARATION.replace("execution_mode = \"relay\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\"", "execution_mode = \"pending_not_implemented\", protocol_profile_owner = \"v3.gemini_relay_runtime_integration\""),
+            "gemini entry protocol must be relay",
         ),
         (
             HUB_V1_DECLARATION.replace("runtime_owner_symbol = \"execute_v3_anthropic_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\"", "runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\""),
             "implemented entry protocol binding anthropic must declare runtime owner symbol and path",
         ),
         (
-            HUB_V1_DECLARATION.replace("pending_owner_symbol = \"execute_v3_foundation_pending_runtime\", pending_owner_path = \"v3/crates/routecodex-v3-runtime/src/foundation.rs\"", "pending_owner_path = \"v3/crates/routecodex-v3-runtime/src/foundation.rs\""),
-            "pending entry protocol binding gemini must declare explicit pending owner symbol and path",
+            HUB_V1_DECLARATION.replace("runtime_owner_symbol = \"execute_v3_gemini_relay_runtime_with_default_transport\", runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\"", "runtime_owner_path = \"v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs\""),
+            "implemented entry protocol binding gemini must declare runtime owner symbol and path",
         ),
     ];
     for (invalid, expected) in cases {
@@ -752,7 +752,7 @@ entry_protocol_bindings = [
   { entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
   { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
-  { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "pending_not_implemented", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = false, forbidden_reentry_behavior = "Gemini endpoint must not fall through to generic pending without explicit owner.", pending_owner_symbol = "execute_v3_foundation_pending_runtime", pending_owner_path = "v3/crates/routecodex-v3-runtime/src/foundation.rs" },
+  { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
 ]
 resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
 hooks = [

@@ -381,7 +381,11 @@ fn semantic_target_key(target: &V3RoutePoolTargetManifest) -> String {
 }
 
 fn protocol_from_endpoint(endpoint: &str) -> String {
-    match endpoint.trim() {
+    let endpoint = endpoint.trim();
+    if endpoint.starts_with("/v1beta/models/") && endpoint.ends_with("/generateContent") {
+        return "gemini".to_string();
+    }
+    match endpoint {
         "/v1/responses" | "responses" => "responses".to_string(),
         "/v1/messages" | "anthropic" => "anthropic".to_string(),
         "/v1beta/models" | "gemini" => "gemini".to_string(),

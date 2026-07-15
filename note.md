@@ -30845,6 +30845,14 @@ Pure Rust NAPI candidates:
 - Review fix: `verify:v3-entry-protocol-endpoint-binding` failed because Server source no longer contained explicit `pending_not_implemented` binding text while calling `execute_v3_foundation_pending_runtime`; reintroduced `pending_not_implemented = execution_mode.as_str()` and passed it to `pending_binding_output_response()`.
 - Validation PASS: focused `entry_protocol_binding_dispatches_pending_and_relay_without_body_leakage`, full `routecodex-v3-server --test multi_listener_server` 14/14 before formatting, `npm run verify:v3-entry-protocol-endpoint-binding`, `npm run test:v3-entry-protocol-endpoint-binding-red-fixtures`, `npm run verify:v3-cargo-fmt`, `git diff --check`, and `CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml -p routecodex-v3-server --all-targets -- -D warnings`.
 
+# 2026-07-15T16:33:18Z V3 Gemini Relay Runtime integration start
+- Claim `feature_id:v3.gemini_relay_runtime_integration`, run `20260715T163118Z-Macstudio.local-59204-27a264`.
+- Objective: move `/v1beta/models/:model/generateContent` from explicit pending into controlled V3 Hub v1 Relay JSON/SSE/error/isolation closure, with Gemini differences only in Gemini codec/provider runtime owner.
+- Pre-change evidence: `entry_protocol_binding_dispatches_pending_and_relay_without_body_leakage` passes, proving current Gemini endpoint is explicit `pending_not_implemented` and no provider send.
+- Red evidence 2026-07-15T16:38:21Z: new `gemini_relay_runtime_integration` controlled Runtime test fails to compile because `execute_v3_gemini_relay_runtime`, `V3GeminiRelayClientBody`, and `V3GeminiRelayRuntimeInput` are absent. This locks current Gemini Relay Runtime unwired state before implementation.
+- Green runtime evidence 2026-07-15T16:44:52Z: `gemini_relay_runtime_integration` passes 4/4 for controlled JSON, SSE first-frame-before-terminal, provider 429 Error01-06, and side-channel pre-send rejection. Required forward fix: V3 VR endpoint classification now recognizes `/v1beta/models/:model/generateContent` as `gemini` instead of deriving an invalid path token.
+- Server evidence 2026-07-15T16:47:49Z: `gemini_relay_controlled` passes controlled JSON/SSE/error/isolation; `multi_listener_server` 14/14 updated away from old Gemini pending assertions.
+
 # 2026-07-15T16:49Z direct Responses SSE 402 reroute closeout
 
 - Root cause: same-protocol direct received HTTP 200 before the SSE body emitted `response.failed/error`; the pre-stream guard only recognized rate-limit payloads, so billing/quota 402 frames bypassed ErrorErr05 and reached the client.

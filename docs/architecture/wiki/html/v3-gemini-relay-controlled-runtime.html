@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>V3 Gemini Relay Controlled Runtime</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>V3 Gemini Relay Controlled Runtime</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md</code></p>
+      </header>
+      <article>
+        <h1>V3 Gemini Relay Controlled Runtime</h1>
+        <p>[Implementation plan](../../goals/v3-gemini-relay-runtime-integration-plan.md) · [Test design](../../goals/v3-gemini-relay-runtime-integration-test-design.md) · [Machine manifest](../manifests/v3.gemini_relay.controlled_runtime.mainline.yml) · [HTML review](html/v3-gemini-relay-controlled-runtime.html)</p>
+        <h2>Status</h2>
+        <ul>
+          <li>Feature: <code>v3.gemini_relay_runtime_integration</code>.</li>
+          <li>Endpoint: <code>/v1beta/models/:model/generateContent</code>.</li>
+          <li>Evidence boundary: controlled Rust loopback JSON/SSE/error/isolation only.</li>
+          <li>Live Gemini provider compatibility, install, restart, release, global availability, and production</li>
+        </ul>
+        <p>cutover remain unverified and unclaimed.</p>
+        <ul>
+          <li>V2, P6, Responses Direct, Anthropic Relay, OpenAI Chat Relay, and Provider WebSocket owners are</li>
+        </ul>
+        <p>unchanged.</p>
+        <h2>Single lifecycle</h2>
+        <pre class="mermaid">flowchart LR
+          S[V3GeminiRelayRuntimeInput] --&gt; R1[V3HubReqInbound01ClientRaw]
+          R1 --&gt; R2[V3HubReqInbound02Normalized]
+          R2 --&gt; R3[V3HubReqContinuation03Classified]
+          R3 --&gt; R4[V3HubReqChatProcess04Governed]
+          R4 --&gt; R5[V3HubReqExecution05Planned]
+          R5 --&gt; R6[V3HubReqTarget06Resolved]
+          R6 --&gt; R7[V3HubReqOutbound07ProviderSemantic]
+          R7 --&gt; R8[V3ProviderReqOutbound08WirePayload]
+          R8 --&gt; R9[V3ProviderReqOutbound09TransportRequest]
+          R9 --&gt; P[(Controlled Gemini upstream)]
+          P --&gt; P1[V3ProviderRespInbound01Raw]
+          P1 --&gt; P2[V3HubRespInbound02Normalized]
+          P2 --&gt; P3[V3HubRespChatProcess03Governed]
+          P3 --&gt; P4[V3HubRespContinuation04Committed]
+          P4 --&gt; P5[V3HubRespOutbound05ClientSemantic]
+          P5 --&gt; P6[V3ServerRespOutbound06ClientFrame]</pre>
+        <p>Machine edge IDs are <code>v3-gemini-relay-01..15</code>. Server reads the Config entry binding, supplies request scope, calls the Gemini Runtime owner, and transports the typed result. Gemini URL/model, candidate, function-call, finishReason, JSON, and SSE semantics stay in the Gemini codec/Runtime.</p>
+        <h2>JSON, SSE, error, isolation</h2>
+        <table>
+        <thead><tr><th>Surface</th><th>Controlled evidence</th><th>Locked risk</th></tr></thead>
+        <tbody>
+        <tr><td>JSON</td><td>Loopback captures one <code>/v1beta/models/gemini-wire/generateContent</code> request and returns exact candidates/usage</td><td>client URL alias selects the wire URL without inserting a synthetic <code>model</code> body field</td></tr>
+        <tr><td>Function call</td><td>Runtime governs a Gemini <code>functionCall</code> and preserves its <code>name</code></td><td>protocol identity is not lost or remapped by generic Hub stages</td></tr>
+        <tr><td>SSE</td><td>Shared incremental decoder feeds <code>Body::from_stream</code>; first candidate frame arrives before delayed terminal; no synthetic <code>[DONE]</code></td><td>no full stream materialization or OpenAI framing</td></tr>
+        <tr><td>SSE negatives</td><td>malformed JSON, stream end without terminal, and post-terminal frame fail explicitly</td><td>still-running or malformed provider streams never become success</td></tr>
+        <tr><td>Error</td><td>Controlled 429 enters <code>V3Error01SourceRaised</code> through <code>V3Error06ClientProjected</code></td><td>provider failure never becomes Resp01/success</td></tr>
+        <tr><td>Isolation</td><td>request/response <code>metadata_center</code> fails before provider send or client projection</td><td>internal control truth never enters provider/client normal payload</td></tr>
+        </tbody>
+        </table>
+        <h2>Ownership checklist</h2>
+        <ul>
+          <li>[x] Config registry marks Gemini <code>relay</code> and <code>implemented</code> with the Gemini Runtime owner.</li>
+          <li>[x] Server consumes <code>entry_protocol_binding_for_endpoint</code>; no raw-path Gemini bypass.</li>
+          <li>[x] Virtual Router classifies the dynamic Gemini endpoint as the <code>gemini</code> entry protocol.</li>
+          <li>[x] Existing Hub v1 Req01–Req09 and Resp01–Resp06 nodes only.</li>
+          <li>[x] Gemini protocol semantics stay in <code>gemini_codec.rs</code> and <code>gemini_relay_runtime.rs</code>.</li>
+          <li>[x] Static hook registry only; no dynamic discovery.</li>
+          <li>[x] No fallback, second Runtime kernel, history repair, or Responses Direct re-entry.</li>
+          <li>[x] No raw SSE body collection, synthetic <code>[DONE]</code>, or Server-side candidate/functionCall/</li>
+        </ul>
+        <p>finishReason parsing.</p>
+        <ul>
+          <li>[x] Source/mutation gates cover missing nodes, transport bypass, fallback, dynamic hooks,</li>
+        </ul>
+        <p>materialization, Server semantic parsing, binding regression, endpoint classification, and side-channel leakage.</p>
+        <ul>
+          <li>[ ] Real Gemini provider/live production lifecycle; explicitly outside this controlled slice.</li>
+        </ul>
+        <h2>Required gates</h2>
+        <pre><code class="language-text">npm run test:v3-gemini-relay-runtime-integration
+        npm run verify:v3-gemini-relay-runtime-integration
+        npm run test:v3-gemini-relay-runtime-integration-red-fixtures
+        npm run test:v3-gemini-codec-characterization
+        npm run verify:v3-gemini-codec-characterization
+        npm run test:v3-gemini-codec-characterization-red-fixtures
+        npm run verify:v3-entry-protocol-endpoint-binding
+        npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
+        npm run verify:v3-module-boundaries
+        npm run verify:v3-rust-only
+        npm run verify:v3-architecture-docs
+        npm run verify:v3-resource-map
+        cargo fmt --manifest-path v3/Cargo.toml --all -- --check
+        CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings
+        CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml --workspace -- --nocapture
+        git diff --check</code></pre>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

@@ -127,9 +127,9 @@
         <p>Canonical maps: [V3 function map](../v3-function-map.yml), [V3 mainline call map](../v3-mainline-call-map.yml), [V3 resource map](../v3-resource-operation-map.yml), and [V3 verification map](../v3-verification-map.yml).</p>
         <h2>Purpose</h2>
         <p>This page is the review surface for <code>v3.entry_protocol_endpoint_binding</code>. It locks the first V3 entry gap: every exposed HTTP business endpoint must resolve to one known entry protocol, one execution mode, one implementation status, and one owner before Server dispatch.</p>
-        <p>The required review phrase is endpoint binding complete only when the binding registry, Server exposure, manifest, maps, wiki, verifier, and red fixtures are all consistent. runtime protocol implementation is separate.</p>
+        <p>The required review phrase is endpoint binding complete only when the binding registry, Server exposure, manifest, maps, wiki, verifier, and red fixtures are all consistent. Runtime protocol implementation remains a separately owned feature even when its binding is integrated here.</p>
         <h2>Main Rule</h2>
-        <p>Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol and whether the target is implemented or Gemini pending_not_implemented.</p>
+        <p>Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Gemini relay implemented means the registry points to <code>v3.gemini_relay_runtime_integration</code>; it does not mean live/global/prod compatibility.</p>
         <p>Binding resources are side-channel governance truth. They may not enter provider body, client body, metadata payload, debug payload, provider runtime state, or request payload. live/global/prod not claimed by this source slice.</p>
         <pre class="mermaid">flowchart TD
           M[V3Config05ManifestPublished] --&gt; B1[V3EntryBind01EndpointPatternDeclared]
@@ -137,7 +137,7 @@
           B2 --&gt; B3[V3EntryBind03ServerEnablementChecked]
           B3 --&gt; B4[V3EntryBind04ExecutionBindingProjected]
           B4 --&gt; I[implemented runtime owner]
-          B4 --&gt; P[explicit pending_not_implemented owner]</pre>
+          B4 --&gt; E[explicit unsupported-mode error]</pre>
         <h2>Binding Matrix</h2>
         <table>
         <thead><tr><th>Entry protocol</th><th>Endpoint pattern</th><th>Execution mode</th><th>Implementation status</th><th>Owner</th></tr></thead>
@@ -146,7 +146,7 @@
         <tr><td>responses</td><td><code>/v1/responses</code></td><td>direct</td><td>implemented</td><td><code>execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation</code></td></tr>
         <tr><td>anthropic</td><td><code>/v1/messages</code></td><td>relay</td><td>implemented</td><td><code>execute_v3_anthropic_relay_runtime_with_default_transport</code></td></tr>
         <tr><td>openai_chat</td><td><code>/v1/chat/completions</code></td><td>relay</td><td>implemented</td><td><code>execute_v3_openai_chat_relay_runtime_with_default_transport</code></td></tr>
-        <tr><td>gemini</td><td><code>/v1beta/models/:model/generateContent</code></td><td>pending_not_implemented</td><td>Gemini pending_not_implemented</td><td><code>execute_v3_foundation_pending_runtime</code> pending projection</td></tr>
+        <tr><td>gemini</td><td><code>/v1beta/models/:model/generateContent</code></td><td>relay</td><td>implemented</td><td><code>execute_v3_gemini_relay_runtime_with_default_transport</code></td></tr>
         </tbody>
         </table>
         <h2>Mainline</h2>
@@ -157,7 +157,7 @@
         <tr><td>v3-entry-bind-01</td><td><code>V3Config05ManifestPublished</code></td><td><code>V3EntryBind01EndpointPatternDeclared</code></td><td>Config declares the endpoint pattern registry.</td></tr>
         <tr><td>v3-entry-bind-02</td><td><code>V3EntryBind01EndpointPatternDeclared</code></td><td><code>V3EntryBind02ProtocolResolved</code></td><td>Closed protocol resolves execution mode, implementation status, and owner.</td></tr>
         <tr><td>v3-entry-bind-03</td><td><code>V3EntryBind02ProtocolResolved</code></td><td><code>V3EntryBind03ServerEnablementChecked</code></td><td>Server endpoint table matches the Config registry before dispatch.</td></tr>
-        <tr><td>v3-entry-bind-04</td><td><code>V3EntryBind03ServerEnablementChecked</code></td><td><code>V3EntryBind04ExecutionBindingProjected</code></td><td>Implemented protocols enter owner runtime; pending protocols return explicit pending_not_implemented.</td></tr>
+        <tr><td>v3-entry-bind-04</td><td><code>V3EntryBind03ServerEnablementChecked</code></td><td><code>V3EntryBind04ExecutionBindingProjected</code></td><td>Implemented protocols enter the owner Runtime; unsupported execution modes fail explicitly.</td></tr>
         </tbody>
         </table>
         <h2>Review Checklist</h2>
@@ -165,14 +165,14 @@
           <li>Every exposed <code>/v1/*</code> or <code>/v1beta/*</code> business endpoint has exactly one binding.</li>
           <li>Config allowed protocols, manifest declarations, and Server endpoint exposure are equal.</li>
           <li>Server has no <code>endpoint_protocol()</code> duplicate registry and no raw path runtime bypass.</li>
-          <li>Gemini pending_not_implemented is explicit and owner-bound; it is not runtime success.</li>
+          <li>Gemini relay implemented is explicit and bound to <code>v3.gemini_relay_runtime_integration</code>.</li>
           <li>No unbound endpoint can fall through to generic foundation pending.</li>
           <li>Binding resources are forbidden from provider/client body.</li>
           <li><code>npm run verify:v3-entry-protocol-endpoint-binding</code> and <code>npm run test:v3-entry-protocol-endpoint-binding-red-fixtures</code> are required gates.</li>
         </ul>
         <h2>Current Integration Boundary</h2>
-        <p>Worker A owns Config registry implementation. Worker B owns Server binding consumer implementation. This review surface owns the maps, manifest, wiki, source gate, red fixtures, and integration audit.</p>
-        <p>If A or B is still running, this page can only prove the review/gate skeleton and the baseline red diagnostics. It cannot claim endpoint binding complete, live/global/prod not claimed, or runtime compatibility until the source consumer gates pass.</p>
+        <p>Config publishes the closed four-protocol registry. Server consumes <code>entry_protocol_binding_for_endpoint</code> before dispatch. Gemini now enters the separately owned controlled Relay Runtime, and the entry-binding verifier/red fixtures lock the source integration.</p>
+        <p>This surface does not prove a real Gemini provider, credentials, install, restart, release, global availability, or production cutover. live/global/prod not claimed.</p>
       </article>
     </section>
   </main>

@@ -12,8 +12,8 @@ const expectedEndpointPatterns = new Map([
   ['openai_chat', ['/v1/chat/completions']],
   ['gemini', ['/v1beta/models/:model/generateContent']],
 ]);
-const implementedProtocols = new Set(['responses', 'anthropic', 'openai_chat']);
-const pendingProtocols = new Set(['gemini']);
+const implementedProtocols = new Set(['responses', 'anthropic', 'openai_chat', 'gemini']);
+const pendingProtocols = new Set();
 
 const files = {
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -74,9 +74,9 @@ for (const step of ['v3-entry-bind-01', 'v3-entry-bind-02', 'v3-entry-bind-03', 
 }
 
 requireText(text.verificationMap, files.verificationMap, 'feature_id: v3.entry_protocol_endpoint_binding');
-requireText(text.verificationMap, files.verificationMap, 'Gemini pending_not_implemented');
+requireText(text.verificationMap, files.verificationMap, 'Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration');
 requireText(text.verificationMap, files.verificationMap, 'Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent');
-requireText(text.verificationMap, files.verificationMap, 'Do not claim Gemini runtime implementation live provider compatibility global install restart or production cutover');
+requireText(text.verificationMap, files.verificationMap, 'Do not claim live Gemini provider compatibility global install restart or production cutover');
 
 requireText(text.wiki, files.wiki, '# V3 Entry Protocol Endpoint Binding');
 for (const heading of [
@@ -89,8 +89,8 @@ for (const heading of [
 ]) requireText(text.wiki, files.wiki, heading);
 for (const token of [
   'endpoint binding complete',
-  'runtime protocol implementation is separate',
-  'Gemini pending_not_implemented',
+  'separately owned feature',
+  'Gemini relay implemented',
   'live/global/prod not claimed',
 ]) requireText(text.wiki, files.wiki, token);
 requireText(text.wikiHtml, files.wikiHtml, 'V3 Entry Protocol Endpoint Binding');

@@ -1,0 +1,309 @@
+use axum::{
+    body::Body,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Response,
+    routing::post,
+    Json, Router,
+};
+use futures_util::StreamExt;
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_server::spawn_v3_server_aggregate;
+use serde_json::{json, Value};
+use std::{net::TcpListener, sync::Arc, time::Duration};
+use tokio::sync::{mpsc, oneshot, Mutex};
+
+#[path = "../../../tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
+use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
+
+static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+#[derive(Debug)]
+struct ProviderCapture {
+    authorization: Option<String>,
+    body: Value,
+}
+
+#[derive(Clone)]
+struct ProviderState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+}
+
+async fn controlled_gemini_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body: body.clone(),
+        })
+        .unwrap();
+
+    if body
+        .pointer("/contents/0/parts/0/text")
+        .and_then(Value::as_str)
+        == Some("fail")
+    {
+        return Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}}"#,
+            ))
+            .unwrap();
+    }
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let stream = futures_util::stream::unfold(0_u8, |step| async move {
+            match step {
+                0 => Some((
+                    Ok::<_, std::convert::Infallible>(
+                        br#"data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"first"}]},"finishReason":null}]}
+
+"#
+                        .to_vec(),
+                    ),
+                    1,
+                )),
+                1 => {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    Some((
+                        Ok(
+                            br#"data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":7}}
+
+"#
+                            .to_vec(),
+                        ),
+                        2,
+                    ))
+                }
+                _ => None,
+            }
+        });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({
+                "candidates":[{
+                    "index":0,
+                    "finishReason":"STOP",
+                    "content":{"role":"model","parts":[{"text":"controlled json"}]}
+                }],
+                "usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}
+            }))
+            .unwrap(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn server_executes_controlled_json_sse_error_and_isolation_without_second_owner() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_GEMINI_CONTROLLED_KEY", "controlled-secret");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
+    let (upstream_shutdown_tx, upstream_shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1beta/models/gemini-wire/generateContent",
+            post(controlled_gemini_upstream),
+        )
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = upstream_shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let handle = spawn_v3_server_aggregate(manifest(free_port(), upstream_addr.port()))
+        .await
+        .unwrap();
+    let endpoint = format!(
+        "http://{}/v1beta/models/gemini-client/generateContent",
+        handle.listeners[0].addr
+    );
+    let client = reqwest::Client::new();
+
+    let json_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "contents":[{"role":"user","parts":[{"text":"json"}]}],
+            "tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"object"}}]}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), StatusCode::OK);
+    assert!(json_response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("V3ServerRespOutbound06ClientFrame"));
+    let json_body: Value = json_response.json().await.unwrap();
+    assert_eq!(
+        json_body["candidates"][0]["content"]["parts"][0]["text"],
+        "controlled json"
+    );
+    assert_eq!(json_body["usageMetadata"]["totalTokenCount"], 5);
+    let json_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(
+        json_capture.authorization.as_deref(),
+        Some("Bearer controlled-secret")
+    );
+    assert_eq!(json_capture.body["contents"][0]["parts"][0]["text"], "json");
+    assert!(json_capture.body.get("metadata_center").is_none());
+
+    let sse_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "contents":[{"role":"user","parts":[{"text":"sse"}]}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), StatusCode::OK);
+    assert_eq!(
+        sse_response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+    let mut body_stream = sse_response.bytes_stream();
+    let first = tokio::time::timeout(Duration::from_millis(150), body_stream.next())
+        .await
+        .expect("client first Gemini frame must arrive before controlled terminal delay")
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8(first.to_vec()).unwrap().contains("first"));
+    let rest = tokio::time::timeout(Duration::from_secs(1), body_stream.collect::<Vec<_>>())
+        .await
+        .unwrap();
+    let rest = rest
+        .into_iter()
+        .map(Result::unwrap)
+        .flat_map(|bytes| bytes.to_vec())
+        .collect::<Vec<_>>();
+    let rest = String::from_utf8(rest).unwrap();
+    assert!(rest.contains("\"finishReason\":\"STOP\""));
+    assert!(!rest.contains("[DONE]"));
+    let _sse_capture = captures_rx.recv().await.unwrap();
+
+    let error_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "contents":[{"role":"user","parts":[{"text":"fail"}]}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        error_response
+            .headers()
+            .get("x-routecodex-v3-error-chain")
+            .unwrap(),
+        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
+    );
+    let error_body: Value = error_response.json().await.unwrap();
+    assert_eq!(error_body["error"]["message"], "controlled rate limit");
+    let _error_capture = captures_rx.recv().await.unwrap();
+
+    let isolation_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "contents":[{"role":"user","parts":[{"text":"isolation"}]}],
+            "metadata_center":{"route":"must-not-leak"}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        isolation_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        isolation_response
+            .headers()
+            .get("x-routecodex-v3-error-chain")
+            .unwrap(),
+        "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
+            .await
+            .is_err()
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown_tx.send(()).unwrap();
+    std::env::remove_var("V3_GEMINI_CONTROLLED_KEY");
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn manifest(
+    server_port: u16,
+    upstream_port: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = format!(
+        r#"
+version = 3
+
+{hub_v1_declaration}
+
+[servers.controlled]
+bind = "127.0.0.1"
+port = {server_port}
+routing_group = "controlled"
+endpoints = ["gemini"]
+
+{server_execution}
+
+[providers.controlled]
+type = "gemini"
+base_url = "http://127.0.0.1:{upstream_port}/v1beta"
+default_model = "gemini-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI_CONTROLLED_KEY" }}] }}
+[providers.controlled.models.gemini-wire]
+wire_name = "gemini-wire"
+aliases = ["gemini-client"]
+supports_streaming = true
+capabilities = ["text", "tools", "streaming"]
+[route_groups.controlled.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-wire", key = "controlled", priority = 1 }}]
+"#,
+        hub_v1_declaration = hub_v1_test_declaration(),
+        server_execution = hub_v1_server_execution("controlled"),
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}

@@ -79,8 +79,7 @@ fn expected_entry_protocol_endpoint_patterns(protocol: &str) -> Option<&'static 
 fn expected_entry_protocol_execution_mode(protocol: &str) -> Option<V3EntryProtocolExecutionMode> {
     match protocol {
         "responses" => Some(V3EntryProtocolExecutionMode::Direct),
-        "anthropic" | "openai_chat" => Some(V3EntryProtocolExecutionMode::Relay),
-        "gemini" => Some(V3EntryProtocolExecutionMode::PendingNotImplemented),
+        "anthropic" | "openai_chat" | "gemini" => Some(V3EntryProtocolExecutionMode::Relay),
         _ => None,
     }
 }

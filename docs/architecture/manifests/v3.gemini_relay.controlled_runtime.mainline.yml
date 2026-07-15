@@ -1,0 +1,81 @@
+lifecycle_id: v3.gemini_relay.controlled_runtime
+summary: "Controlled Gemini /v1beta/models/:model/generateContent Relay through the sole Hub v1 lifecycle with incremental SSE client transport."
+owner_feature_id: v3.gemini_relay_runtime_integration
+entrypoint:
+  node_id: V3GeminiRelayRuntimeInput
+  symbol: execute_v3_gemini_generate_content_request
+  source: v3/crates/routecodex-v3-server/src/lib.rs
+return_path:
+  node_id: V3ServerRespOutbound06ClientFrame
+  symbol: gemini_relay_output_response
+  source: v3/crates/routecodex-v3-server/src/lib.rs
+call_map_chain_id: v3.gemini_relay.controlled_runtime
+canonical_docs:
+  - docs/goals/v3-gemini-relay-runtime-integration-plan.md
+  - docs/goals/v3-gemini-relay-runtime-integration-test-design.md
+  - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+  - docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md
+node_ids:
+  - V3GeminiRelayRuntimeInput
+  - V3HubReqInbound01ClientRaw
+  - V3HubReqInbound02Normalized
+  - V3HubReqContinuation03Classified
+  - V3HubReqChatProcess04Governed
+  - V3HubReqExecution05Planned
+  - V3HubReqTarget06Resolved
+  - V3HubReqOutbound07ProviderSemantic
+  - V3ProviderReqOutbound08WirePayload
+  - V3ProviderReqOutbound09TransportRequest
+  - V3ProviderRespInbound01Raw
+  - V3HubRespInbound02Normalized
+  - V3HubRespChatProcess03Governed
+  - V3HubRespContinuation04Committed
+  - V3HubRespOutbound05ClientSemantic
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - { step_id: v3-gemini-relay-01, from_node: V3GeminiRelayRuntimeInput, to_node: V3HubReqInbound01ClientRaw, status: anchored }
+  - { step_id: v3-gemini-relay-02, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: anchored }
+  - { step_id: v3-gemini-relay-03, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqContinuation03Classified, status: anchored }
+  - { step_id: v3-gemini-relay-04, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored }
+  - { step_id: v3-gemini-relay-05, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqExecution05Planned, status: anchored }
+  - { step_id: v3-gemini-relay-06, from_node: V3HubReqExecution05Planned, to_node: V3HubReqTarget06Resolved, status: anchored }
+  - { step_id: v3-gemini-relay-07, from_node: V3HubReqTarget06Resolved, to_node: V3HubReqOutbound07ProviderSemantic, status: anchored }
+  - { step_id: v3-gemini-relay-08, from_node: V3HubReqOutbound07ProviderSemantic, to_node: V3ProviderReqOutbound08WirePayload, status: anchored }
+  - { step_id: v3-gemini-relay-09, from_node: V3ProviderReqOutbound08WirePayload, to_node: V3ProviderReqOutbound09TransportRequest, status: anchored }
+  - { step_id: v3-gemini-relay-10, from_node: V3ProviderReqOutbound09TransportRequest, to_node: V3ProviderRespInbound01Raw, status: anchored }
+  - { step_id: v3-gemini-relay-11, from_node: V3ProviderRespInbound01Raw, to_node: V3HubRespInbound02Normalized, status: anchored }
+  - { step_id: v3-gemini-relay-12, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored }
+  - { step_id: v3-gemini-relay-13, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, status: anchored }
+  - { step_id: v3-gemini-relay-14, from_node: V3HubRespContinuation04Committed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored }
+  - { step_id: v3-gemini-relay-15, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored }
+error_path:
+  node_ids:
+    - V3Error01SourceRaised
+    - V3Error02Classified
+    - V3Error03TargetLocalAction
+    - V3Error04TargetExhaustionDecision
+    - V3Error05ExecutionDecision
+    - V3Error06ClientProjected
+  terminal_rule: "Provider/runtime failure never enters Resp01 success projection."
+isolation:
+  provider_body_forbidden: [metadata_center, debug_snapshot, resource_handle, continuation_owner]
+  client_body_forbidden: [metadata_center, debug_snapshot, resource_handle, selected_target]
+  sse_rule: "Runtime validates and emits Gemini frames incrementally without synthetic DONE; Server transports V3GeminiRelayClientStream with Body::from_stream and never materializes the full stream."
+verification:
+  required_gates:
+    - npm run test:v3-gemini-relay-runtime-integration
+    - npm run verify:v3-gemini-relay-runtime-integration
+    - npm run test:v3-gemini-relay-runtime-integration-red-fixtures
+    - npm run test:v3-gemini-codec-characterization
+    - npm run verify:v3-gemini-codec-characterization
+    - npm run test:v3-gemini-codec-characterization-red-fixtures
+    - npm run verify:v3-entry-protocol-endpoint-binding
+    - npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
+    - npm run verify:v3-module-boundaries
+    - npm run verify:v3-rust-only
+    - npm run verify:v3-architecture-docs
+    - npm run verify:v3-resource-map
+    - cargo fmt --manifest-path v3/Cargo.toml --all -- --check
+    - CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings
+    - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml --workspace -- --nocapture
+    - git diff --check

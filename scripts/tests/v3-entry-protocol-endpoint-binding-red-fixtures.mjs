@@ -59,10 +59,13 @@ const cases = [
     diagnostic: /missing v3-entry-bind-04/u,
   },
   {
-    name: 'remove pending owner',
+    name: 'remove Gemini runtime owner',
     path: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
-    mutate: (source) => source.replace('    pending_owner: execute_v3_foundation_pending_runtime\n', ''),
-    diagnostic: /gemini pending binding must declare pending_owner/u,
+    mutate: (source) => source.replace(
+      '    runtime_owner_symbol: execute_v3_gemini_relay_runtime_with_default_transport\n',
+      '',
+    ),
+    diagnostic: /gemini implemented binding must declare runtime owner symbol\/path/u,
   },
   {
     name: 'add server raw path bypass branch',

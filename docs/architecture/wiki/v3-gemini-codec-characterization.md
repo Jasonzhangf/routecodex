@@ -2,7 +2,7 @@
 
 ## 边界
 
-本页只描述 native Gemini codec 的 characterization。它不注册 Hub hook，不连接 Server、Runtime kernel、Provider transport、continuation、Relay 或 SSE Transport Core。Gemini endpoint 仍保持 `pending_not_implemented`，直到另一个 runtime integration 目标显式改变它。
+本页只描述 native Gemini codec 的 characterization。它不注册 Hub hook，不连接 Server、Runtime kernel、Provider transport、continuation、Relay 或 SSE Transport Core。Gemini Runtime wiring 由 `v3.gemini_relay_runtime_integration` 单独拥有；codec characterization 本身不证明 live/provider/global 可用。
 
 ```mermaid
 flowchart LR

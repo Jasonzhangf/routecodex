@@ -120,16 +120,21 @@ fn published_manifest() -> V3Config05ManifestPublished {
                 V3EntryProtocolBindingManifest {
                     entry_protocol: "gemini".to_string(),
                     endpoint_patterns: vec!["/v1beta/models/:model/generateContent".to_string()],
-                    execution_mode: V3EntryProtocolExecutionMode::PendingNotImplemented,
-                    protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
-                    implemented: false,
+                    execution_mode: V3EntryProtocolExecutionMode::Relay,
+                    protocol_profile_owner: "v3.gemini_relay_runtime_integration".to_string(),
+                    implemented: true,
                     forbidden_reentry_behavior:
-                        "Gemini endpoint must not fall through to generic pending without explicit owner."
+                        "Gemini endpoint must not fall through to pending or direct runtime."
                             .to_string(),
-                    runtime_owner_symbol: None,
-                    runtime_owner_path: None,
-                    pending_owner_symbol: Some("execute_v3_foundation_pending_runtime".to_string()),
-                    pending_owner_path: Some("v3/crates/routecodex-v3-runtime/src/foundation.rs".to_string()),
+                    runtime_owner_symbol: Some(
+                        "execute_v3_gemini_relay_runtime_with_default_transport".to_string(),
+                    ),
+                    runtime_owner_path: Some(
+                        "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
+                            .to_string(),
+                    ),
+                    pending_owner_symbol: None,
+                    pending_owner_path: None,
                 },
             ],
             hook_set_id: "hub_v1.default".to_string(),
