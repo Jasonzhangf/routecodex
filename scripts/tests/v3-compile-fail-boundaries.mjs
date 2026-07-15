@@ -227,9 +227,29 @@ for (const fixture of [
     diagnostic: /private field|E0451/,
   },
   {
+    name: 'Hub Req04 private constructor',
+    code: 'use routecodex_v3_runtime::V3HubReqChatProcess04Governed;\nfn main() { let _ = V3HubReqChatProcess04Governed { previous: todo!() }; }\n',
+    diagnostic: /private field|E0451/,
+  },
+  {
     name: 'Hub non-adjacent conversion',
     code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_target_06_from_v3_hub_req_execution_05, V3HubEntryProtocol, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent};\nfn main() { let req01 = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let _ = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(req01, V3HubTargetResolution::Routed); }\n',
     diagnostic: /mismatched types|expected `V3HubReqExecution05Planned`/,
+  },
+  {
+    name: 'Hub Req04 bypass into execution plan',
+    code: 'use routecodex_v3_runtime::{build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02, build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTransportIntent};\nfn main() { let req01 = build_v3_hub_req_inbound_01_client_raw(serde_json::json!({}), V3HubEntryProtocol::Responses, V3HubInvocationSource::Client, V3HubTransportIntent::Json); let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01); let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(req02, V3HubContinuationOwnership::New); let _ = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req03, V3HubExecutionMode::Relay); }\n',
+    diagnostic: /mismatched types|expected `V3HubReqChatProcess04Governed`/,
+  },
+  {
+    name: 'Hub independent Relay request lifecycle constructor',
+    code: 'use routecodex_v3_runtime::V3HubRelayRequestHooks;\nfn main() { let _ = V3HubRelayRequestHooks { _sealed: () }; }\n',
+    diagnostic: /private field|E0451/,
+  },
+  {
+    name: 'Hub current-node borrowed view cannot outlive payload',
+    code: 'use routecodex_v3_config::V3HubFixedNode;\nuse routecodex_v3_runtime::{borrow_v3_hub_current_node, V3HubCurrentNodeBorrowedView};\nfn leak<\'a>() -> V3HubCurrentNodeBorrowedView<\'a, Vec<u8>> { let payload = vec![1_u8]; borrow_v3_hub_current_node(V3HubFixedNode::V3HubReqChatProcess04Governed, &payload) }\nfn main() {}\n',
+    diagnostic: /returns a value referencing data owned by the current function|E0515/,
   },
 ]) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-node-compile-fail-'));
@@ -238,7 +258,7 @@ for (const fixture of [
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-runtime = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n`,
+      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-config = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-config')}" }\nroutecodex-v3-runtime = { path = "${resolve(repoRoot, 'v3/crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n`,
     );
     writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {

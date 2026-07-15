@@ -221,6 +221,14 @@ Resource scopes must be explicit: `server`, `listener`, `routing_group`, `sessio
 `provider`, `hook`, or `debug`. Side-channel resources may never enter provider body or client
 normal body unless their resource map explicitly permits it.
 
+Relay live-path payload copy budget is a startup and architecture contract, not a later performance
+optimization; unbounded deep copy of request, response, context, continuation, or provider-wire
+truth is forbidden. Full SSE materialize for hook planning, governance, Debug, snapshot, retry, or
+continuation is forbidden. Debug/snapshot copy is bounded, redacted side-channel evidence only and
+must never become business truth, restore truth, or a substitute for the current typed node value.
+Any intentionally retained full payload must declare its unique owner node, byte/item bound,
+release point, and required gate; absence of any declaration is fail-fast.
+
 ## Worker gates
 
 Each worker must include positive and negative gates.

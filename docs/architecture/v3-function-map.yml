@@ -45,6 +45,8 @@ features:
     resource_bindings:
       - v3.config.hub_pipeline_declarations
       - v3.hub.static_hook_registry
+      - v3.hub.runtime_resource_declarations
+      - v3.hub.current_node_borrowed_view
       - v3.hub.entry_protocol
       - v3.hub.continuation_ownership
       - v3.hub.execution_plan
@@ -57,6 +59,7 @@ features:
       - compile_v3_hub_v1_static_registry
       - compile_v3_hub_v1_static_registry_from_config
       - validate_v3_hub_v1_hook_manifest
+      - borrow_v3_hub_current_node
       - build_v3_hub_req_inbound_01_client_raw
       - build_v3_provider_resp_inbound_01_raw
     adjacent_builder_symbols:
@@ -91,6 +94,8 @@ features:
       - npm run verify:v3-p6-freeze
       - npm run test:v3-p6-freeze-red-fixtures
       - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-relay-hook-resources
+      - npm run test:v3-relay-hook-resource-red-fixtures
       - npm run test:v3-h1-source-red-fixtures
       - npm run test:v3-compile-fail
       - npm run verify:v3-architecture-docs
@@ -168,6 +173,80 @@ features:
       - feature_id:v3.hub_relay_response_semantics
       - feature_id:v3.hub_relay_runtime_resources_hooks
       - feature_id:v3.hub_relay_gate_review_surface
+    mainline_bindings:
+      - v3-hub-req-01
+      - v3-hub-req-02
+      - v3-hub-req-03
+      - v3-hub-req-04
+      - v3-hub-req-05
+      - v3-hub-req-06
+      - v3-hub-req-07
+      - v3-hub-req-08
+      - v3-hub-resp-01
+      - v3-hub-resp-02
+      - v3-hub-resp-03
+      - v3-hub-resp-04
+      - v3-hub-resp-05
+
+  - feature_id: v3.hub_relay_request_semantics
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.hub.entry_protocol
+      - v3.hub.continuation_ownership
+      - v3.continuation.remote_binding
+      - v3.continuation.local_context_truth
+    mainline_bindings:
+      - v3-hub-relay-req-01
+      - v3-hub-relay-req-02
+      - v3-hub-relay-req-03
+    entry_symbols:
+      - compile_v3_hub_relay_request_hooks
+      - V3HubRelayRequestHooks::run
+      - classify_continuation
+      - restore_local_context_at_req04
+      - govern_tool_outputs
+    source_nodes:
+      - V3HubReqInbound01ClientRaw
+      - V3HubReqInbound02Normalized
+      - V3HubReqContinuation03Classified
+      - V3HubReqChatProcess04Governed
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - scripts/architecture/verify-v3-relay-request-semantics.mjs
+      - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
+      - docs/goals/v3-hub-relay-request-semantics-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - package.json
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-relay-request-semantics
+      - npm run verify:v3-relay-request-semantics
+      - npm run test:v3-relay-request-semantics-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+    runtime_status: relay_request_source_slice_only
+    pending_runtime:
+      - Relay response-side source slice
+      - Relay resource/hook live integration
+      - live Relay Server entry wiring
+      - continuation end-to-end restore/materialize
+      - P6 cutover or deletion
 
   - feature_id: v3.hub_relay_response_semantics
     owner_crate: routecodex-v3-runtime
@@ -192,6 +271,10 @@ features:
       - V3HubRespInbound02Normalized
       - V3HubRespChatProcess03Governed
       - V3HubRespContinuation04Committed
+    mainline_bindings:
+      - v3-hub-relay-resp-01
+      - v3-hub-relay-resp-02
+      - v3-hub-relay-resp-03
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
@@ -208,7 +291,7 @@ features:
       - v3/crates/routecodex-v3-provider-responses/src
       - ~/.rcc
     required_gates:
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - npm run test:v3-relay-response-semantics
       - npm run verify:v3-relay-response-semantics
       - npm run test:v3-relay-response-semantics-red-fixtures
       - npm run verify:v3-architecture-docs
@@ -220,7 +303,151 @@ features:
     runtime_status: relay_response_source_slice_only
     pending_runtime:
       - Relay request-side source slice
-      - Config/Manifest hook selection and runtime resources
+      - Relay resource/hook live integration
+      - live Relay Server entry wiring
+      - continuation end-to-end restore/materialize
+      - P6 cutover or deletion
+
+  - feature_id: v3.hub_relay_runtime_resources_hooks
+    owner_crates: [routecodex-v3-config, routecodex-v3-runtime]
+    owner_files:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+    resource_bindings:
+      - v3.config.hub_pipeline_declarations
+      - v3.hub.static_hook_registry
+      - v3.hub.runtime_resource_declarations
+      - v3.hub.current_node_borrowed_view
+      - v3.hub.entry_protocol
+      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
+      - v3.hub.resolved_target
+      - v3.hub.provider_protocol
+      - v3.continuation.remote_binding
+      - v3.continuation.local_context_truth
+    mainline_bindings:
+      - v3-hub-req-01
+      - v3-hub-req-02
+      - v3-hub-req-03
+      - v3-hub-req-04
+      - v3-hub-req-05
+      - v3-hub-req-06
+      - v3-hub-req-07
+      - v3-hub-req-08
+      - v3-hub-resp-01
+      - v3-hub-resp-02
+      - v3-hub-resp-03
+      - v3-hub-resp-04
+      - v3-hub-resp-05
+    entry_symbols:
+      - V3HubFixedNode
+      - V3HubResourceAuthoringConfig
+      - V3HubHookManifest
+      - compile_hub_v1
+      - compile_v3_hub_v1_static_registry_from_config
+      - validate_v3_hub_v1_hook_manifest
+      - borrow_v3_hub_current_node
+    allowed_paths:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_v1_h1_contract.rs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - package.json
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-relay-hook-resources
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-relay-hook-resources
+      - npm run test:v3-relay-hook-resource-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: relay_resource_hook_declaration_surface_only
+    pending_runtime:
+      - live Relay Server entry wiring
+      - continuation end-to-end restore/materialize
+      - P6 cutover or deletion
+
+  - feature_id: v3.hub_relay_gate_review_surface
+    owner_file: docs/design/v3-hub-relay-fixed-pipeline-contract.md
+    resource_bindings:
+      - v3.config.hub_pipeline_declarations
+      - v3.hub.static_hook_registry
+      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
+      - v3.hub.resolved_target
+      - v3.hub.provider_protocol
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.hub.response_semantic
+      - v3.continuation.remote_binding
+      - v3.continuation.local_context_truth
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-hub-req-01
+      - v3-hub-req-02
+      - v3-hub-req-03
+      - v3-hub-req-04
+      - v3-hub-req-05
+      - v3-hub-req-06
+      - v3-hub-req-07
+      - v3-hub-req-08
+      - v3-hub-resp-01
+      - v3-hub-resp-02
+      - v3-hub-resp-03
+      - v3-hub-resp-04
+      - v3-hub-resp-05
+    entry_symbols:
+      - verify-v3-architecture-docs
+      - test-v3-hub-skeleton-doc-red-fixtures
+    allowed_paths:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-architecture-docs.mjs
+      - scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs
+      - package.json
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - ~/.rcc
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-hub-skeleton-doc-red-fixtures
+      - npm run test:v3-compile-fail
+    runtime_status: relay_architecture_review_surface_only
+    pending_runtime:
+      - Relay request-side runtime completion
+      - Relay response-side runtime completion
+      - Relay resource/hook live integration
       - live Relay Server entry wiring
       - continuation end-to-end restore/materialize
       - P6 cutover or deletion

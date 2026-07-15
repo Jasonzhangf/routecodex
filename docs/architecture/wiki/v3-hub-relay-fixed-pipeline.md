@@ -89,11 +89,26 @@ Relay is borrow-first and move-at-boundary:
 
 - Hub v1 skeleton and static registry: implemented as source-only H1.
 - P6 Responses Direct: frozen and verified as migration baseline.
-- Relay request semantics: pending.
-- Relay response semantics: pending.
-- Runtime resources and static hook resource config: pending.
-- Relay maps/gates/wiki: this review surface defines the next parallel work split.
+- Relay request semantics: source slice present; combined integration and live Relay remain pending.
+- Relay response semantics: source slice verified; combined integration and live Relay remain pending.
+- Runtime resources and static hook resource config: declaration surface verified; live Relay integration remains pending.
+- Relay maps/gates/wiki: architecture review surface locked by the D gates below.
 - Payload copy-budget runtime gates: pending.
+
+## A/B/C merge checklist
+
+- A request: `v3-hub-relay-req-01..03` only; Req03 classifies, Req04 restores/governs; no Req05,
+  Provider, Server, response, or dynamic-hook shortcut. Run request focused test/verifier/red fixture
+  plus shared architecture gates.
+- B response: `v3-hub-relay-resp-01..03` only; Resp03 governs and Resp04 commits once; no Resp05,
+  SSE, Server, store, second-exit, or post-save semantic repair. Run response focused
+  test/verifier/red fixture plus shared architecture gates.
+- C resources/hooks: Config declares all fixed node entry/exit hooks and resource access; Manifest
+  compiles deterministic `priority -> order -> hook_id`; Runtime consumes Manifest only; servertool
+  remains Req04/Resp03. Run static-hook/resource/config/compile-fail gates.
+- Integration: preserve existing node IDs and P6 freeze, run all D gates, then review copy budget,
+  immutable interval, Error chain, provider/client payload isolation, and forbidden completion
+  claims. No worker slice alone proves live Relay.
 
 ## Required gates
 

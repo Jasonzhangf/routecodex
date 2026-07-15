@@ -353,9 +353,9 @@ resources:
     lifecycle: v3.config.compile
     owner_crate: routecodex-v3-config
     owner_node: V3Config04ResourceRegistryBuilt
-    identity: [skeletonVersion, protocolIds, hookIds, capabilityIds, executionModes, continuationScopeKeys]
+    identity: [skeletonVersion, hookSetId, fixedNodeIds, hookPhases, hookIds, resourceIds, capabilityIds, executionModes, continuationScopeKeys]
     allowed_writers: [compile_hub_v1, compile_server_execution]
-    allowed_readers: [V3Config05ManifestPublished, V3HubStaticHookRegistryCompiler, V3HubRuntimeKernel]
+    allowed_readers: [V3Config05ManifestPublished, compile_v3_hub_v1_static_registry_from_config, V3HubRuntimeKernel]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, dynamic_loader]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -497,10 +497,34 @@ resources:
     lifecycle: v3.hub_pipeline.compile
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubStaticHookRegistry
-    identity: [skeletonVersion, hookSetId, hookSlot]
-    allowed_writers: [compile_v3_hub_v1_static_registry]
-    allowed_readers: [V3HubRuntimeKernel]
+    identity: [skeletonVersion, hookSetId, fixedNodeId, hookPhase, priority, order, hookId]
+    allowed_writers: [compile_v3_hub_v1_static_registry_from_config]
+    allowed_readers: [V3HubStaticHookRegistry::hook, V3HubStaticHookRegistry::resource, V3HubRuntimeKernel]
     forbidden_writers: [routecodex-v3-config, routecodex-v3-server, dynamic_loader, filesystem_scanner]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hub.runtime_resource_declarations
+    resource_kind: side_channel_config
+    lifecycle: v3.hub_pipeline.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3HubResourceManifest
+    identity: [hookSetId, resourceId, resourceKind, resourceScope]
+    allowed_writers: [compile_hub_v1]
+    allowed_readers: [compile_v3_hub_v1_static_registry_from_config, V3HubStaticHookRegistry::resource]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, dynamic_loader, filesystem_scanner]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hub.current_node_borrowed_view
+    resource_kind: borrowed_view
+    lifecycle: v3.hub_pipeline.current_node
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubCurrentNodeBorrowedView
+    identity: [requestId, fixedNodeId, borrowLifetime]
+    allowed_writers: [borrow_v3_hub_current_node]
+    allowed_readers: [V3HubHookDeclaration::invoke]
+    forbidden_writers: [V3HubStaticHookRegistry, routecodex-v3-debug, snapshot_recorder, continuation_store]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

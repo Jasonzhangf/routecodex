@@ -167,7 +167,7 @@ features:
       - JSON and SSE share the sole V3ServerRespOutbound06ClientFrame response exit
       - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance or continuation
     required_gates:
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - npm run test:v3-relay-response-semantics
       - npm run verify:v3-relay-response-semantics
       - npm run test:v3-relay-response-semantics-red-fixtures
       - npm run verify:v3-architecture-docs
@@ -180,6 +180,138 @@ features:
       source: "Relay response-side source slice is complete when focused Rust tests prove Resp01-Resp04 behavior and source gates reject Resp05/SSE/handler/required_action/second-exit/copy-budget violations."
       runtime: "No live Relay runtime or continuation end-to-end restore is claimed. Request source and resource/hook config remain separate workstreams."
       forbidden_claim: "Do not claim request-side completion, resource/hook config completion, live Relay, continuation end-to-end completion, Server entry cutover, P6 deletion, global install, or production replacement."
+
+  - feature_id: v3.hub_relay_request_semantics
+    status: request_source_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_request_source_slice
+    owner_scope: "Relay request semantic source slice from V3HubReqInbound01ClientRaw through V3HubReqChatProcess04Governed only"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - scripts/architecture/verify-v3-relay-request-semantics.mjs
+      - scripts/tests/v3-relay-request-semantics-red-fixtures.mjs
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-request-semantics-test-design.md
+    required_contract:
+      - Req01 and Req02 perform lossless entry normalization into Chat semantic protocol only
+      - Req03 classifies new remote-provider and RouteCodex-local continuation ownership and scope only
+      - Req03 rejects ambiguous local-plus-remote ownership instead of choosing an implicit precedence
+      - Req03 never restores local context, repairs history, runs servertool hooks, or enters Req04 governance
+      - Req04 is the only request-side local continuation restore point and runs tool/history/servertool governance after restore
+      - every Req01 through Req04 owner operation emits deterministic entry and exit hook evidence
+      - required hook failures and malformed tool outputs are explicit fail-fast errors
+      - request payload ownership moves forward once and rejects JSON round-trip or full payload clone budget violations
+    required_gates:
+      - npm run test:v3-relay-request-semantics
+      - npm run verify:v3-relay-request-semantics
+      - npm run test:v3-relay-request-semantics-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+    completion_rule:
+      source: "Relay request-side source slice is complete when focused Rust tests prove Req01-Req04 behavior and source/compile-fail gates reject Req03 restore, Req04 bypass, dynamic hooks, shortcut lifecycle, and payload copy-budget violations."
+      runtime: "No live Relay runtime, Req05-Req09 execution, response slice, resource/hook config, or continuation end-to-end restore is claimed."
+      forbidden_claim: "Do not claim response-side completion, resource/hook config completion, live Relay, continuation end-to-end completion, Server entry cutover, P6 deletion, global install, or production replacement."
+
+  - feature_id: v3.hub_relay_runtime_resources_hooks
+    status: relay_resource_hook_declaration_surface_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_config_manifest_hook_surface
+    owner_scope: "Config-published Hub resources and deterministic static entry/exit hook declarations consumed by Runtime Manifest only"
+    owner_modules:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+    required_contract:
+      - Config publishes every fixed node entry and exit declaration through deterministic Manifest compilation
+      - Runtime consumes Manifest declarations only and never scans directories or loads dynamic hook code
+      - hook order is priority then order then hook_id
+      - required hooks fail fast and disabled optional hooks yield typed no-op events
+      - servertool hooks exist only at Req04 and Resp03
+      - resource access denies immutable-interval mutation and payload side-channel leakage
+    required_gates:
+      - npm run test:v3-relay-hook-resources
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-relay-hook-resources
+      - npm run test:v3-relay-hook-resource-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "Worker C may claim only the resource and hook declaration surface after config/runtime focused gates pass."
+      runtime: "No live Relay behavior, usable continuation, or servertool runtime execution is implied."
+      forbidden_claim: "Do not claim request/response behavior, live Relay, P6 cutover/deletion, global install, or production replacement."
+
+  - feature_id: v3.hub_relay_gate_review_surface
+    status: architecture_review_surface_locked
+    change_risk: critical
+    owner_kind: docs_maps_gates
+    owner_scope: "Queryable four-worker Relay contract, resource/function/mainline/verification maps, wiki review, red fixtures, copy budget, and P6 migration guard"
+    owner_modules:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+      - scripts/architecture/verify-v3-architecture-docs.mjs
+      - scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+    required_contract:
+      - all four worker feature IDs expose resources mainline bindings allowed and forbidden paths required gates and completion limits
+      - Relay remains one Hub v1 execution mode with fixed node IDs and one response exit
+      - continuation immutable interval permits only semantic-equivalent normalization scope validation storage transport expiry and release
+      - servertool stays inside Req04 and Resp03 Chat Process hooks
+      - payload copy budget rejects unbounded deep copy full SSE materialization and Debug or snapshot truth substitution
+      - P6 stays frozen until separately verified cutover and physical deletion
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run test:v3-hub-skeleton-doc-red-fixtures
+      - npm run test:v3-compile-fail
+    completion_rule:
+      source: "D completes only when docs/maps/wiki/gates are mutually queryable and red fixtures reject contract mutations."
+      runtime: "Review surface is not runtime evidence; live Relay, continuation, servertool runtime hooks, and P6 deletion remain pending."
+      forbidden_claim: "Do not claim runtime implementation, live Relay, usable continuation, servertool runtime execution, P6 deletion, global install, restart, or production replacement."
 
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified

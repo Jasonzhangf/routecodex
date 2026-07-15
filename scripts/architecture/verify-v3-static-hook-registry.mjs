@@ -2,8 +2,10 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 
 const path = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
+const hookPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
 const text = readFileSync(path, 'utf8');
-const production = text.replace(/#\[cfg\(test\)\][\s\S]*/, '');
+const hookText = readFileSync(hookPath, 'utf8');
+const production = text.replace(/#\[cfg\(test\)\][\s\S]*/, '') + '\n' + hookText.replace(/#\[cfg\(test\)\][\s\S]*/, '');
 const failures = [];
 function rustFiles(dir, output = []) {
   for (const entry of readdirSync(dir)) {
@@ -61,15 +63,17 @@ if (/entry_protocol[\s\S]{0,120}(?:Direct|RemoteProviderOwned)|provider_protocol
 }
 if (/provider_(?:id|family)|model_prefix|starts_with\(/i.test(production)) failures.push('Hub v1 contains provider-specific branch vocabulary');
 
-const hookIds = [
-  'req_inbound_normalize', 'req_continuation_classify', 'req_chat_process',
-  'req_execution_plan', 'req_target_resolve', 'req_provider_semantic',
-  'provider_wire_build', 'provider_transport', 'resp_inbound_normalize',
-  'resp_chat_process', 'resp_continuation_commit', 'resp_client_project', 'server_frame',
-].map((slot) => `hub_v1.${slot}.not_implemented`);
-for (const hookId of hookIds) if (!production.includes(`"${hookId}"`)) failures.push(`missing static not_implemented hook ${hookId}`);
-if (!production.includes('static V3_HUB_V1_STATIC_HOOKS: [V3HubHookDeclaration; V3_HUB_V1_HOOK_SLOT_COUNT]')) failures.push('closed static hook table missing');
+for (const node of nodes) {
+  for (const phase of ['Entry', 'Exit']) {
+    const pattern = new RegExp(`static_hook\\s*\\(\\s*V3HubFixedNode::${node}\\s*,\\s*V3HubHookPhase::${phase}\\s*,?\\s*\\)`);
+    if (!pattern.test(hookText)) failures.push(`missing static ${phase.toLowerCase()} hook for ${node}`);
+  }
+}
+if (!hookText.includes('static V3_HUB_V1_STATIC_NODE_HOOKS: [V3HubStaticHookSpec; V3_HUB_V1_NODE_HOOK_COUNT]')) failures.push('closed static entry/exit hook table missing');
+if (!hookText.includes('V3Config05ManifestPublished')) failures.push('Runtime static hook registry must consume V3Config05ManifestPublished');
+if (/read_to_string|std::fs|File::open|config\.v3\.toml/.test(hookText)) failures.push('Runtime hook registry must not read config files');
 if (!production.includes('V3HubHookImplementation::NotImplemented')) failures.push('explicit not_implemented implementation missing');
+if (!production.includes('V3HubHookImplementation::DisabledNoop')) failures.push('typed optional disabled hook no-op missing');
 if (!production.includes('validate_v3_hub_v1_hook_manifest')) failures.push('deterministic startup validation missing');
 for (const variant of ['MissingHook', 'DuplicateHook', 'UnknownHook', 'IncompatibleHook']) {
   if (!production.includes(variant)) failures.push(`startup validation missing ${variant}`);
@@ -81,6 +85,12 @@ if (/pub\s+(?:struct|type)\s+[^\n]*(?:Value|Record)|pub\s+[^\n]*serde_json::Valu
 if (/SemanticEnvelope|CanonicalPayload|SharedNodeDto/.test(production)) failures.push('Hub v1 cannot collapse distinct nodes into a synonymous shared DTO');
 if ((production.match(/V3ServerRespOutbound06ClientFrame/g) ?? []).length < 2) failures.push('sole response exit node missing');
 if (/V3ServerRespOutbound0[7-9]|SecondaryResponse|AlternateResponse/.test(production)) failures.push('second response exit is forbidden');
+for (const invariant of ['allowed_resources', 'forbidden_resources', 'V3HubHookRequirement', 'V3HubHookProfile::Servertool', 'may_enter_provider_body', 'may_enter_client_body', 'borrow_v3_hub_current_node']) {
+  if (!production.includes(invariant)) failures.push(`missing hook/resource invariant ${invariant}`);
+}
+if (/serde_json::(?:to_value|from_value|to_string|from_str)|materialize.*sse|snapshot.*live/i.test(hookText)) {
+  failures.push('resource/hook registry contains forbidden JSON round-trip, SSE materialization, or snapshot live-truth pattern');
+}
 
 if (failures.length) {
   console.error('[verify:v3-static-hook-registry] failed');

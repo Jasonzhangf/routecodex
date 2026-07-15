@@ -56,6 +56,16 @@ const read = (file) => {
   try { return fs.readFileSync(abs(file), 'utf8'); }
   catch (error) { fail(`${file}: cannot read: ${error.message}`); return ''; }
 };
+const readSourceWithSiblingModule = (file) => {
+  const primary = read(file);
+  const stem = file.replace(/\.rs$/, '');
+  if (!fs.existsSync(abs(stem)) || !fs.statSync(abs(stem)).isDirectory()) return primary;
+  const parts = [primary];
+  for (const entry of fs.readdirSync(abs(stem))) {
+    if (entry.endsWith('.rs')) parts.push(read(path.join(stem, entry)));
+  }
+  return parts.join('\n');
+};
 const yaml = (file) => {
   try { return YAML.parse(read(file)); }
   catch (error) { fail(`${file}: YAML parse failed: ${error.message}`); return {}; }
@@ -221,10 +231,34 @@ const resourceMap = yaml('docs/architecture/v3-resource-operation-map.yml');
 const functionMap = yaml('docs/architecture/v3-function-map.yml');
 const mainlineMap = yaml('docs/architecture/v3-mainline-call-map.yml');
 const verificationMap = yaml('docs/architecture/v3-verification-map.yml');
+const packageJson = JSON.parse(read('package.json'));
 if (resourceMap.version !== 2) fail('v3-resource-operation-map.yml: version must be 2');
 if (functionMap.version !== 1) fail('v3-function-map.yml: version must be 1');
 if (mainlineMap.version !== 2) fail('v3-mainline-call-map.yml: version must be 2');
 if (verificationMap.version !== 2) fail('v3-verification-map.yml: version must be 2');
+
+const relayWorkerFeatureIds = [
+  'v3.hub_relay_request_semantics',
+  'v3.hub_relay_response_semantics',
+  'v3.hub_relay_runtime_resources_hooks',
+  'v3.hub_relay_gate_review_surface',
+];
+const forbiddenFractionalNodeId = /\bV3[A-Za-z]*03(?:a|_1|\.5)[A-Za-z]*\b/;
+for (const file of [
+  'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+  'docs/goals/v3-hub-relay-four-worker-implementation-plan.md',
+  'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
+  'docs/architecture/v3-function-map.yml',
+  'docs/architecture/v3-mainline-call-map.yml',
+]) {
+  if (forbiddenFractionalNodeId.test(read(file))) fail(`${file}: fractional/reused Hub node ID is forbidden`);
+}
+const hubRelayContractDocsLower = hubRelayContractDocs.toLowerCase();
+for (const phrase of [
+  'unbounded deep copy',
+  'full SSE materialize',
+  'debug/snapshot copy',
+]) if (!hubRelayContractDocsLower.includes(phrase.toLowerCase())) fail(`Relay contract docs: missing payload copy-budget invariant ${phrase}`);
 
 const resourceIds = new Set();
 for (const [index, resource] of array(resourceMap.resources).entries()) {
@@ -285,9 +319,13 @@ for (const [field, fileField] of [
   ['config_symbols', 'config_owner_file'],
 ]) {
   const file = h1Function?.[fileField];
-  if (!file || !fs.existsSync(abs(file))) fail(`function map: missing ${fileField}`);
-  else for (const symbol of array(h1Function?.[field])) {
-    if (!read(file).includes(symbol)) fail(`function map: ${symbol} absent from ${file}`);
+  if (!file || !fs.existsSync(abs(file))) {
+    fail(`function map: missing ${fileField}`);
+    continue;
+  }
+  const sourceWithModules = readSourceWithSiblingModule(file);
+  for (const symbol of array(h1Function?.[field])) {
+    if (!sourceWithModules.includes(symbol)) fail(`function map: ${symbol} absent from ${file}`);
   }
 }
 for (const [index, edge] of allEdges.entries()) {
@@ -324,6 +362,46 @@ for (const [index, edge] of allEdges.entries()) {
 }
 for (const stepId of p6AnchoredStepIds) {
   if (!allEdges.some((edge) => edge.step_id === stepId)) fail(`mainline: missing P6 edge ${stepId}`);
+}
+
+for (const featureId of relayWorkerFeatureIds) {
+  const functionFeature = array(functionMap.features).find((entry) => entry.feature_id === featureId);
+  const verificationFeature = array(verificationMap.features).find((entry) => entry.feature_id === featureId);
+  if (!functionFeature) {
+    fail(`Relay worker map: function map missing ${featureId}`);
+    continue;
+  }
+  if (!verificationFeature) fail(`Relay worker map: verification map missing ${featureId}`);
+  for (const field of ['resource_bindings', 'mainline_bindings', 'allowed_paths', 'forbidden_paths', 'required_gates']) {
+    if (array(functionFeature[field]).length === 0) fail(`Relay worker map: ${featureId} missing ${field}`);
+  }
+  for (const resourceId of array(functionFeature.resource_bindings)) {
+    if (!resourceIds.has(resourceId)) fail(`Relay worker map: ${featureId} binds undeclared resource ${resourceId}`);
+  }
+  for (const stepId of array(functionFeature.mainline_bindings)) {
+    if (!allEdges.some((edge) => edge.step_id === stepId)) {
+      fail(`Relay worker map: ${featureId} binds missing mainline step ${stepId}`);
+    }
+  }
+  for (const gate of array(functionFeature.required_gates)) {
+    if (!String(gate).startsWith('npm run ')) fail(`Relay worker map: ${featureId} invalid function gate ${gate}`);
+    if (verificationFeature && !array(verificationFeature.required_gates).includes(gate)) {
+      fail(`Relay worker map: ${featureId} gate missing from verification map: ${gate}`);
+    }
+    const scriptName = String(gate).slice('npm run '.length).trim();
+    if (!packageJson.scripts?.[scriptName]) fail(`Relay worker map: ${featureId} package script missing: ${scriptName}`);
+  }
+  for (const gate of array(verificationFeature?.required_gates)) {
+    if (!array(functionFeature.required_gates).includes(gate)) {
+      fail(`Relay worker map: ${featureId} verification gate missing from function map: ${gate}`);
+    }
+  }
+  for (const field of ['owner_scope', 'required_contract', 'required_gates', 'completion_rule']) {
+    const value = verificationFeature?.[field];
+    if (value == null || (Array.isArray(value) && value.length === 0)) {
+      fail(`Relay worker map: verification ${featureId} missing ${field}`);
+    }
+  }
 }
 
 const reviewSurface = read('docs/architecture/wiki/v3-responses-direct-mainline.md')

@@ -55,6 +55,34 @@ const fixtures = [
     to: 'arbitrary processing',
     diagnostic: /Relay contract docs: missing invariant semantic-equivalent normalization/,
   },
+  {
+    name: 'relay fractional node ID introduced',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: 'V3HubReqChatProcess04Governed: restore local context',
+    to: 'V3HubReqChatProcess03_1Governed: restore local context',
+    diagnostic: /fractional\/reused Hub node ID is forbidden/,
+  },
+  {
+    name: 'relay unbounded copy ban removed',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: 'unbounded deep copy',
+    to: 'Unlimited cloning',
+    diagnostic: /missing payload copy-budget invariant unbounded deep copy/,
+  },
+  {
+    name: 'relay D worker function map removed',
+    file: 'docs/architecture/v3-function-map.yml',
+    from: 'feature_id: v3.hub_relay_gate_review_surface',
+    to: 'feature_id: v3.hub_relay_gate_review_surface_REMOVED',
+    diagnostic: /function map missing v3\.hub_relay_gate_review_surface/,
+  },
+  {
+    name: 'relay request mainline reverse binding removed',
+    file: 'docs/architecture/v3-function-map.yml',
+    from: '      - v3-hub-relay-req-03',
+    to: '      - v3-hub-relay-req-03_REMOVED',
+    diagnostic: /binds missing mainline step v3-hub-relay-req-03_REMOVED/,
+  },
 ];
 
 const failures = [];
@@ -62,6 +90,7 @@ for (const fixture of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-doc-red-'));
   try {
     cpSync(resolve(repoRoot, 'docs'), join(root, 'docs'), { recursive: true });
+    cpSync(resolve(repoRoot, 'package.json'), join(root, 'package.json'));
     cpSync(resolve(repoRoot, 'v3'), join(root, 'v3'), {
       recursive: true,
       filter: (source) => !source.includes('/target/'),

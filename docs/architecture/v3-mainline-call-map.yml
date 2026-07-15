@@ -44,7 +44,7 @@ chains:
         owner_feature_id: v3.config_interpreter_contract
         resource_flow:
           consumes: [v3.config.schema_validated]
-          produces: [v3.config.resource_registry, v3.config.hub_pipeline_declarations, v3.config.route_pool_match_declarations]
+          produces: [v3.config.resource_registry, v3.config.hub_pipeline_declarations, v3.hub.runtime_resource_declarations, v3.config.route_pool_match_declarations]
           side_channel_reads: []
           side_channel_writes: []
         status: anchored
@@ -61,6 +61,24 @@ chains:
           produces: [v3.config.published_manifest, v3.secret.provider_auth_handle]
           side_channel_reads: []
           side_channel_writes: [v3.secret.provider_auth_handle]
+        status: anchored
+  - chain_id: v3.hub_pipeline.v1.hook_registry_compile
+    owner_feature_id: v3.hub_relay_runtime_resources_hooks
+    summary: "Runtime borrows deterministic resource/hook declarations only from V3Config05ManifestPublished and binds every fixed node entry/exit slot to the closed Rust static catalog."
+    edges:
+      - step_id: v3-hub-hook-compile-01
+        from_node: V3Config05ManifestPublished
+        to_node: V3HubStaticHookRegistry
+        caller_symbol: runtime_consumes_published_manifest_resources_and_typed_optional_noop
+        caller_file: v3/crates/routecodex-v3-runtime/tests/hub_v1_h1_contract.rs
+        callee_symbol: compile_v3_hub_v1_static_registry_from_config
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+        owner_feature_id: v3.hub_relay_runtime_resources_hooks
+        resource_flow:
+          consumes: [v3.config.published_manifest, v3.config.hub_pipeline_declarations, v3.hub.runtime_resource_declarations]
+          produces: [v3.hub.static_hook_registry]
+          side_channel_reads: [v3.hub.runtime_resource_declarations]
+          side_channel_writes: [v3.hub.static_hook_registry]
         status: anchored
   - chain_id: v3.responses_direct.required_mainline
     owner_feature_id: v3.responses_direct_mvp_architecture
@@ -92,6 +110,13 @@ chains:
       - { step_id: v3-hub-req-06, from_node: V3HubReqTarget06Resolved, to_node: V3HubReqOutbound07ProviderSemantic, caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, callee_symbol: build_v3_hub_req_outbound_07_from_v3_hub_req_target_06, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, binding_kind: h1_typed_test, owner_feature_id: v3.hub_pipeline_static_skeleton, resource_flow: { consumes: [v3.request.normal_payload, v3.hub.resolved_target], produces: [v3.request.provider_semantic, v3.hub.provider_protocol], side_channel_reads: [v3.hub.execution_plan], side_channel_writes: [v3.hub.provider_protocol] } }
       - { step_id: v3-hub-req-07, from_node: V3HubReqOutbound07ProviderSemantic, to_node: V3ProviderReqOutbound08WirePayload, caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, callee_symbol: build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, binding_kind: h1_typed_test, owner_feature_id: v3.hub_pipeline_static_skeleton, resource_flow: { consumes: [v3.request.provider_semantic, v3.hub.resolved_target, v3.hub.provider_protocol], produces: [v3.hub.provider_wire_payload], side_channel_reads: [v3.hub.provider_protocol], side_channel_writes: [] } }
       - { step_id: v3-hub-req-08, from_node: V3ProviderReqOutbound08WirePayload, to_node: V3ProviderReqOutbound09TransportRequest, caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, callee_symbol: build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, binding_kind: h1_typed_test, owner_feature_id: v3.hub_pipeline_static_skeleton, resource_flow: { consumes: [v3.hub.provider_wire_payload, v3.secret.provider_auth_handle], produces: [v3.provider.transport_request], side_channel_reads: [v3.secret.provider_auth_handle], side_channel_writes: [] } }
+  - chain_id: v3.hub_pipeline.v1.relay_request_source_slice
+    owner_feature_id: v3.hub_relay_request_semantics
+    summary: "Relay request-side source slice. Req02 normalizes, Req03 classifies only, and Req04 restores/governs; later fixed nodes remain the standard Hub v1 chain."
+    edges:
+      - { step_id: v3-hub-relay-req-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, caller_symbol: V3HubRelayRequestHooks::run, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs, callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, binding_kind: relay_request_source_slice, owner_feature_id: v3.hub_relay_request_semantics, resource_flow: { consumes: [v3.request.normal_payload, v3.hub.entry_protocol], produces: [v3.request.normal_payload], side_channel_reads: [v3.hub.entry_protocol], side_channel_writes: [] } }
+      - { step_id: v3-hub-relay-req-02, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqContinuation03Classified, caller_symbol: V3HubRelayRequestHooks::run, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs, callee_symbol: classify_continuation, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs, status: anchored, binding_kind: relay_request_source_slice, owner_feature_id: v3.hub_relay_request_semantics, resource_flow: { consumes: [v3.request.normal_payload, v3.hub.entry_protocol], produces: [v3.hub.continuation_ownership], side_channel_reads: [v3.continuation.remote_binding, v3.continuation.local_context_truth], side_channel_writes: [v3.hub.continuation_ownership] } }
+      - { step_id: v3-hub-relay-req-03, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, caller_symbol: V3HubRelayRequestHooks::run, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs, callee_symbol: restore_local_context_at_req04, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs, status: anchored, binding_kind: relay_request_source_slice, owner_feature_id: v3.hub_relay_request_semantics, resource_flow: { consumes: [v3.request.normal_payload, v3.hub.continuation_ownership], produces: [v3.request.normal_payload], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [] } }
   - chain_id: v3.hub_pipeline.v1.response
     owner_feature_id: v3.hub_pipeline_static_skeleton
     summary: "Fixed Hub v1 response topology. Direct/Relay/JSON/SSE/servertool outcomes merge before the sole client projection and Server frame exit."
