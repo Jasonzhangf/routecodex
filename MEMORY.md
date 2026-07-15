@@ -3399,3 +3399,8 @@
 - Server consumes the entry binding registry and projects typed runtime output only; it does not parse candidate/functionCall/finishReason semantics. Virtual Router classifies dynamic `/v1beta/models/.../generateContent` endpoints as `gemini` facts without provider-specific Hub/Server branches.
 - Verification evidence: Gemini runtime/server tests, Gemini verifier and 10 red mutations, entry binding verifier/red fixtures, V3 resource/module/Rust-only/static-hook/wiki/manifest/fmt/Clippy/full-workspace/diff gates all pass.
 - This does not prove real Gemini upstream compatibility, live config, production cutover, credentials, or release routing beyond the controlled loopback boundary.
+
+# 2026-07-16 V3 Gemini malformed provider error projection
+
+- `v3.gemini_relay_runtime_integration` must project malformed non-JSON provider HTTP error bodies as explicit `provider_error_body_malformed` client errors through Error01-06. Do not use `unwrap_or_else` / `unwrap_or_default` generic fallback bodies in this owner.
+- Review correction: release/global install copying `v3/` is expected because the V3 bin and tests must be globally installable. Treat the copy scope as required install surface, not as dirty-code evidence to remove.

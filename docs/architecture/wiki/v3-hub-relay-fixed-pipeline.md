@@ -153,6 +153,7 @@ Relay is borrow-first and move-at-boundary:
 ## Hub Relay runtime closeout
 
 - Feature: `v3.hub_relay_runtime_closeout`.
+- Evidence marker: `v3-hub-relay-controlled-closeout-20260716`.
 - Machine lifecycle: `v3.hub_relay.runtime_closeout`, from `v3-hub-relay-closeout-01` through
   `v3-hub-relay-closeout-14`, with adjacent edges over the fixed Req01-Req09 and Resp01-Resp06
   topology.

@@ -168,6 +168,7 @@ description: RouteCodex 调试与架构路由入口
 - `~/.rcc` 是运行时配置真源
 - server handler 不得长出第二套协议解析
 - gate 只是门禁；完成必须有 live/runtime 证据
+- Release/global install copy scope 包含 `v3/` 是预期：V3 bin/tests 必须可全局安装验证。不得把一起 copy V3 当 bug；应验证目标 install surface。
 - 资源收拢先建 map/gate：先落 `resource-operation-map`、function-map `resource_bindings`、mainline `resource_flow`，再按资源改 runtime；禁止先写全局 request/response manager。
 - 资源第一层补缺边界：先补 `request.mainline` / `response.mainline` / `responses.continuation.mainline` / `servertool.hook_skeleton.mainline` / `error.mainline` / `vr.route_availability.mainline` / `metadata.center.mainline` 的相邻 `resource_flow` 与 owner `resource_bindings`；config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics 需先扩展资源分类再补。
 - 资源第二层补缺边界：config/WebUI/runtime lifecycle/debug/internal-error/VR diagnostics/hit-log 必须先使用独立资源（如 `config.runtime_projection`、`runtime.instance_record`、`debug.internal_error_envelope`、`vr.diagnostic_decision`），禁止借用 request/response/route.selection/debug snapshot 资源凑 coverage；剩余 stopless/SSE/stage_a 属下一层 backlog。
