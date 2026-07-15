@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum V3HubEntryProtocol {
@@ -51,6 +51,9 @@ pub enum V3HubTransportIntent {
 
 #[derive(Debug, Clone, PartialEq)]
 struct V3HubOpaquePayload(Value);
+
+#[derive(Debug, Clone, PartialEq)]
+struct V3HubResponsePayload(Arc<Value>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubReqInbound01ClientRaw {
@@ -106,7 +109,7 @@ pub struct V3ProviderReqOutbound09TransportRequest {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ProviderRespInbound01Raw {
-    payload: V3HubOpaquePayload,
+    payload: V3HubResponsePayload,
     entry_protocol: V3HubEntryProtocol,
     provider_protocol: V3HubProviderWireProtocol,
     continuation: V3HubContinuationOwnership,
@@ -118,11 +121,39 @@ pub struct V3ProviderRespInbound01Raw {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespInbound02Normalized {
     previous: V3ProviderRespInbound01Raw,
+    normalized_kind: V3HubResponseNormalizedKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Governed {
     previous: V3HubRespInbound02Normalized,
+    terminality: V3HubResponseTerminality,
+    tool_calls: Vec<V3HubResponseToolCall>,
+    servertool_action: V3HubServertoolResponseAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3HubResponseNormalizedKind {
+    Json,
+    Sse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3HubResponseTerminality {
+    Terminal,
+    NonTerminal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3HubServertoolResponseAction {
+    None,
+    FollowupRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3HubResponseToolCall {
+    call_id: String,
+    name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +167,15 @@ pub enum V3HubContinuationCommit {
 pub struct V3HubRespContinuation04Committed {
     previous: V3HubRespChatProcess03Governed,
     action: V3HubContinuationCommit,
+    canonical_context: Option<V3HubRelayCanonicalResponseContext>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct V3HubRelayCanonicalResponseContext {
+    payload: Arc<Value>,
+    terminality: V3HubResponseTerminality,
+    tool_calls: Vec<V3HubResponseToolCall>,
+    servertool_action: V3HubServertoolResponseAction,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,7 +276,7 @@ pub fn build_v3_provider_resp_inbound_01_raw(
     transport_intent: V3HubTransportIntent,
 ) -> V3ProviderRespInbound01Raw {
     V3ProviderRespInbound01Raw {
-        payload: V3HubOpaquePayload(payload),
+        payload: V3HubResponsePayload(Arc::new(payload)),
         entry_protocol,
         provider_protocol,
         continuation,
@@ -249,13 +289,25 @@ pub fn build_v3_provider_resp_inbound_01_raw(
 pub fn build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(
     input: V3ProviderRespInbound01Raw,
 ) -> V3HubRespInbound02Normalized {
-    V3HubRespInbound02Normalized { previous: input }
+    let normalized_kind = match input.transport_intent {
+        V3HubTransportIntent::Json => V3HubResponseNormalizedKind::Json,
+        V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse,
+    };
+    V3HubRespInbound02Normalized {
+        previous: input,
+        normalized_kind,
+    }
 }
 
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
     input: V3HubRespInbound02Normalized,
 ) -> V3HubRespChatProcess03Governed {
-    V3HubRespChatProcess03Governed { previous: input }
+    V3HubRespChatProcess03Governed {
+        previous: input,
+        terminality: V3HubResponseTerminality::Terminal,
+        tool_calls: Vec::new(),
+        servertool_action: V3HubServertoolResponseAction::None,
+    }
 }
 
 pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
@@ -265,6 +317,7 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
     V3HubRespContinuation04Committed {
         previous: input,
         action,
+        canonical_context: None,
     }
 }
 
@@ -278,6 +331,263 @@ pub fn build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(
     input: V3HubRespOutbound05ClientSemantic,
 ) -> V3ServerRespOutbound06ClientFrame {
     V3ServerRespOutbound06ClientFrame { previous: input }
+}
+
+impl V3HubRespInbound02Normalized {
+    pub fn normalized_kind(&self) -> V3HubResponseNormalizedKind {
+        self.normalized_kind
+    }
+}
+
+impl V3HubRespChatProcess03Governed {
+    pub fn terminality(&self) -> V3HubResponseTerminality {
+        self.terminality
+    }
+
+    pub fn tool_call_count(&self) -> usize {
+        self.tool_calls.len()
+    }
+
+    pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
+        self.servertool_action
+    }
+}
+
+impl V3HubRespContinuation04Committed {
+    pub fn action(&self) -> V3HubContinuationCommit {
+        self.action
+    }
+
+    pub fn canonical_context_count(&self) -> usize {
+        usize::from(self.canonical_context.is_some())
+    }
+
+    pub fn canonical_context_shares_finalized_payload(&self) -> bool {
+        self.canonical_context.as_ref().is_some_and(|context| {
+            Arc::ptr_eq(&context.payload, &self.previous.previous.previous.payload.0)
+        })
+    }
+}
+
+impl V3ServerRespOutbound06ClientFrame {
+    pub fn response_exit_node(&self) -> &'static str {
+        "V3ServerRespOutbound06ClientFrame"
+    }
+
+    pub fn transport_intent(&self) -> V3HubTransportIntent {
+        self.previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .transport_intent
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3HubRelayResponseHookProfile {
+    servertool_names: BTreeSet<String>,
+}
+
+impl V3HubRelayResponseHookProfile {
+    pub fn new<I, S>(servertool_names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            servertool_names: servertool_names
+                .into_iter()
+                .map(|name| name.as_ref().to_owned())
+                .collect(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self::new(std::iter::empty::<&'static str>())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum V3HubRelayResponseError {
+    #[error("Relay response hook received a non-Relay response")]
+    ExecutionModeNotRelay,
+    #[error("provider response must be an object")]
+    ProviderResponseNotObject,
+    #[error("provider response output must be an array")]
+    ProviderResponseOutputNotArray,
+    #[error("malformed tool call at output index {index}: {reason}")]
+    MalformedToolCall { index: usize, reason: &'static str },
+    #[error("provider response status is required")]
+    MissingStatus,
+    #[error("unsupported provider response status: {status}")]
+    UnsupportedStatus { status: String },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct V3HubRelayResponseHookRegistry {
+    normalize: fn(
+        V3ProviderRespInbound01Raw,
+    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>,
+    govern: fn(
+        V3HubRespInbound02Normalized,
+        &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError>,
+    commit: fn(
+        V3HubRespChatProcess03Governed,
+    ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError>,
+}
+
+impl V3HubRelayResponseHookRegistry {
+    pub fn normalize(
+        &self,
+        input: V3ProviderRespInbound01Raw,
+    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
+        (self.normalize)(input)
+    }
+
+    pub fn govern(
+        &self,
+        input: V3HubRespInbound02Normalized,
+        profile: &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
+        (self.govern)(input, profile)
+    }
+
+    pub fn commit(
+        &self,
+        input: V3HubRespChatProcess03Governed,
+    ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
+        (self.commit)(input)
+    }
+}
+
+pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
+    V3HubRelayResponseHookRegistry {
+        normalize: normalize_v3_hub_relay_response,
+        govern: govern_v3_hub_relay_response,
+        commit: commit_v3_hub_relay_response,
+    }
+}
+
+fn normalize_v3_hub_relay_response(
+    input: V3ProviderRespInbound01Raw,
+) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
+    if input.execution != V3HubExecutionMode::Relay {
+        return Err(V3HubRelayResponseError::ExecutionModeNotRelay);
+    }
+    if !input.payload.0.is_object() {
+        return Err(V3HubRelayResponseError::ProviderResponseNotObject);
+    }
+    Ok(build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(input))
+}
+
+fn govern_v3_hub_relay_response(
+    input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
+    let object = input
+        .previous
+        .payload
+        .0
+        .as_object()
+        .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
+    let output = match object.get("output") {
+        Some(Value::Array(output)) => output.as_slice(),
+        Some(_) => return Err(V3HubRelayResponseError::ProviderResponseOutputNotArray),
+        None => &[],
+    };
+    let mut tool_calls = Vec::new();
+    for (index, item) in output.iter().enumerate() {
+        let Some(item) = item.as_object() else {
+            continue;
+        };
+        let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(kind, "function_call" | "custom_tool_call" | "tool_call") {
+            continue;
+        }
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "missing call_id/id",
+            })?;
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                item.get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "missing name/function.name",
+            })?;
+        tool_calls.push(V3HubResponseToolCall {
+            call_id: call_id.to_owned(),
+            name: name.to_owned(),
+        });
+    }
+    let status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or(V3HubRelayResponseError::MissingStatus)?;
+    let status_terminality = match status {
+        "completed" => V3HubResponseTerminality::Terminal,
+        "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
+        _ => {
+            return Err(V3HubRelayResponseError::UnsupportedStatus {
+                status: status.to_owned(),
+            });
+        }
+    };
+    let terminality = if tool_calls.is_empty() {
+        status_terminality
+    } else {
+        V3HubResponseTerminality::NonTerminal
+    };
+    let servertool_action = if tool_calls
+        .iter()
+        .any(|tool_call| profile.servertool_names.contains(&tool_call.name))
+    {
+        V3HubServertoolResponseAction::FollowupRequired
+    } else {
+        V3HubServertoolResponseAction::None
+    };
+    Ok(V3HubRespChatProcess03Governed {
+        previous: input,
+        terminality,
+        tool_calls,
+        servertool_action,
+    })
+}
+
+fn commit_v3_hub_relay_response(
+    input: V3HubRespChatProcess03Governed,
+) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
+    let (action, canonical_context) = match input.terminality {
+        V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
+        V3HubResponseTerminality::NonTerminal => (
+            V3HubContinuationCommit::LocalContext,
+            Some(V3HubRelayCanonicalResponseContext {
+                payload: Arc::clone(&input.previous.previous.payload.0),
+                terminality: input.terminality,
+                tool_calls: input.tool_calls.clone(),
+                servertool_action: input.servertool_action,
+            }),
+        ),
+    };
+    Ok(V3HubRespContinuation04Committed {
+        previous: input,
+        action,
+        canonical_context,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

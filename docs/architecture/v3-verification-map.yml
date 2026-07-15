@@ -138,6 +138,49 @@ features:
       runtime: "No live Relay runtime is claimed from this feature; request/response/resource worker implementation and controlled replay remain pending."
       forbidden_claim: "Do not claim live Relay, usable continuation runtime, servertool runtime hooks, Hub v1 cutover, P6 deletion, additional protocols, global install, or production replacement."
 
+  - feature_id: v3.hub_relay_response_semantics
+    status: response_source_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_response_source_slice
+    owner_scope: "Relay response semantic source slice from V3ProviderRespInbound01Raw through V3HubRespContinuation04Committed only"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - scripts/architecture/verify-v3-relay-response-semantics.mjs
+      - scripts/tests/v3-relay-response-semantics-red-fixtures.mjs
+    design:
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/design/v3-hub-pipeline-static-skeleton-contract.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    test_design:
+      - docs/goals/v3-hub-relay-four-worker-implementation-plan.md
+    required_contract:
+      - provider raw response can enter Relay response semantics only at Resp01 and only in Relay execution mode
+      - Resp02 normalizes provider response kind and must not harvest tools decide terminality or save continuation
+      - Resp03 owns provider-neutral tool harvest servertool response action and terminal/non-terminal classification
+      - Resp04 derives continuation commit from Resp03 finalized semantic truth and saves at most one local canonical context
+      - Resp05 Server SSE handler and store transport do not save restore repair or infer continuation semantics
+      - JSON and SSE share the sole V3ServerRespOutbound06ClientFrame response exit
+      - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance or continuation
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - npm run verify:v3-relay-response-semantics
+      - npm run test:v3-relay-response-semantics-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+    completion_rule:
+      source: "Relay response-side source slice is complete when focused Rust tests prove Resp01-Resp04 behavior and source gates reject Resp05/SSE/handler/required_action/second-exit/copy-budget violations."
+      runtime: "No live Relay runtime or continuation end-to-end restore is claimed. Request source and resource/hook config remain separate workstreams."
+      forbidden_claim: "Do not claim request-side completion, resource/hook config completion, live Relay, continuation end-to-end completion, Server entry cutover, P6 deletion, global install, or production replacement."
+
   - feature_id: v3.responses_direct_h2_equivalence_harness
     status: characterization_harness_verified
     change_risk: high
