@@ -16,7 +16,7 @@ use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -25,6 +25,12 @@ use crate::remote_continuation::{
 use crate::shared::V3RemoteContinuationObservation;
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
+
+static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
+
+fn default_responses_transport() -> &'static ReqwestResponsesTransport {
+    DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectContinuationScope {
@@ -91,7 +97,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport(
         manifest,
         raw,
         hook_registry,
-        &ReqwestResponsesTransport::default(),
+        default_responses_transport(),
     )
     .await
 }
@@ -106,7 +112,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_a
         manifest,
         raw,
         hook_registry,
-        &ReqwestResponsesTransport::default(),
+        default_responses_transport(),
         debug,
     )
     .await
@@ -130,7 +136,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_d
         manifest,
         raw,
         hook_registry,
-        &ReqwestResponsesTransport::default(),
+        default_responses_transport(),
         debug,
     )
     .await

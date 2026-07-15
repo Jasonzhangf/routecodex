@@ -5,23 +5,37 @@ const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
 const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
 const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
+const configTypesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
+const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
+const providerTransportPath = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs';
+const configTestPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
+const websocketTestPath = 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs';
 const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const designPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md';
+const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md';
 const runtime = readFileSync(runtimePath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
+const configTypes = readFileSync(configTypesPath, 'utf8');
+const configValidate = readFileSync(configValidatePath, 'utf8');
+const providerTransport = readFileSync(providerTransportPath, 'utf8');
 const server = readFileSync(serverPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
+const configTests = readFileSync(configTestPath, 'utf8');
+const websocketTests = readFileSync(websocketTestPath, 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const design = readFileSync(designPath, 'utf8');
+const plan = readFileSync(planPath, 'utf8');
 const failures = [];
 
 for (const [owner, text, phrases] of [
   [runtimePath, runtime, [
     'execute_v3_responses_direct_runtime_kernel_core(',
+    'static DEFAULT_RESPONSES_TRANSPORT',
+    'fn default_responses_transport()',
     'execute_v3_responses_direct_runtime_kernel_with_continuation(',
     '.load_for_req03(response_id, &scope.key, now_epoch_ms)',
     'locator.validate_capability_revision(&current_capability_revision)',
@@ -51,6 +65,29 @@ for (const [owner, text, phrases] of [
     'observe_json_remote_continuation(&parsed)',
   ]],
   [targetPath, target, ['pub fn resolve_exact_provider_model_auth(']],
+  [configTypesPath, configTypes, [
+    'pub enum V3ResponsesTransportKind',
+    'WebsocketV2',
+    'pub websocket_v2_url: Option<String>',
+  ]],
+  [configValidatePath, configValidate, [
+    'let responses = compile_provider_responses(&id, provider.responses, &models)?;',
+    'fn compile_provider_responses(',
+    'remote_continuation requires responses websocket_v2 transport',
+    'HTTP transport cannot declare websocket_v2_url',
+    'websocket_v2_url is required for websocket_v2 transport',
+  ]],
+  [providerTransportPath, providerTransport, [
+    'pub enum V3Transport13ResponsesRequest',
+    'ProviderResponsesTransport',
+    'connect_async(handshake)',
+    'event.remove("stream")',
+    'event.remove("background")',
+    'Value::String("response.create".to_string())',
+    'event_type == "error"',
+    'event_type != "response.completed"',
+    'websocket_event_to_sse',
+  ]],
   [serverPath, server, [
     'responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>',
     'build_responses_direct_continuation_scope(',
@@ -64,12 +101,27 @@ for (const [owner, text, phrases] of [
     'missing_locator_scope_mismatch_and_expiry_fail_before_router_or_provider_send',
     'capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send',
     'pinned_terminal_provider_failure_uses_error01_06_without_reselection',
+    'transport = "websocket_v2"',
+  ]],
+  [configTestPath, configTests, [
+    'remote_continuation_is_bound_to_responses_websocket_v2_transport',
+    'HTTP transport cannot declare websocket_v2_url',
+    'websocket_v2_url is required',
+  ]],
+  [websocketTestPath, websocketTests, [
+    'websocket_v2_reuses_one_connection_for_exact_incremental_continuation',
+    'websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_fallback',
+    'previous_response_id',
+    'data: [DONE]',
   ]],
   [serverTestPath, serverTests, [
     'responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry',
     'responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry',
+    'start_controlled_continuation_websocket',
+    'p6_remote_continuation_manifest',
   ]],
-  [designPath, design, ['Resp04 commit', 'Req03 load', 'Req06 exact pin']],
+  [designPath, design, ['Resp04 commit', 'Req03 load', 'Req06 exact pin', 'Transport-bound continuation matrix']],
+  [planPath, plan, ['Provider Responses WebSocket v2 slice', 'Responses WebSocket v2 transport']],
 ]) {
   for (const phrase of phrases) requireText(text, owner, phrase);
 }
@@ -104,6 +156,11 @@ forbid(response, responsePath, [
   /fallback/i,
   /restore_history|materiali[sz]e_context/i,
   /into_body_bytes\s*\(/,
+]);
+forbid(providerTransport, providerTransportPath, [
+  /fallback/i,
+  /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
+  /previous_response_id[\s\S]{0,200}null/,
 ]);
 
 const resp04 = runtime.indexOf('trace.push("V3HubRespContinuation04Committed")');

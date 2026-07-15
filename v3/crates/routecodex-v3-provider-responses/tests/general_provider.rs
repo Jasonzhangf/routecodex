@@ -6,6 +6,7 @@ use axum::{
     routing::post,
     Router,
 };
+use routecodex_v3_config::V3ResponsesTransportKind;
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
@@ -138,6 +139,8 @@ fn target_with_auth(
             alias: auth_alias.to_string(),
             secret,
         },
+        responses_transport: V3ResponsesTransportKind::Http,
+        websocket_v2_url: None,
     }
 }
 

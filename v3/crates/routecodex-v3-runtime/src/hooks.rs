@@ -204,6 +204,8 @@ fn responses_direct_request_projection_hook(
                 alias: candidate.auth_alias.clone(),
                 secret,
             },
+            responses_transport: candidate.responses_transport,
+            websocket_v2_url: candidate.websocket_v2_url.clone(),
         },
         policy.request_body.clone(),
     )

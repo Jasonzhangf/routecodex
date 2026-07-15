@@ -1,4 +1,5 @@
 use crate::V3ProviderError;
+use routecodex_v3_config::V3ResponsesTransportKind;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,8 @@ pub struct V3ResponsesProviderTarget {
     pub canonical_model_id: String,
     pub wire_model: String,
     pub auth: V3ProviderAuthHandle,
+    pub responses_transport: V3ResponsesTransportKind,
+    pub websocket_v2_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +125,8 @@ mod tests {
                     alias: "primary".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
                 },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
             },
             body,
         )
@@ -144,6 +149,8 @@ mod tests {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
             },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),

@@ -10,8 +10,11 @@ const verifier = resolve(repo, 'scripts/architecture/verify-v3-responses-direct-
 const runtime = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
 const response = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const server = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const configValidate = 'v3/crates/routecodex-v3-config/src/validate.rs';
+const providerTransport = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
 const cases = [
   ['Req03 load removed', runtime, '.load_for_req03(response_id, &scope.key, now_epoch_ms)', '.load(response_id)', /load_for_req03/],
+  ['Default transport session state removed', runtime, 'static DEFAULT_RESPONSES_TRANSPORT', 'static REMOVED_DEFAULT_RESPONSES_TRANSPORT', /DEFAULT_RESPONSES_TRANSPORT/],
   ['second response exit', runtime, 'fn release_terminal_failure_locator(', 'async fn execute_selected_continuation() {}\nfn release_terminal_failure_locator(', /execute_selected_continuation/],
   ['Router reentry marker', runtime, 'trace.push("V3HubReqTarget06Resolved");', 'trace.push("V3HubReqTarget06Resolved");\n        let fallback_router = V3VirtualRouter::default();', /fallback/],
   ['control payload leak', runtime, 'let policy = hook_registry.run_route(selected, &standardized);', 'let mut policy = hook_registry.run_route(selected, &standardized);\n        policy.request_body["provider_id"] = serde_json::json!("leak");', /provider_id/],
@@ -19,16 +22,25 @@ const cases = [
   ['SSE stream materialized before projection', response, 'let provider_body = raw.into_body();', 'let body_bytes = raw.into_body_bytes().await.unwrap();\n    let provider_body = V3ProviderResponseBody::Json(body_bytes);', /into_body_bytes/],
   ['structured SSE frame observation removed', response, 'observe_sse_frame_remote_continuation(\n                frame.frame().fields(),\n                &mut pending_response_id,\n            )?;', '// structured frame observation removed', /observe_sse_frame_remote_continuation/],
   ['Server store owner', server, 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
+  ['HTTP-only remote continuation accepted', configValidate, 'let responses = compile_provider_responses(&id, provider.responses, &models)?;', 'let responses = provider.responses;', /compile_provider_responses/],
+  ['WebSocket stream field leaks into event', providerTransport, 'event.remove("stream");', '// stream field leak', /event\.remove\("stream"\)/],
+  ['WebSocket fallback marker', providerTransport, 'let mut sse_frames = Vec::new();', 'let fallback_http_retry = true;\n        let mut sse_frames = Vec::new();', /fallback/i],
 ];
 const copied = [
   runtime,
   'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs',
   'v3/crates/routecodex-v3-runtime/src/shared.rs',
+  'v3/crates/routecodex-v3-config/src/types.rs',
+  configValidate,
+  providerTransport,
   'v3/crates/routecodex-v3-target/src/lib.rs',
   server,
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
+  'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs',
+  'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs',
   'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
   'docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md',
+  'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md',
 ];
 const failures = [];
 for (const [name, relative, from, to, diagnostic] of cases) {

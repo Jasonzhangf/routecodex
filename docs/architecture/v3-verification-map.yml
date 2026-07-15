@@ -916,6 +916,9 @@ features:
     owner_kind: rust_v3_responses_direct_remote_continuation_runtime
     owner_scope: "Resp04 immutable locator commit/release, next Req03 scope load/classification, Req06 exact provider/model/auth resolution, and Server-scoped JSON/SSE two-turn replay"
     owner_modules:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
       - v3/crates/routecodex-v3-runtime/src/shared.rs

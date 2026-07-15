@@ -42,6 +42,28 @@ pub enum V3ProviderError {
         provider_id: String,
         reason: String,
     },
+    #[error(
+        "provider {provider_id} WebSocket transport failed for request {request_id}: {reason}"
+    )]
+    WebSocketTransport {
+        request_id: String,
+        provider_id: String,
+        reason: String,
+    },
+    #[error("provider {provider_id} WebSocket protocol failed for request {request_id}: {reason}")]
+    WebSocketProtocol {
+        request_id: String,
+        provider_id: String,
+        reason: String,
+    },
+    #[error("provider {provider_id} WebSocket event failed for request {request_id} with status {status:?} code {code:?}: {message}")]
+    WebSocketProviderEvent {
+        request_id: String,
+        provider_id: String,
+        status: Option<u16>,
+        code: Option<String>,
+        message: String,
+    },
     #[error("provider returned HTTP {status}", status = .response.status)]
     HttpStatus {
         response: Box<V3ProviderHttpFailure>,

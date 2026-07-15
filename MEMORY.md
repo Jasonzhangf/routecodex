@@ -3302,3 +3302,11 @@
 - Managed lifecycle stale cleanup is terminal-only. Existing Starting, Running, or Stopping state, and runtime caches without a matching Stopped/Failed status, are never reaped merely because a control probe failed.
 - Managed lifecycle terminal cleanup must also validate control ownership before deleting sockets: control instance ID must match the expected declaration and socket path must equal that instance's canonical managed socket. A foreign/corrupted control record fails closed and leaves the foreign socket intact.
 - Focused red/green evidence covers failed rebind truth preservation, non-terminal lifecycle cache preservation, and foreign control-socket preservation; continuation JSON/SSE and managed CLI lifecycle regressions remain green.
+
+# 2026-07-15 V3 remote continuation is transport-bound
+
+- `remote_continuation` is not a model-only capability. V3 Config must reject it unless the provider declares Responses `websocket_v2` plus an explicit `ws://` or `wss://` endpoint.
+- HTTP first-turn success is not continuation availability evidence. The observed upstream accepts normal HTTP Responses but rejects HTTP `previous_response_id` because continuation is supported only on Responses WebSocket v2.
+- Provider transport is the unique WebSocket owner: handshake auth, provider/model/auth/url connection identity, `response.create`, connection-local state, cancellation, event correlation, JSON/SSE raw projection, and typed failures remain outside Hub/Server/handler semantics.
+- Runtime must reuse one Provider transport instance across the two client HTTP turns; creating a new transport per request loses connection-local `store=false` continuation truth.
+- Live completion requires a provider-verified WebSocket endpoint and real managed JSON/SSE two-turn replay. Guessing an endpoint, retaining HTTP remote-continuation capability, or using Relay/local materialization is forbidden.

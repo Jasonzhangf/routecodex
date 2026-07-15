@@ -741,8 +741,11 @@ features:
       - continuation live replay
 
   - feature_id: v3.responses_direct_remote_continuation_integration
-    owner_crates: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-target]
+    owner_crates: [routecodex-v3-config, routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-target]
     owner_files:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
       - v3/crates/routecodex-v3-runtime/src/shared.rs
@@ -758,6 +761,7 @@ features:
     mainline_bindings:
       - v3-rci-01
       - v3-rci-02
+      - v3-rci-ws-01
       - v3-rci-03
       - v3-rci-04
     entry_symbols:
@@ -768,6 +772,8 @@ features:
       - V3RemoteContinuationStore::load_for_req03
       - V3RemoteContinuationLocator::validate_capability_revision
       - V3TargetInterpreter::resolve_exact_provider_model_auth
+      - V3ResponsesTransportKind
+      - ProviderResponsesTransport
       - build_responses_direct_continuation_scope
       - V3RemoteContinuationObservation
     allowed_paths:
@@ -777,7 +783,12 @@ features:
       - v3/crates/routecodex-v3-runtime/src/shared.rs
       - v3/crates/routecodex-v3-runtime/src/hooks.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+      - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs
       - v3/crates/routecodex-v3-target/src/lib.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs

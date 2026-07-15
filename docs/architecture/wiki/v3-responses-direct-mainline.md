@@ -193,6 +193,21 @@ flowchart LR
   `build_v3_server_16_http_frame_from_v3_resp_15` and JSON/SSE emission. Final clean CLI replay is
   recorded below. Relay, continuation, and servertool remain outside P6.
 
+## Remote continuation transport-bound closeout
+
+- Remote continuation is no longer a model-only string claim. Config compile owns
+  `V3ResponsesTransportKind` and rejects `remote_continuation` unless the provider Responses
+  transport is `websocket_v2` with an explicit `websocket_v2_url`.
+- Provider Runtime owns the WebSocket v2 connection/cache resource. It sends exactly one
+  `response.create` per turn, strips HTTP-only `stream` and `background` fields from the WebSocket
+  event, preserves incremental `previous_response_id` input, and projects WebSocket server events
+  back into the existing JSON/SSE provider raw response node.
+- Server uses the shared default Provider transport instance so connection-local continuation state
+  can survive the two HTTP turns that belong to the same provider/model/auth/transport pin.
+- HTTP-only first-turn availability is not remote-continuation evidence. The current managed 5555
+  provider still needs a verified Responses WebSocket v2 endpoint before `live_5555_pending` can be
+  removed.
+
 ## P6 local-live evidence
 
 - Actual built `v3/target/debug/routecodex-v3` loaded `v3/fixtures/config.p6.toml` and started

@@ -336,6 +336,27 @@ pub struct V3ProviderModelAuthoringConfig {
 pub struct V3ProviderResponsesAuthoringConfig {
     pub process: String,
     pub streaming: V3StreamingPolicy,
+    #[serde(default)]
+    pub transport: V3ResponsesTransportKind,
+    #[serde(default)]
+    pub websocket_v2_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ResponsesTransportKind {
+    #[default]
+    Http,
+    WebsocketV2,
+}
+
+impl V3ResponsesTransportKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::WebsocketV2 => "websocket_v2",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

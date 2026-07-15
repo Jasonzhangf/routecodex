@@ -319,6 +319,8 @@ fn provider_target(
             alias: selected.auth_alias.clone(),
             secret,
         },
+        responses_transport: selected.responses_transport,
+        websocket_v2_url: selected.websocket_v2_url.clone(),
     })
 }
 

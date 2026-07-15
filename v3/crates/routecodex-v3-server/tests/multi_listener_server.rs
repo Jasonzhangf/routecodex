@@ -6,11 +6,19 @@ use axum::{
     routing::post,
     Router,
 };
+use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{net::TcpListener, sync::Arc};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{
+        handshake::server::{Request, Response as WsResponse},
+        Message,
+    },
+};
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
@@ -77,6 +85,51 @@ type = "responses"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn p6_remote_continuation_manifest(
+    port_a: u16,
+    port_b: u16,
+    websocket_v2_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = format!(
+        r#"
+version = 3
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+[providers.test]
+type = "responses"
+base_url = "http://controlled.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+responses = {{ process = "chat", streaming = "always", transport = "websocket_v2", websocket_v2_url = "{websocket_v2_url}" }}
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
@@ -226,64 +279,8 @@ async fn start_controlled_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
-async fn controlled_continuation_upstream(
-    State(state): State<Arc<ProviderState>>,
-    headers: HeaderMap,
-    axum::Json(body): axum::Json<Value>,
-) -> Response<Body> {
-    state
-        .captures
-        .send(ProviderCapture {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            accept: headers
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            body: body.clone(),
-        })
-        .unwrap();
-    if body.get("stream").and_then(Value::as_bool) == Some(true) {
-        let sse = if body.get("previous_response_id").and_then(Value::as_str)
-            == Some("resp_server_sse_1")
-        {
-            concat!(
-                "event: response.completed\n",
-                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_server_sse_2\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"server sse done\"}]}}\n\n",
-                "data: [DONE]\n\n"
-            )
-        } else {
-            concat!(
-                "event: response.created\n",
-                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_server_sse_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
-                "event: response.output_item.done\n",
-                "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_server_sse_1\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_server_sse_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
-                "data: [DONE]\n\n"
-            )
-        };
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/event-stream")
-            .body(Body::from(sse))
-            .unwrap();
-    }
-    let response = if body.get("previous_response_id").and_then(Value::as_str)
-        == Some("resp_server_remote_1")
-    {
-        json!({"id":"resp_server_remote_2","status":"completed","output":[{"type":"output_text","text":"server done"}]})
-    } else {
-        json!({"id":"resp_server_remote_1","status":"requires_action","output":[{"type":"function_call","call_id":"call_server_1","name":"lookup","arguments":"{}"}]})
-    };
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&response).unwrap()))
-        .unwrap()
-}
-
-async fn start_controlled_continuation_upstream() -> (
+#[allow(clippy::result_large_err)]
+async fn start_controlled_continuation_websocket() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
     oneshot::Sender<()>,
@@ -291,21 +288,71 @@ async fn start_controlled_continuation_upstream() -> (
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let app = Router::new()
-        .route("/v1/responses", post(controlled_continuation_upstream))
-        .with_state(Arc::new(ProviderState {
-            captures: captures_tx,
-        }));
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
     tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
+        let (stream, _) = tokio::select! {
+            accepted = listener.accept() => accepted.unwrap(),
+            _ = &mut shutdown_rx => return,
+        };
+        let captures = captures_tx.clone();
+        let mut socket =
+            accept_hdr_async(stream, move |request: &Request, response: WsResponse| {
+                let authorization = request
+                    .headers()
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok())
+                    .map(ToOwned::to_owned);
+                captures
+                    .send(ProviderCapture {
+                        authorization,
+                        accept: None,
+                        body: json!({"handshake": true}),
+                    })
+                    .unwrap();
+                Ok(response)
             })
             .await
             .unwrap();
+        while let Some(message) = socket.next().await {
+            let Ok(message) = message else {
+                break;
+            };
+            let bytes = match message {
+                Message::Text(text) => text.as_bytes().to_vec(),
+                Message::Binary(bytes) => bytes.to_vec(),
+                Message::Close(_) => break,
+                Message::Ping(bytes) => {
+                    socket.send(Message::Pong(bytes)).await.unwrap();
+                    continue;
+                }
+                Message::Pong(_) | Message::Frame(_) => continue,
+            };
+            let body: Value = serde_json::from_slice(&bytes).unwrap();
+            captures_tx
+                .send(ProviderCapture {
+                    authorization: None,
+                    accept: None,
+                    body: body.clone(),
+                })
+                .unwrap();
+            let response = if body.get("previous_response_id").and_then(Value::as_str)
+                == Some("resp_server_remote_1")
+            {
+                json!({"type":"response.completed","response":{"id":"resp_server_remote_2","status":"completed","output":[{"type":"output_text","text":"server done"}]}})
+            } else {
+                json!({"type":"response.completed","response":{"id":"resp_server_remote_1","status":"completed","output":[{"type":"function_call","call_id":"call_server_1","name":"lookup","arguments":"{}"}]}})
+            };
+            socket
+                .send(Message::Text(serde_json::to_string(&response).unwrap()))
+                .await
+                .unwrap();
+        }
     });
-    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+    (
+        format!("ws://{address}/v1/responses"),
+        captures_rx,
+        shutdown_tx,
+    )
 }
 
 async fn controlled_failure_upstream() -> Response<Body> {
@@ -416,10 +463,7 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["canonical_model_id"], "test");
     assert_eq!(model["wire_model"], "wire-test");
     assert_eq!(model["provider_id"], "test");
-    assert_eq!(
-        model["capabilities"],
-        json!(["text", "tools", "tool_outputs", "remote_continuation"])
-    );
+    assert_eq!(model["capabilities"], json!(["text", "tools"]));
     assert_eq!(model["supports_streaming"], true);
     assert_eq!(model["supports_thinking"], true);
     assert_eq!(model["thinking"], "optional");
@@ -594,13 +638,16 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
 async fn responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry(
 ) {
     let _test_guard = TEST_LOCK.lock().await;
-    let (provider_base_url, mut captures, shutdown) =
-        start_controlled_continuation_upstream().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-continuation");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let metadata = json!({
@@ -665,10 +712,18 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
     let second_body: Value = second.json().await.unwrap();
     assert_eq!(second_body["id"], "resp_server_remote_2");
 
+    let handshake_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        handshake_capture.authorization.as_deref(),
+        Some("Bearer secret-p6-continuation")
+    );
     let first_capture = captures.recv().await.unwrap();
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
     assert_eq!(second_capture.body["model"], "wire-test");
+    assert_eq!(first_capture.body["type"], "response.create");
+    assert!(first_capture.body.get("stream").is_none());
+    assert!(first_capture.body.get("background").is_none());
     assert_eq!(
         second_capture.body["previous_response_id"],
         "resp_server_remote_1"
@@ -695,13 +750,16 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
 #[tokio::test]
 async fn responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (provider_base_url, mut captures, shutdown) =
-        start_controlled_continuation_upstream().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-continuation-sse");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let first = client
@@ -725,7 +783,7 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         .to_string();
     assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
     assert!(first_trace.contains("V3HubRespContinuation04Committed"));
-    assert!(first.text().await.unwrap().contains("resp_server_sse_1"));
+    assert!(first.text().await.unwrap().contains("resp_server_remote_1"));
 
     let second = client
         .post(&endpoint)
@@ -734,8 +792,8 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         .json(&json!({
             "model":"client-test",
             "stream":true,
-            "previous_response_id":"resp_server_sse_1",
-            "input":[{"type":"function_call_output","call_id":"call_server_sse_1","output":"ok"}]
+            "previous_response_id":"resp_server_remote_1",
+            "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
         }))
         .send()
         .await
@@ -750,15 +808,24 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
     assert!(second_trace.contains("V3HubReqTarget06Resolved"));
     assert!(!second_trace.contains("V3Router07OpaqueTargetHitOnce"));
     assert!(!second_trace.contains("V3TargetLocalReselected"));
-    assert!(second.text().await.unwrap().contains("resp_server_sse_2"));
+    assert!(second
+        .text()
+        .await
+        .unwrap()
+        .contains("resp_server_remote_2"));
 
+    let handshake_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        handshake_capture.authorization.as_deref(),
+        Some("Bearer secret-p6-continuation-sse")
+    );
     let first_capture = captures.recv().await.unwrap();
     let second_capture = captures.recv().await.unwrap();
-    assert_eq!(first_capture.body["stream"], true);
-    assert_eq!(second_capture.body["stream"], true);
+    assert!(first_capture.body.get("stream").is_none());
+    assert!(second_capture.body.get("stream").is_none());
     assert_eq!(
         second_capture.body["previous_response_id"],
-        "resp_server_sse_1"
+        "resp_server_remote_1"
     );
     assert_control_fields_absent(&first_capture.body);
     assert_control_fields_absent(&second_capture.body);

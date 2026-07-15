@@ -17,6 +17,7 @@ serde_json.workspace = true
 sse-transport-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core" }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

@@ -665,6 +665,8 @@ mod tests {
                 model_id: "model".into(),
                 wire_model: "wire-model".into(),
                 base_url: "http://127.0.0.1:1/v1".into(),
+                responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
                 env_name: Some("V3_TEST_KEY".into()),
                 token_file: None,
                 path: vec!["provider".into()],

@@ -287,6 +287,52 @@ fn validates_provider_model_and_forwarder_references() {
 }
 
 #[test]
+fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
+    let http_only = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&http_only).unwrap())
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("remote_continuation requires responses websocket_v2 transport"));
+
+    let missing_endpoint = http_only.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\" }",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_endpoint).unwrap())
+            .unwrap_err();
+    assert!(error.to_string().contains("websocket_v2_url is required"));
+
+    let contradictory_http = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&contradictory_http).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("HTTP transport cannot declare websocket_v2_url"));
+
+    let websocket = http_only.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
+    let responses = manifest.providers["cc"].responses.as_ref().unwrap();
+    assert_eq!(responses.transport.as_str(), "websocket_v2");
+    assert_eq!(
+        responses.websocket_v2_url.as_deref(),
+        Some("wss://provider.invalid/v1/responses")
+    );
+}
+
+#[test]
 fn config_store_is_the_single_read_write_interface() {
     let root =
         std::env::temp_dir().join(format!("routecodex-v3-config-store-{}", std::process::id()));

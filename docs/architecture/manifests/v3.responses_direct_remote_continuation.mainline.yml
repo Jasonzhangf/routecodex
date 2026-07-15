@@ -1,5 +1,5 @@
 lifecycle_id: v3.responses_direct.remote_continuation.integration
-summary: "Provider-owned Responses Direct continuation: Resp04 immutable locator commit, next Req03 scoped load, Req06 exact provider/model/auth pin, and one shared Direct provider/response exit."
+summary: "Provider-owned Responses Direct continuation: Resp04 immutable locator commit, next Req03 scoped load, Req06 exact provider/model/auth/transport pin, Provider-owned Responses WebSocket v2 when configured, and one shared Direct provider/response exit."
 owner_feature_id: v3.responses_direct_remote_continuation_integration
 entrypoint:
   node_id: V3Server03HttpRequestRaw
@@ -9,6 +9,7 @@ node_ids:
   - V3Server03HttpRequestRaw
   - V3HubReqContinuation03Classified
   - V3HubReqTarget06Resolved
+  - V3Transport13ResponsesHttpRequest
   - V3ProviderResp14Raw
   - V3HubRespContinuation04Committed
   - V3Resp15ClientPayload
@@ -27,6 +28,13 @@ edges:
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     binding_pending: null
     split_binding_id: null
+  - step_id: v3-rci-ws-01
+    from_node: V3HubReqTarget06Resolved
+    to_node: V3Transport13ResponsesHttpRequest
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: responses_direct_provider_transport_source
   - step_id: v3-rci-03
     from_node: V3ProviderResp14Raw
     to_node: V3HubRespContinuation04Committed

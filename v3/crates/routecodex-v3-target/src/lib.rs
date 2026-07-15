@@ -1,6 +1,6 @@
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ForwarderTargetManifest, V3RoutePoolTargetManifest,
-    V3RouteTargetKind, V3SelectionStrategy,
+    V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ResponsesTransportKind,
+    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
@@ -249,6 +249,8 @@ pub struct V3TargetCandidate {
     pub model_id: String,
     pub wire_model: String,
     pub base_url: String,
+    pub responses_transport: V3ResponsesTransportKind,
+    pub websocket_v2_url: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
     pub path: Vec<String>,
@@ -550,6 +552,15 @@ impl V3TargetInterpreter {
                 model_id: model.id.clone(),
                 wire_model: model.wire_name.clone(),
                 base_url: provider.base_url.clone(),
+                responses_transport: provider
+                    .responses
+                    .as_ref()
+                    .map(|responses| responses.transport)
+                    .unwrap_or_default(),
+                websocket_v2_url: provider
+                    .responses
+                    .as_ref()
+                    .and_then(|responses| responses.websocket_v2_url.clone()),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
                 path: path.clone(),

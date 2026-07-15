@@ -415,6 +415,7 @@ fn compile_providers(
             }
             let auth = compile_auth(&id, provider.auth)?;
             let models = compile_models(&id, provider.models)?;
+            let responses = compile_provider_responses(&id, provider.responses, &models)?;
             let health = compile_provider_health(&id, provider.health)?;
             Ok((
                 id.clone(),
@@ -426,7 +427,7 @@ fn compile_providers(
                     default_model: provider.default_model,
                     auth,
                     models,
-                    responses: provider.responses,
+                    responses,
                     concurrency: provider.concurrency,
                     health,
                     features: provider.features,
@@ -434,6 +435,66 @@ fn compile_providers(
             ))
         })
         .collect()
+}
+
+fn compile_provider_responses(
+    provider_id: &str,
+    responses: Option<V3ProviderResponsesAuthoringConfig>,
+    models: &BTreeMap<String, V3ProviderModelManifest>,
+) -> Result<Option<V3ProviderResponsesAuthoringConfig>, V3ConfigError> {
+    let requires_remote_continuation = models.values().any(|model| {
+        model
+            .capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation")
+    });
+    let Some(responses) = responses else {
+        if requires_remote_continuation {
+            return Err(validation(format!(
+                "provider {provider_id} remote_continuation requires responses websocket_v2 transport"
+            )));
+        }
+        return Ok(None);
+    };
+
+    match responses.transport {
+        V3ResponsesTransportKind::Http => {
+            if responses.websocket_v2_url.is_some() {
+                return Err(validation(format!(
+                    "provider {provider_id} HTTP transport cannot declare websocket_v2_url"
+                )));
+            }
+            if requires_remote_continuation {
+                return Err(validation(format!(
+                    "provider {provider_id} remote_continuation requires responses websocket_v2 transport"
+                )));
+            }
+        }
+        V3ResponsesTransportKind::WebsocketV2 => {
+            let endpoint = responses
+                .websocket_v2_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|endpoint| !endpoint.is_empty())
+                .ok_or_else(|| {
+                    validation(format!(
+                        "provider {provider_id} websocket_v2_url is required for websocket_v2 transport"
+                    ))
+                })?;
+            if !(endpoint.starts_with("ws://") || endpoint.starts_with("wss://")) {
+                return Err(validation(format!(
+                    "provider {provider_id} websocket_v2_url must use ws:// or wss://"
+                )));
+            }
+            if endpoint.chars().any(char::is_whitespace) {
+                return Err(validation(format!(
+                    "provider {provider_id} websocket_v2_url cannot contain whitespace"
+                )));
+            }
+        }
+    }
+
+    Ok(Some(responses))
 }
 
 fn compile_provider_health(

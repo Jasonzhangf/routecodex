@@ -30721,3 +30721,11 @@ Pure Rust NAPI candidates:
 - Red test: foreign_control_record_is_never_reaped_from_terminal_state failed before the fix because cleanup succeeded instead of returning IdentityMismatch.
 - Fix: reap_inactive_runtime_files now requires control.instance_id to match the expected declaration and socket_path to equal that instance's canonical managed socket before deleting any socket/control cache.
 - Green evidence: focused lifecycle test passed; verify:v3-managed-server-lifecycle passed; managed lifecycle red fixtures now reject 8 mutations including removing the foreign-control guard.
+
+# 2026-07-15T17:45+08:00 V3 Responses Direct remote continuation transport-bound closeout
+
+- Upstream HTTP evidence proved that `previous_response_id` is rejected with “only supported on Responses WebSocket v2”; a successful HTTP first turn therefore cannot advertise usable `remote_continuation`.
+- Config now binds the capability to `responses.transport = "websocket_v2"` plus an explicit `websocket_v2_url`. The generic Responses Provider owns handshake auth, one connection-local session per provider/model/auth/url pin, `response.create` events, JSON/SSE projection, cancellation, and typed WebSocket failures. Runtime reuses one Provider transport instance across the two client HTTP turns.
+- Current-source evidence is green: Config 1/1, Provider WS 2/2, Runtime 7/7, Server JSON/SSE 2/2, H4 14/14, 12 remote-continuation mutations, P6/H2 positive and red gates, architecture/resource/module/Rust-only/fmt/Clippy, full V3 workspace/doctests, CLI build, and diff check.
+- Managed 5555 is still configured as HTTP-only while declaring `remote_continuation`; the new binary correctly rejects that config. The running old binary sends the continuation through HTTP, skips Router on the second turn, and projects the upstream rejection as 502. Five candidate Upgrade paths (`responses`, `responses/ws`, `responses/websocket`, `responses/v2`, `realtime`) received zero handshake bytes before timeout.
+- No live config, provider credential, listener, or managed process was changed. Real managed 5555 JSON/SSE two-turn success remains pending a provider-verified Responses WebSocket v2 endpoint; source/controlled completion is not live completion.

@@ -513,7 +513,7 @@ chains:
         status: anchored
   - chain_id: v3.responses_direct.remote_continuation.integration
     owner_feature_id: v3.responses_direct_remote_continuation_integration
-    summary: "Responses Direct remote continuation commits provider-owned identity at Resp04, loads direct scope at the next Req03, resolves the immutable exact pin at Req06, and rejoins the single Direct provider/response exit without Virtual Router re-entry."
+    summary: "Responses Direct remote continuation commits provider-owned identity at Resp04, loads direct scope at the next Req03, resolves the immutable exact provider/model/auth/transport pin at Req06, uses provider-owned Responses WebSocket v2 when remote continuation is configured, and rejoins the single Direct provider/response exit without Virtual Router re-entry."
     edges:
       - step_id: v3-rci-01
         from_node: V3Server03HttpRequestRaw
@@ -544,6 +544,21 @@ chains:
           produces: [v3.target.concrete_provider]
           side_channel_reads: [v3.continuation.remote_binding]
           side_channel_writes: [v3.target.concrete_provider]
+        status: anchored
+      - step_id: v3-rci-ws-01
+        from_node: V3HubReqTarget06Resolved
+        to_node: V3Transport13ResponsesHttpRequest
+        caller_symbol: responses_direct_provider_transport_hook
+        caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+        callee_symbol: build_v3_transport_13_responses_request_from_v3_provider_12
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+        owner_feature_id: v3.responses_direct_remote_continuation_integration
+        binding_kind: responses_direct_provider_transport_source
+        resource_flow:
+          consumes: [v3.target.concrete_provider, v3.provider.responses_transport_capability, v3.provider.responses_wire_payload]
+          produces: [v3.provider.transport_request, v3.provider.responses_websocket_connection]
+          side_channel_reads: [v3.provider.responses_transport_capability]
+          side_channel_writes: [v3.provider.responses_websocket_connection]
         status: anchored
       - step_id: v3-rci-03
         from_node: V3ProviderResp14Raw
