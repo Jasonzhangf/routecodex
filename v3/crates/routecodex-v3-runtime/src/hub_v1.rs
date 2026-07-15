@@ -3,6 +3,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 mod relay_request;
 pub use relay_request::*;
+mod anthropic_codec;
+pub use anthropic_codec::*;
 mod resource_hooks;
 pub use resource_hooks::*;
 
