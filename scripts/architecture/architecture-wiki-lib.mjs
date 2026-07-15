@@ -261,6 +261,23 @@ export const MANUAL_WIKI_PAGES = [
       'Live provider compatibility',
     ],
   },
+  {
+    path: `${WIKI_ROOT}/v3-entry-protocol-endpoint-binding.md`,
+    title: '# V3 Entry Protocol Endpoint Binding',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Main Rule',
+      '## Binding Matrix',
+      '## Mainline',
+      '## Review Checklist',
+      '## Current Integration Boundary',
+      'v3.entry_protocol_endpoint_binding',
+      'v3-entry-bind-01',
+      'Gemini pending_not_implemented',
+      'live/global/prod not claimed',
+    ],
+  },
 ];
 
 function readText(root, relPath) {

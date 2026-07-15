@@ -87,6 +87,49 @@ features:
       runtime: "Actual V3 CLI config check/status, aggregate multi-listener HTTP probes, invalid-input probes, Debug probes, and controlled-upstream P6 replay pass."
       forbidden_claim: "Do not claim Relay, continuation runtime, Chat Process governance, other provider protocols, Hub v1 cutover, P6 deletion, global install, or production replacement."
 
+  - feature_id: v3.entry_protocol_endpoint_binding
+    status: review_gate_surface_ab_integration_pending
+    change_risk: high
+    owner_kind: v3_review_gate_surface
+    owner_scope: "V3 Entry Protocol Endpoint Binding map, manifest, wiki, source gate, red fixtures, and A/B integration audit."
+    owner_modules:
+      - docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+      - docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md
+      - scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs
+      - scripts/tests/v3-entry-protocol-endpoint-binding-red-fixtures.mjs
+    design:
+      - docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md
+      - docs/goals/v3-foundation-implementation-order.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+    required_contract:
+      - "Every exposed endpoint must bind one known entry protocol execution mode implementation status and owner."
+      - "Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent."
+      - "Gemini pending_not_implemented must be explicit and owner-bound."
+      - "No unbound endpoint can fall through to generic foundation pending."
+      - "Server must not duplicate the protocol registry or bypass binding with raw path dispatch."
+      - "Protocol binding must not depend on provider runtime state metadata debug side-channel or request payload."
+      - "Do not claim Gemini runtime implementation live provider compatibility global install restart or production cutover."
+    required_gates:
+      - npm run verify:v3-entry-protocol-endpoint-binding
+      - npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:architecture-wiki-sync
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:architecture-wiki-browser-smoke
+      - git diff --check
+    completion_rule:
+      source: "Complete when maps, manifest, wiki, verifier, red fixtures, Config registry source, Server binding consumer source, architecture gates, and diff check pass."
+      runtime: "Review/gate/source integration only. endpoint binding complete does not mean runtime protocol implementation is separate work."
+      forbidden_claim: "Do not claim Gemini runtime implementation live provider compatibility global install restart or production cutover."
+
   - feature_id: v3.hub_pipeline_static_skeleton
     status: h1_typed_skeleton_and_static_registry_implemented
     change_risk: critical
@@ -1101,3 +1144,31 @@ features:
       source: "Complete when controlled Runtime and Server JSON/SSE/error/isolation, first-frame timing, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
       runtime: "Controlled Rust loopback replay only; live provider compatibility is not claimed."
       forbidden_claim: "Do not claim Responses Direct, Anthropic continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
+
+  - feature_id: v3.entry_protocol_registry_contract
+    status: source_contract_verified
+    change_risk: medium
+    owner_kind: rust_v3_config_contract
+    owner_scope: "Entry protocol endpoint binding registry in Config manifest only."
+    owner_modules:
+      - v3/crates/routecodex-v3-config
+    required_unit:
+      - registry missing any declared protocol fails
+      - endpoint_patterns missing or duplicated fail
+      - duplicate protocol binding and unknown protocol fail
+      - gemini must be pending_not_implemented with explicit pending owner
+      - implemented direct or relay bindings must declare runtime owner symbol and path
+    required_blackbox:
+      - none; this slice is config contract only and does not claim live runtime behavior
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config -- --nocapture
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - git diff --check
+    completion_rule:
+      source: "Complete when config contract tests and V3 gates prove responses anthropic openai_chat and gemini binding truth is present in V3HubV1Manifest."
+      runtime: "Gemini remains explicit pending_not_implemented; no runtime transport or server dispatcher cutover is claimed."
+      forbidden_claim: "Do not claim Gemini runtime, live provider compatibility, install, restart, production cutover, or server dispatcher normalization."

@@ -74,6 +74,57 @@ chains:
           side_channel_reads: []
           side_channel_writes: [v3.secret.provider_auth_handle]
         status: anchored
+
+  - chain_id: v3.entry_protocol_endpoint_binding.mainline
+    owner_feature_id: v3.entry_protocol_endpoint_binding
+    summary: "Review/gate chain binding V3 business endpoint exposure to closed entry protocols, execution mode, implementation status, and owner before Server dispatch."
+    manifest: docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+    edges:
+      - step_id: v3-entry-bind-01
+        from_node: V3Config05ManifestPublished
+        to_node: V3EntryBind01EndpointPatternDeclared
+        caller_symbol: compile_entry_protocol_bindings
+        caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+        callee_symbol: docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+        callee_file: docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+        owner_feature_id: v3.entry_protocol_endpoint_binding
+        binding_kind: review_gate_source_binding
+        resource_flow: { consumes: [v3.config.published_manifest], produces: [v3.entry_protocol.binding_registry], side_channel_reads: [], side_channel_writes: [v3.entry_protocol.binding_registry] }
+        status: binding_pending
+      - step_id: v3-entry-bind-02
+        from_node: V3EntryBind01EndpointPatternDeclared
+        to_node: V3EntryBind02ProtocolResolved
+        caller_symbol: V3HubV1Manifest::entry_protocol_binding_for_endpoint
+        caller_file: v3/crates/routecodex-v3-config/src/types.rs
+        callee_symbol: V3EntryProtocolBindingManifest
+        callee_file: v3/crates/routecodex-v3-config/src/types.rs
+        owner_feature_id: v3.entry_protocol_endpoint_binding
+        binding_kind: review_gate_source_binding
+        resource_flow: { consumes: [v3.entry_protocol.binding_registry], produces: [v3.entry_protocol.binding_registry], side_channel_reads: [v3.entry_protocol.binding_registry], side_channel_writes: [] }
+        status: binding_pending
+      - step_id: v3-entry-bind-03
+        from_node: V3EntryBind02ProtocolResolved
+        to_node: V3EntryBind03ServerEnablementChecked
+        caller_symbol: routecodex-v3-server endpoint binding consumer
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: V3HubV1Manifest::entry_protocol_binding_for_endpoint
+        callee_file: v3/crates/routecodex-v3-config/src/types.rs
+        owner_feature_id: v3.entry_protocol_endpoint_binding
+        binding_kind: review_gate_source_binding
+        resource_flow: { consumes: [v3.server.validated_http_input, v3.entry_protocol.binding_registry], produces: [v3.server.endpoint_binding_projection], side_channel_reads: [v3.entry_protocol.binding_registry], side_channel_writes: [v3.server.endpoint_binding_projection] }
+        status: binding_pending
+      - step_id: v3-entry-bind-04
+        from_node: V3EntryBind03ServerEnablementChecked
+        to_node: V3EntryBind04ExecutionBindingProjected
+        caller_symbol: routecodex-v3-server endpoint binding consumer
+        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_symbol: execute_v3_foundation_pending_runtime
+        callee_file: v3/crates/routecodex-v3-runtime/src/foundation_pending.rs
+        owner_feature_id: v3.entry_protocol_endpoint_binding
+        binding_kind: review_gate_source_binding
+        resource_flow: { consumes: [v3.server.endpoint_binding_projection], produces: [v3.protocol.pending_projection], side_channel_reads: [v3.entry_protocol.binding_registry], side_channel_writes: [v3.protocol.pending_projection] }
+        status: binding_pending
+
   - chain_id: v3.hub_pipeline.v1.hook_registry_compile
     owner_feature_id: v3.hub_relay_runtime_resources_hooks
     summary: "Runtime borrows deterministic resource/hook declarations only from V3Config05ManifestPublished and binds every fixed node entry/exit slot to the closed Rust static catalog."
@@ -835,3 +886,50 @@ chains:
       - { step_id: v3-openai-chat-relay-13, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, caller_symbol: project_json_response, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs, callee_symbol: V3HubRelayResponseHooks::commit, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, owner_feature_id: v3.openai_chat_relay_runtime_integration, resource_flow: { consumes: [v3.hub.response_semantic], produces: [v3.hub.response_semantic], side_channel_reads: [], side_channel_writes: [] } }
       - { step_id: v3-openai-chat-relay-14, from_node: V3HubRespContinuation04Committed, to_node: V3HubRespOutbound05ClientSemantic, caller_symbol: project_json_response, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs, callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs, status: anchored, owner_feature_id: v3.openai_chat_relay_runtime_integration, resource_flow: { consumes: [v3.hub.response_semantic], produces: [v3.response.client_payload, v3.openai_chat.client_sse_stream], side_channel_reads: [], side_channel_writes: [] } }
       - { step_id: v3-openai-chat-relay-15, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, caller_symbol: openai_chat_relay_output_response, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: Body::from_stream, callee_file: v3/crates/routecodex-v3-server/src/lib.rs, status: anchored, owner_feature_id: v3.openai_chat_relay_runtime_integration, resource_flow: { consumes: [v3.response.client_payload, v3.openai_chat.client_sse_stream], produces: [], side_channel_reads: [v3.error.chain], side_channel_writes: [] } }
+
+  - chain_id: v3.entry_protocol_registry_contract.mainline
+    owner_feature_id: v3.entry_protocol_registry_contract
+    summary: "Config compiles Hub v1 entry protocol bindings into manifest truth before Server or Runtime execution."
+    edges:
+      - step_id: v3-entry-protocol-registry-01
+        from_node: V3HubV1AuthoringConfig
+        to_node: V3EntryProtocolBindingAuthoringConfig
+        caller_symbol: compile_hub_v1
+        caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+        callee_symbol: compile_entry_protocol_bindings
+        callee_file: v3/crates/routecodex-v3-config/src/validate.rs
+        status: anchored
+        owner_feature_id: v3.entry_protocol_registry_contract
+        resource_flow:
+          consumes: [v3.config.hub_pipeline_declarations]
+          produces: [v3.entry_protocol.binding_registry]
+          side_channel_reads: []
+          side_channel_writes: []
+      - step_id: v3-entry-protocol-registry-02
+        from_node: V3EntryProtocolBindingAuthoringConfig
+        to_node: V3EntryProtocolBindingManifest
+        caller_symbol: compile_entry_protocol_bindings
+        caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+        callee_symbol: V3EntryProtocolBindingManifest
+        callee_file: v3/crates/routecodex-v3-config/src/types.rs
+        status: anchored
+        owner_feature_id: v3.entry_protocol_registry_contract
+        resource_flow:
+          consumes: [v3.entry_protocol.binding_registry]
+          produces: [v3.entry_protocol.binding_registry]
+          side_channel_reads: []
+          side_channel_writes: []
+      - step_id: v3-entry-protocol-registry-03
+        from_node: V3EntryProtocolBindingManifest
+        to_node: V3Config05ManifestPublished
+        caller_symbol: compile_hub_v1
+        caller_file: v3/crates/routecodex-v3-config/src/validate.rs
+        callee_symbol: publish_v3_config_05_manifest_from_v3_config_04
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        status: anchored
+        owner_feature_id: v3.entry_protocol_registry_contract
+        resource_flow:
+          consumes: [v3.entry_protocol.binding_registry]
+          produces: [v3.config.published_manifest]
+          side_channel_reads: []
+          side_channel_writes: []

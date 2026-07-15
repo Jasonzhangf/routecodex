@@ -384,6 +384,42 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.entry_protocol.binding_registry
+    resource_kind: config_contract
+    lifecycle: v3.entry_protocol_endpoint_binding.mainline
+    owner_crate: routecodex-v3-config
+    owner_node: V3EntryBind01EndpointPatternDeclared
+    identity: [entryProtocol, endpointPattern, executionMode, implementationStatus, ownerFeatureId]
+    allowed_writers: [compile_hub_v1]
+    allowed_readers: [V3Config05ManifestPublished, V3HubV1Manifest::entry_protocol_binding_for_endpoint, routecodex-v3-server]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: review_gate
+  - resource_id: v3.server.endpoint_binding_projection
+    resource_kind: server_dispatch_projection
+    lifecycle: v3.entry_protocol_endpoint_binding.mainline
+    owner_crate: routecodex-v3-server
+    owner_node: V3EntryBind03ServerEnablementChecked
+    identity: [serverId, endpointPattern, entryProtocol, implementationStatus]
+    allowed_writers: [routecodex-v3-server]
+    allowed_readers: [routecodex-v3-server, project_v3_http_boundary_error]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: review_gate
+  - resource_id: v3.protocol.pending_projection
+    resource_kind: error_projection_plan
+    lifecycle: v3.entry_protocol_endpoint_binding.mainline
+    owner_crate: routecodex-v3-server
+    owner_node: V3EntryBind04ExecutionBindingProjected
+    identity: [entryProtocol, endpointPattern, pendingOwner, reasonCode]
+    allowed_writers: [execute_v3_foundation_pending_runtime]
+    allowed_readers: [routecodex-v3-server, project_v3_http_boundary_error]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: review_gate
   - resource_id: v3.config.hub_pipeline_declarations
     resource_kind: config_contract
     lifecycle: v3.config.compile
