@@ -3316,3 +3316,12 @@
 - Provider transport is the unique WebSocket owner: handshake auth, provider/model/auth/url connection identity, `response.create`, connection-local state, cancellation, event correlation, JSON/SSE raw projection, and typed failures remain outside Hub/Server/handler semantics.
 - Runtime must reuse one Provider transport instance across the two client HTTP turns; creating a new transport per request loses connection-local `store=false` continuation truth.
 - Live completion requires a provider-verified WebSocket endpoint and real managed JSON/SSE two-turn replay. Guessing an endpoint, retaining HTTP remote-continuation capability, or using Relay/local materialization is forbidden.
+
+
+# 2026-07-15 V3 Anthropic Relay local continuation truth
+
+- Anthropic Relay local continuation is Rust Runtime owned. The legal lifecycle is `Resp04 save -> immutable store interval -> next Req04 exact-scope restore -> terminal release`; Server, OpenAI Chat Runtime, Responses Direct/remote continuation, Provider WebSocket, SSE framing, and handler projection must not own this truth.
+- Save condition: pending Anthropic Relay tool calls store the exact canonical provider response under every pending call ID. Success/failure/already-terminal outcomes do not save or revive local truth.
+- Restore condition: next Anthropic `tool_result.tool_use_id` must match entry endpoint, session, conversation, port, routing group, owner, and expiry. Multiple tool results must resolve to the same immutable canonical context before Req04 prepends saved reasoning/function_call before function_call_output.
+- Error condition: scope mismatch fails before provider send; provider error after restore enters Error01-06 and retains saved truth. No owner/scope/store/debug/metadata/auth/route-control field may enter provider or client normal payload.
+- Verified source: controlled JSON two-turn, SSE-first two-turn, multi-tool alias, scope mismatch, provider error retention, local store matrix, verifier, and mutation gates. Live provider compatibility, install/restart, and production cutover are not proven by this source closeout.

@@ -744,3 +744,38 @@ chains:
         owner_feature_id: v3.anthropic_relay_runtime_integration
         resource_flow: { consumes: [v3.response.client_payload], produces: [v3.response.client_payload], side_channel_reads: [], side_channel_writes: [] }
         status: anchored
+
+  - chain_id: v3.anthropic_relay.local_continuation
+    owner_feature_id: v3.anthropic_relay_local_continuation_integration
+    summary: "Resp04 local canonical save through the immutable interval to next Req04 exact-scope restore and governance."
+    edges:
+      - step_id: v3-localcont-01
+        from_node: V3LocalContResp01ChatProcessGoverned
+        to_node: V3LocalContResp02ImmutableSaved
+        caller_symbol: execute_v3_anthropic_relay_runtime_inner
+        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        callee_symbol: commit_or_release_local_continuation
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        owner_feature_id: v3.anthropic_relay_local_continuation_integration
+        resource_flow: { consumes: [v3.hub.response_semantic], produces: [v3.continuation.local_context_truth], side_channel_reads: [], side_channel_writes: [v3.continuation.local_context_truth] }
+        status: anchored
+      - step_id: v3-localcont-02
+        from_node: V3LocalContResp02ImmutableSaved
+        to_node: V3LocalContReq03ExactScopeLoaded
+        caller_symbol: execute_v3_anthropic_relay_runtime_inner
+        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        callee_symbol: V3LocalContinuationStore::restore_at_req04
+        callee_file: v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+        owner_feature_id: v3.anthropic_relay_local_continuation_integration
+        resource_flow: { consumes: [v3.continuation.local_context_truth], produces: [v3.hub.continuation_ownership], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [v3.hub.continuation_ownership] }
+        status: anchored
+      - step_id: v3-localcont-03
+        from_node: V3LocalContReq03ExactScopeLoaded
+        to_node: V3LocalContReq04RestoredGoverned
+        caller_symbol: execute_v3_anthropic_relay_runtime_inner
+        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        callee_symbol: merge_restored_local_context_at_req04
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        owner_feature_id: v3.anthropic_relay_local_continuation_integration
+        resource_flow: { consumes: [v3.continuation.local_context_truth, v3.request.normal_payload, v3.hub.continuation_ownership], produces: [v3.request.normal_payload], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [] }
+        status: anchored

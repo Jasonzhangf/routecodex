@@ -910,3 +910,60 @@ features:
       - remote and local continuation end-to-end wiring
       - P6 deletion
       - global install restart release and production replacement
+
+  - feature_id: v3.anthropic_relay_local_continuation_integration
+    owner_crates: [routecodex-v3-runtime]
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+    resource_bindings:
+      - v3.continuation.local_context_truth
+      - v3.hub.continuation_ownership
+      - v3.request.normal_payload
+      - v3.hub.response_semantic
+    mainline_bindings:
+      - v3-localcont-01
+      - v3-localcont-02
+      - v3-localcont-03
+    entry_symbols:
+      - execute_v3_anthropic_relay_runtime_with_local_continuation
+      - commit_or_release_local_continuation
+      - merge_restored_local_context_at_req04
+      - V3LocalContinuationStore::commit_at_resp04
+      - V3LocalContinuationStore::restore_at_req04
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/local_continuation_contract_store.rs
+      - docs/goals/v3-anthropic-relay-local-continuation-integration-plan.md
+      - docs/goals/v3-anthropic-relay-local-continuation-test-design.md
+      - docs/architecture/manifests/v3.anthropic_relay.local_continuation.mainline.yml
+      - docs/architecture/wiki/v3-anthropic-relay-local-continuation.md
+      - scripts/architecture/verify-v3-anthropic-relay-local-continuation.mjs
+      - scripts/tests/v3-anthropic-relay-local-continuation-red-fixtures.mjs
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-server
+      - src
+      - ~/.rcc
+      - fallback
+    required_gates:
+      - npm run test:v3-anthropic-relay-local-continuation
+      - npm run verify:v3-anthropic-relay-local-continuation
+      - npm run test:v3-anthropic-relay-local-continuation-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    runtime_status: controlled_json_sse_error_isolation_save_restore_release_verified
+    pending_runtime:
+      - live provider compatibility
+      - global install restart and production cutover

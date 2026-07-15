@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "snake_case")]
 pub enum V3LocalContinuationEntryProtocol {
     Responses,
+    Anthropic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,23 @@ impl V3LocalContinuationScopeKey {
     ) -> Self {
         Self {
             entry_protocol: V3LocalContinuationEntryProtocol::Responses,
+            entry_endpoint: entry_endpoint.into(),
+            session_id: session_id.into(),
+            conversation_id: conversation_id.into(),
+            port,
+            routing_group: routing_group.into(),
+        }
+    }
+
+    pub fn anthropic(
+        entry_endpoint: impl Into<String>,
+        session_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        port: u16,
+        routing_group: impl Into<String>,
+    ) -> Self {
+        Self {
+            entry_protocol: V3LocalContinuationEntryProtocol::Anthropic,
             entry_endpoint: entry_endpoint.into(),
             session_id: session_id.into(),
             conversation_id: conversation_id.into(),
@@ -253,6 +271,10 @@ impl V3LocalContinuationStore {
 
     pub fn release(&mut self, context_id: &str) -> bool {
         self.records.remove(context_id).is_some()
+    }
+
+    pub fn contains(&self, context_id: &str) -> bool {
+        self.records.contains_key(context_id)
     }
 
     pub fn len(&self) -> usize {

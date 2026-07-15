@@ -1,0 +1,37 @@
+lifecycle_id: v3.anthropic_relay.local_continuation
+summary: "Anthropic Relay local continuation: Resp04 immutable save, exact-scope interval, next Req04 restore/governance, and terminal release."
+owner_feature_id: v3.anthropic_relay_local_continuation_integration
+entrypoint:
+  node_id: V3LocalContResp01ChatProcessGoverned
+  symbol: V3HubRelayResponseHookRegistry::commit
+  source: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+return_path:
+  node_id: V3LocalContReq04RestoredGoverned
+  symbol: merge_restored_local_context_at_req04
+  source: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+call_map_chain_id: v3.anthropic_relay.local_continuation
+canonical_docs:
+  - docs/goals/v3-anthropic-relay-local-continuation-integration-plan.md
+  - docs/goals/v3-anthropic-relay-local-continuation-test-design.md
+  - docs/architecture/wiki/v3-anthropic-relay-local-continuation.md
+node_ids:
+  - V3LocalContResp01ChatProcessGoverned
+  - V3LocalContResp02ImmutableSaved
+  - V3LocalContReq03ExactScopeLoaded
+  - V3LocalContReq04RestoredGoverned
+edges:
+  - { step_id: v3-localcont-01, from_node: V3LocalContResp01ChatProcessGoverned, to_node: V3LocalContResp02ImmutableSaved, status: anchored }
+  - { step_id: v3-localcont-02, from_node: V3LocalContResp02ImmutableSaved, to_node: V3LocalContReq03ExactScopeLoaded, status: anchored }
+  - { step_id: v3-localcont-03, from_node: V3LocalContReq03ExactScopeLoaded, to_node: V3LocalContReq04RestoredGoverned, status: anchored }
+verification:
+  required_gates:
+    - npm run test:v3-anthropic-relay-local-continuation
+    - npm run verify:v3-anthropic-relay-local-continuation
+    - npm run test:v3-anthropic-relay-local-continuation-red-fixtures
+    - npm run verify:v3-architecture-docs
+    - npm run verify:v3-resource-map
+    - npm run verify:v3-module-boundaries
+    - npm run verify:v3-rust-only
+    - npm run verify:v3-cargo-fmt
+    - npm run verify:v3-clippy
+    - npm run test:v3-workspace

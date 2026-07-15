@@ -261,11 +261,10 @@ fn response_sse_fields(fields: &[SseField]) -> Result<(String, Value), String> {
 }
 
 fn encode_messages(messages: &[Value]) -> Vec<Value> {
-    messages
-        .iter()
-        .map(|message| {
-            let role = message.get("role").cloned().unwrap_or(Value::Null);
-            let content = match message.get("content") {
+    let mut encoded = Vec::new();
+    for message in messages {
+        let role = message.get("role").cloned().unwrap_or(Value::Null);
+        let mut content = match message.get("content") {
                 Some(Value::String(text)) => vec![json!({"type":"input_text","text":text})],
                 Some(Value::Array(parts)) => parts
                     .iter()
@@ -276,7 +275,37 @@ fn encode_messages(messages: &[Value]) -> Vec<Value> {
                     .collect(),
                 _ => Vec::new(),
             };
-            json!({"role":role,"content":content})
-        })
-        .collect()
+        if !content.is_empty() {
+            encoded.push(json!({"role":role,"content":std::mem::take(&mut content)}));
+        }
+        if let Some(parts) = message.get("content").and_then(Value::as_array) {
+            for part in parts {
+                match part.get("type").and_then(Value::as_str) {
+                        Some("tool_use") => encoded.push(json!({
+                            "type":"function_call",
+                            "call_id":part.get("id").cloned().unwrap_or(Value::Null),
+                            "name":part.get("name").cloned().unwrap_or(Value::Null),
+                            "arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).unwrap_or_else(|_| "null".to_string())
+                        })),
+                        Some("tool_result") => encoded.push(json!({
+                            "type":"function_call_output",
+                            "call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),
+                            "output":anthropic_tool_result_output(part.get("content"))
+                        })),
+                        _ => {}
+                    }
+            }
+        }
+    }
+    encoded
+}
+
+fn anthropic_tool_result_output(content: Option<&Value>) -> Value {
+    match content {
+        Some(Value::String(text)) => Value::String(text.clone()),
+        Some(value) => {
+            Value::String(serde_json::to_string(value).unwrap_or_else(|_| "null".into()))
+        }
+        None => Value::String(String::new()),
+    }
 }

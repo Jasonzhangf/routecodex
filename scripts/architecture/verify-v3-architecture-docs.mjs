@@ -93,10 +93,9 @@ const hubV1AnchoredResourceIds = new Set([
   'v3.request.provider_semantic',
   'v3.hub.provider_wire_payload',
   'v3.hub.response_semantic',
-]);
-const hubV1PendingResourceIds = new Set([
   'v3.continuation.local_context_truth',
 ]);
+const hubV1PendingResourceIds = new Set([]);
 const hubV1AnchoredStepIds = new Set([
   'v3-hub-req-01', 'v3-hub-req-02', 'v3-hub-req-03', 'v3-hub-req-04',
   'v3-hub-req-05', 'v3-hub-req-06', 'v3-hub-req-07', 'v3-hub-req-08',

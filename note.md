@@ -30737,3 +30737,11 @@ Pure Rust NAPI candidates:
 - Current-source evidence is green: Config 1/1, Provider WS 2/2, Runtime 7/7, Server JSON/SSE 2/2, H4 14/14, 12 remote-continuation mutations, P6/H2 positive and red gates, architecture/resource/module/Rust-only/fmt/Clippy, full V3 workspace/doctests, CLI build, and diff check.
 - Managed 5555 is still configured as HTTP-only while declaring `remote_continuation`; the new binary correctly rejects that config. The running old binary sends the continuation through HTTP, skips Router on the second turn, and projects the upstream rejection as 502. Five candidate Upgrade paths (`responses`, `responses/ws`, `responses/websocket`, `responses/v2`, `realtime`) received zero handshake bytes before timeout.
 - No live config, provider credential, listener, or managed process was changed. Real managed 5555 JSON/SSE two-turn success remains pending a provider-verified Responses WebSocket v2 endpoint; source/controlled completion is not live completion.
+
+
+# 2026-07-15 V3 Anthropic Relay local continuation controlled closeout
+
+- Claim `feature_id:v3.anthropic_relay_local_continuation_integration` implements only Anthropic Relay local continuation in Rust Runtime. OpenAI Chat runtime and Provider WebSocket owner are intentionally untouched.
+- Red compile gate proved the stateful Anthropic local continuation entry was absent. Current Runtime saves pending tool-call canonical provider response at Resp04, preserves immutable store interval, restores by Anthropic `tool_result.tool_use_id` at next Req04, prepends saved reasoning/function_call before function_call_output, and releases terminal success.
+- Positive/negative evidence: JSON two-turn, SSE-first two-turn, multi-tool alias restore/release, exact-scope mismatch before provider send, provider error after restore retains truth, local store 10/10, dedicated verifier, and 7 mutation fixtures passed.
+- Project-wide gates passed for architecture docs, resource map, module boundaries, Rust-only, fmt, and focused Clippy. Full V3 workspace is currently blocked by unrelated dirty OpenAI Chat Server behavior changing `/v1/chat/completions` pending status from 501 to 500; local continuation tests are green and no OpenAI Chat owner was modified.

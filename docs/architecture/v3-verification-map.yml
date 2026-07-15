@@ -966,3 +966,49 @@ features:
       source: "All source bindings maps manifests gates and JSON/SSE controlled replays pass with one Runtime kernel and one response exit."
       runtime: "The current 5555 same-entry two-turn Responses request completes and samples/logs prove the actual two-turn provider-owned continuation."
       forbidden_claim: "Do not claim Relay/local materialization, P6 expansion, V2 change, credential/config mutation, global install, restart, or production replacement."
+
+  - feature_id: v3.anthropic_relay_local_continuation_integration
+    status: controlled_json_sse_error_isolation_save_restore_release_verified
+    change_risk: critical
+    owner_kind: rust_v3_anthropic_relay_chat_process_local_continuation
+    owner_scope: "Resp04 immutable local context save/release and next Anthropic Relay Req04 exact-scope restore/governance"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+    design:
+      - docs/goals/v3-anthropic-relay-local-continuation-integration-plan.md
+      - docs/goals/v3-anthropic-relay-local-continuation-test-design.md
+      - docs/architecture/wiki/v3-anthropic-relay-local-continuation.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.anthropic_relay.local_continuation.mainline.yml
+    required_unit:
+      - non-terminal response tool calls save at Resp04 under every pending call id
+      - success failure and already-terminal outcomes do not save or revive local truth
+      - duplicate invalid-expiry expired missing wrong-owner and every scope mismatch fail closed
+      - codec rejects debug metadata remote-owner provider model auth and wrong-boundary fields
+    required_blackbox:
+      - JSON two-turn replay saves restores exact reasoning call output order and releases on terminal success
+      - SSE first turn materializes one canonical response at Resp04 and next turn restores and releases
+      - multiple tool-call aliases resolve to the same immutable context and release together
+      - provider error after restore enters Error01-06 and retains saved truth
+      - wrong endpoint session conversation port group and protocol fail before provider send
+      - provider and client normal payloads contain no owner scope store debug metadata auth or route-control truth
+    required_gates:
+      - npm run test:v3-anthropic-relay-local-continuation
+      - npm run verify:v3-anthropic-relay-local-continuation
+      - npm run test:v3-anthropic-relay-local-continuation-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+    completion_rule:
+      source: "Complete when controlled JSON/SSE/error/isolation tests, store matrix, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
+      runtime: "Controlled Rust Runtime replay only; live provider compatibility is not claimed."
+      forbidden_claim: "Do not claim OpenAI Chat, Responses Direct/remote continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
