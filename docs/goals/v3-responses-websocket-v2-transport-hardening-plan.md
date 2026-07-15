@@ -8,6 +8,9 @@ client disconnect、provider/protocol error、并发请求均 fail-closed 且不
 验收标准：
 
 - 同一 provider/model/auth/url session 同时只允许一个 in-flight response。
+- WebSocket handshake 必须发送 Codex/OpenAI Responses WebSocket mode 要求的
+  `OpenAI-Beta: responses_websockets=2026-02-06`；`websocket_v2` 仅是 RouteCodex
+  内部 transport 名称，不冒充官方协议名。
 - 完整 terminal drain 后连接可复用；提前 drop/error/disconnect 后连接必须丢弃。
 - ping/pong、text/binary、split UTF-8、malformed JSON、missing type、failed/incomplete/error 全覆盖。
 - SSE 首帧不等待 terminal，无 Vec/collect/full materialization。
@@ -30,6 +33,7 @@ Out of scope：
 ## 3. 设计原则
 
 - Provider Runtime 是 socket/session 唯一 owner。
+- Provider Runtime 是上游 WebSocket handshake header 唯一 owner；Server/Runtime 不复制 socket state。
 - 单 connection guard 覆盖一次 response 生命周期。
 - terminal drain 才允许复用；其他退出均物理丢弃连接。
 - transport 只做 event/framing/cancellation，不判断 tool/servertool/continuation 业务语义。
@@ -54,6 +58,7 @@ Out of scope：
 ## 6. 测试计划
 
 - terminal 完整 drain 后同连接两轮复用。
+- controlled provider handshake 断言 bearer auth 与 `OpenAI-Beta: responses_websockets=2026-02-06` 同时存在。
 - delta 后提前 drop，下一轮建立新连接且不读到旧 terminal。
 - cancellation before connect/send/read；均 client_disconnect。
 - provider error/failed/incomplete/malformed/missing type/close before terminal。

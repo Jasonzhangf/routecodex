@@ -29,8 +29,7 @@ Required stable fields:
 - `default_reasoning_level = medium`
 - `supported_reasoning_levels = [low, medium, high, xhigh]`
 - `shell_type = shell_command`
-- `tool_mode = code_mode_only`
-- `prefer_websockets = true`
+- `prefer_websockets = false`
 - `minimal_client_version = 0.124.0`
 - `context_window = 272000`
 - `max_context_window = 272000`
@@ -40,6 +39,33 @@ Required descriptive fields:
 - `description = "Frontier model for complex coding, research, and real-world work."`
 - `supported_in_api = true`
 - `visibility = list`
+
+## Built-in `gpt-5.6-*` catalog contract
+
+Bare `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are Codex catalog entries and must be listed even when provider config only exposes provider-prefixed aliases.
+
+Shared stable fields:
+- `apply_patch_tool_type = freeform`
+- `web_search_tool_type = text_and_image`
+- `supports_search_tool = true`
+- `input_modalities = ["text", "image"]`
+- `supports_image_detail_original = true`
+- `supports_parallel_tool_calls = true`
+- `default_reasoning_summary = none`
+- `support_verbosity = true`
+- `default_verbosity = low`
+- `shell_type = shell_command`
+- `tool_mode = code_mode_only`
+- `use_responses_lite = true`
+- `prefer_websockets = false`
+- `minimal_client_version = 0.144.0`
+- `context_window = 372000`
+- `max_context_window = 372000`
+
+Model-specific fields:
+- `gpt-5.6-sol`: description `Latest frontier agentic coding model.`, `default_reasoning_level = low`, reasoning levels include `ultra`.
+- `gpt-5.6-terra`: description `Balanced agentic coding model for everyday work.`, `default_reasoning_level = medium`, reasoning levels include `ultra`.
+- `gpt-5.6-luna`: description `Fast and affordable agentic coding model.`, `default_reasoning_level = medium`, reasoning levels stop at `max`.
 
 ## Provider-prefixed alias contract
 

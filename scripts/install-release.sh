@@ -143,7 +143,7 @@ prepare_isolated_build_root() {
   for item in \
     package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
     .gitignore AGENTS.md \
-    src scripts config configsamples docs tests webui vendor; do
+    src scripts config configsamples docs tests webui vendor v3; do
     copy_isolated_path "$item"
   done
   copy_isolated_path ".agents/skills/rcc-dev-skills"

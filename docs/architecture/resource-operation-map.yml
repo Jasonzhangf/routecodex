@@ -1271,7 +1271,7 @@ resources:
     owner_feature_id: server.models_capability_contract
     owner_node: ModelListItem
     allowed_readers: [client, codex_client]
-    allowed_writers: [buildCodexModelMetadata, buildCodexAdvancedModelMetadata, collectConfiguredModelItems]
+    allowed_writers: [buildCodexModelMetadata, buildBuiltinCodexModelMetadata, collectConfiguredModelItems]
     forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, provider_runtime.observation]
     may_enter_provider_body: false
     may_enter_client_body: true

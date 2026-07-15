@@ -1061,6 +1061,7 @@ features:
     required_contract:
       - terminal drain permits exact-session reuse
       - early drop error and disconnect discard the connection
+      - WebSocket handshake sends OpenAI-Beta responses_websockets=2026-02-06 for Codex/OpenAI Responses WebSocket mode compatibility
       - provider model auth alias and WebSocket URL form the connection identity
       - one owned guard permits only one in-flight response per connection
       - SSE emits the first provider event before terminal and never materializes the full response
@@ -1080,8 +1081,8 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
     required_runtime_evidence:
-      - "Focused controlled matrix covers exact-session reuse, early SSE drop, provider/protocol failures, read cancellation, first-frame latency, and concurrent serialization."
-      - "Mutation gate rejects retained dirty sockets, event accumulation, HTTP retry/fallback, Server socket ownership, and missing concurrency coverage."
+      - "Focused controlled matrix covers OpenAI-Beta handshake, exact-session reuse, early SSE drop, provider/protocol failures, read cancellation, first-frame latency, and concurrent serialization."
+      - "Mutation gate rejects missing OpenAI-Beta handshake, retained dirty sockets, event accumulation, HTTP retry/fallback, Server socket ownership, and missing concurrency coverage."
     completion_rule:
       source: "Complete when focused positive/negative controlled tests, mutation/source gates, V3 maps, provider package, fmt, Clippy, full workspace, module/Rust-only, architecture review, and diff checks pass."
       runtime: "Evidence is controlled loopback WebSocket only; live provider endpoint compatibility is not claimed."

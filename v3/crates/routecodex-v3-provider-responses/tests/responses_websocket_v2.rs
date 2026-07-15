@@ -23,6 +23,8 @@ use tokio_tungstenite::{
     },
 };
 
+const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+
 struct ControlledWebSocket {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
@@ -42,6 +44,10 @@ fn require_websocket_auth(
     assert_eq!(
         request.headers().get("authorization").unwrap(),
         "Bearer websocket-secret"
+    );
+    assert_eq!(
+        request.headers().get("openai-beta").unwrap(),
+        RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE
     );
     Ok(response)
 }

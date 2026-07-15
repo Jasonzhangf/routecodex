@@ -1,0 +1,46 @@
+lifecycle_id: sse.transport_core_shared.mainline
+summary: Protocol-neutral streaming bytes move only through the shared Rust SSE
+  transport topology; V2 and V3 adapters converge on the same encoder.
+owner_feature_id: sse.transport_core_shared
+entrypoint:
+  node_id: SseTransportIn01RawChunk
+  wiki_page: null
+  call_map_chain_id: sse.transport_core_shared.mainline
+node_ids:
+  - SseTransportIn01RawChunk
+  - SseTransportIn02DecodedFrame
+  - SseTransportIn03ValidatedFrameStream
+  - SseTransportOut04EncodedChunk
+edges:
+  - step_id: sse-transport-core-01
+    from_node: SseTransportIn01RawChunk
+    to_node: SseTransportIn02DecodedFrame
+    status: anchored
+    owner_feature_id: sse.transport_core_shared
+    binding_pending: null
+    split_binding_id: null
+  - step_id: sse-transport-core-02
+    from_node: SseTransportIn02DecodedFrame
+    to_node: SseTransportIn03ValidatedFrameStream
+    status: anchored
+    owner_feature_id: sse.transport_core_shared
+    binding_pending: null
+    split_binding_id: null
+  - step_id: sse-transport-core-03-v2
+    from_node: SseTransportIn03ValidatedFrameStream
+    to_node: SseTransportOut04EncodedChunk
+    status: anchored
+    owner_feature_id: sse.transport_core_shared
+    binding_pending: null
+    split_binding_id: null
+  - step_id: sse-transport-core-03-v3
+    from_node: SseTransportIn03ValidatedFrameStream
+    to_node: SseTransportOut04EncodedChunk
+    status: anchored
+    owner_feature_id: sse.transport_core_shared
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

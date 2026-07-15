@@ -3348,4 +3348,30 @@
 - Image/video payload bytes must be omitted from route token estimates. Text and non-media structured request fields still count. Do not trim or mutate client payload to make routing cheaper.
 - `server.bodyLimit` / `ROUTECODEX_HTTP_BODY_LIMIT` is the HTTP parser allocation guard only. Hub format nodes must not own a second fixed semantic byte cap such as `MAX_PAYLOAD_SIZE_BYTES`; payload-size policy belongs at transport parsing, not Hub semantics.
 - `scripts/install-global.sh` isolated builds must copy `v3/` because `build:min` architecture gates validate V3 source bindings from docs/manifests even when the current feature is V2/VR.
-- Isolated install must copy V3 source only, not V3 build outputs: `v3/target` can be tens of GiB and must be excluded along with `node_modules`, `dist`, `coverage`, and `test-results`. Local llms inline packing must remain offline/no-script (`npm install ... --offline --ignore-scripts --omit=optional`) so install validation does not hang on registry metadata. Source-binding maps must not point at git-untracked empty directories such as old TS compat folders; clean install worktrees will not have those directories.
+- Release/global install is expected to carry the V3 tree/artifacts needed for the V3 binary and tests; do not treat adding `v3` to installer copy scope as a bug. Local llms inline packing must remain offline/no-script (`npm install ... --offline --ignore-scripts --omit=optional`) so install validation does not hang on registry metadata. Source-binding maps must not point at git-untracked empty directories such as old TS compat folders; clean install worktrees will not have those directories.
+# 2026-07-15 Codex Responses WebSocket mode alignment fact
+
+- Current `~/code/codex` Responses WebSocket implementation requires handshake header `OpenAI-Beta: responses_websockets=2026-02-06` for `/v1/responses` WebSocket mode. RouteCodex V3 provider WebSocket transport now sends and tests this header in `ProviderResponsesTransport::send_websocket_v2`; `websocket_v2` remains an internal RouteCodex transport label, not the official protocol name.
+- Verified source gates for this fact: provider WebSocket matrix 9/9, `verify:v3-responses-websocket-v2-transport-hardening`, WebSocket red fixtures 7/7, fmt, targeted provider clippy, resource/module/Rust-only/architecture-doc gates, and `git diff --check`. Full V3 workspace still has an unrelated runtime test compile blocker: `hub_v1_h1_contract.rs` missing `entry_protocol_bindings` in `V3HubV1Manifest` initializer.
+
+## 2026-07-15 gpt-5.6 historical tool-image cleanup switch
+
+- `cc-sol/gpt-5.6-sol` live provider config uses `[provider.models."gpt-5.6-sol".direct] historyToolImageCleanup = true` to arm Rust direct hook cleanup for historical tool-output images.
+- The cleanup must remain provider/model-config driven: replace only historical tool-output images with placeholders, preserve current-turn tool images, and keep missing config as no cleanup.
+- Config validation evidence: `npx tsx src/cli.ts config validate` passed after the live config edit; Rust provider v2 loader reads the new `direct.historyToolImageCleanup = true` field.
+# 2026-07-15 V3 entry protocol endpoint binding review gate
+
+- `v3.entry_protocol_endpoint_binding` is the review/gate surface for endpoint-to-entry-protocol binding. Current gate `npm run verify:v3-entry-protocol-endpoint-binding` verifies the four closed protocols (`responses`, `anthropic`, `openai_chat`, `gemini`), endpoint patterns, execution modes/status/owners, map/resource/mainline/wiki/html presence, Config registry source, Server registry consumer, explicit Gemini `pending_not_implemented`, no raw-path Server bypass, and no provider/client body leakage of binding resources.
+- Verified current-state gates for the review slice: entry binding verifier, 9 red fixtures, V3 architecture docs, V3 resource map, V3 module boundaries, V3 rust-only, wiki markdown sync, wiki HTML sync after render, browser smoke, and `git diff --check`. A/B Config and Server claims still remain `running`, so this is source-level C review/gate closure, not an A/B integration-closed or live/prod claim.
+
+# 2026-07-16 RouteCodex stale claim vs active worker distinction
+
+- `.agent-collab/claims/*/owner.json` can remain `status=active` after the worker has stopped. Treat that as stale/unclosed runtime state unless the matching `runs/<run_id>/heartbeat.json` is fresh and a live agent/process is actually present.
+- Before declaring a semantic area blocked by another worker, check owner, heartbeat timestamp, events/evidence, handoff/merge-queue, and current live agents. If heartbeat is stale and no live agent exists, continue by claiming a new run or writing a checked handoff instead of excluding that task.
+- Concrete correction: `feature_id:sse.transport_core_shared` had an `active` owner from `20260715T061836Z-Macstudio-74436-rxsyma`, but no live agent and no fresh heartbeat; future V3/SSE work must not skip SSE solely because this stale claim was not closed.
+
+# 2026-07-15 `/v1/models` built-in gpt-5.6 Codex catalog
+
+- `/v1/models` must always expose built-in bare Codex catalog entries `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` from `src/server/runtime/http-server/routes.ts`, independent of provider-prefixed aliases. Provider-prefixed aliases may still add runtime-derived `context_window`, `supports_streaming`, or provider descriptions.
+- `gpt-5.6-*` built-ins use `minimal_client_version=0.144.0`, `context_window=max_context_window=372000`, `use_responses_lite=true`, `tool_mode=code_mode_only`, `input_modalities=[text,image]`, `supports_search_tool=true`, and `supports_parallel_tool_calls=true`. Sol/Terra support `ultra`; Luna stops at `max`.
+- Verification evidence: `npm run verify:models-capability-contract`, `npm run verify:function-map-compile-gate`, `npm run verify:resource-operation-map`, `npx tsc --noEmit --pretty false`, and `git diff --check` passed after replacing dead `buildCodexAdvancedModelMetadata()` with `buildBuiltinCodexModelMetadata()` and updating the model capability contract.

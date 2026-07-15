@@ -3522,7 +3522,7 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "`/v1/models` must keep bare `gpt-5.5` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
+      - "`/v1/models` must keep bare `gpt-5.5` and `gpt-5.6-*` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
       - "RouteCodex proxy models must advertise `prefer_websockets=false`; Codex provider-level `supports_websockets` is the actual WebSocket trigger, and model metadata must not encourage unsupported proxy WebSocket mode."
 
   - feature_id: server.responses_handler_family
@@ -4170,6 +4170,8 @@ verification:
       - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
       - src/server/runtime/http-server/router-direct-pipeline.ts
     contract:
+      - cargo test --quiet --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi direct_route_model_hooks::tests --lib -- --nocapture
+      - cargo test --quiet --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -p router-hotpath-napi provider_bootstrap_compiles_direct_history_tool_image_cleanup --lib -- --nocapture
       - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
     integration:
       - tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts
@@ -4184,6 +4186,7 @@ verification:
       - npm run build:base
     notes:
       - "Positive locks cover canonical provider wire model, original client alias restore, thinking max->xhigh, JSON body/data/response, SSE, headers, and unchanged object identity. Negative locks cover malformed SSE preservation, nested diagnostic model isolation, and TS semantic helper revival."
+      - "Historical tool image cleanup locks configured old tool-output image replacement, current-turn image preservation, missing-config preservation, provider bootstrap projection, and TS request immutability."
 
   - feature_id: hub.router_direct_response_error_projection
     change_risk: high

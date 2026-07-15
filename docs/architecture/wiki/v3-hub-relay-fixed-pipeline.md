@@ -162,6 +162,7 @@ Relay is borrow-first and move-at-boundary:
 
 The wiki is not runtime evidence. Live Relay remains pending until a later controlled-upstream replay
 proves request and response execution through the fixed Hub v1 skeleton.
+
 ## OpenAI Chat controlled Runtime evidence
 
 - Feature: `v3.openai_chat_relay_runtime_integration`.

@@ -565,7 +565,7 @@ chains:
       - step_id: dsc-01
         from_node: ConfigDirect01AuthoringPolicy
         to_node: ConfigDirect02ValidatedPolicy
-        caller_symbol: normalize_model_direct_semantic
+        caller_symbol: normalize_model_direct_policy
         caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
         callee_symbol: validate_config_direct_02
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
@@ -587,8 +587,8 @@ chains:
         callee_symbol: resolve_direct_semantic_classification
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
         owner_feature_id: hub.direct_semantic_classification
-        semantic_input: "compiled provider/model policy plus Virtual Router real selected provider/model target and selected target routeThinking"
-        semantic_output: "request-scoped DirectSemanticClass and source provenance after forwarder resolution, including route_thinking from selected target routeThinking"
+        semantic_input: "compiled provider/model policy plus Virtual Router real selected provider/model target, selected target routeThinking, and directHistoryToolImageCleanup"
+        semantic_output: "request-scoped DirectSemanticClass, source provenance, route_thinking, and direct history tool image cleanup flag after forwarder resolution"
         resource_flow:
           consumes: [config.provider_profile_projection, route.selection]
           produces: [direct.semantic_policy]
@@ -604,8 +604,8 @@ chains:
         callee_symbol: build_direct_req_04_projection_plan
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
         owner_feature_id: hub.direct_semantic_classification
-        semantic_input: "resolved semantic class plus current client request, selected canonical model, route thinking, and explicit request thinking"
-        semantic_output: "closed request field projection plan using preserve/set actions"
+        semantic_input: "resolved semantic class plus current client request, selected canonical model, route thinking, explicit request thinking, and direct history tool image cleanup flag"
+        semantic_output: "closed request field projection plan using preserve/set actions plus configured historical tool-output image placeholder cleanup"
         resource_flow:
           consumes: [direct.semantic_policy, request.normal_payload, route.selection]
           produces: [provider.wire_payload]

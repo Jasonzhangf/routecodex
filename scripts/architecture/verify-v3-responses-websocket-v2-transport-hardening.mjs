@@ -25,6 +25,8 @@ const failures = [];
 
 for (const [owner, text, phrases] of [
   [transportPath, transport, [
+    'const OPENAI_BETA_HEADER: &str = "openai-beta";',
+    'const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";',
     'websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>',
     'session.lock_owned().await',
     'struct WebSocketSseState',
@@ -35,9 +37,12 @@ for (const [owner, text, phrases] of [
     'V3ProviderError::ClientDisconnect',
     'V3ProviderError::WebSocketProviderEvent',
     'connection closed before terminal response event',
+    'handshake.headers_mut().insert(\n                OPENAI_BETA_HEADER,\n                HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),\n            );',
     'None => {\n                    *connection = None;\n                    return Err(websocket_protocol_error(',
   ]],
   [testPath, tests, [
+    'RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE',
+    'request.headers().get("openai-beta").unwrap()',
     'websocket_v2_reuses_one_connection_for_exact_incremental_continuation',
     'websocket_v2_sse_returns_first_frame_before_terminal_event',
     'websocket_v2_early_sse_drop_discards_connection_before_next_turn',
@@ -59,16 +64,19 @@ for (const [owner, text, phrases] of [
   [functionMapPath, functionMap, [
     'feature_id: v3.responses_websocket_v2_transport_hardening',
     'v3.provider.responses_websocket_connection',
+    'RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE',
     'v3-ws2-01',
     'v3-ws2-02',
   ]],
   [mainlineMapPath, mainlineMap, [
     'chain_id: v3.responses.websocket_v2.transport_hardening',
+    'OpenAI-Beta responses_websockets=2026-02-06',
     'step_id: v3-ws2-01',
     'step_id: v3-ws2-02',
   ]],
   [verificationMapPath, verificationMap, [
     'feature_id: v3.responses_websocket_v2_transport_hardening',
+    'OpenAI-Beta responses_websockets=2026-02-06',
     'terminal drain permits exact-session reuse',
     'early drop error and disconnect discard the connection',
   ]],

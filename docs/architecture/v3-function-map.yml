@@ -1025,6 +1025,7 @@ features:
       - v3-ws2-02
     entry_symbols:
       - ProviderResponsesTransport::send_websocket_v2
+      - RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE
       - websocket_sse_stream
       - next_websocket_message
     allowed_paths:

@@ -9,7 +9,7 @@ import { serializeTomlRecord } from '../../../src/config/toml-basic.js';
 import { initializeRouteErrorHub } from '../../../src/error-handling/route-error-hub.js';
 
 // Canonical builder trace for server.models_capability_contract:
-// buildCodexModelMetadata / buildCodexAdvancedModelMetadata / collectConfiguredModelItems
+// buildCodexModelMetadata / buildBuiltinCodexModelMetadata / collectConfiguredModelItems
 
 async function withServer<T>(app: express.Express, run: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await new Promise<ReturnType<express.Express['listen']>>((resolve) => {
@@ -52,6 +52,40 @@ function expectGpt55CodexContract(model: any): void {
     { effort: 'high', description: 'Greater reasoning depth for complex problems' },
     { effort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
   ]);
+}
+
+function expectGpt56CodexContract(
+  model: any,
+  expected: { description: string; defaultReasoningLevel: string; includesUltra: boolean }
+): void {
+  expect(model).toMatchObject({
+    apply_patch_tool_type: 'freeform',
+    default_reasoning_level: expected.defaultReasoningLevel,
+    default_reasoning_summary: 'none',
+    default_verbosity: 'low',
+    description: expected.description,
+    experimental_supported_tools: [],
+    input_modalities: ['text', 'image'],
+    minimal_client_version: '0.144.0',
+    prefer_websockets: false,
+    shell_type: 'shell_command',
+    support_verbosity: true,
+    supported_in_api: true,
+    supports_image_detail_original: true,
+    supports_parallel_tool_calls: true,
+    supports_search_tool: true,
+    tool_mode: 'code_mode_only',
+    use_responses_lite: true,
+    visibility: 'list',
+    web_search_tool_type: 'text_and_image'
+  });
+  expect(model.context_window).toBe(372000);
+  expect(model.max_context_window).toBe(372000);
+  expect(model.supported_reasoning_levels.map((entry: any) => entry.effort)).toEqual(
+    expected.includesUltra
+      ? ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+      : ['low', 'medium', 'high', 'xhigh', 'max']
+  );
 }
 
 function readModelsPayload(body: any): any[] {
@@ -207,13 +241,37 @@ describe('http routes invalid json handling', () => {
         const body = await response.json();
         const data = readModelsPayload(body);
         const bareAdvanced = data.find((item: any) => item?.id === 'gpt-5.5');
+        const sol = data.find((item: any) => item?.id === 'gpt-5.6-sol');
+        const terra = data.find((item: any) => item?.id === 'gpt-5.6-terra');
+        const luna = data.find((item: any) => item?.id === 'gpt-5.6-luna');
         const minimax = data.find((item: any) => item?.id === 'minimax.MiniMax-M3');
         const advanced = data.find((item: any) => item?.id === 'minimax.gpt-5.5');
         expect(bareAdvanced).toBeTruthy();
+        expect(sol).toBeTruthy();
+        expect(terra).toBeTruthy();
+        expect(luna).toBeTruthy();
         expect(minimax).toBeTruthy();
         expect(advanced).toBeTruthy();
         expectGpt55CodexContract(bareAdvanced);
+        expectGpt56CodexContract(sol, {
+          description: 'Latest frontier agentic coding model.',
+          defaultReasoningLevel: 'low',
+          includesUltra: true
+        });
+        expectGpt56CodexContract(terra, {
+          description: 'Balanced agentic coding model for everyday work.',
+          defaultReasoningLevel: 'medium',
+          includesUltra: true
+        });
+        expectGpt56CodexContract(luna, {
+          description: 'Fast and affordable agentic coding model.',
+          defaultReasoningLevel: 'medium',
+          includesUltra: false
+        });
         expect(bareAdvanced.owned_by).toBe('openai');
+        expect(sol.owned_by).toBe('openai');
+        expect(terra.owned_by).toBe('openai');
+        expect(luna.owned_by).toBe('openai');
         expect(bareAdvanced.context_window).toBe(272000);
         expect(bareAdvanced.max_context_window).toBe(272000);
         expect(minimax.apply_patch_tool_type).toBe('freeform');

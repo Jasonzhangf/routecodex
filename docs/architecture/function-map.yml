@@ -6923,7 +6923,7 @@ owners:
       - ModelListItem
     canonical_builders:
       - buildCodexModelMetadata
-      - buildCodexAdvancedModelMetadata
+      - buildBuiltinCodexModelMetadata
       - collectConfiguredModelItems
     allowed_paths:
       - src/server/runtime/http-server/routes.ts
@@ -6941,7 +6941,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - "Bare `gpt-5.5` alias must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets=false`, `minimal_client_version`, modalities, reasoning, and tool metadata."
+      - "Bare `gpt-5.5` and `gpt-5.6-*` aliases must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets=false`, `minimal_client_version`, modalities, reasoning, and tool metadata."
       - "Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields."
   - feature_id: server.responses_handler_family
     status: active
@@ -8513,14 +8513,15 @@ owners:
       - "Virtual Router resolves the semantic class and provenance only; it must not mutate request or response payload."
       - "`RoutePoolTier.thinking` must flow through `SelectionResult.route_thinking` and selected target `routeThinking`; resolver/projectors must not read route thinking from `routeParams`."
       - "Virtual Router is the sole writer of request-scoped `direct.semantic_policy`; config compilation writes provider profile projection only."
+      - "Provider/model `direct.historyToolImageCleanup` compiles into provider profile and selected target runtime only; missing value leaves direct history image cleanup disabled."
       - "Request and response projectors consume the same resolved contract. Response code must not depend on request projector output or infer mode from `originalClientModel` or whether request fields changed."
       - "All four lifecycle edges are anchored to real Rust caller/callee symbols; Host consumes closed native plans and never branches on semantic class."
 
   - feature_id: hub.direct_route_model_hooks
     status: active
-    summary: "same-protocol direct canonical wire model, thinking override, and client model restoration are Rust-owned"
+    summary: "same-protocol direct canonical wire model, thinking override, historical tool image cleanup, and client model restoration are Rust-owned"
     owner_kind: rust_ssot
-    owner_scope: "Rust plans request model/thinking changes and projects JSON/SSE/header client model restoration; TS only preserves unchanged object identity and executes stream transforms"
+    owner_scope: "Rust plans request model/thinking changes, configured historical tool-output image placeholder cleanup, and JSON/SSE/header client model restoration; TS only preserves unchanged object identity and executes stream transforms"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
     resource_bindings:
       reads:
@@ -8539,6 +8540,9 @@ owners:
       - rewrite_direct_route_sse_frame_json
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_route_model_hooks.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/direct_semantic_classification.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_bootstrap.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/provider_registry.rs
       - src/modules/llmswitch/bridge/direct-route-model-hooks-host.ts
       - src/server/runtime/http-server/router-direct-pipeline.ts
       - tests/server/runtime/http-server/router-direct-pipeline.spec.ts

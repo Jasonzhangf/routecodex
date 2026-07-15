@@ -30,6 +30,9 @@ use tokio_tungstenite::{
 type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 
+const OPENAI_BETA_HEADER: &str = "openai-beta";
+const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+
 #[derive(Clone, Default)]
 pub struct V3ProviderCancellation {
     inner: Arc<V3ProviderCancellationInner>,
@@ -439,6 +442,10 @@ impl ProviderResponsesTransport {
             let authorization = HeaderValue::from_str(&format!("Bearer {secret}"))
                 .map_err(|error| websocket_transport_error(&request_id, &provider_id, error))?;
             handshake.headers_mut().insert(AUTHORIZATION, authorization);
+            handshake.headers_mut().insert(
+                OPENAI_BETA_HEADER,
+                HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
+            );
             let connect = connect_async(handshake);
             let connected = match cancellation.clone() {
                 Some(cancellation) => {

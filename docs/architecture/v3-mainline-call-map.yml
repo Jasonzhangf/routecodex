@@ -806,7 +806,7 @@ chains:
 
   - chain_id: v3.responses.websocket_v2.transport_hardening
     owner_feature_id: v3.responses_websocket_v2_transport_hardening
-    summary: "Provider-owned WebSocket v2 request/session lifecycle; only terminal drain permits exact-session reuse, while early drop, error, disconnect, and protocol failure discard the connection."
+    summary: "Provider-owned Responses WebSocket mode request/session lifecycle; RouteCodex internal transport name is websocket_v2, handshake sends OpenAI-Beta responses_websockets=2026-02-06, and only terminal drain permits exact-session reuse while early drop, error, disconnect, and protocol failure discard the connection."
     edges:
       - step_id: v3-ws2-01
         from_node: V3Transport13ResponsesRequest

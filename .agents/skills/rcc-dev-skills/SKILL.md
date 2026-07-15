@@ -45,6 +45,7 @@ description: RouteCodex 调试与架构路由入口
 - 心跳 stale 不等于接管授权；生产写入、删除、迁移、发布、鉴权、密钥、global install、live runtime 变更仍需明确授权或 checked handoff。
 - 可修复 blocker 不等于等待：如果目标被 map/source anchor、gate wiring、review surface drift、窄测试 fixture drift 等非破坏性问题挡住，且当前 source truth 可验证，应主动做 forward fix。先记录 evidence；有空 claim 就 claim 后修；若 active claim 正占用同语义，先写 handoff，再对低风险 forward-only 一致性修复做最小 patch，不用 reset/checkout/blocked 代替修复。
 - 其他 worker 的无关 claim / handoff / dirty diff 不是当前任务的 blanket blocker。只要目标修改能用定向 patch 保留现有 diff，且没有真实同一语义冲突，就继续自己的 feature/gate；只在同一代码区域出现无法安全合并的直接冲突时停。
+- 未关闭 claim 不等于仍有 worker 在做。判断 active/冲突必须同时看 `owner.json`、对应 `runs/<run_id>/heartbeat.json` 更新时间、`events/evidence`、handoff/merge-queue，以及当前 live agents/实际进程；heartbeat stale 且无 live agent 时按 stale claim 处理，不要把 owner.json 的 `status=active` 字面值当 blocker。
 - 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
 
 ## Debug 首选顺序（强制）
