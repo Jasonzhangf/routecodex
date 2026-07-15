@@ -308,6 +308,58 @@ features:
       - continuation end-to-end restore/materialize
       - P6 cutover or deletion
 
+  - feature_id: v3.hub_relay_payload_copy_runtime_probes
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.hub.current_node_borrowed_view
+      - v3.hub.response_semantic
+      - v3.continuation.local_context_truth
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-hub-relay-copy-probe-01
+      - v3-hub-relay-copy-probe-02
+      - v3-hub-relay-copy-probe-03
+      - v3-hub-relay-copy-probe-04
+    entry_symbols:
+      - relay_json_moves_one_business_payload_through_req04
+      - relay_sse_keeps_one_canonical_payload_without_materializing_stream
+      - local_context_is_retained_until_req04_outcome_release
+      - servertool_roundtrip_uses_one_resp04_context_and_restores_before_req04_hook
+      - verify-v3-relay-payload-copy-budget
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
+      - scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
+      - scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
+      - docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src
+      - v3/crates/routecodex-v3-server/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-relay-payload-copy-runtime-probes
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run test:v3-relay-payload-copy-budget-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    runtime_status: relay_payload_copy_probes_and_gates_only
+    pending_runtime:
+      - live Relay Server entry wiring and replay
+      - continuation persistence and end-to-end restore
+      - servertool runtime execution
+      - P6 cutover or deletion
+
   - feature_id: v3.hub_relay_runtime_resources_hooks
     owner_crates: [routecodex-v3-config, routecodex-v3-runtime]
     owner_files:

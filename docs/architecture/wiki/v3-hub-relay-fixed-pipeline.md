@@ -110,6 +110,20 @@ Relay is borrow-first and move-at-boundary:
   immutable interval, Error chain, provider/client payload isolation, and forbidden completion
   claims. No worker slice alone proves live Relay.
 
+## Payload-copy runtime probe surface
+
+- Feature: `v3.hub_relay_payload_copy_runtime_probes`.
+- `v3-hub-relay-copy-probe-01` proves Relay JSON remains semantically intact through Req04 while
+  the source gate rejects full-payload clones and JSON serialization roundtrips.
+- `v3-hub-relay-copy-probe-02` proves SSE keeps its transport intent, one shared canonical response
+  payload, and the sole Server response exit; the gate rejects stream collection/materialization.
+- `v3-hub-relay-copy-probe-03` proves local context survives lookup release through Req04 and is
+  released with the governed outcome.
+- `v3-hub-relay-copy-probe-04` proves servertool response governance commits one Resp04 canonical
+  context and the following request restores before Req04 servertool governance.
+- These are test/source gates only. They do not establish live Relay, continuation persistence, or
+  servertool runtime execution.
+
 ## Required gates
 
 - `npm run verify:v3-architecture-docs`

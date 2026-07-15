@@ -3232,3 +3232,10 @@
 - Fixed node IDs reject fractional/reused forms such as `03a`, `03_1`, and `03.5`; copy budget rejects unbounded deep copy, full SSE materialization, and Debug/snapshot copies as business or continuation truth.
 - Verified D gates: `verify:v3-architecture-docs`, `verify:v3-resource-map`, `verify:v3-module-boundaries`, `verify:v3-rust-only`, `verify:v3-static-hook-registry`, `test:v3-hub-skeleton-doc-red-fixtures` with 11 rejected mutations, `test:v3-compile-fail`, and `git diff --check`.
 - This marker proves only Relay contracts/maps/wiki/gates. It does not prove live Relay, usable continuation, servertool runtime hooks, Hub v1 cutover, P6 deletion, global install/restart, `~/.rcc`, or production replacement.
+# 2026-07-15: V3 Relay payload-copy probes are mutation-gated
+
+- Marker: `routecodex-v3-relay-payload-copy-probes-gated-20260715`.
+- `v3.hub_relay_payload_copy_runtime_probes` binds four test-only observations to the existing Relay chain: JSON request move-through, SSE shared canonical response without materialization, local context retention/release, and servertool Resp03/Resp04 to next Req04 ordering.
+- Runtime ownership evidence is paired: executable probes assert visible semantics and `Arc` sharing; the source gate rejects deep clone, JSON serialization roundtrip, SSE collection, Debug/snapshot truth substitution, hook-plan payload retention, canonical-sharing removal, and Req04-restore removal.
+- Verified with 4 focused Rust probes, 7 mutation fixtures, V3 module/rust-only/resource/fmt/architecture/static-hook gates, Clippy, and the full V3 workspace.
+- This marker proves copy-budget probes/gates only, not live Relay, continuation persistence/E2E, servertool execution, Server cutover, P6 deletion, install/restart, or production replacement.

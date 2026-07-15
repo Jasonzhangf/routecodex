@@ -30620,3 +30620,10 @@ Pure Rust NAPI candidates:
 - Required D gates passed: architecture docs, resource map, module boundaries, Rust-only, static hook registry, 11 doc red mutations, compile-fail, and diff check.
 - Architecture review found no second lifecycle, non-adjacent shortcut, servertool owner escape, continuation immutable-interval semantic work, payload fallback, P6 deletion, V2/runtime/live/global-install mutation.
 - Boundary: only Relay architecture review surface/contracts/maps/gates are locked. Live Relay, usable continuation, servertool runtime hooks, and P6 deletion remain pending.
+# 2026-07-15: V3 Relay payload-copy runtime probes and gates
+
+- Claim `feature_id:v3.hub_relay_payload_copy_runtime_probes` owns test/probe/gate/map changes only; no V3 runtime source, Server entry, V2/P6, `~/.rcc`, install, restart, or live replay was changed.
+- Four focused Rust probes cover Relay JSON payload movement, SSE non-materialization with one shared canonical response payload, local continuation retention through Req04 and governed-outcome release, and servertool Resp03/Resp04 to next Req04 ordering.
+- The source gate rejects full deep copy, JSON serialization roundtrip cloning, SSE collection/materialization, Debug/snapshot truth substitution, hook-planning payload retention, loss of canonical `Arc::ptr_eq`, and loss of Req04 context restore ownership.
+- Verification passed: 4 focused probes, 7 mutation fixtures, V3 module/rust-only/resource/fmt/architecture/static-hook gates, Clippy `-D warnings`, full V3 workspace tests, and diff check.
+- Completion boundary: this proves copy-budget probes/gates only. It does not prove live Relay, continuation persistence/E2E restore, servertool runtime execution, Server cutover, P6 deletion, global install, restart, or production replacement.

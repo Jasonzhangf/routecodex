@@ -227,6 +227,42 @@ features:
       runtime: "No live Relay runtime, Req05-Req09 execution, response slice, resource/hook config, or continuation end-to-end restore is claimed."
       forbidden_claim: "Do not claim response-side completion, resource/hook config completion, live Relay, continuation end-to-end completion, Server entry cutover, P6 deletion, global install, or production replacement."
 
+  - feature_id: v3.hub_relay_payload_copy_runtime_probes
+    status: payload_copy_probes_and_gates_verified
+    change_risk: high
+    owner_kind: rust_project_v3_test_and_architecture_gate
+    owner_scope: "Test-only Relay JSON/SSE/local-continuation/servertool copy-budget observations and mutation-backed source gates"
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
+      - scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
+      - scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
+    test_design:
+      - docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md
+    mainline_bindings:
+      - v3-hub-relay-copy-probe-01
+      - v3-hub-relay-copy-probe-02
+      - v3-hub-relay-copy-probe-03
+      - v3-hub-relay-copy-probe-04
+    required_contract:
+      - Relay JSON request payload moves through Req01-Req04 without a runtime full-payload clone or JSON roundtrip
+      - Relay SSE response retains transport intent and one response exit without full stream materialization
+      - local continuation context remains available through Req04 restore and has an explicit governed-outcome release point
+      - servertool response and following request use one Resp04 canonical context truth and restore before Req04 servertool governance
+      - Debug snapshot and hook planning cannot become retained business payload truth
+    required_gates:
+      - npm run test:v3-relay-payload-copy-runtime-probes
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run test:v3-relay-payload-copy-budget-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_rule:
+      source: "Copy-budget probes/gates are complete only when four focused probes and every mutation fixture pass with map/package bindings present."
+      runtime: "This feature does not wire or prove live Relay, continuation persistence, or servertool execution."
+      forbidden_claim: "Do not claim live Relay, usable continuation E2E, servertool runtime, Server cutover, P6 deletion, global install, restart, or production replacement."
+
   - feature_id: v3.hub_relay_runtime_resources_hooks
     status: relay_resource_hook_declaration_surface_verified
     change_risk: critical
