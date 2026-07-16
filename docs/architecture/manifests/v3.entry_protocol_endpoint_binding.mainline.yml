@@ -44,12 +44,12 @@ edges:
 entry_protocol_bindings:
   - entry_protocol: responses
     endpoint_patterns: [/v1/responses]
-    execution_mode: direct
+    execution_mode: relay
     implementation_status: implemented
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    runtime_owner_symbol: execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation
-    runtime_owner_path: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    forbidden_fallback_behavior: "Responses endpoint must not fall through to generic foundation pending."
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    runtime_owner_symbol: execute_v3_responses_relay_runtime_with_default_transport
+    runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    forbidden_fallback_behavior: "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or generic foundation pending."
   - entry_protocol: anthropic
     endpoint_patterns: [/v1/messages]
     execution_mode: relay

@@ -8,8 +8,9 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
     execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile,
-    V3AnthropicRelayLocalContinuationScope, V3AnthropicRelayLocalContinuationState,
-    V3AnthropicRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3AnthropicRelayLocalContinuationScope,
+    V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::{
@@ -142,6 +143,77 @@ async fn controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit() 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0]["stream"], false);
+    assert_eq!(captures[1]["stream"], true);
+}
+
+#[tokio::test]
+async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes() {
+    let transport = JsonThenSseTransport {
+        captures: Mutex::new(Vec::new()),
+        turn: AtomicUsize::new(0),
+    };
+
+    let json_output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-relay-json".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"json",
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(json_output.status, 200);
+    assert_eq!(json_output.node_trace, EXPECTED_RELAY_TRACE);
+    assert!(!json_output
+        .node_trace
+        .contains(&"V3Req04StandardizedResponses"));
+    let direct_policy_node = format!("{}{}{}", "V3Responses", "Direct", "11Policy");
+    assert!(!json_output
+        .node_trace
+        .iter()
+        .any(|node| *node == direct_policy_node));
+    assert!(!json_output.node_trace.contains(&"V3TargetLocalReselected"));
+    match json_output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["id"], "resp_closeout_json");
+            assert_eq!(body["status"], "completed");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("JSON request must project JSON body"),
+    }
+
+    let sse_output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-relay-sse".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"sse",
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(sse_output.status, 200);
+    assert_eq!(sse_output.node_trace, EXPECTED_RELAY_TRACE);
+    match sse_output.client_body {
+        V3ResponsesRelayClientBody::Sse(_) => {}
+        V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
+    }
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[0]["model"], "responses-wire-model");
+    assert_eq!(captures[0]["input"], "json");
+    assert_eq!(captures[1]["model"], "responses-wire-model");
     assert_eq!(captures[1]["stream"], true);
 }
 

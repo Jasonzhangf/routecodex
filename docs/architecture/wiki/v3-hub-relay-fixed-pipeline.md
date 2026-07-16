@@ -92,8 +92,8 @@ Relay is borrow-first and move-at-boundary:
 
 - Hub v1 skeleton and static registry: implemented as source-only H1.
 - P6 Responses Direct: frozen and verified as migration baseline.
-- Relay request semantics: source slice and Anthropic controlled integration verified; live Relay remains pending.
-- Relay response semantics: source slice and Anthropic controlled integration verified; live Relay remains pending.
+- Relay request semantics: source slice, Anthropic controlled integration, Responses Relay source server entry, and live 5555 Responses Relay JSON/SSE replay verified.
+- Relay response semantics: source slice, Anthropic controlled integration, Responses Relay source server entry, and live 5555 Responses Relay JSON/SSE replay verified.
 - Runtime resources and static hook resource config: declaration surface and controlled static-registry consumption verified; live Relay remains pending.
 - Relay maps/gates/wiki: architecture review surface locked by the D gates below.
 - Payload copy-budget source/red gates: verified for the controlled integration surface.
@@ -102,9 +102,10 @@ Relay is borrow-first and move-at-boundary:
   connected and verified against the controlled loopback upstream.
 - Hub Relay runtime closeout: `v3.hub_relay_runtime_closeout` binds controlled JSON/SSE E2E,
   local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation,
-  copy-budget probes, and one `V3ServerRespOutbound06ClientFrame` response exit.
-- Live 5555 validation/cutover, remote/local continuation E2E, P6 deletion, global installation,
-  restart, release, real-provider compatibility, and production replacement remain pending.
+  copy-budget probes, Responses Relay source server entry, and one `V3ServerRespOutbound06ClientFrame` response exit.
+- Live 5555 Responses Relay JSON/SSE validation is verified on the globally installed managed
+  5555 instance. Live remote/local continuation E2E, P6 deletion, Anthropic/Gemini live replay,
+  live error samples, and full production replacement remain pending.
 
 ## Anthropic controlled Runtime evidence
 
@@ -158,6 +159,11 @@ Relay is borrow-first and move-at-boundary:
   `v3-hub-relay-closeout-14`, with adjacent edges over the fixed Req01-Req09 and Resp01-Resp06
   topology.
 - Controlled cases prove JSON and SSE both reach exactly one `V3ServerRespOutbound06ClientFrame`.
+- Responses Relay source server cases prove `/v1/responses` Relay enters the fixed topology before
+  Direct/P6 and provider-request dry-run stops before upstream send while exposing the redacted final
+  provider request.
+- Live 5555 evidence proves POST `/v1/responses` Relay JSON/SSE returns exact provider markers with
+  the fixed Req01-Req09/Resp01-Resp06 trace and no Direct/P6 markers.
 - The local-continuation/servertool case proves a `servertool.exec` response hook profile is
   consumed by Runtime response governance, Resp04 saves one local context, next Req04 restores that
   context before the current tool output, and terminal success releases it.

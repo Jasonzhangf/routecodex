@@ -13,6 +13,8 @@ mod gemini_relay_runtime;
 pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
+mod responses_relay_runtime;
+pub use responses_relay_runtime::*;
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;
 mod anthropic_relay_runtime;

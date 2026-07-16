@@ -95,3 +95,22 @@ Out of scope：
 - Controlled Relay Runtime E2E 证明 usable local continuation、servertool runtime hook、one-response-exit。
 - 已完成 slices 仍保持唯一 owner，没有 fallback/第二 lifecycle/第二 response exit。
 - P6 deletion、live cutover、global install/restart 仍显式 pending，等待 Jason 另行授权。
+
+## 9. Source cutover addendum（2026-07-16）
+
+Responses `/v1/responses` V2 default projection now binds to the Responses Relay runtime owner:
+`execute_v3_responses_relay_runtime_with_default_transport` at
+`v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs`.
+
+Source/controlled scope:
+
+- controlled Runtime JSON/SSE enters fixed Req01-Req09 and Resp01-Resp06 topology;
+- Server `/v1/responses` Relay JSON/SSE tests prove no Direct/P6 node reentry;
+- provider-request dry-run proves no upstream send and returns a redacted final provider request;
+- P6 deletion, credentials, and full production replacement remain pending.
+
+Live addendum: after global install of rccv3 0.90.3935 and managed start of
+/Volumes/extension/.rcc/config.5555.v2.toml, V3 5555 POST `/v1/responses` Relay JSON/SSE returned
+HTTP 200 with exact provider markers, complete Req01-Req09/Resp01-Resp06 trace, and no Direct/P6
+markers. Evidence:
+.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json.

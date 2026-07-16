@@ -64,11 +64,39 @@ const cases = [
     diagnostic: /fallback|forbidden/,
   },
   {
+    name: 'responses relay runtime reintroduces P6 direct policy',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'let mut trace = Vec::with_capacity(15);',
+    mutation: 'let _p6_shortcut = "V3ResponsesDirect11Policy";\n    let mut trace = Vec::with_capacity(15);',
+    diagnostic: /ResponsesDirect|forbidden/,
+  },
+  {
+    name: 'responses relay streaming trace drops response chat process node',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'trace.push("V3HubRespChatProcess03Governed");',
+    mutation: 'trace.push("V3HubRespOutbound05ClientSemantic");',
+    diagnostic: /expected 2 occurrences of V3HubRespChatProcess03Governed/,
+  },
+  {
+    name: 'server dispatch runs responses direct before relay',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    marker: 'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+    mutation: 'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {',
+    diagnostic: /must appear after occurrence|missing ordered occurrence/,
+  },
+  {
     name: 'manifest owner drift',
     file: 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml',
     marker: 'owner_feature_id: v3.hub_relay_runtime_closeout',
     mutation: 'owner_feature_id: v3.hub_relay_gate_review_surface',
     diagnostic: /owner_feature_id mismatch|edge v3-hub-relay-closeout/,
+  },
+  {
+    name: 'live replay completion flag removed',
+    file: 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml',
+    marker: '  live_replay_5555: true',
+    mutation: '  live_replay_5555: false',
+    diagnostic: /completion boundary must record live 5555 replay/,
   },
   {
     name: 'package gate removed',
@@ -81,7 +109,10 @@ const cases = [
 
 const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
+  'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
   'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml',
   'docs/architecture/v3-function-map.yml',
   'docs/architecture/v3-mainline-call-map.yml',

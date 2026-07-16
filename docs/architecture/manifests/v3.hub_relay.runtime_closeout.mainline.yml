@@ -41,11 +41,26 @@ verification_gates:
   - npm run test:v3-hub-relay-runtime-closeout
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+  - npm run test:v3-config-v2-compat-5555
   - npm run test:v3-relay-payload-copy-runtime-probes
   - npm run verify:v3-relay-payload-copy-budget
   - npm run test:v3-relay-payload-copy-budget-red-fixtures
+source_entry_bindings:
+  - entry_protocol: responses
+    endpoint_pattern: /v1/responses
+    execution_mode: relay
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    runtime_owner_symbol: execute_v3_responses_relay_runtime_with_default_transport
+    runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    evidence:
+      - v3-responses-relay-server-01
+      - v3-responses-relay-server-02
+      - v3-responses-relay-server-03
+      - v3-responses-relay-server-04
 completion_boundary:
   controlled_runtime: true
-  live_cutover: false
+  source_server_entry: true
+  live_replay_5555: true
+  live_cutover: true
   p6_deletion: false
-  global_install_restart: false
+  global_install_restart: true

@@ -826,7 +826,10 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
         .expect("v2 root must publish hub_v1");
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/responses")
-        .is_some_and(|binding| binding.entry_protocol == "responses"));
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "relay"
+            && binding.runtime_owner_symbol.as_deref()
+                == Some("execute_v3_responses_relay_runtime_with_default_transport")));
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/chat/completions")
         .is_some_and(|binding| binding.entry_protocol == "openai_chat"));

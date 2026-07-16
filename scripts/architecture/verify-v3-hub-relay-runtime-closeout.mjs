@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
+const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
+const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs';
 const manifestPath = 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml';
 const functionMapPath = 'docs/architecture/v3-function-map.yml';
@@ -12,6 +15,9 @@ const wikiPath = 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md';
 const packagePath = 'package.json';
 
 const runtime = readFileSync(runtimePath, 'utf8');
+const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
+const server = readFileSync(serverPath, 'utf8');
+const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const functionMap = readFileSync(functionMapPath, 'utf8');
@@ -67,6 +73,11 @@ if (!Array.isArray(manifest.edges) || manifest.edges.length !== expectedNodes.le
     }
   });
 }
+if (manifest.completion_boundary?.live_replay_5555 !== true
+  || manifest.completion_boundary?.global_install_restart !== true
+  || manifest.completion_boundary?.p6_deletion !== false) {
+  failures.push(`${manifestPath}: completion boundary must record live 5555 replay/global install with P6 deletion still false`);
+}
 
 for (const script of [
   'test:v3-hub-relay-runtime-closeout',
@@ -104,9 +115,11 @@ forbid(runtime, runtimePath, [
 for (const phrase of [
   'EXPECTED_RELAY_TRACE',
   'controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit',
+  'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
   'local_continuation_servertool_roundtrip_is_runtime_e2e',
   'provider_error_closeout_enters_error01_06_without_success_projection',
   'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile',
+  'execute_v3_responses_relay_runtime',
   'servertool.exec',
   'assert!(first.servertool_followup_required);',
   'V3_ERROR_CHAIN_NODE_IDS',
@@ -122,6 +135,57 @@ forbid(tests, testPath, [
   /collect\s*::<\s*Vec|full_buffer|materiali[sz]e/i,
 ]);
 
+for (const phrase of [
+  'execute_v3_responses_relay_runtime_with_default_transport',
+  'execute_v3_responses_relay_runtime',
+  'execute_v3_responses_relay_dry_run_runtime',
+  'project_v3_responses_relay_runtime_failure',
+  'V3HubEntryProtocol::Responses',
+  'V3HubExecutionMode::Relay',
+  'compile_v3_hub_relay_request_hooks().run_from_normalized',
+  'build_v3_provider_12_responses_wire_payload',
+  'build_v3_transport_13_responses_http_request_from_v3_provider_12',
+  'run_json_response_hooks',
+  'push_streaming_response_trace',
+  'project_sse_stream',
+]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
+for (const node of expectedNodes.slice(9)) {
+  requireCount(responsesRuntime, responsesRuntimePath, node, 2);
+}
+forbid(responsesRuntime, responsesRuntimePath, [
+  /fallback/i,
+  /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
+  /V3TargetLocalReselected/,
+  /dynamic[_ -]?hook|libloading|read_dir/i,
+  /collect\s*::<\s*Vec|full_buffer|materiali[sz]e/i,
+]);
+
+for (const phrase of [
+  'execute_v3_responses_relay_request',
+  'responses_relay_output_response',
+  'execute_v3_responses_relay_runtime_with_default_transport',
+  'project_v3_responses_relay_runtime_failure',
+  'is_provider_request_dry_run(&request_headers)',
+  'execute_v3_responses_relay_dry_run_runtime',
+  'return responses_relay_output_response(output);',
+]) requireText(server, serverPath, phrase);
+requireOrdered(
+  server,
+  serverPath,
+  'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+  'if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {',
+  1,
+);
+for (const phrase of [
+  'responses_relay_manifest',
+  'controlled_responses_relay_upstream',
+  'responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse',
+  'responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send',
+  'V3ResponsesDirect11Policy',
+  'V3TargetLocalReselected',
+]) requireText(serverTests, serverTestPath, phrase);
+
 for (const [path, text] of [
   [functionMapPath, functionMap],
   [mainlinePath, mainline],
@@ -131,6 +195,27 @@ for (const [path, text] of [
   requireText(text, path, 'v3.hub_relay_runtime_closeout');
   requireText(text, path, 'v3-hub-relay-closeout-01');
   requireText(text, path, 'v3-hub-relay-closeout-14');
+  requireText(text, path, 'Responses Relay source');
+}
+for (const phrase of [
+  'v3.responses_relay.source_server_entry',
+  'v3-responses-relay-server-01',
+  'v3-responses-relay-server-04',
+]) {
+  requireText(mainline, mainlinePath, phrase);
+}
+for (const phrase of [
+  'source_entry_bindings',
+  'execute_v3_responses_relay_runtime_with_default_transport',
+  'live_replay_5555',
+]) {
+  requireText(readFileSync(manifestPath, 'utf8'), manifestPath, phrase);
+}
+for (const phrase of [
+  'Live 5555 Responses Relay JSON/SSE validation is verified',
+  'no Direct/P6 markers',
+]) {
+  requireText(wiki, wikiPath, phrase);
 }
 
 if (failures.length) {

@@ -86,7 +86,7 @@ if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_partial_v
 if (!(manifest.verification_gates ?? []).includes('npm run verify:provider-failure-ban-blackbox')) {
   failures.push(manifestPath + ': verification_gates missing npm run verify:provider-failure-ban-blackbox');
 }
-if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE')) {
+if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE')) {
   failures.push(manifestPath + ': live audit must name the verified V3 5555 live replay surface');
 }
 if (!String(manifest.live_read_only_audit?.finding ?? '').includes('endpoint_not_enabled')) {
@@ -107,6 +107,12 @@ for (const endpoint of expectedEndpoints) {
 if (caseIds.size !== cases.length) failures.push(manifestPath + ': duplicate case id');
 if (cases.length < expectedEndpoints.length * expectedTransports.length) {
   failures.push(manifestPath + ': matrix must cover every endpoint x transport pair');
+}
+for (const relayCaseId of ['responses_relay_json_http', 'responses_relay_sse_http']) {
+  const relayCase = cases.find((entry) => entry.id === relayCaseId);
+  if (!relayCase || relayCase.live_evidence?.status !== 'live_verified' || relayCase.production?.status !== 'ready') {
+    failures.push(manifestPath + ': Responses Relay live case must be live_verified and ready after 5555 replay ' + relayCaseId);
+  }
 }
 
 for (const entry of cases) {
@@ -169,8 +175,6 @@ else {
 }
 
 for (const blocker of [
-  'responses_relay_cutover_pending',
-  'live_relay_cutover_pending',
   'live_provider_replay_matrix_pending',
   'anthropic_messages_live_replay_pending',
   'gemini_generate_content_live_replay_pending',
@@ -230,7 +234,7 @@ for (const phrase of [
 ]) requireText(wiki, wikiPath, phrase);
 for (const phrase of [
   'live_provider_replay_matrix_pending',
-  'responses_relay_cutover_pending',
+  'responses_relay_live_verified',
   'anthropic_messages_live_replay_pending',
   'gemini_generate_content_live_replay_pending',
   'npm run verify:provider-failure-ban-blackbox',

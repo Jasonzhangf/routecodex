@@ -1360,7 +1360,7 @@ features:
       - V3EntryProtocolExecutionMode
       - compile_entry_protocol_bindings
     required_contract:
-      - responses binds only /v1/responses to direct implemented runtime owner
+      - responses binds only /v1/responses and may use an explicitly declared direct or relay implemented runtime owner; V2 default projection now points at Responses Relay
       - anthropic binds only /v1/messages to relay implemented runtime owner
       - openai_chat binds only /v1/chat/completions to relay implemented runtime owner
       - gemini binds /v1beta/models/:model/generateContent to relay implemented Gemini runtime owner
@@ -1383,11 +1383,17 @@ features:
     status: controlled_runtime_closeout_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_integration_gate
-    owner_scope: "Controlled Hub Relay Runtime closeout over fixed Req01-Req09 and Resp01-Resp06 topology, local continuation E2E, servertool response hook profile, Error01-06, isolation, and copy-budget gates."
-    owner_crate: routecodex-v3-runtime
+    owner_scope: "Controlled Hub Relay Runtime closeout over fixed Req01-Req09 and Resp01-Resp06 topology, local continuation E2E, servertool response hook profile, Error01-06, isolation, copy-budget gates, and Responses Relay source server entry."
+    owner_crates: [routecodex-v3-config, routecodex-v3-runtime, routecodex-v3-server]
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs
       - scripts/tests/v3-hub-relay-runtime-closeout-red-fixtures.mjs
     resource_bindings:
@@ -1420,15 +1426,34 @@ features:
       - v3-hub-relay-closeout-12
       - v3-hub-relay-closeout-13
       - v3-hub-relay-closeout-14
+      - v3-responses-relay-server-01
+      - v3-responses-relay-server-02
+      - v3-responses-relay-server-03
+      - v3-responses-relay-server-04
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile
+      - execute_v3_responses_relay_runtime_with_default_transport
+      - execute_v3_responses_relay_runtime
+      - execute_v3_responses_relay_dry_run_runtime
+      - execute_v3_responses_relay_request
+      - responses_relay_output_response
       - hub_relay_runtime_closeout::controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit
+      - hub_relay_runtime_closeout::responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes
+      - multi_listener_server::responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse
+      - multi_listener_server::responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send
       - hub_relay_runtime_closeout::local_continuation_servertool_roundtrip_is_runtime_e2e
       - hub_relay_runtime_closeout::provider_error_closeout_enters_error01_06_without_success_projection
       - verify-v3-hub-relay-runtime-closeout
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs
       - scripts/tests/v3-hub-relay-runtime-closeout-red-fixtures.mjs
       - docs/goals/v3-hub-relay-runtime-closeout-plan.md
@@ -1443,7 +1468,6 @@ features:
     forbidden_paths:
       - src
       - sharedmodule
-      - v3/crates/routecodex-v3-server/src
       - v3/crates/routecodex-v3-provider-responses/src
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
@@ -1456,6 +1480,8 @@ features:
       - npm run test:v3-hub-relay-runtime-closeout
       - npm run verify:v3-hub-relay-runtime-closeout
       - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+      - npm run test:v3-config-v2-compat-5555
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay -- --nocapture
       - npm run test:v3-relay-payload-copy-runtime-probes
       - npm run verify:v3-relay-payload-copy-budget
       - npm run test:v3-relay-payload-copy-budget-red-fixtures
@@ -1468,11 +1494,10 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
-    runtime_status: controlled_runtime_closeout_only
+    runtime_status: live_5555_responses_relay_json_sse_verified
     pending_runtime:
-      - live Relay Server entry wiring and replay
       - P6 deletion
-      - global install restart release and production replacement
+      - full production replacement
 
   - feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
     status: controlled_runtime_parity_verified
@@ -1558,10 +1583,10 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
-    runtime_status: controlled_parity_verified
+    runtime_status: controlled_parity_and_minimum_live_5555_replay_verified
     pending_runtime:
-      - live provider replay matrix
-      - live inbound Responses WebSocket replay
+      - Anthropic/Gemini live provider replay in an authorized final profile
+      - live provider error samples for 401/403/5xx/timeout
       - Direct remote continuation live closeout
       - P6 deletion and production cutover
 

@@ -76,10 +76,15 @@ fn expected_entry_protocol_endpoint_patterns(protocol: &str) -> Option<&'static 
     }
 }
 
-fn expected_entry_protocol_execution_mode(protocol: &str) -> Option<V3EntryProtocolExecutionMode> {
+fn expected_entry_protocol_execution_modes(
+    protocol: &str,
+) -> Option<&'static [V3EntryProtocolExecutionMode]> {
     match protocol {
-        "responses" => Some(V3EntryProtocolExecutionMode::Direct),
-        "anthropic" | "openai_chat" | "gemini" => Some(V3EntryProtocolExecutionMode::Relay),
+        "responses" => Some(&[
+            V3EntryProtocolExecutionMode::Direct,
+            V3EntryProtocolExecutionMode::Relay,
+        ]),
+        "anthropic" | "openai_chat" | "gemini" => Some(&[V3EntryProtocolExecutionMode::Relay]),
         _ => None,
     }
 }
@@ -323,12 +328,16 @@ fn compile_entry_protocol_bindings(
                 expected_patterns
             )));
         }
-        let expected_mode = expected_entry_protocol_execution_mode(&entry_protocol)
-            .expect("closed protocol has execution mode");
-        if binding.execution_mode != expected_mode {
+        let expected_modes = expected_entry_protocol_execution_modes(&entry_protocol)
+            .expect("closed protocol has execution modes");
+        if !expected_modes.contains(&binding.execution_mode) {
+            let expected = expected_modes
+                .iter()
+                .map(|mode| mode.as_str())
+                .collect::<Vec<_>>()
+                .join(" or ");
             return Err(validation(format!(
-                "hub_v1 {entry_protocol} entry protocol must be {}",
-                expected_mode.as_str()
+                "hub_v1 {entry_protocol} entry protocol must be {expected}",
             )));
         }
         if binding.protocol_profile_owner.trim().is_empty() {

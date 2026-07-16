@@ -108,8 +108,8 @@ Verified live cases:
   OpenAI-Beta: responses_websockets=2026-02-06.
 - OpenAI Chat Relay JSON and SSE on /v1/chat/completions.
 
-Remaining blockers stay explicit: /v1/responses Relay cutover, Anthropic Messages final-profile
-endpoint_not_enabled, Gemini Generate Content final-profile endpoint_not_enabled, and live
+Remaining blockers stay explicit: Anthropic Messages final-profile endpoint_not_enabled,
+Gemini Generate Content final-profile endpoint_not_enabled, and live
 401/403/5xx/timeout provider-error samples. Controlled error evidence now covers 401/403/5xx/timeout
 through `npm run verify:provider-failure-ban-blackbox`: failing primary is excluded once, backup/default
 is hit, and the client does not receive an early terminal provider error. No live config mutation,
@@ -130,3 +130,22 @@ Evidence:
 - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/post_restart_health_process.log
 - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt
 - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt
+
+## 11. 2026-07-16 Responses Relay live 5555 closeout
+
+Globally installed rccv3 snapshot 0.90.3935 was used to start the managed 5555 instance from
+/Volumes/extension/.rcc/config.5555.v2.toml after source cutover. Evidence:
+.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json.
+
+Verified live cases:
+
+- /v1/models capability catalog for gpt-5.6-sol with required Codex request-builder fields.
+- Responses Relay JSON on POST /v1/responses: HTTP 200, exact marker, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
+- Responses Relay SSE on POST /v1/responses: HTTP 200, exact marker, response.completed, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
+- Responses Direct client-facing WebSocket on GET /v1/responses with OpenAI-Beta: responses_websockets=2026-02-06.
+
+Boundary: current POST /v1/responses is Relay after source cutover, so Direct JSON/SSE is intentionally
+not re-run as a fresh POST replay in this profile; the Direct JSON/SSE matrix rows retain the same-day
+pre-cutover production evidence from
+.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json.
+No live config mutation, credential mutation, P6 deletion, or full production cutover is claimed.

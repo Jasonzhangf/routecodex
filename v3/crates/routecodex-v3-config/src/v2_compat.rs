@@ -189,17 +189,20 @@ fn default_v2_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "responses".to_string(),
                 endpoint_patterns: vec!["/v1/responses".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Direct,
+                execution_mode: V3EntryProtocolExecutionMode::Relay,
                 protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
-                    "Responses endpoint must not fall through to relay or pending runtime."
+                    "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation"
+                    "execute_v3_responses_relay_runtime_with_default_transport"
                         .to_string(),
                 ),
-                runtime_owner_path: Some("v3/crates/routecodex-v3-runtime/src/kernel.rs".to_string()),
+                runtime_owner_path: Some(
+                    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs"
+                        .to_string(),
+                ),
                 pending_owner_symbol: None,
                 pending_owner_path: None,
             },

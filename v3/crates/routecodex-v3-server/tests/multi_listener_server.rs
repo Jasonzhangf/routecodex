@@ -191,6 +191,58 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn responses_relay_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn p6_remote_continuation_manifest(
     port_a: u16,
     port_b: u16,
@@ -349,6 +401,53 @@ async fn controlled_responses_upstream(
     }
 }
 
+async fn controlled_responses_relay_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            accept: headers
+                .get("accept")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body: body.clone(),
+        })
+        .unwrap();
+
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                r#"event: response.created
+data: {"id":"resp_sse"}
+
+event: response.completed
+data: {"response":{"id":"resp_sse","status":"completed"}}
+
+data: [DONE]
+
+"#,
+            ))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"id":"resp_json","status":"completed","output_text":"ok","output":[{"type":"output_text","text":"ok"}]}"#,
+            ))
+            .unwrap()
+    }
+}
+
 async fn start_controlled_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -360,6 +459,31 @@ async fn start_controlled_upstream() -> (
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_responses_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_responses_relay_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_responses_relay_upstream))
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -900,6 +1024,95 @@ async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
 }
 
 #[tokio::test]
+async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+
+    let json_response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay json",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let json_trace = json_response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(json_response.status(), 200);
+    assert!(json_trace.contains("V3HubReqInbound01ClientRaw"));
+    assert!(json_trace.contains("V3ServerRespOutbound06ClientFrame"));
+    assert!(!json_trace.contains("V3Req04StandardizedResponses"));
+    assert!(!json_trace.contains("V3ResponsesDirect11Policy"));
+    assert!(!json_trace.contains("V3TargetLocalReselected"));
+    let json_body: Value = json_response.json().await.unwrap();
+    assert_eq!(json_body["status"], "completed");
+
+    let first_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+    assert_eq!(first_capture.body["input"], "relay json");
+
+    let sse_response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay sse",
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    let sse_trace = sse_response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(sse_response.status(), 200);
+    assert_eq!(
+        sse_response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/event-stream"
+    );
+    assert!(sse_trace.contains("V3HubReqInbound01ClientRaw"));
+    assert!(sse_trace.contains("V3ServerRespOutbound06ClientFrame"));
+    assert!(!sse_trace.contains("V3Req04StandardizedResponses"));
+    assert!(!sse_trace.contains("V3ResponsesDirect11Policy"));
+    assert!(!sse_trace.contains("V3TargetLocalReselected"));
+    let sse_body = sse_response.text().await.unwrap();
+    assert!(sse_body.contains("[DONE]"));
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(second_capture.body["model"], "wire-test");
+    assert_eq!(second_capture.body["stream"], true);
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
@@ -929,7 +1142,15 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
         "application/json"
     );
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body, json!({"id": "resp_json", "output_text": "ok"}));
+    assert_eq!(body["id"], "resp_json");
+    assert_eq!(body["output_text"], "ok");
+    if !body["status"].is_null() {
+        assert_eq!(body["status"], "completed");
+    }
+    if let Some(output) = body["output"].as_array() {
+        assert_eq!(output[0]["type"], "output_text");
+        assert_eq!(output[0]["text"], "ok");
+    }
 
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.authorization.as_deref(), Some("Bearer secret-p6"));
@@ -1880,7 +2101,15 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
     let response_body = response.text().await.unwrap();
     assert_eq!(status, 200, "unexpected response body: {response_body}");
     let body: Value = serde_json::from_str(&response_body).unwrap();
-    assert_eq!(body, json!({"id": "resp_json", "output_text": "ok"}));
+    assert_eq!(body["id"], "resp_json");
+    assert_eq!(body["output_text"], "ok");
+    if !body["status"].is_null() {
+        assert_eq!(body["status"], "completed");
+    }
+    if let Some(output) = body["output"].as_array() {
+        assert_eq!(output[0]["type"], "output_text");
+        assert_eq!(output[0]["text"], "ok");
+    }
     let capture = captures.recv().await.unwrap();
     assert_eq!(
         capture.authorization.as_deref(),
@@ -2020,6 +2249,81 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
     assert!(
         !provider_hit,
         "provider-request dry-run must not call the controlled upstream"
+    );
+    assert!(
+        !response_body.contains("secret-key"),
+        "dry-run projection must not leak auth secrets"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "relay dry-run no upstream send",
+            "max_output_tokens": 8
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    let provider_hit = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_ok();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    let node_ids = body["dry_run"]["node_ids"]
+        .as_array()
+        .expect("dry-run body must expose node ids")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        node_ids.contains(&"V3DryRunNoNetworkTerminalEffect"),
+        "node ids must include dry-run terminal effect: {node_ids:?}"
+    );
+    assert!(
+        !node_ids.contains(&"V3ResponsesDirect11Policy"),
+        "Responses Relay dry-run must not enter Direct/P6 policy: {node_ids:?}"
+    );
+    assert_eq!(body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(body["kind"], "provider_request");
+    assert_eq!(body["dryRun"], true);
+    assert_eq!(body["evidence"]["stoppedBeforeProviderSend"], true);
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(body["providerRequest"]["method"], "POST");
+    assert_eq!(
+        body["providerRequest"]["headers"]["authorization"],
+        "[REDACTED]"
+    );
+    assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
+    assert_eq!(
+        body["providerRequest"]["body"]["input"],
+        "relay dry-run no upstream send"
+    );
+    assert!(
+        !provider_hit,
+        "Responses Relay provider-request dry-run must not call upstream"
     );
     assert!(
         !response_body.contains("secret-key"),

@@ -69,8 +69,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.hub_relay_runtime_closeout
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-hub-relay-runtime-closeout] }
-    live_evidence: { status: blocker, refs: [docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], blockers: [live_relay_server_cutover_pending, p6_deletion_pending] }
-    production: { status: blocked, blockers: [live_relay_cutover_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: responses_relay_sse_http
     endpoint: responses_relay
     protocol: responses
@@ -79,8 +79,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.hub_relay_runtime_closeout
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-relay-payload-copy-budget] }
-    live_evidence: { status: blocker, refs: [docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], blockers: [live_relay_sse_cutover_pending, real_provider_sse_relay_pending] }
-    production: { status: blocked, blockers: [live_relay_cutover_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: responses_relay_websocket_v2
     endpoint: responses_relay
     protocol: responses
@@ -220,23 +220,22 @@ capability_cases:
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, use_responses_lite, tool_mode, input_modalities]
 production_blockers:
-  - { blocker_id: responses_relay_cutover_pending, owner_feature_id: v3.hub_relay_runtime_closeout, evidence: docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md }
-  - { blocker_id: live_relay_cutover_pending, owner_feature_id: v3.hub_relay_runtime_closeout, evidence: docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md }
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
   - { blocker_id: anthropic_messages_live_replay_pending, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: MEMORY.md }
   - { blocker_id: gemini_generate_content_live_replay_pending, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml }
   - { blocker_id: final_5555_profile_anthropic_endpoint_not_enabled, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
   - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt }
 live_read_only_audit:
-  timestamp: 2026-07-16T10:06:05Z
-  command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml
-  evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt
+  timestamp: 2026-07-16T11:44:22Z
+  command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml
+  evidence: .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json
   supplemental_evidence:
     - .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json
+    - .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/rccv3_managed_restart_after_60d0c90f4.log
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/post_restart_health_process.log
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt
-  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. After 60d0c90f4 and managed rccv3 restart, Gemini Generate Content JSON and SSE both returned typed endpoint_not_enabled before provider send because the active /Volumes/extension/.rcc/config.5555.v2.toml profile contains no Gemini provider endpoint. The pre-fix model_not_found misroute to the default OpenAI target is no longer reproducible.
+  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. Current POST /v1/responses binding is Responses Relay and its JSON/SSE traces include the fixed Req01-Req09/Resp01-Resp06 lifecycle without Direct/P6 markers; Direct JSON/SSE evidence is the same-day pre-cutover live replay, while Direct client WebSocket remains fresh on GET /v1/responses. After 60d0c90f4 and managed rccv3 restart, Gemini Generate Content JSON and SSE both returned typed endpoint_not_enabled before provider send because the active /Volumes/extension/.rcc/config.5555.v2.toml profile contains no Gemini provider endpoint. The pre-fix model_not_found misroute to the default OpenAI target is no longer reproducible.
   status: live_v3_provider_replay_partial_verified
 verification_gates:
   - npm run verify:v3-live-provider-compat-parity

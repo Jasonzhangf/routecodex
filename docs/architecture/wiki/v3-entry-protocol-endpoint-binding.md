@@ -12,7 +12,7 @@ The required review phrase is endpoint binding complete only when the binding re
 
 ## Main Rule
 
-Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Gemini relay implemented means the registry points to `v3.gemini_relay_runtime_integration`; it does not mean live/global/prod compatibility.
+Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Responses Relay and Gemini relay implemented mean the registry points to their separately owned runtime features; this does not mean live/global/prod compatibility.
 
 Binding resources are side-channel governance truth. They may not enter provider body, client body, metadata payload, debug payload, provider runtime state, or request payload. live/global/prod not claimed by this source slice.
 
@@ -30,7 +30,7 @@ flowchart TD
 
 | Entry protocol | Endpoint pattern | Execution mode | Implementation status | Owner |
 | --- | --- | --- | --- | --- |
-| responses | `/v1/responses` | direct | implemented | `execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation` |
+| responses | `/v1/responses` | relay | implemented | `execute_v3_responses_relay_runtime_with_default_transport` |
 | anthropic | `/v1/messages` | relay | implemented | `execute_v3_anthropic_relay_runtime_with_default_transport` |
 | openai_chat | `/v1/chat/completions` | relay | implemented | `execute_v3_openai_chat_relay_runtime_with_default_transport` |
 | gemini | `/v1beta/models/:model/generateContent` | relay | implemented | `execute_v3_gemini_relay_runtime_with_default_transport` |
@@ -49,6 +49,7 @@ flowchart TD
 - Every exposed `/v1/*` or `/v1beta/*` business endpoint has exactly one binding.
 - Config allowed protocols, manifest declarations, and Server endpoint exposure are equal.
 - Server has no `endpoint_protocol()` duplicate registry and no raw path runtime bypass.
+- Responses Relay source binding is explicit and bound to `v3.hub_relay_runtime_closeout`; manual Direct remains a separately declared config possibility, not the V2 default projection.
 - Gemini relay implemented is explicit and bound to `v3.gemini_relay_runtime_integration`.
 - No unbound endpoint can fall through to generic foundation pending.
 - Binding resources are forbidden from provider/client body.
@@ -57,8 +58,9 @@ flowchart TD
 ## Current Integration Boundary
 
 Config publishes the closed four-protocol registry. Server consumes
-`entry_protocol_binding_for_endpoint` before dispatch. Gemini now enters the separately owned
+`entry_protocol_binding_for_endpoint` before dispatch. Responses now enters the separately owned
+Responses Relay source runtime by default for V2 projection, Gemini enters its separately owned
 controlled Relay Runtime, and the entry-binding verifier/red fixtures lock the source integration.
 
-This surface does not prove a real Gemini provider, credentials, install, restart, release, global
-availability, or production cutover. live/global/prod not claimed.
+This surface does not prove a real Responses/Gemini provider, credentials, install, restart, release,
+global availability, or production cutover. live/global/prod not claimed.

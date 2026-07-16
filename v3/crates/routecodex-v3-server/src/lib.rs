@@ -20,13 +20,17 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
+    execute_v3_responses_relay_dry_run_runtime,
+    execute_v3_responses_relay_runtime_with_default_transport,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
-    register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    project_v3_responses_relay_runtime_failure, register_responses_direct_hooks,
+    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
+    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
 };
 use serde_json::{json, Map, Value};
 use sse_transport_core::{
@@ -282,6 +286,21 @@ async fn pending_endpoint(
         .await;
         return foundation_output_response(output);
     }
+    if is_provider_request_dry_run(&request_headers)
+        && entry_protocol == "responses"
+        && execution_mode == V3EntryProtocolExecutionMode::Relay
+    {
+        let output = execute_v3_responses_relay_dry_run_runtime(
+            &state.manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id,
+                payload,
+            },
+        )
+        .await;
+        return foundation_output_response(output);
+    }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_openai_chat_completions_request(
             &state.manifest,
@@ -331,6 +350,22 @@ async fn pending_endpoint(
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
         return gemini_relay_output_response(output);
+    }
+    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+        let output = match execute_v3_responses_relay_request(
+            &state.manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id,
+                payload,
+            },
+        )
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => project_v3_responses_relay_runtime_failure(error),
+        };
+        return responses_relay_output_response(output);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         let frame = execute_responses_direct_server_frame(
@@ -887,6 +922,36 @@ pub async fn execute_v3_gemini_generate_content_request(
     input: V3GeminiRelayRuntimeInput,
 ) -> Result<V3GeminiRelayRuntimeOutput, routecodex_v3_runtime::V3GeminiRelayRuntimeError> {
     execute_v3_gemini_relay_runtime_with_default_transport(manifest, input).await
+}
+
+pub async fn execute_v3_responses_relay_request(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+) -> Result<V3ResponsesRelayRuntimeOutput, routecodex_v3_runtime::V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_with_default_transport(manifest, input).await
+}
+
+fn responses_relay_output_response(output: V3ResponsesRelayRuntimeOutput) -> Response<Body> {
+    let content_type = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(_) => "application/json",
+        V3ResponsesRelayClientBody::Sse(_) => "text/event-stream",
+    };
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(output.status).expect("typed V3 Responses Relay status"))
+        .header("content-type", content_type)
+        .header("x-routecodex-v3-node-trace", output.node_trace.join(","));
+    if let Some(error_chain) = output.error_chain {
+        builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
+    }
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3ResponsesRelayClientBody::Json(client_response) => Body::from(
+            serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
+        ),
+    };
+    builder
+        .body(body)
+        .expect("typed V3 Responses Relay response")
 }
 
 fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {

@@ -1313,10 +1313,14 @@ features:
     status: controlled_runtime_closeout_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_integration_gate
-    owner_scope: "Controlled Hub Relay Runtime closeout across JSON/SSE, local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation, and one-response-exit."
+    owner_scope: "Controlled Hub Relay Runtime closeout across JSON/SSE, local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation, one-response-exit, and Responses Relay source server entry."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs
       - scripts/tests/v3-hub-relay-runtime-closeout-red-fixtures.mjs
     design:
@@ -1330,6 +1334,8 @@ features:
       - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
     required_unit:
       - controlled JSON and SSE prove the same fixed Req01-Req09 and Resp01-Resp06 topology
+      - Responses Relay JSON and SSE enter the same fixed topology and do not enter P6 Direct policy nodes
+      - V2 default config projection binds /v1/responses to the Responses Relay runtime owner while explicit Direct remains a valid manual binding
       - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - local continuation two-turn restores saved context before current tool output and releases on terminal success
       - servertool response hook profile is consumed by Runtime response governance
@@ -1339,6 +1345,8 @@ features:
       - npm run test:v3-hub-relay-runtime-closeout
       - npm run verify:v3-hub-relay-runtime-closeout
       - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
+      - npm run test:v3-config-v2-compat-5555
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay -- --nocapture
       - npm run test:v3-relay-payload-copy-runtime-probes
       - npm run verify:v3-relay-payload-copy-budget
       - npm run test:v3-relay-payload-copy-budget-red-fixtures
@@ -1352,9 +1360,9 @@ features:
       - npm run test:v3-workspace
       - git diff --check
     completion_rule:
-      source: "Complete when controlled closeout test, source verifier, mutation fixtures, copy-budget probes, architecture/resource/module/static-hook/fmt/clippy/workspace gates, and diff check pass."
-      runtime: "Controlled Rust Runtime closeout only; live Relay Server entry, P6 deletion, global install, restart, release, real-provider compatibility, and production cutover are not claimed."
-      forbidden_claim: "Do not claim live Relay, P6 deletion, global installation, restart, production cutover, or real ~/.rcc mutation."
+      source: "Complete when controlled closeout test, Responses Relay server-entry tests, source verifier, mutation fixtures, copy-budget probes, architecture/resource/module/static-hook/fmt/clippy/workspace gates, and diff check pass."
+      runtime: "Responses Relay JSON/SSE is verified on globally installed managed V3 5555 with real provider replay; P6 deletion, Anthropic/Gemini live replay, live error samples, credential/config mutation, and full production cutover are not claimed."
+      forbidden_claim: "Do not claim P6 deletion, credential/config mutation, Anthropic/Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover."
 
   - feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
     status: controlled_runtime_parity_verified
