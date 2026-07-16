@@ -144,8 +144,32 @@ Verified live cases:
 - Responses Relay SSE on POST /v1/responses: HTTP 200, exact marker, response.completed, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
 - Responses Direct client-facing WebSocket on GET /v1/responses with OpenAI-Beta: responses_websockets=2026-02-06.
 
-Boundary: current POST /v1/responses is Relay after source cutover, so Direct JSON/SSE is intentionally
-not re-run as a fresh POST replay in this profile; the Direct JSON/SSE matrix rows retain the same-day
-pre-cutover production evidence from
+Boundary at this stage: current POST /v1/responses is Relay after source cutover, so Direct JSON/SSE was
+still backed by same-day pre-cutover production evidence from
 .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json.
-No live config mutation, credential mutation, P6 deletion, or full production cutover is claimed.
+Section 12 supersedes this Direct JSON/SSE freshness gap with a temporary non-production Direct 5555 replay.
+No credential mutation, P6 deletion, or full production cutover is claimed.
+
+## 12. 2026-07-16 Responses Direct fresh 5555 closeout after V3 non-production authorization
+
+Jason clarified that V3 5555 is non-production for this task and authorized connection, config, restart,
+and live replay work without waiting for extra approval. A temporary native V3 Direct config was generated
+from /Volumes/extension/.rcc/config.5555.v2.toml, validated with `rccv3 config check`, used only for the
+Direct replay, then removed after the original /Volumes/extension/.rcc/config.5555.v2.toml Relay instance
+was restored. Evidence:
+
+- Direct fresh replay: .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json
+- Relay restoration replay: .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json
+
+Verified live cases:
+
+- Responses Direct JSON on POST /v1/responses: HTTP 200, marker V3_DIRECT_FRESH_JSON_OK, Direct/P6 node trace, no Relay trace.
+- Responses Direct SSE on POST /v1/responses: HTTP 200, marker V3_DIRECT_FRESH_SSE_OK, response.completed, Direct/P6 node trace, no Relay trace.
+- Responses Direct client-facing WebSocket on GET /v1/responses: response.completed, marker V3_DIRECT_FRESH_WS_OK.
+- Restored /v1/models on the original config: HTTP 200 with required Codex request-builder fields for gpt-5.6-sol.
+- Restored Responses Relay JSON/SSE on POST /v1/responses: HTTP 200, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
+
+Boundary: no provider credential mutation, no persistent original 5555 config mutation, no P6 deletion, and
+no full production cutover is claimed. The direct temporary config existed only to produce fresh Direct
+JSON/SSE/WS evidence on the non-production V3 5555 listener, and the listener was restored to the original
+Relay profile before closeout.

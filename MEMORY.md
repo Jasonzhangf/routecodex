@@ -3535,3 +3535,9 @@
 - Source gate npm run verify:v3-resource-relation-edge-lock is wired into npm run verify:v3-architecture-docs.
 - The gate enforces: resources stay registry nodes; callable paths are scalar adjacent mainline edges; resource relationships appear only under edge resource_flow; every declared resource and function-map resource binding is carried by some edge resource_flow; duplicate edge ids, same-node edges, and multi-source/multi-target shortcuts fail.
 - Current map closure: 69 resources are bound through 178 mainline edge resource_flow payloads; mutation red fixture rejects 15 forbidden changes.
+
+# 2026-07-16: V3 5555 Direct fresh replay truth
+- V3 5555 is non-production for this live compat task per Jason, so V3 connection/config/restart/live replay did not need extra approval.
+- Fresh Direct JSON/SSE/WS evidence now exists at `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json`: Direct JSON and SSE returned HTTP 200 with markers `V3_DIRECT_FRESH_JSON_OK` / `V3_DIRECT_FRESH_SSE_OK`, SSE had `response.completed`, and WebSocket returned marker `V3_DIRECT_FRESH_WS_OK`.
+- The temporary native V3 Direct config was generated from `/Volumes/extension/.rcc/config.5555.v2.toml`, validated, used only for replay, then removed. Original `/Volumes/extension/.rcc/config.5555.v2.toml` was restarted and restored evidence at `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json` proves `/v1/models` plus Responses Relay JSON/SSE still pass on the final binding.
+- Matrix docs now treat Direct JSON/SSE/WS and Relay JSON/SSE as fresh real-provider replayed surfaces; Anthropic/Gemini and live 401/403/5xx/timeout remain explicit pending/blocker surfaces.

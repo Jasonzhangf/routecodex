@@ -31056,6 +31056,14 @@ Pure Rust NAPI candidates:
 - live 验证：POST /v1/chat/completions，messages 内用 <**!asxs.gpt-5.5**>，实际路由命中 asxs[crsa].gpt-5.5，响应返回 ASXS_OKASXS_OK，客户端响应里未见内部 metadata。
 - 同时确认 /v1/responses 的 provider-request dry-run 在同类文本 marker 下仍会路由到 cc.key1.gpt-5.5，所以这条入口不能拿同一 marker 当 asxs 证据；本次 asxs 证据取自 chat/completions live smoke + log line。
 
+# 2026-07-16T20:21+08:00 V3 5555 Direct fresh live compat closeout
+
+- Jason clarified V3 5555 is non-production for this task and authorized connection/config/restart/live replay without waiting for extra approval.
+- Generated a temporary native V3 Direct config from `/Volumes/extension/.rcc/config.5555.v2.toml`, validated it with `rccv3 config check`, stopped the original managed Relay instance, started Direct on the same 5555 listener, and ran fresh real-provider replay.
+- Direct evidence: `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json` records Direct JSON HTTP 200 marker `V3_DIRECT_FRESH_JSON_OK`, Direct SSE HTTP 200 marker `V3_DIRECT_FRESH_SSE_OK` with `response.completed`, and Direct client WebSocket marker `V3_DIRECT_FRESH_WS_OK`; JSON/SSE traces show Direct/P6 nodes and no Relay trace.
+- Restore evidence: removed the temporary Direct config, restarted original `/Volumes/extension/.rcc/config.5555.v2.toml`, and replayed `/v1/models` plus Responses Relay JSON/SSE successfully in `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json`.
+- Updated V3 live compat manifest/wiki/plan so Direct JSON/SSE/WS no longer depends only on same-day pre-cutover evidence; Relay restored replay remains the current final binding evidence.
+
 # 2026-07-16T19:44+08:00 V3 5555 Responses Relay live provider replay
 
 - Current dirty source globally installed as routecodex/rcc/rccv3 0.90.3935; `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` package versions matched and `rccv3` sha256 matched.

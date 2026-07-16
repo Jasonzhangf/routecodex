@@ -39,7 +39,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-implementation-plan.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_direct_sse_http
     endpoint: responses_direct
@@ -49,7 +49,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-test-design.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_direct_websocket_v2
     endpoint: responses_direct
@@ -59,7 +59,7 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-remote-continuation-integration-plan.md, docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md], gates: [npm run test:v3-responses-direct-remote-continuation, npm run verify:v3-responses-websocket-v2-transport-hardening] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_relay_json_http
     endpoint: responses_relay
@@ -69,7 +69,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.hub_relay_runtime_closeout
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-hub-relay-runtime-closeout] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_relay_sse_http
     endpoint: responses_relay
@@ -79,7 +79,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.hub_relay_runtime_closeout
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-relay-payload-copy-budget] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json, .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json], blockers: [] }
     production: { status: ready, blockers: [] }
   - id: responses_relay_websocket_v2
     endpoint: responses_relay
@@ -217,7 +217,7 @@ capability_cases:
     endpoint: /v1/models
     owner_feature_id: v3.models_capability_catalog
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-models-capability-catalog-test-design.md, docs/design/codex-model-capability-contract.md, MEMORY.md], gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture, npm run verify:models-capability-contract] }
-    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, use_responses_lite, tool_mode, input_modalities]
 production_blockers:
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
@@ -226,16 +226,17 @@ production_blockers:
   - { blocker_id: final_5555_profile_anthropic_endpoint_not_enabled, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
   - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt }
 live_read_only_audit:
-  timestamp: 2026-07-16T11:44:22Z
-  command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml
-  evidence: .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json
+  timestamp: 2026-07-16T12:21:44Z
+  command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml; Responses Direct fresh replay used a temporary native V3 direct config generated from the current V2 config, then removed after restoring /Volumes/extension/.rcc/config.5555.v2.toml
+  evidence: .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json
   supplemental_evidence:
+    - .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json
     - .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json
     - .agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/evidence.jsonl
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/rccv3_managed_restart_after_60d0c90f4.log
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/post_restart_health_process.log
     - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt
-  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. Current POST /v1/responses binding is Responses Relay and its JSON/SSE traces include the fixed Req01-Req09/Resp01-Resp06 lifecycle without Direct/P6 markers; Direct JSON/SSE evidence is the same-day pre-cutover live replay, while Direct client WebSocket remains fresh on GET /v1/responses. After 60d0c90f4 and managed rccv3 restart, Gemini Generate Content JSON and SSE both returned typed endpoint_not_enabled before provider send because the active /Volumes/extension/.rcc/config.5555.v2.toml profile contains no Gemini provider endpoint. The pre-fix model_not_found misroute to the default OpenAI target is no longer reproducible.
+  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. Fresh Responses Direct JSON/SSE/WS replay on the temporary direct config returned HTTP 200 or WebSocket response.completed with Direct/P6 node trace and no Relay trace; after restoration, /v1/responses Relay JSON/SSE returned HTTP 200 with the fixed Req01-Req09/Resp01-Resp06 lifecycle and no Direct/P6 markers. After 60d0c90f4 and managed rccv3 restart, Gemini Generate Content JSON and SSE both returned typed endpoint_not_enabled before provider send because the active /Volumes/extension/.rcc/config.5555.v2.toml profile contains no Gemini provider endpoint. The pre-fix model_not_found misroute to the default OpenAI target is no longer reproducible.
   status: live_v3_provider_replay_partial_verified
 verification_gates:
   - npm run verify:v3-live-provider-compat-parity
@@ -255,5 +256,6 @@ completion_boundary:
   live_provider_evidence_indexed: true
   production_ready_claim: false
   live_config_mutation: false
+  temporary_non_production_direct_config_emitted_removed: true
   global_install_restart: true
   p6_deletion: false
