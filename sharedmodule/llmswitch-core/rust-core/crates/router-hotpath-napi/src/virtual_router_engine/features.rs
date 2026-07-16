@@ -429,10 +429,7 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let normalized_user_text = latest_user_text.to_lowercase();
     let meaningful_declared_tools = extract_meaningful_declared_tool_names(request.get("tools"));
     let has_tools = !meaningful_declared_tools.is_empty();
-    let estimated_tokens = read_finite_floor_i64(metadata.get("estimatedInputTokens"))
-        .or_else(|| read_finite_floor_i64(metadata.get("estimatedTokens")))
-        .or_else(|| read_finite_floor_i64(metadata.get("estimated_tokens")))
-        .unwrap_or_else(|| estimate_request_tokens(request, &latest_user_text));
+    let estimated_tokens = estimate_request_tokens(request);
     let has_thinking = detect_keyword(&normalized_user_text, &THINKING_KEYWORDS);
     let has_vision_tool = detect_vision_tool(request.get("tools"));
     let media_signals = if latest_message_role == "user" {
@@ -534,7 +531,7 @@ pub(crate) fn estimate_request_tokens_payload_json(input_json: String) -> napi::
 }
 
 // feature_id: vr.route_token_estimation
-fn estimate_request_tokens(request: &Value, _latest_user_text: &str) -> i64 {
+fn estimate_request_tokens(request: &Value) -> i64 {
     let encoder = select_legacy_request_encoder(request);
     let mut total_tokens: usize = 0;
     if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {
@@ -679,19 +676,25 @@ fn count_request_extras_tokens(request: &Value, encoder: &CoreBPE) -> usize {
 }
 
 fn count_responses_context_tokens(request: &Value, encoder: &CoreBPE) -> usize {
-    let mut total = 0;
-    if let Some(input) = request
+    let top_level = request
+        .get("input")
+        .map(|input| count_structured_tokens(input, encoder))
+        .unwrap_or(0);
+    let semantic_context = if let Some(input) = request
         .get("semantics")
         .and_then(|v| v.get("responses"))
         .and_then(|v| v.get("context"))
         .and_then(|v| v.get("input"))
         .and_then(|v| v.as_array())
     {
-        for entry in input {
-            total += count_structured_tokens(entry, encoder);
-        }
-    }
-    total
+        input
+            .iter()
+            .map(|entry| count_structured_tokens(entry, encoder))
+            .sum()
+    } else {
+        0
+    };
+    top_level.max(semantic_context)
 }
 
 fn count_content_tokens(content: &Value, encoder: &CoreBPE) -> usize {
@@ -872,7 +875,7 @@ mod tests {
 
     #[test]
     fn estimate_tokens_accounts_for_large_payloads() {
-        let big = "x".repeat(800_000);
+        let big = "x ".repeat(220_000);
         let request = json!({
             "model": "glm-5",
             "messages": [
@@ -884,10 +887,10 @@ mod tests {
             ],
             "parameters": { "reasoning": { "effort": "high" } }
         });
-        let features = build_routing_features(&request, &json!({ "estimatedInputTokens": 200000 }));
+        let features = build_routing_features(&request, &json!({ "estimatedInputTokens": 1 }));
         assert!(
             features.estimated_tokens >= 180_000,
-            "expected large payload to exceed longcontext threshold, got {}",
+            "expected large non-media payload to exceed longcontext threshold without trusting metadata hints, got {}",
             features.estimated_tokens
         );
     }
@@ -1005,6 +1008,82 @@ mod tests {
     }
 
     #[test]
+    fn estimate_tokens_accounts_for_large_top_level_responses_input_without_metadata_hint() {
+        let compact_request = json!({
+            "model": "glm-5",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "brief"}]
+                }
+            ],
+            "tools": []
+        });
+        let large_text = "x ".repeat(220_000);
+        let request = json!({
+            "model": "glm-5",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": large_text}]
+                }
+            ],
+            "tools": []
+        });
+
+        let compact = build_routing_features(&compact_request, &json!({})).estimated_tokens;
+        let features = build_routing_features(&request, &json!({ "estimatedInputTokens": 1 }));
+        assert!(
+            features.estimated_tokens > compact + 180_000,
+            "expected top-level Responses input text to drive Rust estimate even when metadata is low, compact={compact}, actual={}",
+            features.estimated_tokens
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_omits_media_payloads_in_top_level_responses_input() {
+        let base_request = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image" }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+        let image_request = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image" },
+                        {
+                            "type": "input_image",
+                            "image_url": format!("data:image/png;base64,{}", "A".repeat(200_000))
+                        }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+
+        let base = build_routing_features(&base_request, &json!({})).estimated_tokens;
+        let actual = build_routing_features(&image_request, &json!({})).estimated_tokens;
+        assert!(
+            actual <= base + 8,
+            "expected top-level Responses media payload bytes to be omitted, base={base}, actual={actual}"
+        );
+    }
+
+    #[test]
     fn estimate_tokens_omits_media_payloads_in_message_content_parts() {
         let base_request = json!({
             "model": "gpt-4o",
@@ -1043,6 +1122,43 @@ mod tests {
         assert!(
             actual <= base + 8,
             "expected media payload to be omitted from token estimate, base={base}, actual={actual}"
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_ignores_client_metadata_when_media_payload_is_present() {
+        let request = json!({
+            "model": "gpt-5.6-sol",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Describe this image" },
+                        {
+                            "type": "input_image",
+                            "image_url": {
+                                "url": format!("data:image/png;base64,{}", "A".repeat(200_000))
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": []
+        });
+
+        let actual = build_routing_features(
+            &request,
+            &json!({
+                "estimatedInputTokens": 250_000,
+                "estimatedTokens": 250_000,
+                "estimated_tokens": 250_000
+            }),
+        )
+        .estimated_tokens;
+
+        assert!(
+            actual < 180_000,
+            "client metadata token estimates must not override Rust media-byte omission, got {actual}"
         );
     }
 
@@ -1644,25 +1760,6 @@ mod tests {
         assert!(features.has_tools);
         assert_eq!(features.last_assistant_tool_category, None);
     }
-}
-
-fn read_finite_floor_i64(value: Option<&Value>) -> Option<i64> {
-    let v = value?;
-    if let Some(num) = v.as_i64() {
-        return Some(num);
-    }
-    if let Some(num) = v.as_u64() {
-        if num <= i64::MAX as u64 {
-            return Some(num as i64);
-        }
-        return Some(i64::MAX);
-    }
-    if let Some(num) = v.as_f64() {
-        if num.is_finite() {
-            return Some(num.floor() as i64);
-        }
-    }
-    None
 }
 
 fn detect_keyword(text: &str, keywords: &[&str]) -> bool {

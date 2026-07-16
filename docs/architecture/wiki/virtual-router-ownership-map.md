@@ -115,6 +115,7 @@ Required gates:
 Notes:
 - This feature restores the retired TS tiktoken counting semantics in Rust; it must not use tiktoken-rs prefix model matching for provider aliases such as gpt-5.5/gpt-5.6-sol.
 - HTTP bodyLimit remains the transport allocation guard; Hub format nodes must not own a second fixed semantic payload byte cap.
+- Route classification must ignore client-provided estimatedInputTokens/estimatedTokens metadata and derive estimated_tokens from the Rust request estimator; metadata estimates can be diagnostics/usage hints only.
 
 ## vr.shared_function_library_helpers
 

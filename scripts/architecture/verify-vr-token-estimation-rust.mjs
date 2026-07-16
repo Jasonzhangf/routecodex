@@ -49,6 +49,21 @@ if (/estimate_(?:structured|message).*_chars|structured_chars|total_chars/.test(
 if (!featureSource.includes('count_content_object_tokens') || !featureSource.includes('detect_media_kind(map).is_some()')) {
   failures.push('features.rs must omit image/video payload bytes from token counting');
 }
+if (!/fn\s+count_responses_context_tokens[\s\S]*request\s*\.\s*get\(\s*["']input["']\s*\)/.test(featureSource)) {
+  failures.push('features.rs must count top-level Responses input with Rust token estimation');
+}
+if (!featureSource.includes('estimate_tokens_accounts_for_large_top_level_responses_input_without_metadata_hint')) {
+  failures.push('features.rs must lock top-level Responses input token counting');
+}
+if (/read_finite_floor_i64\s*\(\s*metadata\.get\(\s*["\']estimated(?:InputTokens|Tokens|_tokens)["\']/.test(featureSource)) {
+  failures.push('features.rs must not let client metadata token estimates override Rust request token counting');
+}
+if (/let\s+estimated_tokens\s*=\s*read_finite_floor_i64\s*\(/.test(featureSource)) {
+  failures.push('VR route estimated_tokens must come from estimate_request_tokens(request), not metadata hints');
+}
+if (!featureSource.includes('estimate_tokens_ignores_client_metadata_when_media_payload_is_present')) {
+  failures.push('features.rs must lock metadata-estimate override with a media payload regression test');
+}
 for (const retired of retiredTsFiles) {
   if (fs.existsSync(path.join(root, retired))) {
     failures.push(`${retired} must remain physically removed`);

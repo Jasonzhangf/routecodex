@@ -724,7 +724,8 @@ verification:
       - ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
     notes:
       - "Positive tests lock retired tiktoken model-table behavior, media byte omission, and non-media structured payload counting."
-      - "Negative gates reject char-ratio estimators, prefix-based tiktoken-rs model matching, and fixed Hub semantic payload byte caps."
+      - "Positive tests also lock top-level Responses input counting and prove client metadata token estimates cannot override Rust media-byte omission."
+      - "Negative gates reject char-ratio estimators, prefix-based tiktoken-rs model matching, client metadata token-estimate overrides, and fixed Hub semantic payload byte caps."
 
   - feature_id: vr.shared_function_library_helpers
     change_risk: medium

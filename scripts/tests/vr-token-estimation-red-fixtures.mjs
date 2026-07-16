@@ -20,6 +20,11 @@ const forbiddenSourceFixtures = [
     source: 'pub(crate) fn serialized_json_size<T: Serialize>(value: &T) -> Result<usize, serde_json::Error> { todo!() }',
     pattern: /serialized_json_size/,
   },
+  {
+    label: 'client metadata estimated token override',
+    source: 'let estimated_tokens = read_finite_floor_i64(metadata.get("estimatedInputTokens")).unwrap_or_else(|| estimate_request_tokens(request));',
+    pattern: /read_finite_floor_i64\s*\(\s*metadata\.get\(\s*["\']estimated(?:InputTokens|Tokens|_tokens)["\']/,
+  },
 ];
 
 const misses = forbiddenSourceFixtures.filter(({ source, pattern }) => !pattern.test(source));

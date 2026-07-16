@@ -3418,3 +3418,9 @@
 - Direct remote continuation over SSE is stream-driven: commit after an observed pending SSE chunk, release a previous locator only after clean stream EOF, and preserve previous locator truth on provider/body stream error. Do not use response header/node trace to claim an async stream commit occurred before the stream has been consumed.
 - Server-side SSE projection must call shared transport builders/encoder and fail malformed/missing event fields explicitly. Silent unwrap_or_default empty streams, Ok(None) event skips, manual format!(event...) writers, and Body::from materialized SSE bytes are forbidden in this path.
 - Verified current source gates for this truth: SSE core tests, V2 sniffer tests, V3 provider adapter tests, Responses Direct continuation 8/8, Server multi-listener 14/14, full V3 workspace, V3 Clippy, shared SSE core Clippy, architecture/resource/function/mainline/review gates, and git diff --check.
+
+# 2026-07-16 VR token estimate metadata override boundary
+
+- `vr.route_token_estimation` must derive route `estimated_tokens` from Rust tiktoken request counting, not from client-provided `estimatedInputTokens` / `estimatedTokens` / `estimated_tokens` metadata. Client metadata can remain for diagnostics/usage projection but must not control longcontext classification.
+- Top-level `/v1/responses` `input` is part of the Rust estimate, with image/video media bytes omitted and real text/tool/function output counted. The estimator uses `max(top_level_input, semantics.responses.context.input)` to avoid duplicate counting when both carriers mirror the same Responses context.
+- `server.bodyLimit` remains only an HTTP request allocation guard. It is not a token policy and must not be reintroduced inside Hub semantic nodes.
