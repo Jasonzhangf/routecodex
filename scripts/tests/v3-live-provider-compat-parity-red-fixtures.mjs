@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-live-provider-compat-parity.mjs');
@@ -10,36 +11,50 @@ const cases = [
   {
     name: 'matrix endpoint transport case removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    marker: '  - id: gemini_generate_content_sse_http\n    endpoint: gemini_generate_content\n    protocol: gemini\n    transport: sse_http\n',
-    mutation: '  - id: gemini_generate_content_sse_http\n    endpoint: gemini_generate_content\n    protocol: gemini\n    transport: missing_sse_http\n',
+    mutateYaml: (doc) => {
+      const target = doc.cases.find((entry) => entry.id === 'gemini_generate_content_sse_http');
+      target.transport = 'missing_sse_http';
+    },
     diagnostic: /missing matrix case for gemini_generate_content x sse_http/,
   },
   {
     name: 'production ready without live evidence',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    marker: '    production: { status: blocked, blockers: [live_openai_chat_provider_compat_pending] }',
-    mutation: '    production: { status: ready, blockers: [] }',
+    mutateYaml: (doc) => {
+      const target = doc.cases.find((entry) => entry.id === 'openai_chat_json_http');
+      target.live_evidence = {
+        status: 'pending',
+        refs: [],
+        blockers: ['live_openai_chat_json_provider_replay_pending'],
+      };
+      target.production = { status: 'ready', blockers: [] };
+    },
     diagnostic: /production-ready case lacks live evidence/,
   },
   {
     name: '402 error case removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    marker: '  - { id: http_402,',
-    mutation: '  - { id: http_402_removed,',
+    mutateYaml: (doc) => {
+      const target = doc.error_cases.find((entry) => entry.id === 'http_402');
+      target.id = 'http_402_removed';
+    },
     diagnostic: /missing error case http_402/,
   },
   {
     name: 'codex capability field removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    marker: ', input_modalities]',
-    mutation: ']',
+    mutateYaml: (doc) => {
+      const target = doc.capability_cases.find((entry) => entry.id === 'codex_models_capability_catalog');
+      target.required_fields = target.required_fields.filter((field) => field !== 'input_modalities');
+    },
     diagnostic: /capability field missing input_modalities/,
   },
   {
     name: 'Hub VR provider-specific ban removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
-    marker: '  provider_specific_hub_vr_forbidden: true',
-    mutation: '  provider_specific_hub_vr_forbidden: false',
+    mutateYaml: (doc) => {
+      doc.production_policy.provider_specific_hub_vr_forbidden = false;
+    },
     diagnostic: /Hub\/VR provider-specific branch ban missing/,
   },
   {
@@ -85,11 +100,17 @@ for (const testCase of cases) {
     }
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
-    if (!source.includes(testCase.marker)) {
-      failures.push(testCase.name + ': mutation marker missing');
-      continue;
+    if (testCase.mutateYaml) {
+      const doc = YAML.parse(source);
+      testCase.mutateYaml(doc);
+      writeFileSync(target, YAML.stringify(doc));
+    } else {
+      if (!source.includes(testCase.marker)) {
+        failures.push(testCase.name + ': mutation marker missing');
+        continue;
+      }
+      writeFileSync(target, source.replace(testCase.marker, testCase.mutation));
     }
-    writeFileSync(target, source.replace(testCase.marker, testCase.mutation));
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = (result.stdout ?? '') + '\n' + (result.stderr ?? '');
     if (result.status === 0) failures.push(testCase.name + ': verifier unexpectedly passed');

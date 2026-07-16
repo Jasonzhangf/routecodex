@@ -5,8 +5,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime, project_v3_responses_sse_as_anthropic_events,
-    V3AnthropicRelayRuntimeInput,
+    execute_v3_anthropic_relay_runtime, project_v3_responses_json_as_anthropic_message,
+    project_v3_responses_sse_as_anthropic_events, V3AnthropicRelayRuntimeInput,
 };
 use serde_json::json;
 use std::sync::Mutex;
@@ -82,6 +82,28 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     assert_eq!(output.client_response["stop_reason"], "tool_use");
 }
 
+#[test]
+fn json_projection_accepts_live_responses_message_output_text_shape() {
+    let projected = project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_live_text",
+        "status":"completed",
+        "output":[{
+            "type":"message",
+            "role":"assistant",
+            "content":[{
+                "type":"output_text",
+                "text":"V3_COMPAT_ANTHROPIC_JSON_OK"
+            }]
+        }]
+    }))
+    .unwrap();
+    assert_eq!(projected["content"][0]["type"], "text");
+    assert_eq!(
+        projected["content"][0]["text"],
+        "V3_COMPAT_ANTHROPIC_JSON_OK"
+    );
+}
+
 struct ErrorTransport;
 
 #[async_trait]
@@ -121,6 +143,55 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+}
+
+#[tokio::test]
+async fn sse_projection_accepts_live_data_only_text_delta_frames() {
+    let stream = futures_util::stream::iter([
+        Ok(br#"data: {"type":"response.created","response":{"id":"resp_live_sse","status":"in_progress"}}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_live","role":"assistant","content":[]}}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.content_part.added","part":{"type":"output_text","text":""}}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.output_text.delta","delta":"V3_COMPAT_"}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.output_text.delta","delta":"ANTHROPIC_SSE_OK"}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.output_text.done","text":"V3_COMPAT_ANTHROPIC_SSE_OK"}
+
+"#
+        .to_vec()),
+        Ok(br#"data: {"type":"response.completed","response":{"id":"resp_live_sse","status":"completed"}}
+
+"#
+        .to_vec()),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]);
+    let projection = project_v3_responses_sse_as_anthropic_events(Box::pin(stream))
+        .await
+        .unwrap();
+    let (canonical_response, client_events) = projection.into_parts();
+    assert_eq!(canonical_response["output"][0]["type"], "output_text");
+    assert_eq!(
+        canonical_response["output"][0]["text"],
+        "V3_COMPAT_ANTHROPIC_SSE_OK"
+    );
+    assert!(client_events.iter().any(|event| event
+        .pointer("/data/delta/text")
+        .and_then(|value| value.as_str())
+        == Some("ANTHROPIC_SSE_OK")));
+    assert_eq!(client_events.last().unwrap()["event"], "message_stop");
 }
 
 #[tokio::test]

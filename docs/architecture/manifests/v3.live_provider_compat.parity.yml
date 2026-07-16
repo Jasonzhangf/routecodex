@@ -13,7 +13,7 @@ node_ids:
   - V3LiveCompat04ProductionReadinessProjected
 evidence_levels:
   controlled_verified: Controlled loopback/source/test evidence exists and is linked.
-  live_verified: Read-only live/provider replay evidence exists and is linked.
+  live_verified: Live/provider replay evidence exists and is linked.
   pending: Required evidence is intentionally not claimed yet.
   blocker: Required evidence is blocked by a named owner backlog or external provider/config condition.
 production_policy:
@@ -38,8 +38,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-implementation-plan.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
-    live_evidence: { status: pending, refs: [], blockers: [no current V3 production listener evidence for generic live provider JSON parity] }
-    production: { status: blocked, blockers: [live_provider_json_replay_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: responses_direct_sse_http
     endpoint: responses_direct
     protocol: responses
@@ -48,8 +48,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.responses_direct_mvp
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-test-design.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
-    live_evidence: { status: pending, refs: [], blockers: [read_only_live_sse_replay_pending_for_v3_binary] }
-    production: { status: blocked, blockers: [live_provider_sse_replay_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: responses_direct_websocket_v2
     endpoint: responses_direct
     protocol: responses
@@ -58,8 +58,8 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-remote-continuation-integration-plan.md, docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md], gates: [npm run test:v3-responses-direct-remote-continuation, npm run verify:v3-responses-websocket-v2-transport-hardening] }
-    live_evidence: { status: blocker, refs: [MEMORY.md], blockers: [provider_verified_responses_websocket_v2_endpoint_pending, live_5555_two_turn_success_pending] }
-    production: { status: blocked, blockers: [responses_websocket_v2_live_endpoint_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: responses_relay_json_http
     endpoint: responses_relay
     protocol: responses
@@ -98,7 +98,7 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.anthropic_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_anthropic_messages_json_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_anthropic_endpoint_not_enabled, live_anthropic_messages_json_provider_replay_pending] }
     production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
   - id: anthropic_messages_sse_http
     endpoint: anthropic_messages
@@ -108,7 +108,7 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.anthropic_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_anthropic_messages_sse_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_anthropic_endpoint_not_enabled, live_anthropic_messages_sse_provider_replay_pending] }
     production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
   - id: anthropic_messages_websocket_v2
     endpoint: anthropic_messages
@@ -128,8 +128,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.openai_chat_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_openai_chat_json_provider_replay_pending] }
-    production: { status: blocked, blockers: [live_openai_chat_provider_compat_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: openai_chat_sse_http
     endpoint: openai_chat_completions
     protocol: openai_chat
@@ -138,8 +138,8 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.openai_chat_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_openai_chat_sse_provider_replay_pending] }
-    production: { status: blocked, blockers: [live_openai_chat_provider_compat_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: openai_chat_websocket_v2
     endpoint: openai_chat_completions
     protocol: openai_chat
@@ -158,7 +158,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.gemini_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_gemini_json_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_json_provider_replay_pending] }
     production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
   - id: gemini_generate_content_sse_http
     endpoint: gemini_generate_content
@@ -168,7 +168,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.gemini_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
-    live_evidence: { status: pending, refs: [], blockers: [live_gemini_sse_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_sse_provider_replay_pending] }
     production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
   - id: gemini_generate_content_websocket_v2
     endpoint: gemini_generate_content
@@ -194,20 +194,24 @@ error_cases:
 capability_cases:
   - id: codex_models_capability_catalog
     endpoint: /v1/models
-    owner_feature_id: models.capability_contract
-    controlled_evidence: { status: controlled_verified, refs: [docs/design/codex-model-capability-contract.md, MEMORY.md], gates: [npm run verify:models-capability-contract] }
-    live_evidence: { status: pending, refs: [], blockers: [V3 live /v1/models capability projection pending] }
+    owner_feature_id: v3.models_capability_catalog
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-models-capability-catalog-test-design.md, docs/design/codex-model-capability-contract.md, MEMORY.md], gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture, npm run verify:models-capability-contract] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/evidence.jsonl, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
     required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, use_responses_lite, tool_mode, input_modalities]
 production_blockers:
-  - { blocker_id: live_inbound_websocket_replay_pending, owner_feature_id: v3.responses_inbound_websocket_proxy, evidence: docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md }
-  - { blocker_id: responses_websocket_v2_live_endpoint_pending, owner_feature_id: v3.responses_direct_remote_continuation_integration, evidence: MEMORY.md }
+  - { blocker_id: responses_relay_cutover_pending, owner_feature_id: v3.hub_relay_runtime_closeout, evidence: docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md }
   - { blocker_id: live_relay_cutover_pending, owner_feature_id: v3.hub_relay_runtime_closeout, evidence: docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md }
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
+  - { blocker_id: anthropic_messages_live_replay_pending, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: MEMORY.md }
+  - { blocker_id: gemini_generate_content_live_replay_pending, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml }
+  - { blocker_id: final_5555_profile_anthropic_endpoint_not_enabled, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
+  - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
 live_read_only_audit:
-  timestamp: 2026-07-16T01:09:15Z
-  command_scope: routecodex --version and read-only /health probes on ports 5520 5555 4444 10000
-  finding: Reachable ports 5520 4444 and 10000 report RouteCodex 0.90.3935; port 5555 has no listener; this is not V3 live provider parity evidence.
-  status: live_v3_provider_replay_pending
+  timestamp: 2026-07-16T03:41:00Z
+  command_scope: globally installed routecodex-v3 managed 5555 with endpoints responses and openai_chat; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE
+  evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json
+  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. Anthropic Messages and Gemini Generate Content returned explicit endpoint_not_enabled because the final live 5555 profile declares only responses and openai_chat.
+  status: live_v3_provider_replay_partial_verified
 verification_gates:
   - npm run verify:v3-live-provider-compat-parity
   - npm run test:v3-live-provider-compat-parity-red-fixtures
@@ -225,5 +229,5 @@ completion_boundary:
   live_provider_evidence_indexed: true
   production_ready_claim: false
   live_config_mutation: false
-  global_install_restart: false
+  global_install_restart: true
   p6_deletion: false

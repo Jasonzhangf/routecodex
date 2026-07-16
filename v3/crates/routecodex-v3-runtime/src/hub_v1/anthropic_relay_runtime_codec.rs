@@ -112,6 +112,17 @@ pub fn project_v3_responses_json_as_anthropic_message(
                     content.push(json!({"type":"text","text":text}));
                 }
             }
+            Some("message") => {
+                if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                    for part in parts {
+                        if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                                content.push(json!({"type":"text","text":text}));
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -162,7 +173,9 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
     let mut events = Vec::new();
     let mut next_index = 0_u64;
     let mut active_tool_index = None;
+    let mut active_text_index = None;
     let mut reasoning = String::new();
+    let mut text = String::new();
     let mut tool_call: Option<(Value, Value, String)> = None;
     let mut response_id = Value::Null;
     let mut response_status = Value::String("in_progress".to_string());
@@ -175,6 +188,15 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
         for frame in frames {
             let (event, data) = response_sse_fields(frame.frame().fields())?;
             match event.as_str() {
+                "[DONE]" => {}
+                "response.created" | "response.in_progress" => {
+                    if response_id.is_null() {
+                        response_id = data.pointer("/response/id").cloned().unwrap_or(Value::Null);
+                    }
+                    if let Some(status) = data.pointer("/response/status") {
+                        response_status = status.clone();
+                    }
+                }
                 "response.reasoning_summary_text.delta" => {
                     let index = next_index;
                     if !events.iter().any(|item: &Value| {
@@ -203,6 +225,51 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
                         next_index = index + 1;
                     }
                 }
+                "response.content_part.added" => {
+                    let part = data.get("part").cloned().unwrap_or(Value::Null);
+                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                        let index = ensure_text_content_block(
+                            &mut events,
+                            &mut active_text_index,
+                            &mut next_index,
+                        );
+                        if let Some(initial_text) = part.get("text").and_then(Value::as_str) {
+                            if !initial_text.is_empty() {
+                                text.push_str(initial_text);
+                                events.push(json!({"event":"content_block_delta","data":{"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":initial_text}}}));
+                            }
+                        }
+                    }
+                }
+                "response.output_text.delta" => {
+                    let index = ensure_text_content_block(
+                        &mut events,
+                        &mut active_text_index,
+                        &mut next_index,
+                    );
+                    if let Some(delta) = data.get("delta").and_then(Value::as_str) {
+                        text.push_str(delta);
+                        events.push(json!({"event":"content_block_delta","data":{"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":delta}}}));
+                    }
+                }
+                "response.output_text.done" => {
+                    if let Some(done_text) = data.get("text").and_then(Value::as_str) {
+                        if text.is_empty() && !done_text.is_empty() {
+                            let index = ensure_text_content_block(
+                                &mut events,
+                                &mut active_text_index,
+                                &mut next_index,
+                            );
+                            text.push_str(done_text);
+                            events.push(json!({"event":"content_block_delta","data":{"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":done_text}}}));
+                        } else if !done_text.is_empty() && done_text != text {
+                            return Err(
+                                "response.output_text.done text does not match accumulated deltas"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
                 "response.function_call_arguments.delta" => {
                     let index = active_tool_index
                         .ok_or("function arguments arrived before function call")?;
@@ -214,6 +281,7 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
                         arguments.push_str(delta);
                     }
                 }
+                "response.output_item.done" | "response.content_part.done" => {}
                 "response.completed" => {
                     response_id = data.pointer("/response/id").cloned().unwrap_or(Value::Null);
                     response_status = data
@@ -228,6 +296,9 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
     }
     decoder.finish().map_err(|error| error.to_string())?;
     let mut output = Vec::new();
+    if !text.is_empty() {
+        output.push(json!({"type":"output_text","text":text}));
+    }
     if !reasoning.is_empty() {
         output
             .push(json!({"type":"reasoning","summary":[{"type":"summary_text","text":reasoning}]}));
@@ -255,9 +326,35 @@ fn response_sse_fields(fields: &[SseField]) -> Result<(String, Value), String> {
             }
         }
     }
-    let event = event.ok_or("SSE frame has no event field")?;
-    let data = serde_json::from_str(&data_lines.join("\n")).map_err(|error| error.to_string())?;
+    let data_text = data_lines.join("\n");
+    if data_text == "[DONE]" {
+        return Ok((event.unwrap_or_else(|| "[DONE]".to_string()), Value::Null));
+    }
+    let data: Value = serde_json::from_str(&data_text).map_err(|error| error.to_string())?;
+    let event = match event {
+        Some(event) => event,
+        None => data
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or("SSE frame has no event field")?
+            .to_string(),
+    };
     Ok((event, data))
+}
+
+fn ensure_text_content_block(
+    events: &mut Vec<Value>,
+    active_text_index: &mut Option<u64>,
+    next_index: &mut u64,
+) -> u64 {
+    if let Some(index) = *active_text_index {
+        return index;
+    }
+    let index = *next_index;
+    events.push(json!({"event":"content_block_start","data":{"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}}));
+    *active_text_index = Some(index);
+    *next_index = index + 1;
+    index
 }
 
 fn encode_messages(messages: &[Value]) -> Vec<Value> {

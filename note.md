@@ -30981,3 +30981,18 @@ Pure Rust NAPI candidates:
 - Root fix stays in `routecodex-v3-server::build_v3_models_catalog`: seed/dedupe bare `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, then overlay non-duplicate configured aliases and allowed runtime context/streaming fields. No Router, Provider, auth, continuation, or fallback owner changed.
 - Added `v3.models_capability_catalog` resource/function/mainline/verification bindings and test design. Focused 2/2, V3 architecture/resource/module/Rust-only/fmt/Clippy/workspace, live parity verifier/red fixtures, CLI build, and diff check passed.
 - Live install/restart/replay remains pending because another active live-compat worker currently owns Anthropic live shape repair and global install/restart coordination; no concurrent live mutation was performed.
+
+# 2026-07-16T11:30+08:00 V3 5555 live provider compat partial closeout
+
+- Pre-fix live check: managed 5555 /v1/models returned only gpt-5.6-sol; gpt-5.5, gpt-5.6-terra, and gpt-5.6-luna were absent, so the V3 catalog still missed production Codex built-ins.
+- Source fix used routecodex-v3-server::build_v3_models_catalog only: seed/dedupe built-in Codex catalog entries, then overlay non-duplicate configured aliases. Focused p6_models_endpoint tests passed 2/2.
+- Global install succeeded and refreshed snapshots to /Users/fanzhang/.rcc/install/releases/routecodex-0.90.3935-2026-07-16T032522Z and /Volumes/extension/.rcc/install/releases/routecodex-0.90.3935-2026-07-16T032531Z. The install script's V2 routecodex restart could not find a RouteCodex server on localhost:5555, so V3 was refreshed with routecodex-v3 server restart --config ~/.rcc/config.v3.toml --timeout-ms 30000.
+- Managed V3 restart evidence: PID 3130, PPID 1, command /Users/fanzhang/.rcc/install/current/dist/bin/routecodex-v3 server run-managed-child --config /Volumes/extension/.rcc/config.v3.toml; 5555 /health OK, and V2 5520/4444/10000 health stayed OK at 0.90.3935.
+- Final live replay PASS: /v1/models has gpt-5.5/gpt-5.6-sol/gpt-5.6-terra/gpt-5.6-luna and all required Codex fields; Responses Direct JSON/SSE/client WebSocket markers V3_COMPAT_DIRECT_JSON_OK / V3_COMPAT_DIRECT_SSE_OK / V3_COMPAT_DIRECT_WS_OK passed; OpenAI Chat Relay JSON/SSE markers V3_COMPAT_OPENAI_CHAT_JSON_OK / V3_COMPAT_OPENAI_CHAT_SSE_OK passed.
+- Boundary: this closes the requested minimum final 5555 profile responses + openai_chat only. /v1/responses Relay cutover, Anthropic Messages live replay, Gemini live replay, and unverified live error cases remain blockers/pending.
+
+# 2026-07-16T11:48+08:00 V3 live compat matrix closeout
+- Root cause found by live matrix: Anthropic Relay projection dropped live Responses JSON output item type=message with nested content type=output_text and rejected data-only Responses SSE frames without event field. Fix owner stayed in v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs; Hub/VR unchanged.
+- Red evidence: focused Anthropic relay runtime test failed on empty JSON content and SSE frame has no event field; green evidence: focused test 5/5, verifier, red fixtures, V3 fmt/clippy/workspace.
+- Live evidence after global install + managed restart: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json. Verified /v1/models, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat JSON/SSE. Anthropic/Gemini are explicit final-profile endpoint_not_enabled blockers because current 5555 declares only responses/openai_chat.
+- Updated compat matrix manifest/wiki/plan and verifier/red fixtures to record partial live provider replay without live config mutation or production cutover.

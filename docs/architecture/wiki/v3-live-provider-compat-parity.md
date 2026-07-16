@@ -35,11 +35,11 @@ The machine manifest covers every endpoint and transport pair:
 
 | Endpoint | JSON HTTP | SSE HTTP | WebSocket v2 |
 | --- | --- | --- | --- |
-| Responses Direct | controlled verified, live pending | controlled verified, live pending | controlled verified, live blocker |
+| Responses Direct | controlled + live verified | controlled + live verified | controlled + live verified for client-facing WebSocket |
 | Responses Relay | controlled verified, live blocker | controlled verified, live blocker | controlled verified, live pending |
-| Anthropic Messages | controlled verified, live pending | controlled verified, live pending | blocked: no entry contract |
-| OpenAI Chat Completions | controlled verified, live pending | controlled verified, live pending | blocked: no entry contract |
-| Gemini Generate Content | controlled verified, live pending | controlled verified, live pending | blocked: no entry contract |
+| Anthropic Messages | controlled verified, final 5555 profile blocker | controlled verified, final 5555 profile blocker | blocked: no entry contract |
+| OpenAI Chat Completions | controlled + live verified | controlled + live verified | blocked: no entry contract |
+| Gemini Generate Content | controlled verified, final 5555 profile blocker | controlled verified, final 5555 profile blocker | blocked: no entry contract |
 
 The manifest also locks the required error cases: http_401, http_402, http_403, http_429, http_5xx, sse_body_level_failure, malformed_provider_body, timeout, disconnect, and cancel.
 
@@ -61,12 +61,14 @@ The /v1/models capability case tracks the Codex request-builder fields that can 
 
 Current blockers are explicit and must not be silently converted into readiness:
 
-- live_inbound_websocket_replay_pending: client-facing Responses WebSocket proxy is controlled-verified, but real live/provider WebSocket replay remains pending.
-- responses_websocket_v2_live_endpoint_pending: provider-verified Responses WebSocket v2 endpoint and real two-turn success remain pending.
+- responses_relay_cutover_pending: /v1/responses Relay cutover is still not claimed by this matrix.
 - live_relay_cutover_pending: controlled Relay closeout does not prove live Relay Server cutover.
-- live_provider_replay_matrix_pending: read-only live provider replay matrix still needs real provider evidence.
+- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for pending Anthropic, Gemini, and error cases.
+- anthropic_messages_live_replay_pending: Anthropic Messages JSON/SSE is not enabled in the final 5555 profile.
+- gemini_generate_content_live_replay_pending: Gemini Generate Content JSON/SSE remains outside the final 5555 profile.
+- final_5555_profile_anthropic_endpoint_not_enabled and final_5555_profile_gemini_endpoint_not_enabled: live 5555 returned typed endpoint_not_enabled errors for protocols excluded from the final responses + openai_chat profile.
 
-Read-only audit on 2026-07-16T01:09:15Z found reachable ports 5520, 4444, and 10000 reporting RouteCodex 0.90.3935, while 5555 had no listener. That audit is not V3 live provider parity evidence and keeps live_v3_provider_replay_pending explicit.
+Live audit on 2026-07-16T03:41:00Z used the globally installed managed V3 5555 profile with endpoints responses and openai_chat. Evidence is recorded in .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json. It verified /v1/models for gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna with required Codex capability fields, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE against the real provider. Anthropic Messages and Gemini Generate Content returned explicit endpoint_not_enabled because the final 5555 profile does not declare those endpoints. The audit status is live_v3_provider_replay_partial_verified; it is not a full production cutover, live config mutation, or P6 deletion claim.
 
 ## Required Gates
 
@@ -83,4 +85,4 @@ Read-only audit on 2026-07-16T01:09:15Z found reachable ports 5520, 4444, and 10
 
 ## Completion Boundary
 
-This closeout can prove the matrix contract and identify verified/pending/blocker states. It does not by itself authorize or prove live config mutation, credential mutation, global install/restart, P6 deletion, or production cutover.
+This closeout proves a partial live 5555 provider replay after authorized global install, managed V3 restart, and final live profile responses + openai_chat. It does not prove credential mutation, full Relay cutover, P6 deletion, Anthropic/Gemini live replay, the full error matrix, or production cutover.

@@ -133,7 +133,7 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
-    runtime_status: source_controlled_live_5555_replay_pending
+    runtime_status: live_5555_verified
 
   - feature_id: v3.entry_protocol_endpoint_binding
     owner_kind: v3_review_gate_surface
@@ -1564,10 +1564,10 @@ features:
       - P6 deletion and production cutover
 
   - feature_id: v3.live_provider_compat_parity_closeout
-    status: matrix_contract_verified_pending_live_replay
+    status: partial_live_provider_replay_verified
     change_risk: high
     owner_kind: docs_verifier_v3_compat_gate
-    owner_scope: "V3 live provider compatibility parity matrix and production blocker projection. This owner records evidence levels; it does not mutate live config or runtime provider behavior."
+    owner_scope: "V3 live provider compatibility parity matrix and production blocker projection. This owner records evidence levels and the authorized partial 5555 live replay; it does not claim full production cutover."
     owner_files:
       - docs/architecture/manifests/v3.live_provider_compat.parity.yml
       - scripts/architecture/verify-v3-live-provider-compat-parity.mjs
@@ -1600,8 +1600,8 @@ features:
       - ~/.rcc
       - provider credentials
       - live config mutation
-      - global install
-      - restart
+      - unauthorized global install
+      - unauthorized restart
       - P6 deletion
       - Hub or Virtual Router provider-specific runtime branches
     required_gates:

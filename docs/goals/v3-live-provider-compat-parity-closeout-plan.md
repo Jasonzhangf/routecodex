@@ -93,3 +93,21 @@ Out of scope：
 - live/provider compat matrix 可查询，verified/pending/blocker 状态明确。
 - 所有 declared production-ready case 均有 controlled + live 双证据。
 - 未完成项不冒充完成；阻塞切流的 provider/protocol/transport/tool/image/error 缺口被列成明确 owner backlog。
+
+## 9. 2026-07-16 partial live 5555 closeout
+
+Authorized live closeout installed the current source globally, restarted the managed V3 5555
+instance, and verified the final live profile responses + openai_chat with real provider replay.
+Evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json.
+
+Verified live cases:
+
+- /v1/models capability catalog for gpt-5.6-sol with required Codex request-builder fields.
+- Responses Direct JSON and SSE.
+- Responses Direct client-facing WebSocket on GET /v1/responses with
+  OpenAI-Beta: responses_websockets=2026-02-06.
+- OpenAI Chat Relay JSON and SSE on /v1/chat/completions.
+
+Remaining blockers stay explicit: /v1/responses Relay cutover, Anthropic Messages final-profile
+endpoint_not_enabled, Gemini Generate Content final-profile endpoint_not_enabled, and the
+unverified live error matrix. No live config mutation or P6 deletion is claimed.

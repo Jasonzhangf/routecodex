@@ -76,14 +76,17 @@ if (manifest.production_policy?.provider_specific_hub_vr_forbidden !== true) {
 }
 if (manifest.completion_boundary?.production_ready_claim !== false
     || manifest.completion_boundary?.live_config_mutation !== false
-    || manifest.completion_boundary?.global_install_restart !== false) {
-  failures.push(manifestPath + ': completion boundary must not claim production/live mutation');
+    || manifest.completion_boundary?.global_install_restart !== true) {
+  failures.push(manifestPath + ': completion boundary must record global install/restart live closeout without live config mutation or full production cutover');
 }
-if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_pending') {
-  failures.push(manifestPath + ': live read-only audit must keep V3 provider replay pending');
+if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_partial_verified') {
+  failures.push(manifestPath + ': live audit must record partial V3 provider replay verification');
 }
-if (!String(manifest.live_read_only_audit?.finding ?? '').includes('not V3 live provider parity evidence')) {
-  failures.push(manifestPath + ': live read-only audit must not claim V3 live provider parity');
+if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE')) {
+  failures.push(manifestPath + ': live audit must name the verified V3 5555 live replay surface');
+}
+if (!String(manifest.live_read_only_audit?.finding ?? '').includes('endpoint_not_enabled')) {
+  failures.push(manifestPath + ': live audit must record final-profile endpoint_not_enabled blockers');
 }
 
 for (const endpoint of expectedEndpoints) requireArrayText(manifest.axes?.endpoints, endpoint, 'axes.endpoints');
@@ -152,10 +155,13 @@ else {
 }
 
 for (const blocker of [
-  'live_inbound_websocket_replay_pending',
-  'responses_websocket_v2_live_endpoint_pending',
+  'responses_relay_cutover_pending',
   'live_relay_cutover_pending',
   'live_provider_replay_matrix_pending',
+  'anthropic_messages_live_replay_pending',
+  'gemini_generate_content_live_replay_pending',
+  'final_5555_profile_anthropic_endpoint_not_enabled',
+  'final_5555_profile_gemini_endpoint_not_enabled',
 ]) {
   if (!(manifest.production_blockers ?? []).some((entry) => entry.blocker_id === blocker)) {
     failures.push(manifestPath + ': missing production blocker ' + blocker);
@@ -209,8 +215,9 @@ for (const phrase of [
 ]) requireText(wiki, wikiPath, phrase);
 for (const phrase of [
   'live_provider_replay_matrix_pending',
-  'responses_websocket_v2_live_endpoint_pending',
-  'live_inbound_websocket_replay_pending',
+  'responses_relay_cutover_pending',
+  'anthropic_messages_live_replay_pending',
+  'gemini_generate_content_live_replay_pending',
 ]) requireText(wiki, wikiPath, phrase);
 
 if (failures.length) {
