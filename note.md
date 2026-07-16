@@ -10,6 +10,7 @@
 - Dirty code review found a partial kernel-side bypass for HTTP-only terminal SSE. Root fix moved to `v3/crates/routecodex-v3-runtime/src/shared.rs`: streaming `response.created` is a candidate id only; actual Resp04 commit/capability error waits for function-call/requires_action evidence. Added positive terminal SSE and negative HTTP-only function-call tests.
 - Verification after root fix: owner gate, direct verifier/red fixtures, H4, P6 freeze, H2 equivalence, V3 architecture/resource/module/Rust-only/fmt/clippy/workspace, and `git diff --check` passed.
 - No provider credential, live config, global install, or restart mutation was performed. Live closeout remains pending until Jason explicitly authorizes enabling WebSocket v2 `remote_continuation` capability in the live profile and restarting/replaying.
+- Follow-up managed 5555 start attempt after source gates: both installed and target `routecodex-v3 server start --config ~/.rcc/config.v3.toml` fail with `IdentityMismatch("refusing to reap state for a different instance declaration")` while `server status` reports `state="stopped"` and `curl :5555/health` is connection refused. No state file deletion or broad kill was performed; this is a separate managed lifecycle blocker before live replay can prove the SSE fix.
 
 # 2026-07-16T09:58+08:00 V3 inbound Responses WebSocket proxy closeout
 
