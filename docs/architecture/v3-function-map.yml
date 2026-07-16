@@ -49,7 +49,7 @@ features:
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
-    runtime_status: managed_lifecycle_source_and_live_5555_pending
+    runtime_status: source_controlled_and_live_5555_release_rollover_verified
 
   - feature_id: v3.config_server_full_function
     owner_crates: [routecodex-v3-config, routecodex-v3-server, routecodex-v3-error]
@@ -919,12 +919,10 @@ features:
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
-    runtime_status: source_and_controlled_json_sse_http_replay_verified_websocket_v2_transport_binding_pending_live_5555_pending
+    runtime_status: source_and_controlled_json_sse_websocket_v2_replay_verified_live_5555_profile_pending
     pending_runtime:
-      - Config and Manifest transport-bound remote continuation capability
-      - Provider-owned Responses WebSocket v2 connection and event transport
-      - controlled WebSocket JSON and SSE two-turn replay
-      - current managed 5555 real JSON and SSE two-turn success
+      - current managed 5555 profile still uses HTTP transport without remote_continuation/tool_outputs capability
+      - current managed 5555 real JSON/SSE/client-WS two-turn success after authorized live config and restart
 
   - feature_id: v3.anthropic_relay_runtime_integration
     owner_crates: [routecodex-v3-runtime, routecodex-v3-server]

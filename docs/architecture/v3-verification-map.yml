@@ -3,6 +3,7 @@ status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
   - feature_id: v3.managed_server_lifecycle
+    status: source_controlled_and_live_5555_release_rollover_verified
     change_risk: high
     owner_kind: rust_project_v3
     owner_scope: "Managed process control for one V3 aggregate instance; request/response Runtime remains the only business lifecycle."
@@ -988,7 +989,7 @@ features:
       runtime: "Evidence is limited to the built repo-local controlled Server-owned driver and loopback upstream; it does not establish live 5555 or production compatibility."
       forbidden_claim: "Do not claim live 5555, continuation E2E, P6 deletion, global installation, restart, release, production cutover, or real-provider compatibility."
   - feature_id: v3.responses_direct_remote_continuation_integration
-    status: source_and_controlled_json_sse_http_replay_verified_websocket_v2_transport_binding_pending_live_5555_pending
+    status: source_and_controlled_json_sse_websocket_v2_replay_verified_live_5555_profile_pending
     change_risk: high
     owner_kind: rust_v3_responses_direct_remote_continuation_runtime
     owner_scope: "Resp04 immutable locator commit/release, next Req03 scope load/classification, Req06 exact provider/model/auth resolution, and Server-scoped JSON/SSE two-turn replay"
@@ -1040,7 +1041,7 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
     completion_rule:
-      source: "All source bindings maps manifests gates and JSON/SSE controlled replays pass with one Runtime kernel and one response exit."
+      source: "All source bindings maps manifests gates and JSON/SSE/WebSocket-v2 controlled replays pass with one Runtime kernel and one response exit."
       runtime: "The current 5555 same-entry two-turn Responses request completes and samples/logs prove the actual two-turn provider-owned continuation."
       forbidden_claim: "Do not claim Relay/local materialization, P6 expansion, V2 change, credential/config mutation, global install, restart, or production replacement."
 

@@ -10,7 +10,8 @@
 - Dirty code review found a partial kernel-side bypass for HTTP-only terminal SSE. Root fix moved to `v3/crates/routecodex-v3-runtime/src/shared.rs`: streaming `response.created` is a candidate id only; actual Resp04 commit/capability error waits for function-call/requires_action evidence. Added positive terminal SSE and negative HTTP-only function-call tests.
 - Verification after root fix: owner gate, direct verifier/red fixtures, H4, P6 freeze, H2 equivalence, V3 architecture/resource/module/Rust-only/fmt/clippy/workspace, and `git diff --check` passed.
 - No provider credential, live config, global install, or restart mutation was performed. Live closeout remains pending until Jason explicitly authorizes enabling WebSocket v2 `remote_continuation` capability in the live profile and restarting/replaying.
-- Follow-up managed 5555 start attempt after source gates initially failed with `IdentityMismatch("refusing to reap state for a different instance declaration")` while `server status` reported `state="stopped"`. Root lifecycle fix allows same config identity to roll to the next release/target executable only from terminal `stopped|failed` state; active or foreign state remains rejected. After the fix, target `routecodex-v3 server start --config ~/.rcc/config.v3.toml` started 5555 and live JSON/SSE `/v1/responses` returned `V3_JSON_OK` / `V3_SSE_OK` with `response.completed` and `[DONE]`.
+- Follow-up managed 5555 start attempt after source gates: both installed and target `routecodex-v3 server start --config ~/.rcc/config.v3.toml` fail with `IdentityMismatch("refusing to reap state for a different instance declaration")` while `server status` reports `state="stopped"` and `curl :5555/health` is connection refused. No state file deletion or broad kill was performed; this is a separate managed lifecycle blocker before live replay can prove the SSE fix.
+- Current-state re-audit: controlled direct remote-continuation and provider WebSocket v2 gates pass, including JSON/SSE/WebSocket-v2 two-turn coverage. Live `~/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml` still declare `cc_sol` Responses transport as `http` and omit `remote_continuation` / `tool_outputs`; `routecodex-v3 server status --config ~/.rcc/config.v3.toml` now reports stopped and 5555 has no listener. No live config, credential, global install, or restart mutation was performed in this re-audit.
 
 # 2026-07-16T09:58+08:00 V3 inbound Responses WebSocket proxy closeout
 
@@ -30952,3 +30953,22 @@ Pure Rust NAPI candidates:
 - Validation PASS on current tree: focused inbound WS verifier/red/tests, Relay tool/servertool verifier/red/tests, live provider compat verifier/red, hub skeleton doc red, provider-failure blackbox including HTTP 402 reroute, V3 fmt/clippy/workspace, V3 architecture/resource/module/Rust-only/static-hook, resource/function/mainline/review gates, and git diff --check.
 - Global install verification PASS: ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh; installed routecodex --version reports 0.90.3935; installed routecodex-v3 --help works from /Users/fanzhang/.local/bin/routecodex-v3.
 - Boundary: port 5555 still has no listener, so real V3 JSON/SSE/WS live provider replay and active goal v3.responses_direct_remote_continuation_integration remain not complete. No live config, credential, restart, P6 deletion, or production cutover was performed beyond the authorized global install.
+
+# 2026-07-16T11:00+08:00 V3 managed release rollover and 5555 live closeout
+
+- Clean HEAD red probe reproduced terminal same-config release rollover failure:
+  `IdentityMismatch("refusing to reap state for a different instance declaration")`.
+- Lifecycle now allows only `executable_path` to advance when schema, instance ID, canonical config
+  path/digest, listeners, and terminal `stopped|failed` truth match. Running, missing-terminal,
+  foreign-control, config/listener, and other declaration differences remain fail-fast.
+- Controlled evidence: lifecycle release tests 3/3, lifecycle unit 9/9, CLI lifecycle 4/4 including
+  release-a stop -> release-b start, verifier, 14 red mutations, architecture/resource/module/
+  Rust-only/fmt/Clippy/full V3 workspace/CLI build all pass.
+- Installed snapshot `routecodex-0.90.3935-2026-07-16T025310Z` owns managed instance
+  `v3-8c6067c5e9bf284db30d`. One managed restart changed PID `51320 -> 55831` and nonce while retaining
+  the instance ID. Live JSON returned exact `V3_RESTART_JSON_OK`; live SSE returned exact
+  `V3_RESTART_SSE_OK`, `response.completed`, and `[DONE]`. V2 ports 5520/4444/10000 remained healthy
+  at `0.90.3935`.
+- This closes ordinary HTTP JSON/SSE and lifecycle rollover only. Current HTTP profile still does not
+  advertise remote continuation/tool-output continuation; no unverified WebSocket endpoint or
+  fallback was added.

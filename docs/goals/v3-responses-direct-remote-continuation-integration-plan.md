@@ -162,3 +162,19 @@ response。`store=false` 的 continuation state 只存在于当前连接内，ID
 
 结论：source/controlled closeout 仍有效，但 live 5555 closeout 继续 pending。按本目标约束，启用
 `remote_continuation` / WebSocket v2 provider transport 需要 live config 与 restart 变更，必须等待 Jason 明确授权后再执行。
+
+## 12. Current-state audit（2026-07-16）
+
+当前 source/controlled 状态已从 WebSocket v2 binding pending 推进为 controlled JSON/SSE/WebSocket-v2 replay
+verified：`npm run test:v3-responses-direct-remote-continuation`、direct verifier、direct red fixtures、
+WebSocket v2 hardening verifier 与 red fixtures均通过。controlled coverage 已包含 Config transport-bound
+capability、provider WebSocket v2 lifecycle、Runtime JSON/SSE continuation、Server JSON/SSE two-turn replay、
+Req03 load、Req06 exact pin、续接轮 Router hit=0、no Relay/local materialization、no provider reselection。
+
+当前 live 状态仍未满足完成标准：`~/.rcc/config.v3.toml` 与
+`/Volumes/extension/.rcc/config.v3.toml` 的 `cc_sol` 仍声明
+`responses = { process = "chat", streaming = "always", transport = "http" }`，模型能力仍只有
+`text/reasoning/tools/streaming`，未发布 `remote_continuation` / `tool_outputs`，且当前
+`routecodex-v3 server status --config ~/.rcc/config.v3.toml` 显示 `state="stopped"`、5555 无 listener。
+按本目标执行规范，live config / credential / restart 仍需 Jason 明确授权后才能执行真实 JSON/SSE/client-WS
+两轮 replay。
