@@ -31043,3 +31043,27 @@ Pure Rust NAPI candidates:
 - Source fix: `routecodex-v3-config/src/v2_compat.rs` now reads V2 `[provider.responses] transport` and `websocket_v2_url` / `websocketV2Url`, defaults omitted transport to HTTP, and leaves V3 compile gates to reject HTTP-only remote continuation or WebSocket v2 without endpoint. Existing provider-protocol endpoint enablement remains a separate Config binding truth and was not changed in this transport-projection patch.
 - Gate evidence PASS: `npm run test:v3-config-v2-compat-5555`; `npm run test:v3-responses-direct-remote-continuation`; `npm run verify:v3-responses-direct-remote-continuation`; direct red fixtures; WS hardening verifier/red fixtures; V3 fmt; V3 Clippy; full V3 workspace; resource/module/Rust-only/mainline/manifest/review/function gates; `git diff --check`.
 - Boundary: no live credential/config/global install/restart was changed. Real 5555 two-turn remote continuation still needs a provider-verified WebSocket v2 endpoint plus authorized config/restart/replay.
+
+# 2026-07-16T19:40+08:00 5520 router-direct provider failure diagnosis
+- User-pasted request `openai-responses-router-gpt-5.6-sol-20260716T191037476-550958-9769` was found in `~/.rcc/logs/server-4444.log` even though the entry port is 5520; this aggregate process logs 5520/4444/10000 together after 19:10 restart.
+- Exact chain: longcontext -> `cc.key1.gpt-5.5` failed HTTP_402 insufficient credits, switched; -> `asxs.crsa.gpt-5.5` logged public `Unclassified error ... missing status/code` but provider-switch classified `catalogKey=ECONNRESET`, switched; -> `asxs.crsb.gpt-5.5` failed HTTP_401 and this request stopped without `provider.error_action_backoff_wait` / `provider-switch` for attempt 3.
+- Config truth: 5520 `longcontext` and `default` both include `fwd.free.gpt-5.5` then `fwd.paid.gpt-5.5`; paid provider chain is asxs -> 1token -> 55ai. Current installed native ErrorErr05 returns `shouldRetry=true` for HTTP_401 while default pool is available.
+- Later same-process evidence at 19:34 (`openai-responses-router-gpt-5.5-20260716T192849943-551209-10020`) rerouted asxs.crsb HTTP_401 to 1token then 55ai, so the pasted missing-status line itself is a provider transport reset symptom, not the only root. The remaining recurring problem is provider pool/account health: cc 402/504, asxs crsa 502/ECONNRESET, asxs crsb 401 invalid key, 1token/55ai 403 balance/group errors.
+
+# 2026-07-16T20:00+08:00 asxs 单 key 修复与 live smoke
+- 已把 ~/.rcc/provider/asxs/config.v2.toml 的 provider.auth.entries 从两条收敛为一条：只保留 crsa，apiKey 继续引用 CRS_OAI_KEY1；删除了失效的 crsb 静态 key。
+- routecodex config validate 通过；5520/4444/10000 /health 都是 ok。
+- live 验证：POST /v1/chat/completions，messages 内用 <**!asxs.gpt-5.5**>，实际路由命中 asxs[crsa].gpt-5.5，响应返回 ASXS_OKASXS_OK，客户端响应里未见内部 metadata。
+- 同时确认 /v1/responses 的 provider-request dry-run 在同类文本 marker 下仍会路由到 cc.key1.gpt-5.5，所以这条入口不能拿同一 marker 当 asxs 证据；本次 asxs 证据取自 chat/completions live smoke + log line。
+
+# 2026-07-16T19:44+08:00 V3 5555 Responses Relay live provider replay
+
+- Current dirty source globally installed as routecodex/rcc/rccv3 0.90.3935; `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current` package versions matched and `rccv3` sha256 matched.
+- V3 managed start on `/Volumes/extension/.rcc/config.5555.v2.toml` safely recovered a stale `running` state whose old release executable path had been pruned; no state file deletion, broad kill, live config mutation, or credential edit was used.
+- Live 5555 `/health` returned `status=ok`, `server_id=gateway_priority_5555`, `manifest_version=3`. `/v1/models` returned required Codex capability fields for `gpt-5.6-sol`.
+- POST `/v1/responses` now enters Responses Relay on the fixed Req01-Req09/Resp01-Resp06 trace. JSON and SSE returned HTTP 200 with exact markers `V3_RESPONSES_REPLAY_JSON_OK` / `V3_RESPONSES_REPLAY_SSE_OK`, and forbidden Direct/P6 markers were absent.
+- GET `/v1/responses` client WebSocket remains Direct and returned marker `V3_RESPONSES_DIRECT_WS_FRESH_OK`. Direct JSON/SSE cannot be freshly replayed through current POST binding without changing config; matrix keeps the same-day pre-cutover Direct JSON/SSE live evidence from `20260716T032203Z-Macstudio.local-73370-compatresume`.
+- Evidence: `.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json`.
+
+# 2026-07-16T11:40:07Z V3 resource/call-edge wording correction
+- Jason corrected the V3 architecture wording: resources themselves are not "edges"; callable/runtime paths must be expressed as adjacent `from_node -> to_node` edges. Resource relationships travel on those call/lifecycle edges as `resource_flow` (`consumes` / `produces` / `side_channel_reads` / `side_channel_writes`). Multiple callable/resource relationships mean multiple explicit edges; `allowed_paths` remains feature file-scope, not a call/resource edge.

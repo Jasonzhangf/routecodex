@@ -3510,3 +3510,23 @@
 - 60d0c90f4 fixed the live Gemini misroute class: V2 TOML projection no longer enables Gemini without an enabled Gemini provider, and Gemini runtime rejects non-Gemini selected targets before provider send.
 - Verified after global rccv3 install snapshot 0.90.3935 and managed restart of /Volumes/extension/.rcc/config.5555.v2.toml: Gemini /v1beta/models/gemini-wire/generateContent JSON and SSE both returned HTTP 501 endpoint_not_enabled at V3Server03HttpRequestRaw through Error01-06. The sanitized active config contains no Gemini provider endpoint.
 - Current Gemini live state is an unauthorized profile blocker, not production readiness and not the previous model_not_found default-OpenAI-target runtime bug. Do not mark Gemini live provider replay ready until an authorized Gemini endpoint/provider profile is configured, restarted, and JSON/SSE provider replay succeeds.
+
+# 2026-07-16: V3 resource relation vs call-path edge rule
+- V3 resources are nodes/truths, not standalone call edges. Callable/runtime paths must be represented by adjacent `from_node -> to_node` edges in `docs/architecture/v3-mainline-call-map.yml` or lifecycle manifests.
+- Resource relationships are carried by each edge's `resource_flow` (`consumes`, `produces`, `side_channel_reads`, `side_channel_writes`). Multiple callable paths or resource relationships require multiple explicit edges.
+- `docs/architecture/v3-function-map.yml` `allowed_paths` / `forbidden_paths` are feature file-scope constraints only; do not treat them as call-path or resource-relation edges.
+
+# 2026-07-16 V3 5555 Responses Relay live provider replay
+
+- Globally installed `routecodex/rcc/rccv3` 0.90.3935 with matching `rccv3` sha256 across `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`; managed 5555 ran from `/Volumes/extension/.rcc/config.5555.v2.toml` as instance `v3-2412d59aaae7317c9867`.
+- Managed lifecycle can safely recover stale `running` state after release executable rollover only when same config/listener identity is proven, control socket is gone, pid/control ownership is valid, and all listener addresses are available. Do not hand-delete V3 runtime state or kill ports to fix this class.
+- Current POST `/v1/responses` on 5555 is Responses Relay. Live JSON/SSE replay returned HTTP 200 with exact markers and the full fixed Req01-Req09/Resp01-Resp06 trace; Direct/P6 markers were absent. `/v1/models` returned required Codex capability fields.
+- Direct client WebSocket on GET `/v1/responses` remains live verified. Direct JSON/SSE evidence for the matrix is the same-day pre-cutover Direct POST replay; do not re-label current Relay POST replay as Direct.
+- Evidence: `.agent-collab/runs/20260716T110035Z-Macstudio.local-31201-f5633c/logs/live-provider-matrix-20260716T114218Z/summary.json`.
+
+# 2026-07-16 asxs 单 key 事实
+
+- ~/.rcc/provider/asxs/config.v2.toml current active auth entry is only crsa, and it still binds to CRS_OAI_KEY1; crsb has been removed from the active config.
+- Verification: routecodex config validate passed, and 5520/4444/10000 health all returned ok.
+- Live smoke: POST /v1/chat/completions with messages containing <**!asxs.gpt-5.5**> routed to asxs[crsa].gpt-5.5 and returned ASXS_OKASXS_OK.
+- Observation: /v1/responses provider-request dry-run on the same textual marker still selected cc.key1.gpt-5.5, so asxs credential verification should use the chat/completions live smoke path instead of that responses dry-run marker as proof.
