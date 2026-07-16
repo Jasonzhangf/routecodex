@@ -418,6 +418,26 @@ function readRoutingDecisionProviderPool(
   return pool.length > 0 ? pool : [currentProviderKey];
 }
 
+function shouldAllowRouterDirectExcludedProviderReselection(
+  args: {
+    availabilityDecision: {
+      hasAlternativeCandidate?: boolean;
+      verifiedLastProvider?: boolean;
+    };
+    vrDefaultFloorProtected?: boolean;
+  }
+): boolean {
+  // feature_id: error.execution_decision_consumer
+  // TS consumes Rust route/availability truth only. This permits the VR-owned
+  // default-floor / verified-last-provider selection to execute even when the
+  // provider was excluded on an earlier route tier.
+  if (args.vrDefaultFloorProtected === true) {
+    return true;
+  }
+  return args.availabilityDecision.hasAlternativeCandidate !== true
+    && args.availabilityDecision.verifiedLastProvider === true;
+}
+
 function logRouterDirectNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
   const now = Date.now();
   const last = routerDirectNonBlockingLogState.get(stage) ?? 0;
@@ -1775,19 +1795,81 @@ export class RouteCodexHttpServer {
       });
     }
     if (!retryState.retryProviderKey && retryState.excludedProviderKeys.has(providerKey)) {
+      const routingDecisionProviderPool = readRoutingDecisionProviderPool(
+        routingDecision,
+        providerKey
+      );
+      const routingDecisionRouteName =
+        typeof routingDecision?.routeName === 'string' ? routingDecision.routeName : undefined;
+      const routingPolicyGroupForErrorErr05 =
+        resolveErrorErr05RoutingPolicyGroup({
+          metadata: metadataForHub,
+          portRoutingPolicyGroup: portConfig.routingPolicyGroup,
+        });
+      const routingDecisionTiers =
+        routingDecisionRouteName && routingPolicyGroupForErrorErr05
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
+              routingDecisionRouteName,
+            )
+          : [];
+      const defaultRouteTiers =
+        routingDecisionRouteName && routingPolicyGroupForErrorErr05
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(routingPolicyGroupForErrorErr05),
+              'default',
+            )
+          : [];
+      const availabilityDecision = resolveErrorErr05RouteAvailabilityDecision({
+        routeName: routingDecisionRouteName,
+        routePool: routingDecisionProviderPool,
+        routeTiers: routingDecisionTiers,
+        defaultRouteTiers,
+        excludedProviderKeys: retryState.excludedProviderKeys,
+        providerKey,
+        routingDecisionRoutePoolPresent:
+          Array.isArray((routingDecision as Record<string, unknown> | undefined)?.routePool)
+          && ((routingDecision as Record<string, unknown>).routePool as unknown[]).length > 0,
+      });
+      const vrDefaultFloorProtected =
+        routingDecision
+        && typeof routingDecision === 'object'
+        && !Array.isArray(routingDecision)
+        && (routingDecision as Record<string, unknown>).defaultFloorProtected === true;
       this.logStage('router-direct.retry.excluded_target_reselected', input.requestId, {
         providerKey,
         excluded: Array.from(retryState.excludedProviderKeys),
         directAttempt,
+        routeName: routingDecisionRouteName,
+        defaultFloorProtected: vrDefaultFloorProtected,
+        hasAlternativeCandidate: availabilityDecision.hasAlternativeCandidate,
+        routePoolIsAuthoritative: availabilityDecision.routePoolAuthoritative,
+        defaultTierAvailable: availabilityDecision.defaultPoolAvailable,
+        isVerifiedLastProvider: availabilityDecision.verifiedLastProvider,
+        reasonCode: availabilityDecision.reasonCode,
       });
-      if (retryState.lastError) {
-        throw retryState.lastError;
+      if (shouldAllowRouterDirectExcludedProviderReselection({
+        availabilityDecision,
+        vrDefaultFloorProtected,
+      })) {
+        this.logStage('router-direct.retry.excluded_target_reselected_last_provider', input.requestId, {
+          providerKey,
+          excluded: Array.from(retryState.excludedProviderKeys),
+          directAttempt,
+          routeName: routingDecisionRouteName,
+          defaultFloorProtected: vrDefaultFloorProtected,
+          reasonCode: availabilityDecision.reasonCode,
+        });
+      } else {
+        if (retryState.lastError) {
+          throw retryState.lastError;
+        }
+        throw Object.assign(new Error(`router-direct reselected excluded provider ${providerKey}`), {
+          code: 'ERR_ROUTER_DIRECT_EXCLUDED_PROVIDER_RESELECTED',
+          requestId: input.requestId,
+          providerKey,
+        });
       }
-      throw Object.assign(new Error(`router-direct reselected excluded provider ${providerKey}`), {
-        code: 'ERR_ROUTER_DIRECT_EXCLUDED_PROVIDER_RESELECTED',
-        requestId: input.requestId,
-        providerKey,
-      });
     }
 
     const requestPayload = rawDirectPayload;

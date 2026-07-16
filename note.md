@@ -31134,3 +31134,36 @@ Pure Rust NAPI candidates:
 - Boundary: no global install/restart was needed because this commit only updates tests/docs and the installed 0.90.3935 runtime already contains the behavior; no forced upstream failure replay was run, but live success and dry-run floor diagnostics close the 5520 default-floor showstopper.
 - Sanitized live dry-run for 5520 multimodal with `metadataCenterSnapshot.runtimeControl.routeHint=multimodal` returns `selectedRouteName=multimodal`, `selectedProviderKey=cc.key1.gpt-5.5`, candidate keys `cc/asxs/1token/55ai`, and `wouldReturnProviderNotAvailable=false`; so 5520 multimodal currently does include cc and asxs candidates. Earlier asxs may still be health-cooldown in status, but it is not absent from the pool.
 - Live 5520 log sample `openai-responses-router-gpt-5.5-20260716T215113045-552767-11578` confirms provider error handling on installed runtime: `cc.key1.gpt-5.5` returned HTTP_400, RouteCodex logged `provider.error_action_backoff_wait delayMs=3000`, then `provider-switch attempt=1/6 -> 2/6`, then VR selected `cc-sol.key1.gpt-5.6-sol`, and usage completed with `model=gpt-5.5->gpt-5.6-sol`.
+
+# 2026-07-16T22:17+08:00 V3 CLI old-shape parser correction
+
+- Jason corrected the V3 startup surface: the user command must follow the old top-level RouteCodex shape, not a newly invented required `server` namespace.
+- Installed red evidence before the fix: global `/Users/fanzhang/.local/bin/rccv3 --help` exposed only `config/server/help`, and `rccv3 start --help` failed with `unrecognized subcommand 'start'`.
+- Source correction: `rccv3 start/status/restart/stop` now parse at top level and reuse the same `V3ManagedLifecycle` branches; `-c/--config` is accepted; the existing `rccv3 server ...` path remains compatible but is hidden from main help.
+- Docs, test design, wiki, verifier, red mutation fixture, project MEMORY, and July lesson were aligned to the same command truth. Global build/install and managed 5555/V2 coexistence replay remain the delivery gates for this correction.
+
+# 2026-07-16T23:28+08:00 V3 lifecycle start takeover parity correction
+
+- Jason corrected the remaining lifecycle semantic gap: `rccv3 start` must behave like old `rcc start` when the configured port is occupied. It should first gracefully stop the exact managed instance, then signal only explicit listener PIDs for the configured ports, escalating SIGTERM -> SIGKILL if needed; no broad kill or invented `AlreadyRunning` refusal.
+- Red evidence before the fix: duplicate managed `start` failed with `AlreadyRunning("v3-...")`, and a SIGTERM-resistant process holding the configured listener port failed with `Address already in use (os error 48)`.
+- Source correction stayed in `routecodex-v3-lifecycle`: `start` now releases the configured listener set before spawn, uses exact managed control stop first, discovers listener PIDs via scoped `lsof -nP -iTCP:<port> -sTCP:LISTEN -t`, and sends signals only to those explicit PIDs.
+- Verification evidence: focused red-to-green tests for duplicate start and SIGTERM-resistant listener, managed lifecycle verifier/red fixtures, lifecycle crate tests, CLI managed lifecycle tests, full V3 managed lifecycle suite, V3 architecture/resource/module/Rust-only/fmt/Clippy/workspace gates, `build:base`, global install, installed `rccv3` help, live 5555 duplicate `start` PID/nonce change `42085 -> 42312`, 5555 `/v1/models` + JSON/SSE provider replay, and V2 5520/4444/10000 health all passed.
+- Boundary: V3 SSE provider replay in this final run emitted the marker and `response.completed`, but no `[DONE]` was observed; report that exact live behavior rather than claiming `[DONE]`.
+
+## 2026-07-16 23:16 +0800 - 5520 router-direct default-floor reselect after provider switch chain
+- Live sample `openai-responses-router-gpt-5.5-20260716T224657418-553044-11855`: provider failures switched `cc-sol -> cc -> asxs -> 1token -> 55ai`; after 55ai ECONNRESET, VR selected `default -> cc.key1.gpt-5.5` with default floor, but router-direct projected previous 55ai ECONNRESET before sending the selected default-floor provider.
+- Root cause: router-direct TS excluded-provider guard vetoed a Rust VR default-floor reselect when the default provider had been excluded earlier on the primary route. This is not pool-empty and not missing asxs.
+- Fix direction: router-direct may reject excluded reselects only when Rust availability says alternatives remain/unverified; if Rust route decision has `defaultFloorProtected=true` or ErrorErr05 verifies last provider, it must execute the selected provider.
+- Tests added: forward live-shaped default-floor reselect sends the provider; reverse alternatives-remain excluded reselect does not send.
+
+# 2026-07-16T23:48+08:00 5520 router-direct default-floor fix globally installed and restarted
+
+- Jason corrected the closeout requirement: this source fix required global install plus managed 5520 aggregate restart before live evidence could be claimed.
+- Ran `ROUTECODEX_BUILD_RESTART_ONLY=0 ROUTECODEX_INSTALL_VERIFY_PORT=5520 npm run install:global`; it built native hotpath + build:min, packed/installed `routecodex@0.90.3935`, refreshed `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`, and verified global `routecodex` 0.90.3935.
+- Ran exactly one managed aggregate restart: `ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 ROUTECODEX_RESTART_WAIT_MS=120000 RCC_RESTART_WAIT_MS=120000 routecodex restart --port 5520`; it reported `Aggregate RouteCodex server restarted: localhost:5520`.
+- Live runtime truth: PID 83285 runs `/Users/fanzhang/.rcc/install/current/dist/index.js`; `routecodex --version`, `rcc --version`, and `~/.rcc/install/current/package.json` all report 0.90.3935. Ports 5520/4444/10000 share PID 83285 and `/health` reports ready/pipelineReady/version 0.90.3935; 5555 is separate `rccv3` PID 83547.
+- Installed fix proof: both `~/.rcc/install/current/dist/server/runtime/http-server/index.js` and `/opt/homebrew/lib/node_modules/routecodex/dist/server/runtime/http-server/index.js` contain `shouldAllowRouterDirectExcludedProviderReselection` and `defaultFloorProtected` handling.
+- Live VR default-floor proof after restart: `routecodex port dry-run 5520` with `metadataCenterSnapshot.runtimeControl.routeHint=thinking` and excluded providers `cc-sol/cc/asxs/1token/55ai` returned `ok=true`, `selectedRouteName=default`, `selectedProviderKey=cc.key1.gpt-5.5`, `selectedPoolId=default:pool1`, `defaultFloorProtected=true`, `wouldReturnProviderNotAvailable=false`, and routePool `[cc, asxs, 1token, 55ai]`.
+- 5520 route status after restart: multimodal/default include `cc.key1.gpt-5.5` in `fwd.free.gpt-5.5` and `asxs.crsa.gpt-5.5` in `fwd.paid.gpt-5.5`; `/v1/models` lists `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`.
+- Live log truth uses active aggregate log `~/.rcc/logs/server-4444.log`, not stale `server-5520.log`. Post-restart live 5520 traffic shows `router-direct:longcontext/tools` requests successfully selecting/using `cc.key1.gpt-5.5`.
+- Gap: I did not intentionally force a real upstream provider-failure chain after restart; the error-chain behavior is covered by the red/green source test plus previous source gates, and live closeout is install/restart/health/installed-code/VR-default-floor dry-run/live-traffic evidence.

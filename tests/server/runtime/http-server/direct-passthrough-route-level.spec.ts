@@ -2519,6 +2519,324 @@ describe('direct passthrough route-level', () => {
     jest.useRealTimers();
   });
 
+  it('router-direct honors Rust default-floor reselect when selected default provider was excluded on the primary route', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const defaultFloorProviderKey = 'cc.key1.gpt-5.5';
+    const priorPrimaryProviderKeys = [
+      'cc-sol.key1.gpt-5.6-sol',
+      defaultFloorProviderKey,
+      'asxs.crsa.gpt-5.5',
+      '1token.key1.gpt-5.5',
+      '55ai.key1.gpt-5.5',
+    ];
+    const liveDefaultRoutePool = [
+      defaultFloorProviderKey,
+      'asxs.crsa.gpt-5.5',
+      '1token.key1.gpt-5.5',
+      '55ai.key1.gpt-5.5',
+    ];
+    const defaultDirectSend = jest.fn(async () => ({
+      status: 200,
+      data: {
+        id: 'resp_router_direct_default_floor_reselect',
+        object: 'response',
+        status: 'completed',
+        output_text: 'ok',
+      },
+    }));
+    const route = jest.fn(() => ({
+      target: {
+        providerKey: defaultFloorProviderKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: defaultFloorProviderKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: {
+        routeName: 'default',
+        pool: ['fwd.free.gpt-5.5'],
+        routePool: liveDefaultRoutePool,
+        poolId: 'default:pool1',
+        defaultFloorProtected: true,
+        reason: 'thinking:last-tool-thinking',
+      },
+      diagnostics: { defaultFloorProtected: true },
+    }));
+
+    (server as any).userConfig = {
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_priority_5520: {
+            routing: {
+              thinking: [
+                {
+                  id: 'thinking-primary',
+                  targets: ['fwd.free.gpt-5.5', 'fwd.free.gpt-5.6-sol'],
+                  priority: 150,
+                },
+                {
+                  id: 'thinking-paid',
+                  targets: ['fwd.paid.gpt-5.5'],
+                  priority: 100,
+                },
+              ],
+              default: [
+                {
+                  id: 'default-floor',
+                  targets: ['fwd.free.gpt-5.5'],
+                  priority: 150,
+                },
+              ],
+            },
+          },
+        },
+      },
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
+    (server as any).pipelineRuntimeConfigByRoutingPolicyGroup.set('gateway_priority_5520', {
+      routingTiersByRoute: {
+        thinking: [
+          {
+            id: 'thinking-primary',
+            targets: ['fwd.free.gpt-5.5', 'fwd.free.gpt-5.6-sol'],
+            priority: 150,
+          },
+          {
+            id: 'thinking-paid',
+            targets: ['fwd.paid.gpt-5.5'],
+            priority: 100,
+          },
+        ],
+        default: [
+          {
+            id: 'default-floor',
+            targets: ['fwd.free.gpt-5.5'],
+            priority: 150,
+          },
+        ],
+      },
+      routingProviderIds: ['cc', 'cc-sol', 'asxs', '1token', '55ai'],
+    });
+    (server as any).providerHandles = new Map([
+      [defaultFloorProviderKey, {
+        runtimeKey: defaultFloorProviderKey,
+        providerId: 'cc',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: defaultDirectSend,
+        },
+      }],
+    ]);
+
+    const outcome = await (server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_default_floor_reselect',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          stream: true,
+          input: 'ping',
+        },
+        metadata: {},
+      },
+      {
+        maxAttempts: 6,
+        excludedProviderKeys: new Set(priorPrimaryProviderKeys),
+        lastError: Object.assign(new Error('previous 55ai ECONNRESET'), {
+          code: 'ECONNRESET',
+          providerKey: '55ai.key1.gpt-5.5',
+        }),
+      },
+      6,
+    );
+
+    expect(outcome.used).toBe(true);
+    expect(outcome.auditContext.providerKey).toBe(defaultFloorProviderKey);
+    expect(outcome.response?.data).toMatchObject({ id: 'resp_router_direct_default_floor_reselect' });
+    expect(defaultDirectSend).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
+  });
+
+  it('router-direct still rejects excluded reselect when Rust availability says alternatives remain', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const excludedProviderKey = 'cc.key1.gpt-5.5';
+    const alternativeProviderKey = 'asxs.crsa.gpt-5.5';
+    const directSend = jest.fn(async () => ({
+      status: 200,
+      data: { id: 'must_not_send_excluded_reselect' },
+    }));
+    const previousError = Object.assign(new Error('previous cc failure'), {
+      code: 'HTTP_400',
+      providerKey: excludedProviderKey,
+    });
+    const route = jest.fn(() => ({
+      target: {
+        providerKey: excludedProviderKey,
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: excludedProviderKey,
+        modelId: 'gpt-5.5',
+      },
+      decision: {
+        routeName: 'thinking',
+        pool: [excludedProviderKey, alternativeProviderKey],
+        routePool: [excludedProviderKey, alternativeProviderKey],
+        poolId: 'thinking:pool1',
+        reason: 'thinking:test',
+      },
+      diagnostics: {},
+    }));
+
+    (server as any).userConfig = {
+      virtualrouter: {
+        routingPolicyGroups: {
+          gateway_priority_5520: {
+            routing: {
+              thinking: [
+                {
+                  id: 'thinking-primary',
+                  targets: [excludedProviderKey, alternativeProviderKey],
+                  priority: 150,
+                },
+              ],
+              default: [
+                {
+                  id: 'default-floor',
+                  targets: [excludedProviderKey],
+                  priority: 100,
+                },
+              ],
+            },
+          },
+        },
+      },
+      httpserver: {
+        ports: [{
+          port: 5520,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5520',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    installNativeHubPipelineRoute(server, 'gateway_priority_5520', route);
+    (server as any).pipelineRuntimeConfigByRoutingPolicyGroup.set('gateway_priority_5520', {
+      routingTiersByRoute: {
+        thinking: [
+          {
+            id: 'thinking-primary',
+            targets: [excludedProviderKey, alternativeProviderKey],
+            priority: 150,
+          },
+        ],
+        default: [
+          {
+            id: 'default-floor',
+            targets: [excludedProviderKey],
+            priority: 100,
+          },
+        ],
+      },
+      routingProviderIds: ['cc', 'asxs'],
+    });
+    (server as any).providerHandles = new Map([
+      [excludedProviderKey, {
+        runtimeKey: excludedProviderKey,
+        providerId: 'cc',
+        providerType: 'openai',
+        providerFamily: 'openai',
+        providerProtocol: 'openai-responses',
+        runtime: { modelId: 'gpt-5.5' },
+        instance: {
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: jest.fn(),
+          processIncomingDirect: directSend,
+        },
+      }],
+    ]);
+
+    await expect((server as any).executeRouterDirectPipelineForPort(
+      {
+        port: 5520,
+        host: '127.0.0.1',
+        mode: 'router',
+        routingPolicyGroup: 'gateway_priority_5520',
+        sameProtocolBehavior: 'direct',
+      },
+      {
+        requestId: 'req_router_direct_excluded_reselect_alternative',
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        headers: {},
+        query: {},
+        body: {
+          model: 'gpt-5.5',
+          stream: true,
+          input: 'ping',
+        },
+        metadata: {},
+      },
+      {
+        maxAttempts: 6,
+        excludedProviderKeys: new Set([excludedProviderKey]),
+        lastError: previousError,
+      },
+      2,
+    )).rejects.toThrow('previous cc failure');
+
+    expect(directSend).not.toHaveBeenCalled();
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
+  });
+
   it('HTTP BLACKBOX: router-direct provider HTTP 401 never enters standard executor', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
