@@ -477,8 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnose_route_returns_provider_not_available_when_snapshot_excludes_all_forwarder_targets()
-    {
+    fn diagnose_route_preserves_default_floor_when_snapshot_excludes_all_forwarder_targets() {
         let mut core = VirtualRouterEngineCore::new();
         core.initialize(&build_forwarder_status_test_config())
             .expect("initialize");
@@ -502,14 +501,22 @@ mod tests {
             &metadata,
         );
 
-        assert_eq!(dry_run["ok"].as_bool(), Some(false));
+        assert_eq!(dry_run["ok"].as_bool(), Some(true));
         assert_eq!(
-            dry_run["error"]["code"].as_str(),
-            Some("PROVIDER_NOT_AVAILABLE")
+            dry_run["decision"]["selectedRouteName"].as_str(),
+            Some("default")
         );
-        assert!(
-            dry_run["error"]["details"]["unavailableRoutePools"].is_array(),
-            "diagnostics should expose route pool availability blockers"
+        assert_eq!(
+            dry_run["decision"]["selectedProviderKey"].as_str(),
+            Some("sdfv.key1.gpt-test")
+        );
+        assert_eq!(
+            dry_run["decision"]["defaultFloorProtected"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            dry_run["decision"]["wouldReturnProviderNotAvailable"].as_bool(),
+            Some(false)
         );
     }
 

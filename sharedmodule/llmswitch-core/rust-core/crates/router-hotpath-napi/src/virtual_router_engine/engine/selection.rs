@@ -5048,7 +5048,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_forwarder_retry_exclusion_exhausts_only_after_last_real_provider() {
+    fn priority_forwarder_retry_exclusion_preserves_default_floor_after_all_real_providers() {
         let mut core = VirtualRouterEngineCore::new();
         let config = json!({
             "providers": {
@@ -5099,29 +5099,30 @@ mod tests {
         let features = RoutingFeatures::default();
         let routing_state = RoutingInstructionState::default();
 
-        let exhausted = core.select_provider(
-            DEFAULT_ROUTE,
-            &json!({
-                "excludedProviderKeys": [
-                    "primary.key1.gpt-test",
-                    "secondary.key1.gpt-test"
-                ]
-            }),
-            &classification,
-            &features,
-            &routing_state,
-            None,
-            unsafe { Env::from_raw(std::ptr::null_mut()) },
-        );
+        let selected = core
+            .select_provider(
+                DEFAULT_ROUTE,
+                &json!({
+                    "excludedProviderKeys": [
+                        "primary.key1.gpt-test",
+                        "secondary.key1.gpt-test"
+                    ]
+                }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("configured default forwarder must preserve its last ordered provider floor");
 
-        assert!(
-            exhausted.is_err(),
-            "forwarder must be unavailable only after every real target is excluded"
-        );
+        assert_eq!(selected.provider_key, "primary.key1.gpt-test");
+        assert_eq!(selected.route_used, DEFAULT_ROUTE);
+        assert!(selected.default_floor_protected);
     }
 
     #[test]
-    fn round_robin_forwarder_retry_exclusion_exhausts_after_every_real_provider() {
+    fn round_robin_forwarder_retry_exclusion_preserves_default_floor_after_all_real_providers() {
         let mut core = VirtualRouterEngineCore::new();
         let config = json!({
             "providers": {
@@ -5172,24 +5173,25 @@ mod tests {
         let features = RoutingFeatures::default();
         let routing_state = RoutingInstructionState::default();
 
-        let exhausted = core.select_provider(
-            DEFAULT_ROUTE,
-            &json!({
-                "excludedProviderKeys": [
-                    "primary.key1.gpt-test",
-                    "secondary.key1.gpt-test"
-                ]
-            }),
-            &classification,
-            &features,
-            &routing_state,
-            None,
-            unsafe { Env::from_raw(std::ptr::null_mut()) },
-        );
+        let selected = core
+            .select_provider(
+                DEFAULT_ROUTE,
+                &json!({
+                    "excludedProviderKeys": [
+                        "primary.key1.gpt-test",
+                        "secondary.key1.gpt-test"
+                    ]
+                }),
+                &classification,
+                &features,
+                &routing_state,
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("configured default forwarder must preserve one provider floor");
 
-        assert!(
-            exhausted.is_err(),
-            "round-robin forwarder must not reselect an excluded real provider"
-        );
+        assert_eq!(selected.provider_key, "primary.key1.gpt-test");
+        assert_eq!(selected.route_used, DEFAULT_ROUTE);
+        assert!(selected.default_floor_protected);
     }
 }
