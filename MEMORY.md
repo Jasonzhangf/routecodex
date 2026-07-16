@@ -3530,3 +3530,8 @@
 - Verification: routecodex config validate passed, and 5520/4444/10000 health all returned ok.
 - Live smoke: POST /v1/chat/completions with messages containing <**!asxs.gpt-5.5**> routed to asxs[crsa].gpt-5.5 and returned ASXS_OKASXS_OK.
 - Observation: /v1/responses provider-request dry-run on the same textual marker still selected cc.key1.gpt-5.5, so asxs credential verification should use the chat/completions live smoke path instead of that responses dry-run marker as proof.
+
+# 2026-07-16: V3 resource relation edge lock gate
+- Source gate npm run verify:v3-resource-relation-edge-lock is wired into npm run verify:v3-architecture-docs.
+- The gate enforces: resources stay registry nodes; callable paths are scalar adjacent mainline edges; resource relationships appear only under edge resource_flow; every declared resource and function-map resource binding is carried by some edge resource_flow; duplicate edge ids, same-node edges, and multi-source/multi-target shortcuts fail.
+- Current map closure: 69 resources are bound through 178 mainline edge resource_flow payloads; mutation red fixture rejects 15 forbidden changes.

@@ -31067,3 +31067,9 @@ Pure Rust NAPI candidates:
 
 # 2026-07-16T11:40:07Z V3 resource/call-edge wording correction
 - Jason corrected the V3 architecture wording: resources themselves are not "edges"; callable/runtime paths must be expressed as adjacent `from_node -> to_node` edges. Resource relationships travel on those call/lifecycle edges as `resource_flow` (`consumes` / `produces` / `side_channel_reads` / `side_channel_writes`). Multiple callable/resource relationships mean multiple explicit edges; `allowed_paths` remains feature file-scope, not a call/resource edge.
+
+# 2026-07-16T12:24:00Z V3 resource relation edge lock gate
+- Added verify:v3-resource-relation-edge-lock and red fixture gate, wired it into verify:v3-architecture-docs.
+- Gate locks resources as registry nodes and resource relationships as mainline edge resource_flow; scalar from_node -> to_node only, with duplicate/same-node/multi-target shortcuts rejected.
+- Map fixes: v3.protocol.pending_projection is now carried by entry binding edge v3-entry-bind-04; stale function-map binding v3.provider.responses_raw corrected to v3.response.provider_raw.
+- Verification passed: verify:v3-resource-relation-edge-lock, red fixtures (15 rejected mutations), verify:v3-architecture-docs, verify:v3-resource-map, verify:v3-entry-protocol-endpoint-binding, verify:v3-static-hook-registry, verify:v3-hub-relay-runtime-closeout, and targeted git diff --check.

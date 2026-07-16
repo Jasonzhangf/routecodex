@@ -76,11 +76,8 @@ const cases = [
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
       return source.replace(
-        '        to_node: V3Config02AuthoringParsed
-',
-        '        to_node: V3Config02AuthoringParsed
-        to_nodes: [V3Config02AuthoringParsed, V3Config02OtherParsed]
-',
+        '        to_node: V3Config02AuthoringParsed\n',
+        '        to_node: V3Config02AuthoringParsed\n        to_nodes: [V3Config02AuthoringParsed, V3Config02OtherParsed]\n',
       );
     },
     diagnostic: /path shortcut field to_nodes is forbidden; multiple callable paths require multiple edges/u,
