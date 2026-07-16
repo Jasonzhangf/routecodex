@@ -30770,6 +30770,13 @@ Pure Rust NAPI candidates:
 - Maps updated so `sse.stream_parse_boundary` only lists parse stream/event NAPI owners, not a retired line assembler.
 - V2 old replay added in `tests/sharedmodule/sse-runtime-rust-dispatch.spec.ts`: marker `direct-passthrough-sse-20260713T055458`, text `PASSTHROUGH_SSE_OK`, model/reasoning/event order/`[DONE]`, and client keepalive-stripped bytes equal provider body.
 - Current evidence: focused V2 sniffer Rust 19/19; duplicate parser residue absent outside verifier forbidden literal list; `npm run build:native-hotpath`; V2 replay Jest 5/5; `test:sse-transport-core`; `test:v3-sse-transport-adapter`; SSE/shared/architecture/resource/function/mainline/review gates; shared fmt/SSE clippy; V3 fmt/clippy/controlled replay/workspace; `git diff --check` all passed.
+
+# 2026-07-16: V3 Responses Direct remote continuation resumed closeout
+
+- Claim `feature_id:v3.responses_direct_remote_continuation_integration` was stale/blocked from run `20260715T061851Z-Macstudio-75324-rci`; explicit PID `75324` was not running, so run `20260716T005339Z-Macstudio.local-86834-2460af` took over without live config/credential/global install/restart mutation.
+- Controlled evidence is green in current source: config transport binding 1/1, provider WebSocket v2 9/9, Runtime remote-continuation state machine 8/8, Server JSON/SSE two-turn replay 2/2, H4 14/14, WebSocket hardening verifier/red fixtures, V3 architecture/resource/module/Rust-only/fmt/Clippy/full workspace, CLI build, and `git diff --check`.
+- Forward fix: `verify-v3-responses-direct-remote-continuation` now follows the actual `project_sse_stream -> observed_sse_client_stream -> observe_sse_remote_continuation_chunk` helper boundary and forbids non-atomic `store.release(previous_response_id); store.commit(input)` as a fake Resp04 rebind. Red fixtures now reject 13 mutations.
+- Current live evidence: `curl http://127.0.0.1:5555/health --max-time 5` returns connection refused and `routecodex port status 5555 --json` fails to inspect. Live JSON/SSE two-turn replay is therefore not runnable in this turn without starting/restarting or selecting another authorized profile, which the goal explicitly says requires Jason authorization.
 # 2026-07-15: 5520 provider 402 reroute reselected excluded direct-continuation provider
 
 - Live request `openai-responses-router-gpt-5.6-sol-20260715T210706792-538250-5993` proved 402 did enter ErrorErr05: log emitted `switch=exclude_and_reroute`, then second VR pass selected the same `cc.key1.gpt-5.5`, then projected 402 to client.

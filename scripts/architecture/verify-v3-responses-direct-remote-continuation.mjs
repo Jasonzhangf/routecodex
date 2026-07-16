@@ -59,7 +59,7 @@ for (const [owner, text, phrases] of [
     'V3RemoteContinuationObservation',
     'V3ProviderResponseBody::Sse(stream) => project_sse_stream(stream).await?',
     'SseIncrementalDecoder::new(SseTransportLimits::default())',
-    'build_sse_transport_in_01_raw_chunk(&chunk)',
+    'build_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(',
     'frame.frame().fields()',
     'observe_json_remote_continuation(&parsed)',
@@ -134,25 +134,43 @@ for (const [owner, text, phrases] of [
 const coreDefinitions = runtime.match(/async fn execute_v3_responses_direct_runtime_kernel_core</g) ?? [];
 if (coreDefinitions.length !== 1) failures.push(`${runtimePath}: expected one Runtime kernel core, got ${coreDefinitions.length}`);
 const projectSseStreamStart = response.indexOf('async fn project_sse_stream(');
-const projectSseStreamEnd = response.indexOf('fn observe_sse_remote_continuation_bytes(');
+const projectSseStreamEnd = response.indexOf('fn observed_sse_client_stream(');
 if (projectSseStreamStart < 0 || projectSseStreamEnd < 0 || projectSseStreamEnd <= projectSseStreamStart) {
-  failures.push(`${responsePath}: missing project_sse_stream structured observer boundary`);
+  failures.push(`${responsePath}: missing project_sse_stream streaming handoff boundary`);
 } else {
   const projectSseStream = response.slice(projectSseStreamStart, projectSseStreamEnd);
   for (const phrase of [
-    'build_sse_transport_in_01_raw_chunk(&chunk)',
-    'observe_sse_frame_remote_continuation(',
-    'frame.frame().fields()',
+    'observed_sse_client_stream(stream, observation_state.clone())',
+    'V3ClientBody::Sse(client_stream)',
+    'V3RemoteContinuationObservation::Streaming',
   ]) {
     requireText(projectSseStream, `${responsePath}: project_sse_stream`, phrase);
+  }
+}
+const observedStreamStart = response.indexOf('fn observed_sse_client_stream(');
+const observedStreamEnd = response.indexOf('fn observe_sse_remote_continuation_bytes(');
+if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= observedStreamStart) {
+  failures.push(`${responsePath}: missing observed_sse_client_stream structured observer boundary`);
+} else {
+  const observedStream = response.slice(observedStreamStart, observedStreamEnd);
+  for (const phrase of [
+    'observe_sse_remote_continuation_chunk(',
+    'build_sse_transport_in_01_raw_chunk(chunk)',
+    'observe_sse_frame_remote_continuation(frame.frame().fields(), pending_response_id)',
+  ]) {
+    requireText(observedStream, `${responsePath}: observed_sse_client_stream`, phrase);
   }
 }
 forbid(runtime, runtimePath, [
   /execute_selected_continuation/,
   /fallback/i,
   /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
+  /store\.release\(previous_response_id\)[\s\S]{0,120}store\.commit\(input\)/,
   /request_body\s*\[\s*["'](?:provider_id|auth_alias|continuation_owner|capability_revision|routing_group)["']\s*\]/,
 ]);
+if (/store\.release\(previous_response_id\)[\s\S]{0,120}store\.commit\(input\)/.test(runtime)) {
+  failures.push(`${runtimePath}: non-atomic Resp04 rebind must use rebind_for_resp04`);
+}
 forbid(server, serverPath, [
   /body\s*\[\s*["'](?:provider_id|auth_alias|continuation_owner|capability_revision|routing_group)["']\s*\]\s*=/,
   /V3RemoteContinuationStore/,
