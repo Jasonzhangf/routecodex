@@ -653,7 +653,7 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
 }
 
 fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_routecodex-v3"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
         .arg(config_path)
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
@@ -666,12 +666,12 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
     eprintln!(
         "H2 CLI pid={} binary={} config={}",
         child.id(),
-        env!("CARGO_BIN_EXE_routecodex-v3"),
+        env!("CARGO_BIN_EXE_rccv3"),
         config_path.display()
     );
     assert!(
         matches!(child.try_wait(), Ok(None)),
-        "routecodex-v3 CLI server exited during startup"
+        "rccv3 CLI server exited during startup"
     );
     CliProcess { child }
 }
@@ -685,7 +685,7 @@ async fn wait_for_health(
     let mut last_observation = String::from("no health attempt");
     for _ in 0..80 {
         if let Some(status) = cli.child.try_wait().unwrap() {
-            panic!("routecodex-v3 CLI exited before health on {port}: {status}");
+            panic!("rccv3 CLI exited before health on {port}: {status}");
         }
         match client
             .get(format!("http://127.0.0.1:{port}/health"))
@@ -708,7 +708,7 @@ async fn wait_for_health(
         sleep(Duration::from_millis(100)).await;
     }
     panic!(
-        "routecodex-v3 CLI health did not become ready on {port}; pid={}; last={last_observation}",
+        "rccv3 CLI health did not become ready on {port}; pid={}; last={last_observation}",
         cli.child.id()
     );
 }
@@ -821,7 +821,7 @@ async fn wait_ports_closed(client: &reqwest::Client, ports: &[u16]) {
                 .send()
                 .await
                 .is_err(),
-            "routecodex-v3 CLI port {port} should close after scoped child termination"
+            "rccv3 CLI port {port} should close after scoped child termination"
         );
     }
 }

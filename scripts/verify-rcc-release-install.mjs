@@ -72,7 +72,7 @@ function verifyTarballShape(tarballPath, packageName) {
   }
 }
 
-function verifyNormalInstall(tarballPath, packageName, binName, version) {
+function verifyNormalInstall(tarballPath, packageName, binName, version, extraBins = []) {
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), `${packageName}-normal-install.`));
   try {
     run('npm', ['install', '-g', tarballPath, '--prefix', prefix, '--no-audit', '--no-fund'], {
@@ -84,6 +84,12 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
     const versionResult = run(binPath, ['--version'], { cwd: PROJECT_ROOT });
     if (!versionResult.stdout.includes(version)) {
       fail(`${packageName} installed ${binName} version mismatch: ${JSON.stringify(versionResult.stdout.trim())}`);
+    }
+
+    for (const extraBin of extraBins) {
+      const extraBinPath = path.join(prefix, 'bin', extraBin);
+      if (!fs.existsSync(extraBinPath)) fail(`${packageName} installed ${extraBin} is missing`);
+      run(extraBinPath, ['--help'], { cwd: PROJECT_ROOT });
     }
 
     const packageDir = path.join(prefix, 'lib', 'node_modules', packageName);
@@ -139,6 +145,7 @@ function verifyNormalInstall(tarballPath, packageName, binName, version) {
       tarball: tarballPath,
       prefix,
       version,
+      extraBins,
       dependencies: Object.keys(installedPackage.dependencies || {}).length,
       bundledDependencies: (installedPackage.bundleDependencies || installedPackage.bundledDependencies || []).length,
       llmsDistExists: checks.llmsDistExists,
@@ -159,7 +166,7 @@ if (rootPackage.dependencies?.esbuild) {
 }
 
 const releasePackages = [
-  { packageName: 'routecodex', binName: 'routecodex', tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `routecodex-${version}.tgz`) },
+  { packageName: 'routecodex', binName: 'routecodex', extraBins: ['rccv3'], tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `routecodex-${version}.tgz`) },
   { packageName: 'rcc', binName: 'rcc', tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `rcc-${version}.tgz`) },
 ];
 
@@ -170,7 +177,8 @@ for (const releasePackage of releasePackages) {
     releasePackage.tarballPath,
     releasePackage.packageName,
     releasePackage.binName,
-    version
+    version,
+    releasePackage.extraBins || []
   ));
 }
 

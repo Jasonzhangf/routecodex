@@ -7,7 +7,7 @@
   "module": "dist/index.js",
   "bin": {
     "routecodex": "dist/cli.js",
-    "routecodex-v3": "dist/bin/routecodex-v3"
+    "rccv3": "dist/bin/rccv3"
   },
   "exports": {
     ".": {

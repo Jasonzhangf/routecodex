@@ -29,7 +29,7 @@ Debug side-channel remains isolated from normal payloads.
 
 ## Harness Contract
 
-- The replay starts the actual routecodex-v3 server start --config <temp-config> CLI binary.
+- The replay starts the actual `rccv3 server start --config <temp-config>` CLI binary.
 - Controlled upstreams are local HTTP servers observed through provider-facing requests only.
 - The harness does not call spawn_v3_server_aggregate, Runtime kernels, Provider functions, H1 typed
   nodes, or any internal server entry.

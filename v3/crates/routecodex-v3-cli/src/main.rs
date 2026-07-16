@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
-use routecodex_v3_config::{V3Config05ManifestPublished, V3ConfigStore};
+use routecodex_v3_config::{default_v3_config_path, V3Config05ManifestPublished, V3ConfigStore};
 use routecodex_v3_lifecycle::V3ManagedLifecycle;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "routecodex-v3")]
+#[command(name = "rccv3")]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -26,7 +27,7 @@ enum Command {
 enum ConfigCommand {
     Check {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
     },
 }
 
@@ -34,30 +35,30 @@ enum ConfigCommand {
 enum ServerCommand {
     Start {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
         #[arg(long, default_value_t = false)]
         foreground: bool,
     },
     Status {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
     },
     Restart {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
     Stop {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
     #[command(hide = true)]
     RunManagedChild {
         #[arg(long)]
-        config: String,
+        config: Option<String>,
     },
 }
 
@@ -67,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Config {
             command: ConfigCommand::Check { config },
         } => {
+            let config = resolve_config_path(config)?;
             let manifest = load_manifest(&config)?;
             println!(
                 "config ok: version={} servers={}",
@@ -77,6 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Server {
             command: ServerCommand::Start { config, foreground },
         } => {
+            let config = resolve_config_path(config)?;
             let manifest = load_manifest(&config)?;
             for server in manifest.servers.values().filter(|server| server.enabled) {
                 println!("starting {} on {}:{}", server.id, server.bind, server.port);
@@ -85,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 routecodex_v3_server::serve_v3_server_aggregate_until_shutdown(manifest).await?;
             } else {
                 let executable = std::env::current_exe()?;
-                let status = V3ManagedLifecycle::new(&config)?
+                let status = V3ManagedLifecycle::new(config)?
                     .start(&executable, Duration::from_secs(15))
                     .await?;
                 println!("{}", serde_json::to_string(&status)?);
@@ -94,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Server {
             command: ServerCommand::Status { config },
         } => {
+            let config = resolve_config_path(config)?;
             let manifest = load_manifest(&config)?;
             for server in manifest.servers.values() {
                 println!(
@@ -102,16 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             let executable = std::env::current_exe()?;
-            let status = V3ManagedLifecycle::new(&config)?
-                .status(&executable)
-                .await?;
+            let status = V3ManagedLifecycle::new(config)?.status(&executable).await?;
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
             command: ServerCommand::Restart { config, timeout_ms },
         } => {
+            let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            let status = V3ManagedLifecycle::new(&config)?
+            let status = V3ManagedLifecycle::new(config)?
                 .restart(&executable, Duration::from_millis(timeout_ms))
                 .await?;
             println!("{}", serde_json::to_string(&status)?);
@@ -119,8 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Server {
             command: ServerCommand::Stop { config, timeout_ms },
         } => {
+            let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            let status = V3ManagedLifecycle::new(&config)?
+            let status = V3ManagedLifecycle::new(config)?
                 .stop(&executable, Duration::from_millis(timeout_ms))
                 .await?;
             println!("{}", serde_json::to_string(&status)?);
@@ -128,8 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Server {
             command: ServerCommand::RunManagedChild { config },
         } => {
+            let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            V3ManagedLifecycle::new(&config)?
+            V3ManagedLifecycle::new(config)?
                 .run_managed_child(&executable)
                 .await?;
         }
@@ -137,6 +142,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn load_manifest(config: &str) -> Result<V3Config05ManifestPublished, Box<dyn std::error::Error>> {
+fn resolve_config_path(config: Option<String>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Some(config) = config {
+        return Ok(PathBuf::from(config));
+    }
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "HOME is required to resolve config.v3.toml",
+        )
+    })?;
+    Ok(default_v3_config_path(home))
+}
+
+fn load_manifest(
+    config: impl Into<PathBuf>,
+) -> Result<V3Config05ManifestPublished, Box<dyn std::error::Error>> {
     Ok(V3ConfigStore::new(config).load_snapshot()?)
 }

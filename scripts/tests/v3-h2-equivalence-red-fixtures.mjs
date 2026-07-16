@@ -10,9 +10,9 @@ const fixtures = [
   {
     name: 'CLI entry replaced by library server',
     file: 'v3/crates/routecodex-v3-cli/tests/h2_p6_controlled_replay.rs',
-    from: 'env!("CARGO_BIN_EXE_routecodex-v3")',
+    from: 'env!("CARGO_BIN_EXE_rccv3")',
     to: 'spawn_v3_server_aggregate',
-    diagnostic: /forbidden internal runtime\/server entry|missing env!\("CARGO_BIN_EXE_routecodex-v3"\)/,
+    diagnostic: /forbidden internal runtime\/server entry|missing env!\("CARGO_BIN_EXE_rccv3"\)/,
   },
   {
     name: 'default pool exhaustion coverage removed',

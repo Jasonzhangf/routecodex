@@ -169,7 +169,7 @@ try {
   mutated.name = args.name;
   mutated.bin = { [args.bin]: 'dist/cli.js' };
   if (isRouteCodex) {
-    mutated.bin['routecodex-v3'] = 'dist/bin/routecodex-v3';
+    mutated.bin.rccv3 = 'dist/bin/rccv3';
   }
   // Ensure description mentions mode
   const suffix = (isRcc || isRouteCodex) ? ' (release)' : ' (dev)';

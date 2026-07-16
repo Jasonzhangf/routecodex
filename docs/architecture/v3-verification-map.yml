@@ -603,7 +603,7 @@ features:
       - docs/goals/v3-hub-h2-p6-responses-direct-characterization.md
     required_contract:
       - P6 remains frozen as the migration source and is not extended into Hub v1
-      - replay starts the actual routecodex-v3 CLI server entry and controlled upstreams
+      - replay starts the actual rccv3 CLI server entry and controlled upstreams
       - replay does not call internal Runtime kernels, Server library entrypoints, Provider helpers, or H1 Rust symbols
       - JSON and SSE prove provider wire, raw provider response, client response, and one response exit
       - target-local reselection proves one Virtual Router hit and no upper-pool return
@@ -625,7 +625,7 @@ features:
       - npm run test:v3-workspace
     completion_rule:
       source: "H2 source completion requires the harness verifier, H2 red fixtures, P6 baseline tests, architecture docs/resource/module gates, Rust fmt/clippy/workspace, and diff check."
-      runtime: "H2 runtime evidence is the actual routecodex-v3 CLI controlled-upstream replay artifact for JSON, SSE, reselection, default exhaustion, Dry Run, Debug, and side-channel isolation."
+      runtime: "H2 runtime evidence is the actual rccv3 CLI controlled-upstream replay artifact for JSON, SSE, reselection, default exhaustion, Dry Run, Debug, and side-channel isolation."
       forbidden_claim: "Do not claim Hub v1 Direct migrated, Server switched, Relay/continuation available, P6 deleted, global install, production runtime, or real provider compatibility."
 
   - feature_id: v3.foundation_p0_p2
@@ -663,9 +663,9 @@ features:
       - no dynamic hook discovery
       - no compatibility Manifest projection such as single server, default_tier, auth_env shortcut, or selected provider
     required_integration:
-      - actual routecodex-v3 binary config check against v3/fixtures/config.p2.toml
-      - actual routecodex-v3 binary server status against v3/fixtures/config.p2.toml
-      - actual routecodex-v3 binary starts both 45444 and 45445 from one process
+      - actual rccv3 binary config check against v3/fixtures/config.p2.toml
+      - actual rccv3 binary server status against v3/fixtures/config.p2.toml
+      - actual rccv3 binary starts both 45444 and 45445 from one process
       - each listener returns its own /health server_id/address/port/manifest_version
       - pending business endpoints return Debug/Error routed structured not_implemented
     required_gates:

@@ -5,8 +5,9 @@ import path from 'node:path';
 
 const root = process.cwd();
 const manifestPath = path.join(root, 'v3', 'Cargo.toml');
-const sourceBin = path.join(root, 'v3', 'target', 'debug', process.platform === 'win32' ? 'routecodex-v3.exe' : 'routecodex-v3');
-const targetBin = path.join(root, 'dist', 'bin', process.platform === 'win32' ? 'routecodex-v3.exe' : 'routecodex-v3');
+const sourceBin = path.join(root, 'v3', 'target', 'debug', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3');
+const targetBin = path.join(root, 'dist', 'bin', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3');
+const legacyTargetBin = path.join(root, 'dist', 'bin', process.platform === 'win32' ? 'routecodex-v3.exe' : 'routecodex-v3');
 
 function fail(message) {
   console.error(`[copy-v3-cli-bin] ${message}`);
@@ -38,6 +39,9 @@ if (!fs.existsSync(sourceBin)) {
 }
 
 fs.mkdirSync(path.dirname(targetBin), { recursive: true });
+if (legacyTargetBin !== targetBin && fs.existsSync(legacyTargetBin)) {
+  fs.rmSync(legacyTargetBin, { force: true });
+}
 fs.copyFileSync(sourceBin, targetBin);
 if (process.platform !== 'win32') {
   fs.chmodSync(targetBin, 0o755);

@@ -28,7 +28,7 @@ flowchart LR
 
 ## Commands
 
-`routecodex-v3 server start|status|restart|stop --config <path>` all call
+`rccv3 server start|status|restart|stop --config <path>` all call
 `routecodex-v3-lifecycle`. `server run-managed-child` is hidden and only executes a declaration
 already published by the owner. `--foreground` exists solely for controlled external harnesses and
 does not publish managed state.

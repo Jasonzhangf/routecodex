@@ -60,7 +60,7 @@ git diff --check
 Runtime closeout:
 
 - Build and globally install the current source.
-- Restart the one managed V3 aggregate instance through `routecodex-v3 server restart`.
+- Restart the one managed V3 aggregate instance through `rccv3 server restart`.
 - Replay live `GET /v1/models` on 5555 and verify the four built-ins plus configured aliases.
 - Replay one JSON and one SSE `/v1/responses` control sample.
 - Verify V2 ports 5520, 4444, and 10000 remain healthy.

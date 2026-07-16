@@ -6,7 +6,7 @@
 
 验收标准：
 
-- `routecodex-v3 server start|status|restart|stop --config ~/.rcc/config.v3.toml` 形成单一 Rust lifecycle owner；start/restart 不产生重复 listener 或孤儿进程。
+- `rccv3 server start|status|restart|stop --config ~/.rcc/config.v3.toml` 形成单一 Rust lifecycle owner；start/restart 不产生重复 listener 或孤儿进程。
 - instance declaration 是服务身份真相；PID 只是带启动时间/instance identity 的瞬态 cache，不能仅凭端口或陈旧 PID 接管进程。
 - restart 只作用于匹配的 V3 instance，一次操作覆盖该 config 的全部 listener；禁 broad kill、按端口循环 restart 或杀任意占用者。
 - V2 5520/10000/4444 与 V3 5555 并行健康；真实 JSON/SSE `/v1/responses` 在 managed restart 前后均通过。

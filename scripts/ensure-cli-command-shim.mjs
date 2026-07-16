@@ -169,14 +169,22 @@ function writeShim(shimDir, binName, packageName, options = {}) {
   return shimPath;
 }
 
+function removeLegacyShim(shimDir, binName) {
+  if (process.platform === 'win32') {
+    return;
+  }
+  fs.rmSync(path.join(shimDir, binName), { force: true });
+}
+
 function main() {
   const installed = [];
   const shimDirs = resolveShimDirs();
   for (const shimDir of shimDirs) {
+    removeLegacyShim(shimDir, 'routecodex-v3');
     installed.push(writeShim(shimDir, 'routecodex', 'routecodex'));
     installed.push(writeShim(shimDir, 'rcc', 'routecodex'));
-    installed.push(writeShim(shimDir, 'routecodex-v3', 'routecodex', {
-      currentRelativePath: path.join('dist', 'bin', 'routecodex-v3'),
+    installed.push(writeShim(shimDir, 'rccv3', 'routecodex', {
+      currentRelativePath: path.join('dist', 'bin', 'rccv3'),
       native: true
     }));
   }

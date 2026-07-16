@@ -111,13 +111,13 @@ for (const [name, script] of [
   ['install-release.sh', installReleaseScript],
 ]) {
   for (const forbidden of [
-    'npm uninstall -g rcc',
-    '/node_modules/rcc',
-    '$GLOBAL_NODE_MODULES/rcc',
-    '$NPM_PREFIX/bin/rcc',
+    { label: 'npm uninstall -g rcc', pattern: /npm uninstall -g rcc(?:\s|$)/ },
+    { label: '/node_modules/rcc', pattern: /\/node_modules\/rcc(?:[\s"'/$]|$)/ },
+    { label: '$GLOBAL_NODE_MODULES/rcc', pattern: /\$GLOBAL_NODE_MODULES\/rcc(?:[\s"'/$]|$)/ },
+    { label: '$NPM_PREFIX/bin/rcc', pattern: /\$NPM_PREFIX\/bin\/rcc(?:[\s"']|$)/ },
   ]) {
-    if (script.includes(forbidden)) {
-      failures.push(`${name} must not delete or uninstall an existing global rcc package (${forbidden})`);
+    if (forbidden.pattern.test(script)) {
+      failures.push(`${name} must not delete or uninstall an existing global rcc package (${forbidden.label})`);
     }
   }
 }

@@ -3370,6 +3370,14 @@
 - Before declaring a semantic area blocked by another worker, check owner, heartbeat timestamp, events/evidence, handoff/merge-queue, and current live agents. If heartbeat is stale and no live agent exists, continue by claiming a new run or writing a checked handoff instead of excluding that task.
 - Concrete correction: `feature_id:sse.transport_core_shared` had an `active` owner from `20260715T061836Z-Macstudio-74436-rxsyma`, but no live agent and no fresh heartbeat; future V3/SSE work must not skip SSE solely because this stale claim was not closed.
 
+# 2026-07-16 V3 `rccv3` distribution surface truth
+
+- V3 distributed CLI command and artifact are now `rccv3` and `dist/bin/rccv3`. Cargo `[[bin]]` and Clap command name are also `rccv3`; `routecodex-v3` may remain only as crate/package namespace text, not as an installed command or published npm bin.
+- V3 CLI `--config` is optional. When omitted, CLI resolves `$HOME/.rcc/config.v3.toml` via `routecodex-v3-config::default_v3_config_path`; missing `HOME` without explicit `--config` fails fast with `HOME is required to resolve config.v3.toml`.
+- Build/install scripts must remove stale `dist/bin/routecodex-v3` and stale `routecodex-v3` shims while publishing/verifying `rccv3`. Release verification checks `routecodex` plus extra bin `rccv3`; global/release install checks run `rccv3 --help`.
+- Validation note: `npm run build:base` auto-bumps package version unless `ROUTECODEX_SKIP_AUTO_BUMP=1` is set. For validation-only builds, use `ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base`, then verify `./dist/bin/rccv3 --help` and absence of `dist/bin/routecodex-v3`.
+- Evidence: red tests first failed on old package bin/CLI required config; green gates passed for V3 distribution Jest, CLI default-config tests, V3 CLI full tests, managed lifecycle/H2/VR controlled replays, V3 Clippy, full V3 workspace, H2 verifier/red fixtures, function-map build wiring, build:base with skip bump, script syntax checks, `git diff --check`, and `./dist/bin/rccv3 --help`.
+
 # 2026-07-15 `/v1/models` built-in gpt-5.6 Codex catalog
 
 - `/v1/models` must always expose built-in bare Codex catalog entries `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` from `src/server/runtime/http-server/routes.ts`, independent of provider-prefixed aliases. Provider-prefixed aliases may still add runtime-derived `context_window`, `supports_streaming`, or provider descriptions.

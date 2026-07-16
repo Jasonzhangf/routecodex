@@ -239,21 +239,21 @@ install_release_snapshot() {
 }
 
 verify_cli_commands() {
-  echo "🔍 验证 routecodex / routecodex-v3 / rcc 安装..."
+  echo "🔍 验证 routecodex / rccv3 / rcc 安装..."
   if ! command -v routecodex >/dev/null 2>&1; then
     fail "未找到 routecodex 命令，请检查 shim 生成和 PATH"
   fi
   if ! command -v rcc >/dev/null 2>&1; then
     fail "未找到 rcc 命令，请检查 shim 生成和 PATH"
   fi
-  if ! command -v routecodex-v3 >/dev/null 2>&1; then
-    fail "未找到 routecodex-v3 命令，请检查 V3 build artifact 和 shim"
+  if ! command -v rccv3 >/dev/null 2>&1; then
+    fail "未找到 rccv3 命令，请检查 V3 build artifact 和 shim"
   fi
   echo "✅ routecodex: $(command -v routecodex)"
-  echo "✅ routecodex-v3: $(command -v routecodex-v3)"
+  echo "✅ rccv3: $(command -v rccv3)"
   echo "✅ rcc: $(command -v rcc)"
   routecodex --version
-  routecodex-v3 --help >/dev/null
+  rccv3 --help >/dev/null
   rcc --version
 }
 

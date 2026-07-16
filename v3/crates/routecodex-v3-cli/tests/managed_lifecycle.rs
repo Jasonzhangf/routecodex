@@ -134,7 +134,7 @@ fn scan_instance_files_for_secret(instance_dir: &Path) {
 }
 
 fn copy_release_binary(source: &str, release_root: &Path) -> PathBuf {
-    let binary = release_root.join("bin").join("routecodex-v3");
+    let binary = release_root.join("bin").join("rccv3");
     fs::create_dir_all(binary.parent().unwrap()).unwrap();
     fs::copy(source, &binary).unwrap();
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
@@ -147,7 +147,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
-    let binary = env!("CARGO_BIN_EXE_routecodex-v3");
+    let binary = env!("CARGO_BIN_EXE_rccv3");
 
     let start = run(binary, &state_root, &config, "start");
     assert!(
@@ -228,7 +228,7 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
-    let binary = env!("CARGO_BIN_EXE_routecodex-v3");
+    let binary = env!("CARGO_BIN_EXE_rccv3");
 
     let (start_cli_pid, start) = run_with_pid(binary, &state_root, &config, "start");
     assert!(
@@ -291,7 +291,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
     let config = write_config(&root, ports);
-    let source_binary = env!("CARGO_BIN_EXE_routecodex-v3");
+    let source_binary = env!("CARGO_BIN_EXE_rccv3");
     let first_release = copy_release_binary(source_binary, &root.path().join("release-a"));
     let second_release = copy_release_binary(source_binary, &root.path().join("release-b"));
 
@@ -373,7 +373,7 @@ fn unknown_port_owner_is_not_stopped_or_taken_over() {
     let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
     let occupied_port = occupied.local_addr().unwrap().port();
     let config = write_config(&root, [occupied_port, free_port()]);
-    let binary = env!("CARGO_BIN_EXE_routecodex-v3");
+    let binary = env!("CARGO_BIN_EXE_rccv3");
     let start = run(binary, &state_root, &config, "start");
     assert!(!start.status.success());
     assert!(

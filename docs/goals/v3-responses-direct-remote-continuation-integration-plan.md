@@ -144,7 +144,7 @@ response。`store=false` 的 continuation state 只存在于当前连接内，ID
 
 ## 11. Managed 5555 capability-gate finding（2026-07-16）
 
-当前全局安装面已可用，`routecodex --version` 为 `0.90.3935`，`routecodex-v3 --help` 可用，5555 health
+当前全局安装面已可用，`routecodex --version` 为 `0.90.3935`，V3 CLI help 可用，5555 health
 返回 V3 manifest server `responses_v3_5555`，模型目录只发布 `gpt-5.6-sol` / provider `cc_sol`。
 
 本轮只读 live probe 未改 provider credential、live config、global install 或 restart。证据目录：

@@ -13,7 +13,8 @@ This design covers only P0 architecture contracts, P1 Config, and P2 multi-liste
 | Server startup | one Manifest starts all enabled listeners | any occupied/invalid listener fails aggregate startup and releases earlier binds |
 | Health | every listener returns its own server ID/address/port and Manifest version | listener absent after explicit shutdown |
 | Pending endpoint | request registers Debug node, traverses all Error nodes, emits Server frame | handler-local direct response and provider call are forbidden by source gates |
-| CLI | config check, server status, and server start consume `V3ConfigStore`/Server APIs | CLI direct file IO, listener bind, provider dependency, or second lifecycle fail source gates |
+| CLI | `rccv3` config check, server status, and server start consume `V3ConfigStore`/Server APIs; omitted `--config` resolves `$HOME/.rcc/config.v3.toml` | missing explicit config plus missing `HOME`, CLI direct file IO, listener bind, provider dependency, or second lifecycle fail explicitly |
+| Distribution | build and package emit one executable surface, `rccv3` -> `dist/bin/rccv3` | stale `routecodex-v3` artifact, npm bin, shim, or install verification fails the distribution gate |
 
 ## White-box tests
 
@@ -33,13 +34,14 @@ This design covers only P0 architecture contracts, P1 Config, and P2 multi-liste
 
 ## Project blackbox
 
-Build the actual `routecodex-v3` Rust binary, start `v3/fixtures/config.p2.toml`, probe every `/health`, probe pending business endpoints, stop the exact process through its control handle, and prove both ports are closed.
+Build the actual `rccv3` Rust binary, start `v3/fixtures/config.p2.toml`, probe every `/health`, probe pending business endpoints, stop the exact process through its control handle, and prove both ports are closed.
 
 ## Required gates
 
 - Rust fmt, Clippy with warnings denied, full V3 workspace tests/build.
 - V3 architecture docs, resource map, module boundaries, Rust-only, static-hook, and compile-fail gates.
 - Config-only IO scan and no compatibility projection scan.
+- V3 distribution script test and CLI default-config positive/negative tests.
 - Targeted `git diff --check`.
 
 ## Known exclusions

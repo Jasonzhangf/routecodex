@@ -316,7 +316,7 @@ targets = [{{ kind = "provider_model", provider = "exhausted", model = "test", k
 }
 
 fn start_cli(config_path: &Path) -> CliProcess {
-    let child = Command::new(env!("CARGO_BIN_EXE_routecodex-v3"))
+    let child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
         .arg(config_path)
         .env("VR_OPTIONAL_KEY", "optional-secret")
