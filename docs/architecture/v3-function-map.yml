@@ -89,6 +89,52 @@ features:
       - npm run test:v3-workspace
     runtime_status: config_and_server_bound_p6_preserved
 
+  - feature_id: v3.models_capability_catalog
+    owner_crates: [routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+    resource_bindings:
+      - v3.config.published_manifest
+      - v3.models.capability_catalog
+    mainline_bindings:
+      - v3-models-01
+      - v3-models-02
+    entry_symbols:
+      - models_endpoint
+      - build_v3_models_catalog
+      - build_v3_codex_model_metadata
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+      - docs/goals/v3-models-capability-catalog-test-design.md
+      - scripts/architecture/verify-v3-architecture-docs.mjs
+      - note.md
+      - MEMORY.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-provider-responses
+      - src
+      - sharedmodule
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: source_controlled_live_5555_replay_pending
+
   - feature_id: v3.entry_protocol_endpoint_binding
     owner_kind: v3_review_gate_surface
     owner_scope: "Entry protocol endpoint binding registry, Server projection consistency, explicit pending status, and integration gate surface."

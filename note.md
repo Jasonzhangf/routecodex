@@ -30973,3 +30973,11 @@ Pure Rust NAPI candidates:
 - This closes ordinary HTTP JSON/SSE and lifecycle rollover only. Current HTTP profile still does not
   advertise remote continuation/tool-output continuation; no unverified WebSocket endpoint or
   fallback was added.
+
+# 2026-07-16T11:24+08:00 V3 Config A `/v1/models` capability catalog review
+
+- Reviewed local commit `46ade5e0c`: advanced Codex capability metadata matched the V2 contract, but the V3 catalog still depended on provider declarations and omitted bare built-ins when the Manifest did not list them; arbitrary aliases also drifted to `minimal_client_version=0.124.0` instead of the V2 generic `0.98.0` preset.
+- Red evidence: focused Server blackbox failed because `gpt-5.5` was absent from a Manifest that only declared `client-test` plus `gpt-5.6-sol`.
+- Root fix stays in `routecodex-v3-server::build_v3_models_catalog`: seed/dedupe bare `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, then overlay non-duplicate configured aliases and allowed runtime context/streaming fields. No Router, Provider, auth, continuation, or fallback owner changed.
+- Added `v3.models_capability_catalog` resource/function/mainline/verification bindings and test design. Focused 2/2, V3 architecture/resource/module/Rust-only/fmt/Clippy/workspace, live parity verifier/red fixtures, CLI build, and diff check passed.
+- Live install/restart/replay remains pending because another active live-compat worker currently owns Anthropic live shape repair and global install/restart coordination; no concurrent live mutation was performed.

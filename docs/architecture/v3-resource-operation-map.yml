@@ -84,6 +84,19 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.models.capability_catalog
+    resource_kind: client_catalog_projection
+    lifecycle: v3.models.capability_catalog
+    owner_feature_id: v3.models_capability_catalog
+    owner_crate: routecodex-v3-server
+    owner_node: V3Models02CodexCapabilityProjected
+    identity: [visibleModelId]
+    allowed_writers: [build_v3_models_catalog]
+    allowed_readers: [models_endpoint, json_response]
+    forbidden_writers: [routecodex-v3-config, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: true
+    binding_status: anchored
   - resource_id: v3.secret.provider_auth_handle
     resource_kind: secret_handle
     lifecycle: v3.config.compile

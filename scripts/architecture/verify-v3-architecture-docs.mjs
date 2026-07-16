@@ -117,6 +117,10 @@ const hubV1EdgePairs = new Map([
   ['v3-hub-resp-04', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic']],
   ['v3-hub-resp-05', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
 ]);
+const clientBodyProjectionResources = new Set([
+  'v3.response.client_payload',
+  'v3.models.capability_catalog',
+]);
 
 for (const file of requiredFiles) if (!fs.existsSync(abs(file))) fail(`${file}: missing`);
 
@@ -282,7 +286,7 @@ for (const [index, resource] of array(resourceMap.resources).entries()) {
   }
   if (!['normal_payload', 'provider_wire', 'transport'].includes(resource.resource_kind)
       && resource.may_enter_provider_body !== false) fail(`${where}: control resource may enter provider body`);
-  if (resource.resource_id !== 'v3.response.client_payload' && resource.may_enter_client_body === true) {
+  if (!clientBodyProjectionResources.has(resource.resource_id) && resource.may_enter_client_body === true) {
     fail(`${where}: unexpected client body permission`);
   }
 }

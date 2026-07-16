@@ -90,6 +90,45 @@ features:
       runtime: "Actual V3 CLI config check/status, aggregate multi-listener HTTP probes, invalid-input probes, Debug probes, and controlled-upstream P6 replay pass."
       forbidden_claim: "Do not claim Relay, continuation runtime, Chat Process governance, other provider protocols, Hub v1 cutover, P6 deletion, global install, or production replacement."
 
+  - feature_id: v3.models_capability_catalog
+    status: source_controlled_live_5555_replay_pending
+    change_risk: medium
+    owner_kind: rust_v3_server_client_catalog_projection
+    owner_scope: "Read-only /v1/models projection from the compiled V3 Manifest plus stable built-in Codex ModelInfo entries."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+    design:
+      - docs/design/codex-model-capability-contract.md
+    test_design:
+      - docs/goals/v3-models-capability-catalog-test-design.md
+    contract:
+      - v3.models.capability_catalog
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+    required_unit:
+      - bare gpt-5.5 gpt-5.6-sol gpt-5.6-terra and gpt-5.6-luna are always listed
+      - configured aliases keep runtime-derived context and streaming fields
+      - built-in and configured duplicate visible IDs collapse to one catalog entry
+      - data and models arrays remain equivalent
+      - auth handles and internal control resources never enter the catalog
+    required_gates:
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    completion_rule:
+      source: "Focused positive/negative catalog tests and V3 architecture/resource/module/Rust-only/fmt/Clippy/workspace gates pass."
+      runtime: "Globally installed managed 5555 returns the four built-ins plus configured aliases, JSON/SSE control replay passes, and V2 member health remains green."
+      forbidden_claim: "Catalog listing does not prove every model is routable; no provider route fallback, credential mutation, P6 deletion, or production cutover is implied."
+
   - feature_id: v3.entry_protocol_endpoint_binding
     status: review_gate_surface_ab_integration_pending
     change_risk: high

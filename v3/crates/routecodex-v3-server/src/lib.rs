@@ -8,8 +8,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode,
-    V3ProviderModelManifest, V3ServerManifest,
+    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
@@ -1170,8 +1169,16 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
     }
 }
 
+// feature_id: v3.models_capability_catalog
 fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json::Value {
     let mut data = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for builtin_model_id in ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        let mut item = build_v3_codex_model_metadata(builtin_model_id, builtin_model_id, None);
+        item.insert("owned_by".to_string(), json!("openai"));
+        seen.insert(builtin_model_id.to_string());
+        data.push(Value::Object(item));
+    }
     for provider in manifest
         .providers
         .values()
@@ -1184,7 +1191,11 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
                 model.aliases.clone()
             };
             for visible_id in visible_ids {
-                let mut item = build_v3_codex_model_metadata(&visible_id, model);
+                if seen.contains(&visible_id) {
+                    continue;
+                }
+                let mut item =
+                    build_v3_codex_model_metadata(&visible_id, &model.id, model.max_context_tokens);
                 item.insert(
                     "owned_by".to_string(),
                     json!(format!("provider:{}", provider.id)),
@@ -1209,6 +1220,7 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
                     json!(model.max_context_tokens),
                 );
                 item.insert("features".to_string(), json!(model.features));
+                seen.insert(visible_id);
                 data.push(Value::Object(item));
             }
         }
@@ -1223,14 +1235,15 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
 
 fn build_v3_codex_model_metadata(
     visible_id: &str,
-    model: &V3ProviderModelManifest,
+    canonical_model_id: &str,
+    max_context_tokens: Option<u64>,
 ) -> Map<String, Value> {
-    let is_gpt_55 = model.id == "gpt-5.5";
-    let is_gpt_56_sol = model.id == "gpt-5.6-sol";
-    let is_gpt_56_terra = model.id == "gpt-5.6-terra";
-    let is_gpt_56_luna = model.id == "gpt-5.6-luna";
+    let is_gpt_55 = canonical_model_id == "gpt-5.5";
+    let is_gpt_56_sol = canonical_model_id == "gpt-5.6-sol";
+    let is_gpt_56_terra = canonical_model_id == "gpt-5.6-terra";
+    let is_gpt_56_luna = canonical_model_id == "gpt-5.6-luna";
     let is_gpt_56 = is_gpt_56_sol || is_gpt_56_terra || is_gpt_56_luna;
-    let is_builtin_bare = visible_id == model.id && (is_gpt_55 || is_gpt_56);
+    let is_builtin_bare = visible_id == canonical_model_id && (is_gpt_55 || is_gpt_56);
     let preset_context_window = if is_gpt_55 {
         Some(272_000)
     } else if is_gpt_56 {
@@ -1239,9 +1252,9 @@ fn build_v3_codex_model_metadata(
         None
     };
     let context_window = if is_builtin_bare {
-        preset_context_window.or(model.max_context_tokens)
+        preset_context_window.or(max_context_tokens)
     } else {
-        model.max_context_tokens.or(preset_context_window)
+        max_context_tokens.or(preset_context_window)
     }
     .unwrap_or(128_000);
     let description = if is_gpt_55 {
@@ -1320,7 +1333,13 @@ fn build_v3_codex_model_metadata(
         ("visibility".to_string(), json!("list")),
         (
             "minimal_client_version".to_string(),
-            json!(if is_gpt_56 { "0.144.0" } else { "0.124.0" }),
+            json!(if is_gpt_56 {
+                "0.144.0"
+            } else if is_gpt_55 {
+                "0.124.0"
+            } else {
+                "0.98.0"
+            }),
         ),
         ("supported_in_api".to_string(), json!(true)),
         ("priority".to_string(), json!(0)),

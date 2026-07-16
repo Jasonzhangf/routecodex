@@ -843,6 +843,48 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
 }
 
 #[tokio::test]
+async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data = response["data"].as_array().unwrap();
+    for id in ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        assert!(
+            data.iter().any(|model| model["id"] == id),
+            "{id} must be listed as a built-in Codex catalog entry"
+        );
+    }
+    let client_test = data
+        .iter()
+        .find(|model| model["id"] == "client-test")
+        .expect("configured alias must remain listed");
+    assert_eq!(client_test["minimal_client_version"], "0.98.0");
+    let sol_count = data
+        .iter()
+        .filter(|model| model["id"] == "gpt-5.6-sol")
+        .count();
+    assert_eq!(
+        sol_count, 1,
+        "built-in and provider catalog entries must dedupe"
+    );
+    assert_eq!(response["models"], response["data"]);
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
