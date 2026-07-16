@@ -41,6 +41,33 @@ const cases = [
     diagnostic: /missing error case http_402/,
   },
   {
+    name: 'reroutable provider failure regressed to pending',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.error_cases.find((entry) => entry.id === 'http_401');
+      target.status = 'pending';
+      delete target.controlled_evidence;
+    },
+    diagnostic: /reroutable provider failure case must not be vague pending http_401/,
+  },
+  {
+    name: 'timeout live pending blocker removed',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.error_cases.find((entry) => entry.id === 'timeout');
+      target.live_evidence = { status: 'live_pending', refs: [], gates: [] };
+    },
+    diagnostic: /error case timeout live evidence must name blockers when not live_verified/,
+  },
+  {
+    name: 'provider failure blackbox gate removed from manifest',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      doc.verification_gates = doc.verification_gates.filter((gate) => gate !== 'npm run verify:provider-failure-ban-blackbox');
+    },
+    diagnostic: /missing npm run verify:provider-failure-ban-blackbox/,
+  },
+  {
     name: 'codex capability field removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {

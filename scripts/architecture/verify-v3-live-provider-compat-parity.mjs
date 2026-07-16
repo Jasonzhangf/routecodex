@@ -47,6 +47,7 @@ const requiredErrorCases = [
   'disconnect',
   'cancel',
 ];
+const reroutableProviderFailureCases = ['http_401', 'http_403', 'http_5xx', 'timeout'];
 const requiredCapabilityFields = [
   'supports_reasoning_summaries',
   'support_verbosity',
@@ -81,6 +82,9 @@ if (manifest.completion_boundary?.production_ready_claim !== false
 }
 if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_partial_verified') {
   failures.push(manifestPath + ': live audit must record partial V3 provider replay verification');
+}
+if (!(manifest.verification_gates ?? []).includes('npm run verify:provider-failure-ban-blackbox')) {
+  failures.push(manifestPath + ': verification_gates missing npm run verify:provider-failure-ban-blackbox');
 }
 if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE')) {
   failures.push(manifestPath + ': live audit must name the verified V3 5555 live replay surface');
@@ -139,6 +143,16 @@ for (const errorCase of manifest.error_cases ?? []) {
   if (!errorCase.status || !errorCase.owner_feature_id || !errorCase.required_path) {
     failures.push(manifestPath + ': malformed error case ' + (errorCase.id ?? '<missing>'));
   }
+  if (reroutableProviderFailureCases.includes(errorCase.id)) {
+    if (errorCase.status !== 'controlled_verified') {
+      failures.push(manifestPath + ': reroutable provider failure case must not be vague pending ' + errorCase.id);
+    }
+    validateErrorEvidence(errorCase.controlled_evidence, 'controlled_evidence', errorCase.id);
+    validateErrorEvidence(errorCase.live_evidence, 'live_evidence', errorCase.id);
+    if (!String(errorCase.required_path).includes('Error01-06')) {
+      failures.push(manifestPath + ': reroutable provider failure case must name Error01-06 path ' + errorCase.id);
+    }
+  }
 }
 
 const codexCapability = (manifest.capability_cases ?? [])
@@ -171,6 +185,7 @@ for (const blocker of [
 for (const script of [
   'verify:v3-live-provider-compat-parity',
   'test:v3-live-provider-compat-parity-red-fixtures',
+  'verify:provider-failure-ban-blackbox',
 ]) {
   if (!packageJson.scripts?.[script]) failures.push(packagePath + ': missing script ' + script);
 }
@@ -218,7 +233,12 @@ for (const phrase of [
   'responses_relay_cutover_pending',
   'anthropic_messages_live_replay_pending',
   'gemini_generate_content_live_replay_pending',
+  'npm run verify:provider-failure-ban-blackbox',
 ]) requireText(wiki, wikiPath, phrase);
+for (const phrase of [
+  'scenarioTimeout',
+  'production_credentials_must_not_be_mutated_for_auth_error',
+]) requireText(readFileSync(manifestPath, 'utf8'), manifestPath, phrase);
 
 if (failures.length) {
   console.error('[verify:v3-live-provider-compat-parity] failed');
@@ -228,7 +248,7 @@ if (failures.length) {
 console.log('[verify:v3-live-provider-compat-parity] ok');
 
 function validateEvidence(evidence, label, caseId) {
-  const statuses = ['controlled_verified', 'live_verified', 'pending', 'blocker'];
+  const statuses = ['controlled_verified', 'live_verified', 'live_pending', 'pending', 'blocker'];
   if (!evidence || !statuses.includes(evidence.status)) {
     failures.push(manifestPath + ': invalid ' + label + ' status in case ' + caseId);
   }
@@ -237,6 +257,33 @@ function validateEvidence(evidence, label, caseId) {
   }
   if (evidence.status === 'blocker' && (!Array.isArray(evidence.blockers) || evidence.blockers.length === 0)) {
     failures.push(manifestPath + ': blocker evidence must name blockers in case ' + caseId);
+  }
+  if (evidence.status === 'live_pending' && (!Array.isArray(evidence.blockers) || evidence.blockers.length === 0)) {
+    failures.push(manifestPath + ': live_pending evidence must name blockers in case ' + caseId);
+  }
+}
+
+function validateErrorEvidence(evidence, label, caseId) {
+  if (!evidence || typeof evidence !== 'object') {
+    failures.push(manifestPath + ': missing ' + label + ' for error case ' + caseId);
+    return;
+  }
+  if (label === 'controlled_evidence' && evidence.status !== 'controlled_verified') {
+    failures.push(manifestPath + ': error case ' + caseId + ' controlled evidence must be controlled_verified');
+  }
+  if (label === 'live_evidence') {
+    if (!['live_verified', 'live_pending', 'blocker'].includes(evidence.status)) {
+      failures.push(manifestPath + ': error case ' + caseId + ' live evidence status must be live_verified, live_pending, or blocker');
+    }
+    if (evidence.status !== 'live_verified' && (!Array.isArray(evidence.blockers) || evidence.blockers.length === 0)) {
+      failures.push(manifestPath + ': error case ' + caseId + ' live evidence must name blockers when not live_verified');
+    }
+  }
+  if (!Array.isArray(evidence.refs)) {
+    failures.push(manifestPath + ': error case ' + caseId + ' ' + label + '.refs must be an array');
+  }
+  if (!Array.isArray(evidence.gates)) {
+    failures.push(manifestPath + ': error case ' + caseId + ' ' + label + '.gates must be an array');
   }
 }
 

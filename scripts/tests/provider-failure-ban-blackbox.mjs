@@ -86,7 +86,11 @@ function readRoutingGroupHealth(routeCodex, routingPolicyGroup) {
   return Array.isArray(status?.health) ? status.health : [];
 }
 
-async function createMockUpstream({ status, body, onHit }) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function createMockUpstream({ status, body, onHit, delayMs = 0 }) {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
   app.use((req, res, next) => {
@@ -96,7 +100,10 @@ async function createMockUpstream({ status, body, onHit }) {
     }
     if (req.method === 'POST' && req.path.endsWith('/responses')) {
       onHit?.(req.body);
-      res.status(status).json(body);
+      void (async () => {
+        if (delayMs > 0) await sleep(delayMs);
+        if (!res.headersSent && !res.destroyed) res.status(status).json(body);
+      })();
       return;
     }
     next();
@@ -431,6 +438,10 @@ async function withScenarioRuntime(options, fn) {
     typeof options?.responsesTimeoutMs === 'number' && Number.isFinite(options.responsesTimeoutMs)
       ? Math.max(1000, Math.floor(options.responsesTimeoutMs))
       : 15000;
+  const providerTimeoutMs =
+    typeof options?.providerTimeoutMs === 'number' && Number.isFinite(options.providerTimeoutMs)
+      ? Math.max(1, Math.floor(options.providerTimeoutMs))
+      : undefined;
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-provider-failure-'));
   const home = path.join(tmpDir, 'home');
   const rccHome = path.join(home, '.rcc');
@@ -448,6 +459,7 @@ async function withScenarioRuntime(options, fn) {
       setEnv('ROUTECODEX_SERVERTOOL_ENABLED', '0'),
       setEnv('ROUTECODEX_TRAFFIC_STORE_ROOT', path.join(tmpDir, 'traffic')),
       setEnv('ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS', String(responsesTimeoutMs)),
+      setEnv('ROUTECODEX_PROVIDER_TIMEOUT_MS', providerTimeoutMs === undefined ? undefined : String(providerTimeoutMs)),
       setEnv('ROUTECODEX_MAX_PROVIDER_ATTEMPTS', String(maxProviderAttempts))
     );
     await import('../../dist/modules/traffic-governor/index.js');
@@ -710,6 +722,58 @@ async function runAuthQuotaScenario({ label, status, code, marker }) {
   });
 }
 
+async function runTimeoutScenario() {
+  return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000, providerTimeoutMs: 100 }, async (ctx) => {
+    let primaryHits = 0;
+    let backupHits = 0;
+    const primaryUpstream = ctx.trackServer(
+      await createMockUpstream({
+        status: 200,
+        body: buildResponsesOkBody('late-primary-timeout'),
+        delayMs: 1000,
+        onHit: () => {
+          primaryHits += 1;
+        }
+      })
+    );
+    const backupUpstream = ctx.trackServer(
+      await createMockUpstream({
+        status: 200,
+        body: buildResponsesOkBody('ok-from-backup-timeout'),
+        onHit: () => {
+          backupHits += 1;
+        }
+      })
+    );
+
+    const userConfig = buildUserConfig(primaryUpstream.baseUrl, backupUpstream.baseUrl);
+    const server = ctx.trackServer(
+      await createHarnessServer({
+        userConfig,
+        RouteCodexHttpServer: ctx.RouteCodexHttpServer,
+        handleResponses: ctx.handleResponses
+      })
+    );
+
+    const first = await postResponses(server.httpHarness.baseUrl);
+    assert.equal(
+      first.status,
+      200,
+      `provider timeout must reroute to backup instead of returning client-visible timeout: ${first.body}`
+    );
+    assert.match(first.body, /ok-from-backup-timeout/);
+    assert.equal(primaryHits, 1, 'timeout should hit failing primary exactly once before exclusion');
+    assert.equal(backupHits, 1, 'timeout should hit backup after primary timeout exclusion');
+
+    return {
+      code: 'provider_timeout',
+      primaryHits,
+      backupHits,
+      clientStatus: first.status
+    };
+  });
+}
+
 
 async function runPortIsolationScenario() {
   return withScenarioRuntime({ maxProviderAttempts: 3, responsesTimeoutMs: 15000 }, async (ctx) => {
@@ -801,6 +865,7 @@ async function main() {
     code: 'HTTP_403',
     marker: 'ok-from-backup-403'
   });
+  const resultTimeout = await runTimeoutScenario();
   const resultQuota = await runAuthQuotaScenario({
     label: 'INSUFFICIENT_QUOTA',
     status: 429,
@@ -818,6 +883,7 @@ async function main() {
         scenario401: result401,
         scenario402: result402,
         scenario403: result403,
+        scenarioTimeout: resultTimeout,
         scenarioInsufficientQuota: resultQuota,
         portIsolation: resultPortIsolation,
         ...(result502 ? { scenario502: result502 } : {})

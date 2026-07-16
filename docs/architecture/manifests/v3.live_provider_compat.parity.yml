@@ -14,6 +14,7 @@ node_ids:
 evidence_levels:
   controlled_verified: Controlled loopback/source/test evidence exists and is linked.
   live_verified: Live/provider replay evidence exists and is linked.
+  live_pending: Live/provider replay is intentionally not claimed and has named blockers.
   pending: Required evidence is intentionally not claimed yet.
   blocker: Required evidence is blocked by a named owner backlog or external provider/config condition.
 production_policy:
@@ -181,14 +182,34 @@ cases:
     live_evidence: { status: blocker, refs: [], blockers: [no_gemini_websocket_v2_entry_contract] }
     production: { status: blocked, blockers: [transport_not_declared_for_endpoint] }
 error_cases:
-  - { id: http_401, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 typed provider authentication failure }
+  - id: http_401
+    status: controlled_verified
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    required_path: Error01-06 typed provider authentication failure; candidate/default pool remains reroutable until exhausted
+    controlled_evidence: { status: controlled_verified, refs: [scripts/tests/provider-failure-ban-blackbox.mjs, docs/goals/provider-error-reroutable-until-pool-and-default-empty.md], gates: [npm run verify:provider-failure-ban-blackbox], scenario: scenario401, proves: primaryHits=1 backupHits=1 clientStatus=200 }
+    live_evidence: { status: live_pending, refs: [docs/goals/v3-live-provider-compat-parity-closeout-plan.md], gates: [], blockers: [production_credentials_must_not_be_mutated_for_auth_error] }
   - { id: http_402, status: controlled_verified, owner_feature_id: v3.responses_direct_sse_provider_failure_guard, required_path: SSE or HTTP provider billing failure becomes typed provider error before client success }
-  - { id: http_403, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 typed provider authorization failure }
+  - id: http_403
+    status: controlled_verified
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    required_path: Error01-06 typed provider authorization failure; candidate/default pool remains reroutable until exhausted
+    controlled_evidence: { status: controlled_verified, refs: [scripts/tests/provider-failure-ban-blackbox.mjs, docs/goals/provider-error-reroutable-until-pool-and-default-empty.md], gates: [npm run verify:provider-failure-ban-blackbox], scenario: scenario403, proves: primaryHits=1 backupHits=1 clientStatus=200 }
+    live_evidence: { status: live_pending, refs: [docs/goals/v3-live-provider-compat-parity-closeout-plan.md], gates: [], blockers: [production_credentials_must_not_be_mutated_for_authorization_error] }
   - { id: http_429, status: controlled_verified, owner_feature_id: v3.openai_chat_relay_runtime_integration, required_path: Error01-06 provider rate limit projection without success wrapping }
-  - { id: http_5xx, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 retryable provider runtime failure }
+  - id: http_5xx
+    status: controlled_verified
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    required_path: Error01-06 retryable provider runtime failure; candidate/default pool remains reroutable until exhausted
+    controlled_evidence: { status: controlled_verified, refs: [scripts/tests/provider-failure-ban-blackbox.mjs, docs/goals/provider-error-reroutable-until-pool-and-default-empty.md], gates: [npm run verify:provider-failure-ban-blackbox], scenario: scenario503, proves: primaryHits>=1 backupHits>=1 clientStatus=200 }
+    live_evidence: { status: live_pending, refs: [docs/goals/v3-live-provider-compat-parity-closeout-plan.md], gates: [], blockers: [natural_live_5xx_not_observed_in_current_5555_replay] }
   - { id: sse_body_level_failure, status: controlled_verified, owner_feature_id: v3.responses_direct_sse_provider_failure_guard, required_path: first semantic SSE failure block maps to typed provider failure }
   - { id: malformed_provider_body, status: controlled_verified, owner_feature_id: v3.gemini_relay_runtime_integration, required_path: provider_error_body_malformed through Error01-06 }
-  - { id: timeout, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: typed timeout or provider transport error without success wrapping }
+  - id: timeout
+    status: controlled_verified
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    required_path: Error01-06 typed timeout or provider transport error without success wrapping; candidate/default pool remains reroutable until exhausted
+    controlled_evidence: { status: controlled_verified, refs: [scripts/tests/provider-failure-ban-blackbox.mjs, docs/goals/provider-error-reroutable-until-pool-and-default-empty.md], gates: [npm run verify:provider-failure-ban-blackbox], scenario: scenarioTimeout, proves: primaryHits=1 backupHits=1 clientStatus=200 }
+    live_evidence: { status: live_pending, refs: [docs/goals/v3-live-provider-compat-parity-closeout-plan.md], gates: [], blockers: [natural_live_timeout_not_observed_in_current_5555_replay] }
   - { id: disconnect, status: controlled_verified, owner_feature_id: v3.responses_websocket_v2_transport_hardening, required_path: client_disconnect remains health-neutral and discards active WebSocket connection }
   - { id: cancel, status: controlled_verified, owner_feature_id: v3.responses_websocket_v2_transport_hardening, required_path: cancellation before connect or send or read remains typed and clears dirty connection }
 capability_cases:
@@ -215,6 +236,7 @@ live_read_only_audit:
 verification_gates:
   - npm run verify:v3-live-provider-compat-parity
   - npm run test:v3-live-provider-compat-parity-red-fixtures
+  - npm run verify:provider-failure-ban-blackbox
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

@@ -1607,6 +1607,7 @@ features:
     required_gates:
       - npm run verify:v3-live-provider-compat-parity
       - npm run test:v3-live-provider-compat-parity-red-fixtures
+      - npm run verify:provider-failure-ban-blackbox
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-resource-map
       - npm run verify:v3-module-boundaries

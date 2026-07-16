@@ -43,6 +43,8 @@ The machine manifest covers every endpoint and transport pair:
 
 The manifest also locks the required error cases: http_401, http_402, http_403, http_429, http_5xx, sse_body_level_failure, malformed_provider_body, timeout, disconnect, and cancel.
 
+Provider failure evidence is split by safety boundary. HTTP 401, HTTP 403, HTTP 5xx, and provider timeout are controlled_verified through `npm run verify:provider-failure-ban-blackbox`: each failing primary records one provider failure attempt, then backup/default is hit and the client receives HTTP 200 instead of an early terminal provider error. Live 401/403 remains live_pending because production credentials must not be mutated to manufacture auth/authorization errors; live 5xx/timeout remains live_pending until a natural or authorized live provider failure sample exists.
+
 ## Capability Contract
 
 The /v1/models capability case tracks the Codex request-builder fields that can change emitted provider payloads:
@@ -63,7 +65,7 @@ Current blockers are explicit and must not be silently converted into readiness:
 
 - responses_relay_cutover_pending: /v1/responses Relay cutover is still not claimed by this matrix.
 - live_relay_cutover_pending: controlled Relay closeout does not prove live Relay Server cutover.
-- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for pending Anthropic, Gemini, and error cases.
+- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for pending Anthropic, Gemini, and live 401/403/5xx/timeout cases.
 - anthropic_messages_live_replay_pending: Anthropic Messages JSON/SSE is not enabled in the final 5555 profile.
 - gemini_generate_content_live_replay_pending: Gemini Generate Content JSON/SSE remains outside the final 5555 profile.
 - final_5555_profile_anthropic_endpoint_not_enabled and final_5555_profile_gemini_endpoint_not_enabled: live 5555 returned typed endpoint_not_enabled errors for protocols excluded from the final responses + openai_chat profile.
@@ -74,6 +76,7 @@ Live audit on 2026-07-16T03:41:00Z used the globally installed managed V3 5555 p
 
 - npm run verify:v3-live-provider-compat-parity
 - npm run test:v3-live-provider-compat-parity-red-fixtures
+- npm run verify:provider-failure-ban-blackbox
 - npm run verify:v3-architecture-docs
 - npm run verify:v3-resource-map
 - npm run verify:v3-module-boundaries
@@ -85,4 +88,4 @@ Live audit on 2026-07-16T03:41:00Z used the globally installed managed V3 5555 p
 
 ## Completion Boundary
 
-This closeout proves a partial live 5555 provider replay after authorized global install, managed V3 restart, and final live profile responses + openai_chat. It does not prove credential mutation, full Relay cutover, P6 deletion, Anthropic/Gemini live replay, the full error matrix, or production cutover.
+This closeout proves a partial live 5555 provider replay after authorized global install, managed V3 restart, and final live profile responses + openai_chat. It also records controlled provider-failure evidence for 401/403/5xx/timeout reroute/default-pool behavior. It does not prove credential mutation, full Relay cutover, P6 deletion, Anthropic/Gemini live replay, live 401/403/5xx/timeout provider failures, or production cutover.

@@ -109,5 +109,8 @@ Verified live cases:
 - OpenAI Chat Relay JSON and SSE on /v1/chat/completions.
 
 Remaining blockers stay explicit: /v1/responses Relay cutover, Anthropic Messages final-profile
-endpoint_not_enabled, Gemini Generate Content final-profile endpoint_not_enabled, and the
-unverified live error matrix. No live config mutation or P6 deletion is claimed.
+endpoint_not_enabled, Gemini Generate Content final-profile endpoint_not_enabled, and live
+401/403/5xx/timeout provider-error samples. Controlled error evidence now covers 401/403/5xx/timeout
+through `npm run verify:provider-failure-ban-blackbox`: failing primary is excluded once, backup/default
+is hit, and the client does not receive an early terminal provider error. No live config mutation,
+credential mutation, or P6 deletion is claimed.
