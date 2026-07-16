@@ -25,9 +25,11 @@ features:
       - exclusive operation lock and auth-handle preflight
       - no resolved secret in lifecycle projection
       - wrong identity, stale state, already-running, and already-stopped failures
+      - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
     required_integration:
       - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
       - stable instance identity and changed PID/start nonce across restart
+      - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path
       - all listeners close on one stop
       - lifecycle state, argv, log, and evidence contain no resolved secret
       - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses

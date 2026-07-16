@@ -46,14 +46,14 @@ does not publish managed state.
 
 ## Review checklist
 
-- [ ] Config loads through `V3ConfigStore::load_snapshot_with_source_identity` and publishes a deterministic Manifest plus source identity.
-- [ ] Instance declaration matches config digest, executable, and all listeners.
-- [ ] Operation lock is exclusive.
-- [ ] Duplicate start fails while exact control identity is live.
-- [ ] Restart is one aggregate operation, not a listener loop.
-- [ ] Wrong nonce/config/executable and unknown port occupancy fail explicitly.
-- [ ] A stopped exact-config instance can start from the next release snapshot executable; an active
+- [x] Config loads through `V3ConfigStore::load_snapshot_with_source_identity` and publishes a deterministic Manifest plus source identity.
+- [x] Instance declaration matches config digest, executable, and all listeners.
+- [x] Operation lock is exclusive.
+- [x] Duplicate start fails while exact control identity is live.
+- [x] Restart is one aggregate operation, not a listener loop.
+- [x] Wrong nonce/config/executable and unknown port occupancy fail explicitly.
+- [x] A stopped exact-config instance can start from the next release snapshot executable; an active
       or missing-terminal instance cannot be reaped or taken over.
-- [ ] State/argv/log/evidence scans contain no resolved secret.
-- [ ] Temporary CLI blackbox and live 5555 restart evidence both pass.
-- [ ] V2 5520/10000/4444 stay healthy throughout the V3 restart.
+- [x] State/argv/log/evidence scans contain no resolved secret.
+- [x] Temporary CLI blackbox and live 5555 restart evidence both pass.
+- [x] V2 5520/10000/4444 stay healthy throughout the V3 restart.
