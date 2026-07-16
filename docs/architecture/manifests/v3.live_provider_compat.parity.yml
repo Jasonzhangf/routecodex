@@ -256,6 +256,8 @@ completion_boundary:
   live_provider_evidence_indexed: true
   production_ready_claim: false
   remote_continuation_two_turn_live: false
+  remote_continuation_provider_ws_probe: .agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json
+  remote_continuation_provider_ws_opened_count: 0
   live_config_mutation: false
   temporary_non_production_direct_config_emitted_removed: true
   global_install_restart: true

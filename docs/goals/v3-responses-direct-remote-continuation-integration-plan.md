@@ -215,3 +215,30 @@ Jason 已授权 V3 5555 非生产环境的 connection/config/restart/live replay
 - 对同路径发普通 HTTPS 请求能返回 401/404 形状；加 WebSocket Upgrade 后同样 8s timeout。这说明 HTTP endpoint 可达，但当前 provider/proxy 对 WebSocket Upgrade 未给出可验证响应。
 
 结论：A 的 Config source 支持已经完成；live 5555 不应只靠猜测写入 `transport="websocket_v2"` 和 `websocket_v2_url`。真实两轮 remote continuation/tool_outputs closeout 仍需要 provider 侧给出可握手的 WebSocket v2 endpoint，或换成已验证支持 Responses WebSocket v2 的 provider profile 后再做持久配置、managed restart、两轮 replay。
+
+## 15. Configured provider WebSocket v2 matrix probe（2026-07-16）
+
+Section 14 只覆盖当前 5555 主用 `cc-sol` profile。本轮继续把同一验证口径扩展到当前已配置的 Responses provider 列表，避免把“只有主 provider 缺 endpoint”误判成可以通过切换现有 profile 解决。
+
+证据：
+
+- Summary：`.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json`
+- Per-candidate JSONL：`.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-probe.jsonl`
+- Evidence log：`.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/evidence.jsonl`
+
+Probe contract：
+
+- 读取 `/Volumes/extension/.rcc/provider` 和 `~/.rcc/provider` 中已配置的 `type="responses"` provider，按 provider id 去重，secret 只在内存用于握手，不写入输出。
+- 对每个 provider 派生 4 个候选 WebSocket endpoint：`/responses`、`/responses/ws`、`/responses/websocket`、`/realtime`。
+- 使用真实 WebSocket Upgrade、配置 auth（若存在）和 `OpenAI-Beta: responses_websockets=2026-02-06`。
+- 成功条件唯一是 HTTP `101 Switching Protocols`；HTTP 200/400/401/403/404/405、connection refused、timeout 都不是 provider Responses WebSocket v2 availability。
+
+结果：
+
+- Providers：13。
+- Candidates：52。
+- HTTP 101 opened：0。
+- Status/error counts：`200=6`、`400=2`、`401=4`、`403=1`、`404=25`、`405=1`、`ConnectionRefusedError=2`、`TimeoutError=11`。
+- Inventory 断言：13 个 provider 都没有声明 `websocket_v2_url`；声明 transport 均为空或 HTTP；模型能力均未声明 `remote_continuation` 和 `tool_outputs`。
+
+结论：当前已配置 provider 集合里没有可验证 provider Responses WebSocket v2 endpoint，live two-turn remote continuation/tool_outputs exact-pin replay 继续 blocked。此时不应对任何现有 provider 写入猜测的 `transport="websocket_v2"` / `websocket_v2_url`，也不应重启 5555 去制造必然失败的 live profile。下一步只能是拿到 provider 侧确认可握手的 WebSocket v2 endpoint，或新增/切换到已验证支持该 endpoint 的 provider profile 后，再做持久配置、managed restart、JSON/SSE/client-WS 两轮 exact-pin replay。

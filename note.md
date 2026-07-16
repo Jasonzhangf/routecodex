@@ -31101,3 +31101,10 @@ Pure Rust NAPI candidates:
 - Provider WebSocket v2 probe with existing cc-sol auth + `OpenAI-Beta: responses_websockets=2026-02-06` timed out during opening handshake for `wss://api.anyint.ai/openai/v1/responses` and `?model=gpt-5.6-sol`; no connection opened and no terminal event arrived.
 - HTTPS no-auth `/responses` returns 401 JSON, but WebSocket Upgrade to `/responses`, `/responses/ws`, and `/responses/websocket` times out with zero bytes. Root gap is provider/proxy WS endpoint availability, not Config source projection.
 - Boundary: no persistent live config, credential, install, restart, or production cutover mutation was made; do not guess `websocket_v2_url` into live config until a provider-verified endpoint exists.
+
+# 2026-07-16T21:10+08:00 V3 configured provider WS v2 matrix probe
+- Run: `.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963`, claim `gate_id:v3_responses_direct_remote_continuation_provider_ws_probe`.
+- Probe contract: all configured `type="responses"` providers from `/Volumes/extension/.rcc/provider` and `~/.rcc/provider`, provider-id deduped; 4 WS candidates per provider (`/responses`, `/responses/ws`, `/responses/websocket`, `/realtime`); real WebSocket Upgrade with configured auth when present and `OpenAI-Beta: responses_websockets=2026-02-06`; success requires HTTP 101.
+- Result: 13 providers, 52 candidates, 0 HTTP 101. Counts: `200=6`, `400=2`, `401=4`, `403=1`, `404=25`, `405=1`, `ConnectionRefusedError=2`, `TimeoutError=11`.
+- Inventory assertion passed: no configured provider has `websocket_v2_url`, no provider declares `transport="websocket_v2"`, no configured model has `remote_continuation` or `tool_outputs`.
+- Conclusion: live two-turn remote continuation/tool_outputs exact-pin replay is blocked by provider/profile WS endpoint availability. No persistent config, credential, install, restart, or fallback/materialization was performed.

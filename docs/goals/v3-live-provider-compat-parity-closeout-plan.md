@@ -173,3 +173,9 @@ Boundary: no provider credential mutation, no persistent original 5555 config mu
 two-turn remote continuation/tool_outputs exact-pin live replay, and no full production cutover is claimed.
 The direct temporary config existed only to produce fresh Direct JSON/SSE/WS evidence on the non-production
 V3 5555 listener, and the listener was restored to the original Relay profile before closeout.
+
+Follow-up blocker evidence: `.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json`
+probed 13 configured Responses providers x 4 provider-side WebSocket candidates with configured auth and
+`OpenAI-Beta: responses_websockets=2026-02-06`; 0/52 returned HTTP 101. This keeps
+`remote_continuation_two_turn_live=false` until a provider-verified Responses WebSocket v2 endpoint is available
+and a real two-turn exact-pin replay succeeds.
