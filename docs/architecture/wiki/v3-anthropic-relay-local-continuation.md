@@ -1,6 +1,6 @@
 # V3 Anthropic Relay Local Continuation
 
-Canonical plan: [implementation plan](../../goals/v3-anthropic-relay-local-continuation-integration-plan.md) · [test design](../../goals/v3-anthropic-relay-local-continuation-test-design.md) · [machine manifest](../manifests/v3.anthropic_relay.local_continuation.mainline.yml)
+Canonical plan: [implementation plan](../../goals/v3-anthropic-relay-local-continuation-integration-plan.md) · [test design](../../goals/v3-anthropic-relay-local-continuation-test-design.md) · [machine manifest](../manifests/v3.anthropic_relay.local_continuation.mainline.yml) · [HTML review surface](v3-anthropic-relay-local-continuation.html)
 
 Owner feature: `v3.anthropic_relay_local_continuation_integration`.
 
