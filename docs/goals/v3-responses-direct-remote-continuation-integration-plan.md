@@ -199,3 +199,19 @@ Live 5555 现状（只读、已脱敏）：`cc-sol` provider 仍只有
 `[provider.responses] process="chat", streaming="always"`，模型 capability 缺
 `remote_continuation` / `tool_outputs`，且没有 `websocket_v2_url`。因此 source 能读取 V2 WS 声明后，
 真实两轮 live closeout 仍取决于 provider 侧给出可验证 WebSocket v2 endpoint 与 Jason 授权配置/restart。
+
+## 14. Config A live execution audit after authorization（2026-07-16）
+
+Jason 已授权 V3 5555 非生产环境的 connection/config/restart/live replay。本轮从配置侧重新执行 A，但未做持久 live config mutation，因为唯一缺口不只是 TOML 字段，而是 provider WebSocket v2 endpoint 仍未验证可用。
+
+证据目录：`.agent-collab/runs/20260716T124105Z-Macstudio.local-23864-6eb355fe/`。
+
+已验证事实：
+
+- `rccv3 config check --config /Volumes/extension/.rcc/config.5555.v2.toml` 通过，5555 `/health` 为 V3 running。
+- `/Volumes/extension/.rcc/provider/cc-sol/config.v2.toml` 与 `~/.rcc/provider/cc-sol/config.v2.toml` 仍只声明 `[provider.responses] process="chat", streaming="always"`；`gpt-5.6-sol` capabilities 仍缺 `remote_continuation` / `tool_outputs`，且无 `websocket_v2_url`。
+- `/v1/models` 中 `gpt-5.6-sol` 的 Codex capability 字段齐全，但 `prefer_websockets=false`，不能作为 remote continuation 能力证据。
+- 使用现有 `cc-sol` auth 对 `wss://api.anyint.ai/openai/v1/responses` 与 query 变体执行 Responses WebSocket v2 handshake probe，均在 opening handshake 阶段 8s timeout，未打开连接、未收到 terminal event。
+- 对同路径发普通 HTTPS 请求能返回 401/404 形状；加 WebSocket Upgrade 后同样 8s timeout。这说明 HTTP endpoint 可达，但当前 provider/proxy 对 WebSocket Upgrade 未给出可验证响应。
+
+结论：A 的 Config source 支持已经完成；live 5555 不应只靠猜测写入 `transport="websocket_v2"` 和 `websocket_v2_url`。真实两轮 remote continuation/tool_outputs closeout 仍需要 provider 侧给出可握手的 WebSocket v2 endpoint，或换成已验证支持 Responses WebSocket v2 的 provider profile 后再做持久配置、managed restart、两轮 replay。

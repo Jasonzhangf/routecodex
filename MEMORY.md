@@ -3542,3 +3542,9 @@
 - The temporary native V3 Direct config was generated from `/Volumes/extension/.rcc/config.5555.v2.toml`, validated, used only for replay, then removed. Original `/Volumes/extension/.rcc/config.5555.v2.toml` was restarted and restored evidence at `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json` proves `/v1/models` plus Responses Relay JSON/SSE still pass on the final binding.
 - This is not two-turn remote continuation/tool_outputs exact-pin evidence; that live gate remains separate.
 - Matrix docs now treat Direct JSON/SSE/WS and Relay JSON/SSE as fresh real-provider replayed surfaces; Anthropic/Gemini and live 401/403/5xx/timeout remain explicit pending/blocker surfaces.
+
+# 2026-07-16: V3 5555 Config A live endpoint blocker
+- After Jason authorized non-production V3 5555 config/restart/live work, Config A was re-audited from `/Volumes/extension/.rcc/config.5555.v2.toml` and `cc-sol` provider profiles without changing credentials or persistent config.
+- Active `cc-sol` still declares Responses HTTP shape only: `[provider.responses] process="chat", streaming="always"`; `gpt-5.6-sol` lacks `remote_continuation` / `tool_outputs`; no `websocket_v2_url` exists. `/v1/models` lists Codex fields but `prefer_websockets=false`.
+- Provider endpoint probes using the existing auth and `OpenAI-Beta: responses_websockets=2026-02-06` timed out during opening handshake for `wss://api.anyint.ai/openai/v1/responses` and the model query variant. Plain HTTPS on `/responses` returns an auth-shaped response, while WebSocket Upgrade gets zero bytes until timeout.
+- Do not persist `transport="websocket_v2"` by guessing this endpoint. Live remote continuation still needs a provider-verified WebSocket v2 endpoint or a different verified profile before config mutation, managed restart, and two-turn replay.
