@@ -114,3 +114,19 @@ endpoint_not_enabled, Gemini Generate Content final-profile endpoint_not_enabled
 through `npm run verify:provider-failure-ban-blackbox`: failing primary is excluded once, backup/default
 is hit, and the client does not receive an early terminal provider error. No live config mutation,
 credential mutation, or P6 deletion is claimed.
+
+## 10. 2026-07-16 Gemini live blocker recheck after 60d0c90f4
+
+After 60d0c90f4, globally installed rccv3 snapshot 0.90.3935 was used to restart the
+managed 5555 instance from /Volumes/extension/.rcc/config.5555.v2.toml. Gemini Generate
+Content JSON and SSE probes both returned typed HTTP 501 endpoint_not_enabled at
+V3Server03HttpRequestRaw with Error01-06 projection before provider send. The sanitized config
+summary contains no Gemini provider endpoint, so the remaining Gemini live gap is an unauthorized
+profile blocker, not the old runtime bug that routed /generateContent to the default OpenAI target.
+
+Evidence:
+
+- .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/rccv3_managed_restart_after_60d0c90f4.log
+- .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/post_restart_health_process.log
+- .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt
+- .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt

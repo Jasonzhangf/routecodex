@@ -72,6 +72,8 @@ Current blockers are explicit and must not be silently converted into readiness:
 
 Live audit on 2026-07-16T03:41:00Z used the globally installed managed V3 5555 profile with endpoints responses and openai_chat. Evidence is recorded in .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json. It verified /v1/models for gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna with required Codex capability fields, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE against the real provider. Anthropic Messages and Gemini Generate Content returned explicit endpoint_not_enabled because the final 5555 profile does not declare those endpoints. The audit status is live_v3_provider_replay_partial_verified; it is not a full production cutover, live config mutation, or P6 deletion claim.
 
+Gemini blocker recheck on 2026-07-16T10:06:05Z used globally installed rccv3 snapshot 0.90.3935 after managed restart of /Volumes/extension/.rcc/config.5555.v2.toml. Evidence is recorded in .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt and .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt. Both Gemini JSON and SSE returned HTTP 501 endpoint_not_enabled with Error01-06 projection before provider send; the active profile contains no Gemini provider endpoint, and the old model_not_found misroute to the default OpenAI target was not reproduced.
+
 ## Required Gates
 
 - npm run verify:v3-live-provider-compat-parity

@@ -1328,10 +1328,11 @@ features:
       - CARGO_NET_OFFLINE=true cargo clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml --workspace -- --nocapture
       - git diff --check
-    runtime_status: controlled_json_sse_error_isolation_verified
+    runtime_status: controlled_json_sse_error_isolation_verified_live_5555_profile_blocked
     pending_runtime:
+      - authorized live Gemini provider endpoint/profile
       - live Gemini provider compatibility
-      - global install restart and production cutover
+      - production cutover
 
   - feature_id: v3.entry_protocol_registry_contract
     status: source_contract_verified

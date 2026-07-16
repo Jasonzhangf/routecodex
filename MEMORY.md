@@ -3504,3 +3504,9 @@
 - `v3.v2_config_toml_compat_5555` now projects V2 `[provider.responses] transport` and `websocket_v2_url` / `websocketV2Url` into the V3 provider manifest. Omitted transport remains HTTP; `remote_continuation` still requires `tool_outputs` and WebSocket v2 at Config compile; WebSocket v2 without endpoint fails before Runtime/Provider send.
 - Existing V2 5555 provider-protocol endpoint enablement remains separate from this transport projection; Runtime and Provider transport must consume the compiled Config truth rather than infer or expand endpoint availability.
 - Current live 5555 gap remains external/config truth, not source wiring: `cc-sol` V2 provider config lacks `remote_continuation`, `tool_outputs`, and `websocket_v2_url`; no live config, credential, install, restart, or provider endpoint guessing was performed. Live remote-continuation closure still requires authorized config/restart and real two-turn replay proving the exact provider/model/auth/transport pin.
+
+# 2026-07-16 V3 Gemini live 5555 profile blocker after 60d0c90f4
+
+- 60d0c90f4 fixed the live Gemini misroute class: V2 TOML projection no longer enables Gemini without an enabled Gemini provider, and Gemini runtime rejects non-Gemini selected targets before provider send.
+- Verified after global rccv3 install snapshot 0.90.3935 and managed restart of /Volumes/extension/.rcc/config.5555.v2.toml: Gemini /v1beta/models/gemini-wire/generateContent JSON and SSE both returned HTTP 501 endpoint_not_enabled at V3Server03HttpRequestRaw through Error01-06. The sanitized active config contains no Gemini provider endpoint.
+- Current Gemini live state is an unauthorized profile blocker, not production readiness and not the previous model_not_found default-OpenAI-target runtime bug. Do not mark Gemini live provider replay ready until an authorized Gemini endpoint/provider profile is configured, restarted, and JSON/SSE provider replay succeeds.
