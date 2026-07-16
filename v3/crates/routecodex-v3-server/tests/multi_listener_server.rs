@@ -170,6 +170,14 @@ supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
+[providers.test.models."gpt-5.6-sol"]
+wire_name = "gpt-5.6-sol"
+capabilities = ["text", "reasoning", "tools", "streaming"]
+supports_streaming = true
+supports_thinking = true
+thinking = "ultra"
+max_tokens = 64000
+max_context_tokens = 200000
 [debug]
 log_console = false
 snapshots = true
@@ -802,6 +810,28 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["thinking"], "optional");
     assert_eq!(model["max_tokens"], 4096);
     assert_eq!(model["max_context_tokens"], 128000);
+    assert_eq!(model["support_verbosity"], true);
+    assert_eq!(model["supports_reasoning_summaries"], true);
+    assert_eq!(model["supports_parallel_tool_calls"], true);
+    assert_eq!(model["supports_search_tool"], true);
+    assert_eq!(model["input_modalities"], json!(["text", "image"]));
+    assert_eq!(model["context_window"], 128000);
+    assert_eq!(model["max_context_window"], 128000);
+    let sol = response["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "gpt-5.6-sol")
+        .expect("gpt-5.6-sol must expose Codex model metadata");
+    assert_eq!(sol["supports_reasoning_summaries"], true);
+    assert_eq!(sol["support_verbosity"], true);
+    assert_eq!(sol["supports_parallel_tool_calls"], true);
+    assert_eq!(sol["context_window"], 372000);
+    assert_eq!(sol["max_context_window"], 372000);
+    assert_eq!(sol["supports_search_tool"], true);
+    assert_eq!(sol["use_responses_lite"], true);
+    assert_eq!(sol["tool_mode"], "code_mode_only");
+    assert_eq!(sol["input_modalities"], json!(["text", "image"]));
     assert!(
         !serde_json::to_string(&response)
             .unwrap()

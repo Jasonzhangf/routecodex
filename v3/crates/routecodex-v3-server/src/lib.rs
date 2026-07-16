@@ -8,7 +8,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
+    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode,
+    V3ProviderModelManifest, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
@@ -28,7 +29,7 @@ use routecodex_v3_runtime::{
     V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
     V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
 };
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use sse_transport_core::{
     build_sse_transport_in_01_raw_chunk, build_sse_transport_in_02_from_fields,
     build_sse_transport_in_03_from_sse_transport_in_02,
@@ -1183,29 +1184,163 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
                 model.aliases.clone()
             };
             for visible_id in visible_ids {
-                data.push(json!({
-                    "id": visible_id,
-                    "object": "model",
-                    "owned_by": format!("provider:{}", provider.id),
-                    "provider_id": provider.id,
-                    "canonical_model_id": model.id,
-                    "wire_model": model.wire_name,
-                    "aliases": model.aliases,
-                    "capabilities": model.capabilities,
-                    "supports_streaming": model.supports_streaming,
-                    "supports_thinking": model.supports_thinking,
-                    "thinking": model.thinking,
-                    "max_tokens": model.max_tokens,
-                    "max_context_tokens": model.max_context_tokens,
-                    "features": model.features,
-                }));
+                let mut item = build_v3_codex_model_metadata(&visible_id, model);
+                item.insert(
+                    "owned_by".to_string(),
+                    json!(format!("provider:{}", provider.id)),
+                );
+                item.insert("provider_id".to_string(), json!(provider.id));
+                item.insert("canonical_model_id".to_string(), json!(model.id));
+                item.insert("wire_model".to_string(), json!(model.wire_name));
+                item.insert("aliases".to_string(), json!(model.aliases));
+                item.insert("capabilities".to_string(), json!(model.capabilities));
+                item.insert(
+                    "supports_streaming".to_string(),
+                    json!(model.supports_streaming),
+                );
+                item.insert(
+                    "supports_thinking".to_string(),
+                    json!(model.supports_thinking),
+                );
+                item.insert("thinking".to_string(), json!(model.thinking));
+                item.insert("max_tokens".to_string(), json!(model.max_tokens));
+                item.insert(
+                    "max_context_tokens".to_string(),
+                    json!(model.max_context_tokens),
+                );
+                item.insert("features".to_string(), json!(model.features));
+                data.push(Value::Object(item));
             }
         }
     }
+    let models = data.clone();
     json!({
         "object": "list",
         "data": data,
+        "models": models,
     })
+}
+
+fn build_v3_codex_model_metadata(
+    visible_id: &str,
+    model: &V3ProviderModelManifest,
+) -> Map<String, Value> {
+    let is_gpt_55 = model.id == "gpt-5.5";
+    let is_gpt_56_sol = model.id == "gpt-5.6-sol";
+    let is_gpt_56_terra = model.id == "gpt-5.6-terra";
+    let is_gpt_56_luna = model.id == "gpt-5.6-luna";
+    let is_gpt_56 = is_gpt_56_sol || is_gpt_56_terra || is_gpt_56_luna;
+    let is_builtin_bare = visible_id == model.id && (is_gpt_55 || is_gpt_56);
+    let preset_context_window = if is_gpt_55 {
+        Some(272_000)
+    } else if is_gpt_56 {
+        Some(372_000)
+    } else {
+        None
+    };
+    let context_window = if is_builtin_bare {
+        preset_context_window.or(model.max_context_tokens)
+    } else {
+        model.max_context_tokens.or(preset_context_window)
+    }
+    .unwrap_or(128_000);
+    let description = if is_gpt_55 {
+        "Frontier model for complex coding, research, and real-world work."
+    } else if is_gpt_56_sol {
+        "Latest frontier agentic coding model."
+    } else if is_gpt_56_terra {
+        "Balanced agentic coding model for everyday work."
+    } else if is_gpt_56_luna {
+        "Fast and affordable agentic coding model."
+    } else {
+        "RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities."
+    };
+    let default_reasoning_level = if is_gpt_56_sol { "low" } else { "medium" };
+    let supported_reasoning_levels = if is_gpt_56_sol || is_gpt_56_terra {
+        json!([
+            {"effort":"low","description":"Fast responses with lighter reasoning"},
+            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
+            {"effort":"high","description":"Greater reasoning depth for complex problems"},
+            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
+            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"},
+            {"effort":"ultra","description":"Ultra reasoning depth for frontier-grade tasks"}
+        ])
+    } else if is_gpt_56_luna {
+        json!([
+            {"effort":"low","description":"Fast responses with lighter reasoning"},
+            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
+            {"effort":"high","description":"Greater reasoning depth for complex problems"},
+            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"},
+            {"effort":"max","description":"Maximum reasoning depth for the hardest tasks"}
+        ])
+    } else {
+        json!([
+            {"effort":"low","description":"Fast responses with lighter reasoning"},
+            {"effort":"medium","description":"Balances speed and reasoning depth for everyday tasks"},
+            {"effort":"high","description":"Greater reasoning depth for complex problems"},
+            {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}
+        ])
+    };
+    let mut item = Map::from_iter([
+        ("id".to_string(), json!(visible_id)),
+        ("object".to_string(), json!("model")),
+        ("owned_by".to_string(), json!("provider")),
+        ("slug".to_string(), json!(visible_id)),
+        ("display_name".to_string(), json!(visible_id)),
+        ("base_instructions".to_string(), json!("")),
+        ("description".to_string(), json!(description)),
+        ("prefer_websockets".to_string(), json!(false)),
+        ("support_verbosity".to_string(), json!(true)),
+        ("default_verbosity".to_string(), json!("low")),
+        ("apply_patch_tool_type".to_string(), json!("freeform")),
+        ("web_search_tool_type".to_string(), json!("text_and_image")),
+        ("supports_search_tool".to_string(), json!(true)),
+        ("input_modalities".to_string(), json!(["text", "image"])),
+        ("supports_image_detail_original".to_string(), json!(true)),
+        (
+            "truncation_policy".to_string(),
+            json!({"mode":"tokens","limit":10000}),
+        ),
+        ("supports_parallel_tool_calls".to_string(), json!(true)),
+        (
+            "reasoning_summary_format".to_string(),
+            json!("experimental"),
+        ),
+        ("supports_reasoning_summaries".to_string(), json!(true)),
+        ("default_reasoning_summary".to_string(), json!("none")),
+        (
+            "default_reasoning_level".to_string(),
+            json!(default_reasoning_level),
+        ),
+        (
+            "supported_reasoning_levels".to_string(),
+            supported_reasoning_levels,
+        ),
+        ("shell_type".to_string(), json!("shell_command")),
+        ("visibility".to_string(), json!("list")),
+        (
+            "minimal_client_version".to_string(),
+            json!(if is_gpt_56 { "0.144.0" } else { "0.124.0" }),
+        ),
+        ("supported_in_api".to_string(), json!(true)),
+        ("priority".to_string(), json!(0)),
+        (
+            "experimental_supported_tools".to_string(),
+            json!(if is_gpt_56 {
+                Vec::<&str>::new()
+            } else {
+                vec!["apply_patch", "web_search"]
+            }),
+        ),
+        ("effective_context_window_percent".to_string(), json!(95)),
+        ("context_window".to_string(), json!(context_window)),
+        ("max_context_window".to_string(), json!(context_window)),
+    ]);
+    if is_gpt_56 {
+        item.insert("tool_mode".to_string(), json!("code_mode_only"));
+        item.insert("use_responses_lite".to_string(), json!(true));
+    }
+    item
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_error_06(
