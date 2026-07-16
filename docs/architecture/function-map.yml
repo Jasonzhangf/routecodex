@@ -1663,7 +1663,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/request_typed_entrypoints.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/hub_req_outbound_05_provider_semantic.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_types/provider_req_outbound_06_wire_payload.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule
       - tests/server/runtime/http-server
       - docs
@@ -5255,7 +5254,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
     forbidden_paths:
@@ -5297,7 +5295,6 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
     forbidden_paths:
       - src/providers/core/runtime
       - src/server/runtime/http-server
@@ -5335,7 +5332,6 @@ owners:
       - normalize_responses_function_tools
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5373,7 +5369,6 @@ owners:
       - normalize_responses_tool_parameters
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5410,7 +5405,6 @@ owners:
       - apply_responses_instructions_to_input
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
@@ -5446,7 +5440,6 @@ owners:
       - apply_responses_crs_request_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
-      - sharedmodule/llmswitch-core/src/conversion/hub/pipeline/compat
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
     forbidden_paths:
       - src/providers/core/runtime
