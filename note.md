@@ -1,3 +1,16 @@
+# 2026-07-16T10:21+08:00 V3 Responses Direct remote continuation live 5555 probe
+
+- Accepted Jason correction: release/global install copying `v3/` is expected because `routecodex-v3` bin/tests must be globally installable for V3 validation; do not treat that copy scope as dirty code.
+- Refreshed active goal `v3.responses_direct_remote_continuation_integration`, `.agent-collab`, MemoryPalace, function map, verification map, mainline map, and manifest.
+- Evidence: `routecodex --version` = `0.90.3935`; `routecodex-v3 --help` works; `http://127.0.0.1:5555/health` returns `responses_v3_5555` V3 manifest server; `/v1/models` publishes `gpt-5.6-sol` owned by provider `cc_sol`.
+- Controlled owner gate passed: `npm run test:v3-responses-direct-remote-continuation`.
+- Live evidence dir: `.agent-collab/runs/20260716T021947Z-Macstudio.local-71025-2and3/logs/live-5555-20260716T022108Z/`.
+- JSON live first turn returned HTTP 500 with `provider cc_sol model gpt-5.6-sol lacks required remote_continuation capability`; trace includes `V3Transport13ResponsesHttpRequest` and error projection at `V3HubRespContinuation04Committed`.
+- Client WebSocket live handshake succeeded but first event was `{type:"error", code:"runtime_error", message:"provider cc_sol model gpt-5.6-sol lacks required remote_continuation capability"}`.
+- Dirty code review found a partial kernel-side bypass for HTTP-only terminal SSE. Root fix moved to `v3/crates/routecodex-v3-runtime/src/shared.rs`: streaming `response.created` is a candidate id only; actual Resp04 commit/capability error waits for function-call/requires_action evidence. Added positive terminal SSE and negative HTTP-only function-call tests.
+- Verification after root fix: owner gate, direct verifier/red fixtures, H4, P6 freeze, H2 equivalence, V3 architecture/resource/module/Rust-only/fmt/clippy/workspace, and `git diff --check` passed.
+- No provider credential, live config, global install, or restart mutation was performed. Live closeout remains pending until Jason explicitly authorizes enabling WebSocket v2 `remote_continuation` capability in the live profile and restarting/replaying.
+
 # 2026-07-16T09:58+08:00 V3 inbound Responses WebSocket proxy closeout
 
 - Scope: `feature_id:v3.responses_inbound_websocket_proxy` owns only the client-facing `/v1/responses` WebSocket upgrade/framing/projection shell in `routecodex-v3-server`; provider/upstream WebSocket connection/cache/continuation remains `v3.responses_websocket_v2_transport_hardening` / Responses Direct Runtime owner.

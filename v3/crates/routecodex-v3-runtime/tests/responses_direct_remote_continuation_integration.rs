@@ -59,6 +59,16 @@ struct TwoTurnSseTransport {
 }
 
 #[derive(Default)]
+struct TerminalSseWithoutRemoteContinuationTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+#[derive(Default)]
+struct PendingSseWithoutRemoteContinuationTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+#[derive(Default)]
 struct ThreeTurnTransport {
     requests: Mutex<Vec<Value>>,
 }
@@ -222,6 +232,82 @@ impl ResponsesTransport for TwoTurnSseTransport {
     }
 }
 
+#[async_trait]
+impl ResponsesTransport for TerminalSseWithoutRemoteContinuationTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.requests.lock().unwrap().push(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(
+                vec![
+                    concat!(
+                        "event: response.created\n",
+                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_http_sse_terminal\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                    concat!(
+                        "event: response.completed\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_sse_terminal\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
+                        "data: [DONE]\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                ]
+                .into_iter()
+                .map(Ok),
+            )),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for PendingSseWithoutRemoteContinuationTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.requests.lock().unwrap().push(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(
+                vec![
+                    concat!(
+                        "event: response.created\n",
+                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_http_sse_pending\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                    concat!(
+                        "event: response.output_item.done\n",
+                        "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_http_sse_pending\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_http_sse_pending\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                        "data: [DONE]\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                ]
+                .into_iter()
+                .map(Ok),
+            )),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry()
 {
@@ -339,10 +425,11 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     let first_chunk_text = String::from_utf8(first_chunk).unwrap();
     assert!(first_chunk_text.contains("resp_sse_1"));
     assert!(!first_chunk_text.contains("[DONE]"));
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
     let first_remainder = collect_sse_text(first_stream).await;
     assert!(first_remainder.contains("call_sse_1"));
     assert!(first_remainder.contains("[DONE]"));
+    assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
@@ -383,6 +470,82 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert_eq!(requests[1]["previous_response_id"], "resp_sse_1");
     assert_eq!(requests[1]["input"][0]["type"], "function_call_output");
     assert_control_truth_isolated(&requests[1]);
+}
+
+#[tokio::test]
+async fn http_only_sse_terminal_response_streams_without_remote_continuation_commit() {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = TerminalSseWithoutRemoteContinuationTransport::default();
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-terminal",
+            json!({"model":"client","stream":true,"input":"say done"}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200);
+    assert_eq!(state.len().unwrap(), 0);
+    let body = collect_sse_body_text(first.client_payload.body).await;
+    assert!(body.contains("resp_http_sse_terminal"));
+    assert!(body.contains("response.completed"));
+    assert!(body.contains("[DONE]"));
+    assert_eq!(state.len().unwrap(), 0);
+
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_control_truth_isolated(&requests[0]);
+}
+
+#[tokio::test]
+async fn http_only_sse_function_call_errors_without_remote_continuation_capability() {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = PendingSseWithoutRemoteContinuationTransport::default();
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-pending",
+            json!({"model":"client","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200);
+    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
+        panic!("SSE pending response must stay a stream until observed")
+    };
+    let first_chunk = stream
+        .next()
+        .await
+        .expect("response.created chunk must be yielded")
+        .expect("response.created must not be treated as pending continuation");
+    assert!(String::from_utf8(first_chunk)
+        .unwrap()
+        .contains("resp_http_sse_pending"));
+    let error = stream
+        .next()
+        .await
+        .expect("function-call chunk must fail explicitly")
+        .expect_err("HTTP-only function call must not be delivered as continuable success");
+    assert!(error
+        .message
+        .contains("provider p model m lacks required remote_continuation capability"));
+    assert_eq!(state.len().unwrap(), 0);
+
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_control_truth_isolated(&requests[0]);
 }
 
 async fn collect_sse_body_text(body: V3ClientBody) -> String {
@@ -854,6 +1017,38 @@ fn assert_error_chain(output: &routecodex_v3_runtime::V3ResponsesDirectRuntimeOu
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_variant("a", true, &[])
+}
+
+fn http_only_manifest_without_remote_continuation(
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "g"
+endpoints = ["responses"]
+[providers.p]
+enabled = true
+type = "responses"
+base_url = "http://controlled.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
+responses = { process = "chat", streaming = "always", transport = "http" }
+[providers.p.models.m]
+wire_name = "wire-m"
+capabilities = ["text", "tools", "streaming"]
+supports_streaming = true
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
 }
 
 fn manifest_variant(

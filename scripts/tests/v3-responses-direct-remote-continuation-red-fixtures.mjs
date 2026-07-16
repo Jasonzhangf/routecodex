@@ -20,7 +20,7 @@ const cases = [
   ['control payload leak', runtime, 'let policy = hook_registry.run_route(selected, &standardized);', 'let mut policy = hook_registry.run_route(selected, &standardized);\n        policy.request_body["provider_id"] = serde_json::json!("leak");', /provider_id/],
   ['non-atomic Resp04 rebind', runtime, 'store.rebind_for_resp04(previous_response_id, input)', '{ store.release(previous_response_id); store.commit(input) }', /rebind_for_resp04/],
   ['SSE stream materialized before projection', response, 'let provider_body = raw.into_body();', 'let body_bytes = raw.into_body_bytes().await.unwrap();\n    let provider_body = V3ProviderResponseBody::Json(body_bytes);', /into_body_bytes/],
-  ['structured SSE frame observation removed', response, 'observe_sse_frame_remote_continuation(frame.frame().fields(), pending_response_id)?;', '// structured frame observation removed', /observe_sse_frame_remote_continuation/],
+  ['structured SSE pending record removed', response, 'observation_state.record_pending_response_id(&response_id)?;', '// structured pending record removed', /record_pending_response_id/],
   ['Server store owner', server, 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
   ['HTTP-only remote continuation accepted', configValidate, 'let responses = compile_provider_responses(&id, provider.responses, &models)?;', 'let responses = provider.responses;', /compile_provider_responses/],
   ['WebSocket stream field leaks into event', providerTransport, 'event.remove("stream");', '// stream field leak', /event\.remove\("stream"\)/],

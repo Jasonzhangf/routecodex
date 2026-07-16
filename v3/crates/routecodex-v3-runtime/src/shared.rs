@@ -154,7 +154,7 @@ fn observed_sse_client_stream(
     struct ObservedState {
         stream: V3ProviderSseStream,
         decoder: SseIncrementalDecoder,
-        pending_response_id: Option<String>,
+        response_id_candidate: Option<String>,
         observation_state: V3SseRemoteContinuationObservationState,
         done: bool,
     }
@@ -163,7 +163,7 @@ fn observed_sse_client_stream(
         ObservedState {
             stream,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-            pending_response_id: None,
+            response_id_candidate: None,
             observation_state,
             done: false,
         },
@@ -176,7 +176,7 @@ fn observed_sse_client_stream(
                     let result = observe_sse_remote_continuation_chunk(
                         &chunk,
                         &mut state.decoder,
-                        &mut state.pending_response_id,
+                        &mut state.response_id_candidate,
                         &state.observation_state,
                     )
                     .map(|()| chunk);
@@ -210,16 +210,17 @@ fn observed_sse_client_stream(
 fn observe_sse_remote_continuation_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
-    pending_response_id: &mut Option<String>,
+    response_id_candidate: &mut Option<String>,
     observation_state: &V3SseRemoteContinuationObservationState,
 ) -> Result<(), V3Error01SourceRaised> {
     let frames = decoder
         .push(build_sse_transport_in_01_raw_chunk(chunk))
         .map_err(sse_transport_source)?;
     for frame in frames {
-        observe_sse_frame_remote_continuation(frame.frame().fields(), pending_response_id)?;
-        if let Some(response_id) = pending_response_id.as_deref() {
-            observation_state.record_pending_response_id(response_id)?;
+        if let Some(response_id) =
+            observe_sse_frame_remote_continuation(frame.frame().fields(), response_id_candidate)?
+        {
+            observation_state.record_pending_response_id(&response_id)?;
         }
     }
     Ok(())
@@ -228,13 +229,19 @@ fn observe_sse_remote_continuation_chunk(
 fn observe_sse_remote_continuation_bytes(
     body: &[u8],
 ) -> Result<V3RemoteContinuationObservation, V3Error01SourceRaised> {
+    let mut response_id_candidate = None;
     let mut pending_response_id = None;
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let frames = decoder
         .push(build_sse_transport_in_01_raw_chunk(body))
         .map_err(sse_transport_source)?;
     for frame in frames {
-        observe_sse_frame_remote_continuation(frame.frame().fields(), &mut pending_response_id)?;
+        if let Some(response_id) = observe_sse_frame_remote_continuation(
+            frame.frame().fields(),
+            &mut response_id_candidate,
+        )? {
+            pending_response_id = Some(response_id);
+        }
     }
     decoder.finish().map_err(sse_transport_source)?;
     Ok(
@@ -246,8 +253,8 @@ fn observe_sse_remote_continuation_bytes(
 
 fn observe_sse_frame_remote_continuation(
     fields: &[SseField],
-    pending_response_id: &mut Option<String>,
-) -> Result<(), V3Error01SourceRaised> {
+    response_id_candidate: &mut Option<String>,
+) -> Result<Option<String>, V3Error01SourceRaised> {
     let mut data = String::new();
     for field in fields {
         let SseField::Named { name, value } = field else {
@@ -263,7 +270,7 @@ fn observe_sse_frame_remote_continuation(
     }
     let data = data.trim();
     if data.is_empty() || data == "[DONE]" {
-        return Ok(());
+        return Ok(None);
     }
     let event: serde_json::Value = serde_json::from_str(data).map_err(|error| {
         build_v3_error_01_source_raised(
@@ -274,10 +281,14 @@ fn observe_sse_frame_remote_continuation(
         )
     })?;
     let semantic = event.get("response").unwrap_or(&event);
-    if let V3RemoteContinuationObservation::Pending { response_id } =
-        observe_json_remote_continuation(semantic)?
-    {
-        *pending_response_id = Some(response_id);
+    let semantic_response_id = semantic
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned);
+    if let Some(response_id) = semantic_response_id.as_ref() {
+        *response_id_candidate = Some(response_id.clone());
     }
     if matches!(
         event
@@ -285,13 +296,53 @@ fn observe_sse_frame_remote_continuation(
             .and_then(serde_json::Value::as_str),
         Some("function_call" | "custom_tool_call")
     ) {
-        *pending_response_id = event
+        let response_id = event
             .get("response_id")
             .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
             .map(ToOwned::to_owned)
-            .or_else(|| pending_response_id.take());
+            .or_else(|| semantic_response_id.clone())
+            .or_else(|| response_id_candidate.clone())
+            .ok_or_else(|| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "pending_remote_response_id_missing",
+                    "pending SSE function call has no response id",
+                )
+            })?;
+        return Ok(Some(response_id));
     }
-    Ok(())
+    let has_pending_tool_output = semantic
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(serde_json::Value::as_str),
+                    Some("function_call" | "custom_tool_call")
+                )
+            })
+        });
+    let requires_action = matches!(
+        semantic.get("status").and_then(serde_json::Value::as_str),
+        Some("requires_action")
+    );
+    if has_pending_tool_output || requires_action {
+        let response_id = semantic_response_id
+            .or_else(|| response_id_candidate.clone())
+            .ok_or_else(|| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "pending_remote_response_id_missing",
+                    "pending SSE continuation has no response id",
+                )
+            })?;
+        return Ok(Some(response_id));
+    }
+    Ok(None)
 }
 
 fn observe_json_remote_continuation(

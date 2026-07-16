@@ -141,3 +141,24 @@ response。`store=false` 的 continuation state 只存在于当前连接内，ID
    credential。若当前 provider 未提供可握手的 WS endpoint，保留 live pending 并报告外部 transport 缺口。
 
 官方合同来源：<https://developers.openai.com/api/docs/guides/websocket-mode>。
+
+## 11. Managed 5555 capability-gate finding（2026-07-16）
+
+当前全局安装面已可用，`routecodex --version` 为 `0.90.3935`，`routecodex-v3 --help` 可用，5555 health
+返回 V3 manifest server `responses_v3_5555`，模型目录只发布 `gpt-5.6-sol` / provider `cc_sol`。
+
+本轮只读 live probe 未改 provider credential、live config、global install 或 restart。证据目录：
+`.agent-collab/runs/20260716T021947Z-Macstudio.local-71025-2and3/logs/live-5555-20260716T022108Z/`。
+
+结果：
+
+- controlled owner gate `npm run test:v3-responses-direct-remote-continuation` 通过。
+- JSON live 首轮在 `V3HubRespContinuation04Committed` 投影 HTTP 500：
+  `provider cc_sol model gpt-5.6-sol lacks required remote_continuation capability`。
+- client WebSocket live handshake 成功，但首轮返回 runtime error event：
+  `provider cc_sol model gpt-5.6-sol lacks required remote_continuation capability`。
+- node trace 仍显示 provider transport 为 `V3Transport13ResponsesHttpRequest`，当前 profile 未发布
+  WebSocket v2 remote continuation capability；因此未进入可证明同 provider/model/auth/transport pin 的两轮成功路径。
+
+结论：source/controlled closeout 仍有效，但 live 5555 closeout 继续 pending。按本目标约束，启用
+`remote_continuation` / WebSocket v2 provider transport 需要 live config 与 restart 变更，必须等待 Jason 明确授权后再执行。

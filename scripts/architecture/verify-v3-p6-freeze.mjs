@@ -62,14 +62,24 @@ for (const executor of lifecycleExecutors) {
   if (!allowedExecutors.has(executor)) failures.push(`P6 freeze forbids second lifecycle executor ${executor}`);
 }
 
-const responsesBranch = server.match(/if is_responses \{[\s\S]*?\n    \} else \{/)?.[0] ?? '';
-if (!responsesBranch.includes('execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation')) {
+const directBranchStart = server.indexOf('if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {');
+const directBranchEnd = directBranchStart < 0 ? -1 : server.indexOf('} else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented', directBranchStart);
+const directBranch = directBranchStart >= 0 && directBranchEnd > directBranchStart
+  ? server.slice(directBranchStart, directBranchEnd)
+  : '';
+const frameFunctionStart = server.indexOf('async fn execute_responses_direct_server_frame(');
+const frameFunctionEnd = frameFunctionStart < 0 ? -1 : server.indexOf('\nfn pending_binding_output_response(', frameFunctionStart);
+const frameFunction = frameFunctionStart >= 0 && frameFunctionEnd > frameFunctionStart
+  ? server.slice(frameFunctionStart, frameFunctionEnd)
+  : '';
+const responsesBranch = `${directBranch}\n${frameFunction}`;
+if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation')) {
   failures.push('P6 Server entry no longer calls the frozen Runtime kernel');
 }
-if ((responsesBranch.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {
+if ((frameFunction.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {
   failures.push('P6 must have exactly one response frame builder');
 }
-if ((responsesBranch.match(/responses_direct_output_response\(/g) ?? []).length !== 1) {
+if ((directBranch.match(/responses_direct_output_response\(/g) ?? []).length !== 1) {
   failures.push('P6 must have exactly one response exit');
 }
 if (/routecodex_v3_provider_responses|ReqwestResponsesTransport|\.send\(/.test(responsesBranch)) {

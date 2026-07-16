@@ -38,11 +38,16 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
 | missing/expired/scope mismatch/owner mismatch | reject at Req03 |
 | pin/capability/provider availability mismatch | reject at Req06 |
 | duplicate commit | fail at Resp04; never overwrite |
+| streaming \`response.created\` only | forward as client SSE; do not commit a locator |
+| streaming function/custom tool call on HTTP-only provider | fail explicitly at Resp04 capability gate |
 
 ## Positive gates
 
 - JSON and SSE controlled upstream: function_call -> Resp04 commit -> function_call_output with
   previous_response_id -> Req03 load -> Req06 exact pin -> terminal success.
+- SSE first-frame streaming: `response.created` / `status=in_progress` is only a response ID
+  candidate; Resp04 commits only after an actual function/custom tool call or explicit
+  `requires_action` payload. Terminal SSE with no tool call leaves no locator.
 - First turn contains one Virtual Router hit; continuation turn contains zero Router nodes and no
   target-local reselection.
 - Provider request preserves previous_response_id and tool output while excluding provider/auth,
@@ -54,6 +59,9 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
 - endpoint/session/conversation/port/group mismatch;
 - provider/model/auth/capability mismatch, expiry, unavailable provider;
 - still-running, already-terminal, and terminal provider failure;
+- HTTP-only streaming terminal response must not fail just because `response.created` is
+  `in_progress`; HTTP-only streaming tool-call response must fail before exposing a continuable
+  success because the selected provider lacks `remote_continuation`;
 - Error01-06 polarity and provider/client normal-payload isolation.
 
 ## Red baseline

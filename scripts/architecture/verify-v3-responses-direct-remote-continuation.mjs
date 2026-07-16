@@ -62,6 +62,8 @@ for (const [owner, text, phrases] of [
     'build_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(',
     'frame.frame().fields()',
+    'response_id_candidate: None',
+    'observation_state.record_pending_response_id(&response_id)',
     'observe_json_remote_continuation(&parsed)',
   ]],
   [targetPath, target, ['pub fn resolve_exact_provider_model_auth(']],
@@ -102,6 +104,8 @@ for (const [owner, text, phrases] of [
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
     'sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact_pin',
+    'http_only_sse_terminal_response_streams_without_remote_continuation_commit',
+    'http_only_sse_function_call_errors_without_remote_continuation_capability',
     'missing_locator_scope_mismatch_and_expiry_fail_before_router_or_provider_send',
     'capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send',
     'pinned_terminal_provider_failure_uses_error01_06_without_reselection',
@@ -156,7 +160,8 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
   for (const phrase of [
     'observe_sse_remote_continuation_chunk(',
     'build_sse_transport_in_01_raw_chunk(chunk)',
-    'observe_sse_frame_remote_continuation(frame.frame().fields(), pending_response_id)',
+    'observe_sse_frame_remote_continuation(frame.frame().fields(), response_id_candidate)?',
+    'observation_state.record_pending_response_id(&response_id)?',
   ]) {
     requireText(observedStream, `${responsePath}: observed_sse_client_stream`, phrase);
   }
