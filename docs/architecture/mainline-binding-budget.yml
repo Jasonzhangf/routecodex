@@ -13,6 +13,15 @@ chains:
       Config materialization is fully anchored: TS public shell calls the native
       Rust loader, Rust owns TOML/provider/runtime manifest materialization, and
       server runtime consumes only the Rust-produced VR/Hub runtime artifacts.
+  - chain_id: v3.v2_config_toml_compat_5555.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 V2-config compatibility for 5555 is fully anchored in routecodex-v3-config:
+      store detection enters the V2 TOML compiler, then normal V3 schema validation
+      publishes the manifest consumed by CLI/server/runtime.
   - chain_id: webui.config_editor_surface.mainline
     expected_total_edges: 2
     min_anchored_edges: 2

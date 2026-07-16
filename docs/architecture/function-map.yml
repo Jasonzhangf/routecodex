@@ -8976,3 +8976,63 @@ owners:
     notes:
       - "`[DONE]` and event names are opaque data to transport; terminal, continuation, tool, reasoning, routing, and provider semantics are forbidden."
       - "V3 Server streaming projection remains blocked by the active remote-continuation integration claim while that path materializes the complete SSE body; the shared-core gate remains red until the semantic owner exposes a streaming-safe contract."
+
+  - feature_id: v3.v2_config_toml_compat_5555
+    status: active
+    summary: "V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract"
+    owner_kind: rust_ssot
+    owner_scope: "routecodex-v3-config owns V2 root/provider TOML detection, V2-to-V3 authoring projection, canonical Hub V1 endpoint/server execution declarations, provider secret-handle materialization, and manifest publication for V3 runtime consumption; runtime/server/CLI only consume V3Config05ManifestPublished"
+    owner_module: v3/crates/routecodex-v3-config/src/v2_compat.rs
+    resource_bindings:
+      writes:
+        - config.runtime_projection@V3Config05ManifestPublished
+        - config.provider_profile_projection@V3Config05ManifestPublished
+        - config.routing_policy_projection@V3Config05ManifestPublished
+      reads:
+        - config.authoring_surface@V2RootConfig
+        - config.provider_config_text_codec@V2ProviderConfigFile
+      forbidden:
+        - provider.wire_payload@V3ProviderReqOutbound08WirePayload
+        - response.client_payload@V3ServerRespOutbound06ClientFrame
+        - route.selection@V3HubReqTarget06Resolved
+    canonical_types:
+      - V2RootConfig
+      - V2ProviderConfigFile
+      - V3Config02AuthoringParsed
+      - V3Config05ManifestPublished
+    canonical_builders:
+      - compile_v2_config_02_authoring_from_file
+      - compile_v2_root
+      - default_v2_hub_v1_authoring
+      - default_v2_server_execution
+      - compile_v2_providers
+      - compile_v2_route_groups
+    allowed_paths:
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/store.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - docs/architecture
+      - docs/design/v3-routecodex-rust-module-boundaries.md
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-provider-responses
+      - src/server/runtime/http-server
+      - src/providers
+    required_tests:
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    required_gates:
+      - npm run test:v3-config-v2-compat-5555
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "V2 compatibility is an explicit input format branch in V3ConfigStore, not a fallback after V3 parse failure. Invalid V2 source fails fast."
+      - "V2 literal apiKey values are converted to local token_file handles under the config directory; secrets must not enter debug output, repo files, or client/provider payloads."
+      - "The 5555 route contract is locked by config_store_compiles_v2_root_and_provider_toml_for_5555_contract: thinking/coding/longcontext = GLM 5.2 primary, GPT free backup, GPT paid backup; tools/search/web_search = MiniMax M3 primary, GLM 5.2 backup; multimodal = MiniMax M3 primary, GPT free backup, GPT paid gpt-5.4 fallback; default = de-duplicated ordered union of those targets and must stay non-empty."

@@ -791,6 +791,11 @@ fn compile_models(
                 "text"
                     | "reasoning"
                     | "tools"
+                    | "web_search"
+                    | "multimodal"
+                    | "vision"
+                    | "longcontext"
+                    | "no_reasoning_summary"
                     | "remote_continuation"
                     | "local_materialization"
                     | "tool_outputs"
@@ -1112,7 +1117,14 @@ fn compile_pool_match(
         Some(&[
             "text",
             "reasoning",
+            "thinking",
+            "coding",
+            "longcontext",
             "tools",
+            "search",
+            "web_search",
+            "multimodal",
+            "vision",
             "remote_continuation",
             "local_materialization",
             "tool_outputs",

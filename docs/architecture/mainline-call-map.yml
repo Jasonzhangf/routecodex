@@ -174,6 +174,45 @@ chains:
           side_channel_writes: []
         status: anchored
 
+  - chain_id: v3.v2_config_toml_compat_5555.mainline
+    summary: "V3 config store detects explicit V2 root TOML and compiles it with provider config.v2.toml files into the V3 published manifest for 5555."
+    entry_contract:
+      node: V3Config01FileSource
+      owner_doc: docs/architecture/function-map.yml
+    edges:
+      - step_id: v3-v2-config-01
+        from_node: V3Config01FileSource
+        to_node: V3Config02AuthoringParsed
+        caller_symbol: parse_authoring_for_store
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: compile_v2_config_02_authoring_from_file
+        callee_file: v3/crates/routecodex-v3-config/src/v2_compat.rs
+        owner_feature_id: v3.v2_config_toml_compat_5555
+        semantic_input: "config.toml raw bytes with version=2.0.0 and virtualrouterMode=v2"
+        semantic_output: "V3Config02AuthoringParsed with V2 servers/providers/forwarders/route groups plus canonical Hub V1 endpoint bindings and server execution declarations projected into V3 authoring"
+        resource_flow:
+          consumes: [config.authoring_surface, config.provider_config_text_codec]
+          produces: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: v3-v2-config-02
+        from_node: V3Config02AuthoringParsed
+        to_node: V3Config05ManifestPublished
+        caller_symbol: load_snapshot_with_source_identity
+        caller_file: v3/crates/routecodex-v3-config/src/store.rs
+        callee_symbol: validate_v3_config_03_schema_from_v3_config_02
+        callee_file: v3/crates/routecodex-v3-config/src/lib.rs
+        owner_feature_id: v3.v2_config_toml_compat_5555
+        semantic_input: "V2-projected V3 authoring"
+        semantic_output: "validated V3 manifest consumed by CLI/server/runtime"
+        resource_flow:
+          consumes: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
+          produces: [config.runtime_projection, config.provider_profile_projection, config.routing_policy_projection]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+
   - chain_id: webui.config_editor_surface.mainline
     summary: "WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics."
     entry_contract:

@@ -37,7 +37,7 @@ impl V3ConfigStore {
 
     pub fn read_authoring(&self) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
         let source = read_v3_config_01_file_source(&self.path)?;
-        parse_v3_config_02_authoring(&source.raw_toml)
+        parse_authoring_for_store(&source.path, &source.raw_toml)
     }
 
     pub fn load_snapshot(&self) -> Result<V3Config05ManifestPublished, V3ConfigError> {
@@ -50,7 +50,7 @@ impl V3ConfigStore {
         let source = read_v3_config_01_file_source(&self.path)?;
         let canonical_path = fs::canonicalize(&source.path)?;
         let source_sha256 = format!("{:x}", Sha256::digest(source.raw_toml.as_bytes()));
-        let parsed = parse_v3_config_02_authoring(&source.raw_toml)?;
+        let parsed = parse_authoring_for_store(&source.path, &source.raw_toml)?;
         let validated = validate_v3_config_03_schema_from_v3_config_02(parsed)?;
         let registry = build_v3_config_04_resource_registry_from_v3_config_03(validated)?;
         let manifest = publish_v3_config_05_manifest_from_v3_config_04(registry)?;
@@ -88,6 +88,16 @@ impl V3ConfigStore {
         fs::rename(temp_path, &self.path)?;
         Ok(())
     }
+}
+
+fn parse_authoring_for_store(
+    path: &Path,
+    raw_toml: &str,
+) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
+    if let Some(authoring) = crate::try_compile_v2_config_02_authoring_from_file(path, raw_toml)? {
+        return Ok(authoring);
+    }
+    parse_v3_config_02_authoring(raw_toml)
 }
 
 pub fn default_v3_config_path(home: impl AsRef<Path>) -> PathBuf {

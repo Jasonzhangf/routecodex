@@ -4398,3 +4398,24 @@ verification:
       - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, long streams, opaque `[DONE]`, and normal close."
       - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and absence of synthetic terminal success."
       - "V3 controlled-upstream Server blackbox and V2 installed-surface replay are required before runtime closure; current source-only gates cannot claim live completion."
+
+  - feature_id: v3.v2_config_toml_compat_5555
+    change_risk: high
+    unit:
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/src/store.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+    contract:
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - npm run test:v3-config-v2-compat-5555
+    integration:
+      - npm run test:v3-workspace
+    smoke:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+    notes:
+      - "Positive contract locks V2 root + provider config.v2.toml input, canonical Hub V1 endpoint bindings and server execution declarations, Jason-defined 5555 route ordering, provider type mapping, local token_file handle materialization, and secret-free manifest debug output."
+      - "Live closure still requires global install, V3 managed restart on 5555, health, models, and same-entry route probes after source gates pass."

@@ -1,5 +1,6 @@
 mod store;
 mod types;
+mod v2_compat;
 mod validate;
 
 pub use store::{default_v3_config_path, V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan};
@@ -29,6 +30,13 @@ pub(crate) fn read_v3_config_01_file_source(
 
 pub fn parse_v3_config_02_authoring(raw: &str) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
     Ok(toml::from_str(raw)?)
+}
+
+pub(crate) fn try_compile_v2_config_02_authoring_from_file(
+    config_path: impl AsRef<Path>,
+    raw: &str,
+) -> Result<Option<V3Config02AuthoringParsed>, V3ConfigError> {
+    v2_compat::compile_v2_config_02_authoring_from_file(config_path.as_ref(), raw)
 }
 
 pub fn validate_v3_config_03_schema_from_v3_config_02(

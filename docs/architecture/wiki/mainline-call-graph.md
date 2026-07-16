@@ -69,6 +69,32 @@ flowchart LR
 | cfg-runtime-hub-02 | `HubConfig01PipelineRuntimeArtifact -> HubConfig02RuntimePolicyArtifacts` | anchored | `extractProviderKeysFromPipelineRuntimeConfig -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
 | cfg-runtime-hub-03 | `HubConfig01PipelineRuntimeArtifact -> HubConfig03RuntimeRouteTierArtifacts` | anchored | `extractRoutingTiersForPipelineRuntimeConfigRoute -> compile_routecodex_runtime_manifest` |  | `config.user_config_materialization`<br/>runtime user config loader is a TS native shell; v2 source validation and runtime manifest materialization are Rust-owned |
 
+## v3.v2_config_toml_compat_5555.mainline
+
+V3 config store detects explicit V2 root TOML and compiles it with provider config.v2.toml files into the V3 published manifest for 5555.
+
+Entry contract: `V3Config01FileSource` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3Config05ManifestPublished["V3Config05ManifestPublished"]
+  V3Config02AuthoringParsed["V3Config02AuthoringParsed"]
+  V3Config01FileSource["V3Config01FileSource"]
+  V3Config01FileSource -->|v3-v2-config-01| V3Config02AuthoringParsed
+  V3Config02AuthoringParsed -->|v3-v2-config-02| V3Config05ManifestPublished
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3Config01FileSource anchored;
+  class V3Config02AuthoringParsed anchored;
+  class V3Config05ManifestPublished anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-v2-config-01 | `V3Config01FileSource -> V3Config02AuthoringParsed` | anchored | `parse_authoring_for_store -> compile_v2_config_02_authoring_from_file` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
+| v3-v2-config-02 | `V3Config02AuthoringParsed -> V3Config05ManifestPublished` | anchored | `load_snapshot_with_source_identity -> validate_v3_config_03_schema_from_v3_config_02` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
+
 ## webui.config_editor_surface.mainline
 
 WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.

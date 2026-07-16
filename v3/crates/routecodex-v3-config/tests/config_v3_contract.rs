@@ -1,3 +1,4 @@
+// feature_id: v3.v2_config_toml_compat_5555
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
     V3ConfigStore, V3HubFixedNode, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
@@ -742,6 +743,408 @@ fn rejects_ambiguous_cross_provider_alias_invalid_health_and_unknown_endpoint() 
         .to_string()
         .contains("unknown endpoint unknown_protocol"));
 }
+
+#[test]
+fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
+    let root = std::env::temp_dir().join(format!("routecodex-v3-v2-compat-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "orangeai",
+        "openai",
+        "https://glm.invalid/v1",
+        "glm-5.2",
+        &["glm-5.2"],
+    );
+    write_v2_provider(
+        &root,
+        "minimax",
+        "anthropic",
+        "https://minimax.invalid/anthropic",
+        "MiniMax-M3",
+        &["MiniMax-M3"],
+    );
+    write_v2_provider(
+        &root,
+        "cc",
+        "responses",
+        "https://cc.invalid/openai/v1",
+        "gpt-5.5",
+        &["gpt-5.5"],
+    );
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+    write_v2_provider(
+        &root,
+        "asxs",
+        "responses",
+        "https://asxs.invalid/v1",
+        "gpt-5.5",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+    write_v2_provider(
+        &root,
+        "1token",
+        "responses",
+        "https://one-token.invalid/v1",
+        "gpt-5.4",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+    write_v2_provider(
+        &root,
+        "55ai",
+        "responses",
+        "https://55ai.invalid/v1",
+        "gpt-5.5",
+        &["gpt-5.5", "gpt-5.4"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_5555_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+
+    assert_eq!(manifest.version, 3);
+    assert_eq!(manifest.servers["gateway_priority_5555"].port, 5555);
+    assert_eq!(
+        manifest.servers["gateway_priority_5555"].routing_group,
+        "gateway_priority_5555"
+    );
+    let hub = manifest
+        .hub_v1
+        .as_ref()
+        .expect("v2 root must publish hub_v1");
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses")
+        .is_some_and(|binding| binding.entry_protocol == "responses"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/chat/completions")
+        .is_some_and(|binding| binding.entry_protocol == "openai_chat"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/messages")
+        .is_some_and(|binding| binding.entry_protocol == "anthropic"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1beta/models/gemini-2.5-pro/generateContent")
+        .is_some_and(|binding| binding.entry_protocol == "gemini"));
+    let execution = manifest.servers["gateway_priority_5555"]
+        .execution
+        .as_ref()
+        .expect("v2 root hub_v1 server must declare execution policy");
+    assert_eq!(execution.allowed_modes, ["direct", "relay"]);
+    assert_eq!(
+        execution.allowed_invocation_sources,
+        ["client", "servertool_followup", "dry_run"]
+    );
+    assert_eq!(execution.allowed_transports, ["json", "sse"]);
+    assert_eq!(manifest.providers["orangeai"].provider_type, "openai_chat");
+    assert_eq!(manifest.providers["minimax"].provider_type, "anthropic");
+    assert_eq!(manifest.providers["cc"].provider_type, "responses");
+    assert!(manifest.providers["orangeai"].auth.entries[0]
+        .token_file
+        .as_ref()
+        .is_some_and(|path| path.contains(".routecodex-v3-secret-handles")));
+    assert!(!format!("{manifest:?}").contains("secret-orangeai-key1"));
+
+    let group = &manifest.route_groups["gateway_priority_5555"];
+    assert_route_targets(
+        group.pools["thinking"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["coding"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["longcontext"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+        ],
+    );
+    assert_route_targets(
+        group.pools["tools"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["search"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["web_search"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &["fwd.minimax.MiniMax-M3", "fwd.glm.glm-5.2"],
+    );
+    assert_route_targets(
+        group.pools["multimodal"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.minimax.MiniMax-M3",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.4",
+        ],
+    );
+    assert_route_targets(
+        group.pools["default"]
+            .targets
+            .iter()
+            .map(|target| target.id.as_deref().unwrap())
+            .collect(),
+        &[
+            "fwd.glm.glm-5.2",
+            "fwd.free.gpt-5.5",
+            "fwd.free.gpt-5.6-sol",
+            "fwd.paid.gpt-5.5",
+            "fwd.minimax.MiniMax-M3",
+            "fwd.paid.gpt-5.4",
+        ],
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn assert_route_targets(actual: Vec<&str>, expected: &[&str]) {
+    assert_eq!(actual, expected);
+}
+
+fn write_v2_provider(
+    root: &std::path::Path,
+    id: &str,
+    provider_type: &str,
+    base_url: &str,
+    default_model: &str,
+    models: &[&str],
+) {
+    let dir = root.join("provider").join(id);
+    fs::create_dir_all(&dir).unwrap();
+    let mut raw = format!(
+        r#"version = "2.0.0"
+providerId = "{id}"
+
+[provider]
+id = "{id}"
+enabled = true
+type = "{provider_type}"
+baseURL = "{base_url}"
+defaultModel = "{default_model}"
+
+[provider.auth]
+type = "apiKey"
+apiKey = "secret-{id}-key1"
+
+[provider.responses]
+process = "chat"
+streaming = "always"
+
+[provider.concurrency]
+maxInFlight = 8
+acquireTimeoutMs = 60000
+staleLeaseMs = 300000
+"#
+    );
+    for model in models {
+        raw.push_str(&format!(
+            r#"
+[provider.models."{model}"]
+supportsStreaming = true
+supportsThinking = true
+thinking = "low"
+maxTokens = 64000
+maxContext = 1048576
+capabilities = ["text", "reasoning", "tools", "web_search", "multimodal", "longcontext"]
+"#
+        ));
+    }
+    fs::write(dir.join("config.v2.toml"), raw).unwrap();
+}
+
+const V2_5555_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.glm.glm-5.2"]
+protocol = "openai"
+model = "glm-5.2"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.glm.glm-5.2".targets]]
+providerId = "orangeai"
+priority = 1
+
+[virtualrouter.forwarders."fwd.minimax.MiniMax-M3"]
+protocol = "anthropic"
+model = "MiniMax-M3"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.minimax.MiniMax-M3".targets]]
+providerId = "minimax"
+priority = 1
+
+[virtualrouter.forwarders."fwd.free.gpt-5.5"]
+protocol = "openai"
+model = "gpt-5.5"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.5".targets]]
+providerId = "cc"
+priority = 1
+
+[virtualrouter.forwarders."fwd.free.gpt-5.6-sol"]
+protocol = "openai"
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.6-sol".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.forwarders."fwd.paid.gpt-5.5"]
+protocol = "openai"
+model = "gpt-5.5"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "asxs"
+priority = 1
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "1token"
+priority = 2
+[[virtualrouter.forwarders."fwd.paid.gpt-5.5".targets]]
+providerId = "55ai"
+priority = 3
+
+[virtualrouter.forwarders."fwd.paid.gpt-5.4"]
+protocol = "openai"
+model = "gpt-5.4"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "asxs"
+priority = 1
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "1token"
+priority = 2
+[[virtualrouter.forwarders."fwd.paid.gpt-5.4".targets]]
+providerId = "55ai"
+priority = 3
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 300
+targets = ["fwd.glm.glm-5.2"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 100
+targets = ["fwd.paid.gpt-5.5"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 200
+targets = ["fwd.glm.glm-5.2"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 300
+targets = ["fwd.minimax.MiniMax-M3"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 200
+targets = ["fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol"]
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 100
+targets = ["fwd.paid.gpt-5.4"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.glm.glm-5.2", "fwd.free.gpt-5.5", "fwd.free.gpt-5.6-sol", "fwd.paid.gpt-5.5", "fwd.minimax.MiniMax-M3", "fwd.paid.gpt-5.4"]
+"#;
 
 const HUB_V1_DECLARATION: &str = r#"
 [pipelines.hub_v1]
