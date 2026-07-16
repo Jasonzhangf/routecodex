@@ -159,6 +159,51 @@ impl V3Transport13ResponsesRequest {
         }
     }
 
+    pub fn redacted_provider_request_projection(&self) -> Value {
+        let stream_intent = match self.stream_intent() {
+            V3ResponsesStreamIntent::Json => "json",
+            V3ResponsesStreamIntent::Sse => "sse",
+        };
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http { .. } => json!({
+                "method": "POST",
+                "providerId": self.provider_id(),
+                "url": self.url(),
+                "headers": {
+                    "accept": if self.stream_intent() == V3ResponsesStreamIntent::Sse { "text/event-stream" } else { "application/json" },
+                    "authorization": "[REDACTED]",
+                    "content-type": "application/json"
+                },
+                "body": self.body(),
+                "streamIntent": stream_intent
+            }),
+            V3Transport13ResponsesRequestKind::AnthropicMessagesHttp { .. } => json!({
+                "method": "POST",
+                "providerId": self.provider_id(),
+                "url": self.url(),
+                "headers": {
+                    "accept": if self.stream_intent() == V3ResponsesStreamIntent::Sse { "text/event-stream" } else { "application/json" },
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                    "x-api-key": "[REDACTED]"
+                },
+                "body": self.body(),
+                "streamIntent": stream_intent
+            }),
+            V3Transport13ResponsesRequestKind::WebSocketV2 { .. } => json!({
+                "method": "WEBSOCKET",
+                "providerId": self.provider_id(),
+                "url": self.url(),
+                "headers": {
+                    "authorization": "[REDACTED]",
+                    "openai-beta": RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE
+                },
+                "body": self.body(),
+                "streamIntent": stream_intent
+            }),
+        }
+    }
+
     pub fn with_cancellation(mut self, value: V3ProviderCancellation) -> Self {
         match &mut self.kind {
             V3Transport13ResponsesRequestKind::Http { cancellation, .. }

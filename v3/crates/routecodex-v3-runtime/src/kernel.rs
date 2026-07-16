@@ -226,6 +226,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
 #[derive(Debug)]
 struct V3DryRunNoNetworkTransport {
     response_payload: Value,
+    captured_provider_request: Arc<Mutex<Option<Value>>>,
 }
 
 #[async_trait]
@@ -234,6 +235,9 @@ impl ResponsesTransport for V3DryRunNoNetworkTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        if let Ok(mut captured) = self.captured_provider_request.lock() {
+            *captured = Some(request.redacted_provider_request_projection());
+        }
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -276,8 +280,10 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
         Ok(session_id) => session_id,
         Err(error) => return crate::project_v3_debug_failure("V3SnapshotSessionStarted", error),
     };
+    let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3DryRunNoNetworkTransport {
         response_payload: fixture.response_payload.clone(),
+        captured_provider_request: Arc::clone(&captured_provider_request),
     };
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_and_debug(
         manifest,
@@ -344,9 +350,25 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
         V3ClientBody::Bytes(bytes) => json!({"body_kind": "bytes", "byte_len": bytes.len()}),
         V3ClientBody::Sse(_) => json!({"body_kind": "sse_stream"}),
     };
+    let provider_request = captured_provider_request
+        .lock()
+        .ok()
+        .and_then(|captured| captured.clone())
+        .map(|request| debug.redact_projection(request))
+        .unwrap_or_else(|| json!(null));
     crate::V3FoundationRuntimeOutput {
         status: output.client_payload.status,
         body: json!({
+            "object": "routecodex.pipeline_dry_run",
+            "kind": "provider_request",
+            "dryRun": true,
+            "evidence": {
+                "stoppedBeforeProviderSend": true,
+                "providerNetworkSend": false,
+                "stoppedBeforeNetworkSend": true,
+                "providerRequestCaptured": !provider_request.is_null()
+            },
+            "providerRequest": provider_request,
             "dry_run": {
                 "fixture_id": fixture.fixture_id,
                 "server_id": fixture.server_id,
@@ -357,6 +379,7 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
                 "provider_network_send": false,
                 "stopped_before_network_send": true,
                 "stopped_before_provider_send": true,
+                "provider_request": provider_request,
                 "node_ids": output.node_trace,
                 "snapshots": transient_snapshots,
                 "response_payload": debug.redact_projection(response_payload)

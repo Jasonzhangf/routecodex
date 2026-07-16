@@ -258,6 +258,30 @@ async fn pending_endpoint(
     };
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    if is_provider_request_dry_run(&request_headers)
+        && entry_protocol == "responses"
+        && execution_mode == V3EntryProtocolExecutionMode::Direct
+    {
+        let output = execute_v3_responses_direct_dry_run_runtime(
+            V3DryRunFixture {
+                fixture_id: request_id.clone(),
+                server_id: state.server.id.clone(),
+                method,
+                path,
+                request_payload: payload,
+                response_payload: json!({
+                    "id": format!("dry_run_{request_id}"),
+                    "object": "response",
+                    "status": "completed",
+                    "output_text": "routecodex provider-request dry-run stopped before provider send"
+                }),
+            },
+            &state.manifest,
+            &state.debug,
+        )
+        .await;
+        return foundation_output_response(output);
+    }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_openai_chat_completions_request(
             &state.manifest,
@@ -356,6 +380,13 @@ async fn pending_endpoint(
             ),
         ))
     }
+}
+
+fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-routecodex-dry-run")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
 }
 
 async fn responses_websocket_endpoint(

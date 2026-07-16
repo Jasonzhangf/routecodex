@@ -1968,6 +1968,66 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 }
 
 #[tokio::test]
+async fn p6_provider_request_dry_run_header_returns_final_request_without_upstream_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
+        .await
+        .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "dry-run no upstream send",
+            "max_output_tokens": 8
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    let provider_hit = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_ok();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(body["kind"], "provider_request");
+    assert_eq!(body["dryRun"], true);
+    assert_eq!(body["evidence"]["stoppedBeforeProviderSend"], true);
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(body["providerRequest"]["method"], "POST");
+    assert!(body["providerRequest"]["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/responses"));
+    assert_eq!(
+        body["providerRequest"]["headers"]["authorization"],
+        "[REDACTED]"
+    );
+    assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
+    assert_eq!(
+        body["providerRequest"]["body"]["input"],
+        "dry-run no upstream send"
+    );
+    assert!(
+        !provider_hit,
+        "provider-request dry-run must not call the controlled upstream"
+    );
+    assert!(
+        !response_body.contains("secret-key"),
+        "dry-run projection must not leak auth secrets"
+    );
+}
+
+#[tokio::test]
 async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let handle = spawn_v3_server_aggregate(manifest(free_port(), free_port()))
