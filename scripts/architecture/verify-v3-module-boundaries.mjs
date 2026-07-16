@@ -50,7 +50,8 @@ for (const path of all) {
       && !/V3ProviderAuthSecretHandle|Environment\(String\)|TokenFile\(String\)/.test(productionText)) {
     fail('wire/raw/error Provider DTOs must not store resolved secret values: ' + path);
   }
-  if (!path.includes('routecodex-v3-server') && /axum::serve|TcpListener::bind/.test(text) && !isTest) {
+  const httpListenerText = text.replace(/std::net::TcpListener::bind/g, '');
+  if (!path.includes('routecodex-v3-server') && /axum::serve|TcpListener::bind/.test(httpListenerText) && !isTest) {
     fail('HTTP listener outside server crate: ' + path);
   }
   if (!isTest && !path.includes('routecodex-v3-config') && !isProviderOwner

@@ -696,11 +696,21 @@ fn reap_inactive_runtime_files(
             V3ManagedRunState::Stopped | V3ManagedRunState::Failed
         )
     });
+    let stale_unreachable_runtime_status = if status.as_ref().is_some_and(|status| {
+        !matches!(
+            status.state,
+            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+        )
+    }) {
+        owned_unreachable_runtime_state_is_reapable(instance_dir, expected)?
+    } else {
+        false
+    };
     let declaration_path = instance_dir.join("instance.json");
     if declaration_path.exists() {
         let declaration: V3ManagedInstanceDeclaration = read_json(&declaration_path)?;
         if declaration != *expected
-            && !(terminal_status
+            && !((terminal_status || stale_unreachable_runtime_status)
                 && same_instance_declaration_except_executable_path(&declaration, expected))
         {
             return Err(V3LifecycleError::IdentityMismatch(
@@ -712,7 +722,8 @@ fn reap_inactive_runtime_files(
         if !matches!(
             status.state,
             V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-        ) {
+        ) && !stale_unreachable_runtime_status
+        {
             return Err(V3LifecycleError::IdentityMismatch(format!(
                 "refusing to reap non-terminal managed state {:?}",
                 status.state
@@ -749,6 +760,59 @@ fn reap_inactive_runtime_files(
         }
     }
     Ok(())
+}
+
+fn owned_unreachable_runtime_state_is_reapable(
+    instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    let control_path = instance_dir.join("control.json");
+    if control_path.exists() {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != expected.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap control record for a different instance".to_string(),
+            ));
+        }
+        let socket_path = PathBuf::from(&control.socket_path);
+        if socket_path != managed_control_socket_path(&expected.instance_id) {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap non-canonical managed control socket path".to_string(),
+            ));
+        }
+        if socket_path.exists() {
+            return Ok(false);
+        }
+    }
+
+    let pid_path = instance_dir.join("pid.cache");
+    if pid_path.exists() {
+        let pid: V3ManagedPidCache = read_json(&pid_path)?;
+        if pid.instance_id != expected.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap pid cache for a different instance".to_string(),
+            ));
+        }
+        if control_path.exists() {
+            let control: V3ManagedControlRecord = read_json(&control_path)?;
+            if pid.start_nonce != control.start_nonce {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "refusing to reap pid/control cache with mismatched nonce".to_string(),
+                ));
+            }
+        }
+    }
+
+    for listener in &expected.listeners {
+        if !listener_address_is_available(&listener.bind, listener.port) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn listener_address_is_available(bind: &str, port: u16) -> bool {
+    std::net::TcpListener::bind((bind, port)).is_ok()
 }
 
 fn same_instance_declaration_except_executable_path(
@@ -954,7 +1018,18 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
             Some("control probe temporarily unavailable".to_string()),
         )
         .unwrap();
-        fs::write(instance_dir.join("pid.cache"), b"preserve-active-cache").unwrap();
+        let occupied = std::net::TcpListener::bind(("127.0.0.1", 45499)).unwrap();
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: declaration.instance_id.clone(),
+                pid: 42,
+                start_nonce: "active-release".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
 
         assert!(matches!(
             reap_inactive_runtime_files(&instance_dir, &declaration),
@@ -962,6 +1037,65 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         ));
         assert!(instance_dir.join("pid.cache").exists());
         assert!(instance_dir.join("status.json").exists());
+        drop(occupied);
+    }
+
+    #[test]
+    fn stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (published, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&published.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+
+        let next_release = root.path().join("next-release-rccv3");
+        fs::write(&next_release, b"next release executable identity").unwrap();
+        let mut expected = published.clone();
+        expected.executable_path = fs::canonicalize(&next_release)
+            .unwrap()
+            .display()
+            .to_string();
+
+        write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+        write_status(
+            &instance_dir,
+            &published.instance_id,
+            V3ManagedRunState::Running,
+            Some("previous release lost pid and control socket after install rollover".to_string()),
+        )
+        .unwrap();
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                pid: 42,
+                start_nonce: "previous-release".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
+        let socket_path = managed_control_socket_path(&published.instance_id);
+        assert!(!socket_path.exists());
+        write_json_atomic(
+            &instance_dir.join("control.json"),
+            &V3ManagedControlRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                socket_path: socket_path.display().to_string(),
+                start_nonce: "previous-release".to_string(),
+            },
+        )
+        .unwrap();
+
+        reap_inactive_runtime_files(&instance_dir, &expected).unwrap();
+
+        assert!(!instance_dir.join("pid.cache").exists());
+        assert!(!instance_dir.join("control.json").exists());
+        assert!(!socket_path.exists());
     }
 
     #[test]
@@ -1087,7 +1221,19 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
             Some("active previous release".to_string()),
         )
         .unwrap();
-        fs::write(instance_dir.join("pid.cache"), b"preserve-active-cache").unwrap();
+        let occupied =
+            std::net::TcpListener::bind(("127.0.0.1", published.listeners[0].port)).unwrap();
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                pid: 42,
+                start_nonce: "active-release".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
 
         assert!(matches!(
             reap_inactive_runtime_files(&instance_dir, &expected),
@@ -1095,5 +1241,6 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         ));
         assert!(instance_dir.join("pid.cache").exists());
         assert!(instance_dir.join("instance.json").exists());
+        drop(occupied);
     }
 }

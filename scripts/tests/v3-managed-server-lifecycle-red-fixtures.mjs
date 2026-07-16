@@ -27,6 +27,8 @@ const mutations = [
   ['inject broad kill', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn epoch_ms()', 'fn forbidden() { let _ = Command::new("pkill"); }\nfn epoch_ms()'],
   ['remove strict schema', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', '#[serde(deny_unknown_fields)]', '#[serde(default)]'],
   ['remove non-terminal reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure', 'removed_non_terminal_runtime_state_guard'],
+  ['remove stale running release rollover positive guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone', 'removed_stale_running_release_rollover_guard'],
+  ['remove stale running port availability guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn listener_address_is_available(', 'fn removed_listener_address_is_available('],
   ['remove foreign control reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'foreign_control_record_is_never_reaped_from_terminal_state', 'removed_foreign_control_reaping_guard'],
   ['remove release executable rollover helper', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn same_instance_declaration_except_executable_path(', 'fn removed_same_instance_declaration_except_executable_path('],
   ['remove terminal release rollover positive test', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn stopped_instance_state_allows_release_snapshot_executable_rollover()', 'fn removed_stopped_release_snapshot_rollover_test()'],

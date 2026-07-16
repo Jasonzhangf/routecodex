@@ -33,6 +33,7 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/wiki/v3-managed-server-lifecycle.md
+      - scripts/architecture/verify-v3-module-boundaries.mjs
     forbidden_paths:
       - sharedmodule/llmswitch-core
       - src
