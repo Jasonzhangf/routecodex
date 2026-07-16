@@ -174,7 +174,7 @@ Req03 load、Req06 exact pin、续接轮 Router hit=0、no Relay/local materiali
 当前 live 状态仍未满足完成标准：`~/.rcc/config.v3.toml` 与
 `/Volumes/extension/.rcc/config.v3.toml` 的 `cc_sol` 仍声明
 `responses = { process = "chat", streaming = "always", transport = "http" }`，模型能力仍只有
-`text/reasoning/tools/streaming`，未发布 `remote_continuation` / `tool_outputs`，且当前
-`routecodex-v3 server status --config ~/.rcc/config.v3.toml` 显示 `state="stopped"`、5555 无 listener。
-按本目标执行规范，live config / credential / restart 仍需 Jason 明确授权后才能执行真实 JSON/SSE/client-WS
-两轮 replay。
+`text/reasoning/tools/streaming`，未发布 `remote_continuation` / `tool_outputs`。后续 managed lifecycle
+release rollover 已把 5555 拉回 running，普通 HTTP JSON/SSE smoke 可用，但这只证明 terminal
+HTTP 请求可用，不证明 provider-owned remote continuation 两轮成功。按本目标执行规范，live config /
+credential / restart 仍需 Jason 明确授权后才能执行真实 JSON/SSE/client-WS 两轮 remote-continuation replay。
