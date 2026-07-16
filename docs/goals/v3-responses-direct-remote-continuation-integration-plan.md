@@ -242,3 +242,27 @@ Probe contract：
 - Inventory 断言：13 个 provider 都没有声明 `websocket_v2_url`；声明 transport 均为空或 HTTP；模型能力均未声明 `remote_continuation` 和 `tool_outputs`。
 
 结论：当前已配置 provider 集合里没有可验证 provider Responses WebSocket v2 endpoint，live two-turn remote continuation/tool_outputs exact-pin replay 继续 blocked。此时不应对任何现有 provider 写入猜测的 `transport="websocket_v2"` / `websocket_v2_url`，也不应重启 5555 去制造必然失败的 live profile。下一步只能是拿到 provider 侧确认可握手的 WebSocket v2 endpoint，或新增/切换到已验证支持该 endpoint 的 provider profile 后，再做持久配置、managed restart、JSON/SSE/client-WS 两轮 exact-pin replay。
+
+## 15. Provider WS v2 discovery pass（2026-07-16）
+
+Continuation of Config A after the live cc-sol endpoint timeout broadened the probe to all configured
+Responses provider profiles that had a locally resolvable auth secret, without printing secrets and without
+mutating provider config.
+
+Evidence directory: `.agent-collab/runs/20260716T130144Z-Macstudio.local-68215-f53975df/`.
+
+Findings:
+
+- Authenticated WebSocket v2 handshake scan covered the locally resolvable Responses providers `55ai`,
+  `cc`, `cc-sol`, `llmgate`, `llmtoken`, and `xl` across their Config-derived `/responses` endpoints and
+  standard `/v1/responses` / `/openai/v1/responses` discovery variants. Result: `opened=0`.
+- Providers with env-referenced or missing auth in the current agent shell were skipped as unresolved local
+  evidence, not marked failed: `1token`, `asxs`, `dibittai`, `grok`, `lmstudio`, `sdfv`, and `ykk`.
+- Official `wss://api.openai.com/v1/responses` was also probed using the current `OPENAI_API_KEY` environment
+  variable. The authenticated WebSocket upgrade returned `invalid_api_key`; it therefore cannot serve as the
+  live provider for this closeout without credential replacement, which is out of scope for this task.
+
+Conclusion: the blocker is now stronger than a single `cc-sol` config omission. The current local runtime
+configuration has no provider-verified Responses WebSocket v2 endpoint available for a real two-turn
+`function_call_output` replay. Do not persist a WebSocket v2 config mutation until one provider profile can
+first prove a successful `101` upgrade and terminal `response.completed` event with the same auth source.
