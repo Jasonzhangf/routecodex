@@ -158,7 +158,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.gemini_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
-    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_json_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt, .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_json_provider_replay_pending] }
     production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
   - id: gemini_generate_content_sse_http
     endpoint: gemini_generate_content
@@ -168,7 +168,7 @@ cases:
     scenario_groups: [text, tool, image, error]
     owner_feature_id: v3.gemini_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
-    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_sse_provider_replay_pending] }
+    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt, .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt], blockers: [final_5555_profile_gemini_endpoint_not_enabled, live_gemini_sse_provider_replay_pending] }
     production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
   - id: gemini_generate_content_websocket_v2
     endpoint: gemini_generate_content
@@ -205,12 +205,17 @@ production_blockers:
   - { blocker_id: anthropic_messages_live_replay_pending, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: MEMORY.md }
   - { blocker_id: gemini_generate_content_live_replay_pending, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml }
   - { blocker_id: final_5555_profile_anthropic_endpoint_not_enabled, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
-  - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
+  - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt }
 live_read_only_audit:
-  timestamp: 2026-07-16T03:41:00Z
-  command_scope: globally installed routecodex-v3 managed 5555 with endpoints responses and openai_chat; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE
-  evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json
-  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. Anthropic Messages and Gemini Generate Content returned explicit endpoint_not_enabled because the final live 5555 profile declares only responses and openai_chat.
+  timestamp: 2026-07-16T10:06:05Z
+  command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml
+  evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt
+  supplemental_evidence:
+    - .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json
+    - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/rccv3_managed_restart_after_60d0c90f4.log
+    - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/post_restart_health_process.log
+    - .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_after_restart_config_logs.txt
+  finding: V3 5555 returned HTTP 200 for /v1/models with gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna plus required Codex capability fields; Responses Direct JSON/SSE/client WebSocket and OpenAI Chat Relay JSON/SSE all returned exact live provider markers. After 60d0c90f4 and managed rccv3 restart, Gemini Generate Content JSON and SSE both returned typed endpoint_not_enabled before provider send because the active /Volumes/extension/.rcc/config.5555.v2.toml profile contains no Gemini provider endpoint. The pre-fix model_not_found misroute to the default OpenAI target is no longer reproducible.
   status: live_v3_provider_replay_partial_verified
 verification_gates:
   - npm run verify:v3-live-provider-compat-parity

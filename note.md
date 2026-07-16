@@ -31020,6 +31020,15 @@ Pure Rust NAPI candidates:
 - Controlled evidence: `npm run test:v3-provider-responses` passed 5/5 including URL/auth/body/JSON-projection assertions; V3 fmt, Clippy, full workspace, resource/function/mainline/architecture gates, and `git diff --check` passed.
 - Global/live evidence: installed `routecodex`, `rcc`, and `/Volumes/extension/.rcc/install/current/package.json` all report `0.90.3935`; managed V3 5555 health reports `gateway_priority_5555`, manifest/version `3`; the same `/v1/responses` tools/search probe with `model=MiniMax-M3` returned HTTP 200, `status=completed`, `model=MiniMax-M3`, `output_text=OK`. The latest trace reached `V3Target10ConcreteProviderSelected -> V3Provider12ResponsesWirePayload -> V3Transport13ResponsesHttpRequest -> V3ProviderResp14Raw -> V3Resp15ClientPayload -> V3Server16HttpFrame status=200` without `V3TargetLocalReselected`.
 - Boundary: this closes MiniMax Anthropic JSON provider dispatch for the declared tools/search request. Real web-search quality, multimodal behavior, full Anthropic SSE event/tool-use projection, remote continuation, error live matrix, and the remaining multi-protocol live matrix stay separate gaps.
+# 2026-07-16T18:06+08:00 V3 Gemini live blocker recheck after 60d0c90f4
+
+- Source commit 60d0c90f4 fix(v3): guard gemini live routing was pushed to origin/main.
+- Global snapshot /Users/fanzhang/.rcc/install/current and /Volumes/extension/.rcc/install/current are 0.90.3935; managed restart used rccv3 server restart with /Volumes/extension/.rcc/config.5555.v2.toml.
+- Post-restart process is /Users/fanzhang/.rcc/install/current/dist/bin/rccv3 server run-managed-child --config /Volumes/extension/.rcc/config.5555.v2.toml, PID 5728; /health returned status=ok, server_id=gateway_priority_5555, manifest_version=3.
+- Gemini JSON and SSE probes to http://127.0.0.1:5555/v1beta/models/gemini-wire/generateContent both returned HTTP 501 typed endpoint_not_enabled with V3Error01SourceRaised to V3Error06ClientProjected, stage V3Server03HttpRequestRaw.
+- Sanitized /Volumes/extension/.rcc/config.5555.v2.toml summary contains no literal Gemini provider/endpoint. This proves the remaining Gemini live gap is an unauthorized profile blocker; the pre-fix model_not_found route to default OpenAI target is not reproduced after managed restart.
+- Evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/rccv3_managed_restart_after_60d0c90f4.log, post_restart_health_process.log, live_gemini_json_sse_after_restart_60d0c90f4.txt, live_gemini_after_restart_config_logs.txt.
+
 ## 2026-07-16 V3 CLI distribution rename exploration
 
 - User contract: V3 distributed executable is `rccv3`; its default config is `$HOME/.rcc/config.v3.toml`.

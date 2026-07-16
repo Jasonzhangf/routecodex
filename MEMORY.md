@@ -3498,3 +3498,9 @@
 - `V3Transport13ResponsesRequest` is sealed behind Provider-owned builders; runtime relay helpers may request a protocol URL via `build_v3_transport_13_responses_http_request_from_parts`, but non-owner code cannot construct transport node variants directly.
 - Global installed 5555 live proof is current: `routecodex`, `rcc`, and install package version are `0.90.3935`; V3 `/health` is green; a `/v1/responses` request declaring `web_search_preview` and selecting `MiniMax-M3` returned HTTP 200, `status=completed`, `model=MiniMax-M3`, and `output_text=OK` without target-local reselection.
 - This evidence proves selected Anthropic protocol dispatch and the exercised JSON request/response shape. It does not prove real search execution quality, multimodal parity, full Anthropic SSE/tool-use parity, remote continuation, or the remaining protocol/error live matrix.
+
+# 2026-07-16 V3 Gemini live 5555 profile blocker after 60d0c90f4
+
+- 60d0c90f4 fixed the live Gemini misroute class: V2 TOML projection no longer enables Gemini without an enabled Gemini provider, and Gemini runtime rejects non-Gemini selected targets before provider send.
+- Verified after global rccv3 install snapshot 0.90.3935 and managed restart of /Volumes/extension/.rcc/config.5555.v2.toml: Gemini /v1beta/models/gemini-wire/generateContent JSON and SSE both returned HTTP 501 endpoint_not_enabled at V3Server03HttpRequestRaw through Error01-06. The sanitized active config contains no Gemini provider endpoint.
+- Current Gemini live state is an unauthorized profile blocker, not production readiness and not the previous model_not_found default-OpenAI-target runtime bug. Do not mark Gemini live provider replay ready until an authorized Gemini endpoint/provider profile is configured, restarted, and JSON/SSE provider replay succeeds.

@@ -1225,7 +1225,7 @@ features:
       forbidden_claim: "Do not claim Responses Direct, Anthropic continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
 
   - feature_id: v3.gemini_relay_runtime_integration
-    status: controlled_runtime_source_verified
+    status: controlled_runtime_source_verified_live_5555_profile_blocker_verified
     change_risk: high
     owner_kind: rust_v3_gemini_relay_runtime
     owner_scope: "Controlled /v1beta/models/:model/generateContent Relay through the sole Hub v1 Req01-Req09 and Resp01-Resp06 lifecycle."
@@ -1278,8 +1278,8 @@ features:
       - git diff --check
     completion_rule:
       source: "Complete when controlled Runtime and Server JSON/SSE/error/isolation, negative SSE and response-isolation tests, mutation/source gates, maps/manifest/wiki, fmt, Clippy, full workspace, module/Rust-only, architecture review, browser smoke, and diff checks pass."
-      runtime: "Controlled Rust loopback replay only; live Gemini provider compatibility is not claimed."
-      forbidden_claim: "Do not claim V2/P6 changes, live config, credentials, install, restart, release, global Gemini compatibility, or production cutover."
+      runtime: "Controlled Rust loopback replay passes; globally installed rccv3 managed 5555 now returns typed endpoint_not_enabled for Gemini JSON/SSE because the active V2 profile has no Gemini provider endpoint, so live provider compatibility remains blocked by profile authorization rather than a runtime misroute."
+      forbidden_claim: "Do not claim V2/P6 cutover, live config mutation, credentials, global Gemini provider compatibility, or production cutover."
 
   - feature_id: v3.entry_protocol_registry_contract
     status: source_contract_verified
