@@ -100,7 +100,8 @@ fn compile_v2_root(
 
     let forwarders = compile_v2_forwarders(&root.virtualrouter.forwarders, &referenced_forwarders)?;
     let providers = compile_v2_providers(config_dir, &forwarders)?;
-    let servers = compile_v2_servers(router_ports)?;
+    let available_protocols = available_entry_protocols(&providers);
+    let servers = compile_v2_servers(router_ports, &available_protocols)?;
     let route_groups = compile_v2_route_groups(root.virtualrouter.routing_policy_groups)?;
 
     Ok(V3Config02AuthoringParsed {
@@ -123,6 +124,7 @@ fn compile_v2_root(
 
 fn compile_v2_servers(
     ports: Vec<V2HttpServerPort>,
+    available_protocols: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, V3ServerAuthoringConfig>, V3ConfigError> {
     ports
         .into_iter()
@@ -136,6 +138,17 @@ fn compile_v2_servers(
             let id = port
                 .name
                 .unwrap_or_else(|| format!("v2_router_{}", port.port));
+            let endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+                .into_iter()
+                .filter(|protocol| available_protocols.contains(*protocol))
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if endpoints.is_empty() {
+                return Err(validation(format!(
+                    "v2 router port {} has no enabled protocol providers",
+                    port.port
+                )));
+            }
             Ok((
                 id,
                 V3ServerAuthoringConfig {
@@ -143,17 +156,22 @@ fn compile_v2_servers(
                     bind: port.host.unwrap_or_else(|| "0.0.0.0".to_string()),
                     port: port.port,
                     routing_group: group,
-                    endpoints: vec![
-                        "responses".to_string(),
-                        "openai_chat".to_string(),
-                        "anthropic".to_string(),
-                        "gemini".to_string(),
-                    ],
+                    endpoints,
                     features: BTreeMap::new(),
                     execution: Some(default_v2_server_execution()),
                 },
             ))
         })
+        .collect()
+}
+
+fn available_entry_protocols(
+    providers: &BTreeMap<String, V3ProviderAuthoringConfig>,
+) -> BTreeSet<String> {
+    providers
+        .values()
+        .filter(|provider| provider.enabled)
+        .map(|provider| provider.provider_type.clone())
         .collect()
 }
 

@@ -472,6 +472,38 @@ async fn side_channel_request_fails_before_provider_send() {
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
+#[tokio::test]
+async fn non_gemini_route_target_fails_before_provider_send() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let error = execute_v3_gemini_relay_runtime(
+        &manifest_with_provider_type("openai_chat"),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-non-gemini-target".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents":[{"role":"user","parts":[{"text":"must not hit OpenAI target"}]}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect_err("non-Gemini provider target must fail before transport");
+
+    assert!(
+        error
+            .to_string()
+            .contains("no compatible Gemini provider target"),
+        "{error:?}"
+    );
+    assert!(transport.captured_url.lock().unwrap().is_none());
+    assert!(transport.captured_body.lock().unwrap().is_none());
+}
+
 async fn collect_sse_items(chunks: Vec<Vec<u8>>) -> Vec<Result<String, String>> {
     use futures_util::StreamExt;
     let transport = StaticSseTransport {
@@ -503,6 +535,12 @@ async fn collect_sse_items(chunks: Vec<Vec<u8>>) -> Vec<Result<String, String>> 
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_with_provider_type("gemini")
+}
+
+fn manifest_with_provider_type(
+    provider_type: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let source = format!(
         r#"
 version = 3
@@ -518,7 +556,7 @@ endpoints = ["gemini"]
 {server_execution}
 
 [providers.controlled]
-type = "gemini"
+type = "{provider_type}"
 base_url = "http://controlled.invalid/v1beta"
 default_model = "gemini-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI_CONTROLLED_KEY" }}] }}
@@ -533,6 +571,7 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-
 "#,
         hub_v1_declaration = hub_v1_test_declaration(),
         server_execution = hub_v1_server_execution("controlled"),
+        provider_type = provider_type,
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }

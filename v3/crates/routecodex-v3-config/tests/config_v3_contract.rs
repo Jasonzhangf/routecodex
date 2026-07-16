@@ -815,6 +815,11 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
         manifest.servers["gateway_priority_5555"].routing_group,
         "gateway_priority_5555"
     );
+    assert_eq!(
+        manifest.servers["gateway_priority_5555"].endpoints,
+        ["responses", "anthropic", "openai_chat"],
+        "v2 5555 projection must not enable Gemini without a Gemini provider target"
+    );
     let hub = manifest
         .hub_v1
         .as_ref()

@@ -529,6 +529,12 @@ fn provider_target(
     manifest: &V3Config05ManifestPublished,
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3ResponsesProviderTarget, V3GeminiRelayRuntimeError> {
+    if selected.provider_type != "gemini" {
+        return Err(V3GeminiRelayRuntimeError::Target(format!(
+            "no compatible Gemini provider target: selected provider {} has protocol {}",
+            selected.provider_id, selected.provider_type
+        )));
+    }
     let provider = manifest
         .providers
         .get(&selected.provider_id)
