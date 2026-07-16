@@ -784,7 +784,10 @@ fn epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn fixture(root: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
         let config = root.path().join("config.v3.toml");
@@ -820,6 +823,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn deterministic_identity_and_unknown_state_fields_fail() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -845,6 +849,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn operation_lock_is_exclusive_and_auth_handle_is_required() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
         std::env::remove_var("V3_LIFECYCLE_TEST_KEY");
@@ -865,6 +870,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn state_projection_never_contains_resolved_secret() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret-value");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -877,6 +883,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn published_declaration_mismatch_is_rejected_without_reaping() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -900,6 +907,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn terminal_state_allows_reaping_stale_release_executable_path_for_same_config_identity() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -930,6 +938,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -957,6 +966,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn foreign_control_record_is_never_reaped_from_terminal_state() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -996,6 +1006,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
@@ -1053,6 +1064,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 
     #[test]
     fn running_instance_state_rejects_release_snapshot_executable_rollover() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
         let (config, executable, state) = fixture(&root);
