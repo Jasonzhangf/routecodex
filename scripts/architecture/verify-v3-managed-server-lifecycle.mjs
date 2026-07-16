@@ -30,6 +30,10 @@ for (const symbol of [
   'spawn_v3_server_aggregate', 'handle.shutdown().await', 'serde(deny_unknown_fields)',
   'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure',
   'foreign_control_record_is_never_reaped_from_terminal_state',
+  'fn same_instance_declaration_except_executable_path(',
+  'fn terminal_state_allows_reaping_stale_release_executable_path_for_same_config_identity()',
+  'fn stopped_instance_state_allows_release_snapshot_executable_rollover()',
+  'fn running_instance_state_rejects_release_snapshot_executable_rollover()',
   'refusing to reap control record for a different instance',
   'refusing to reap non-canonical managed control socket path',
 ]) requireText(lifecycle, symbol, 'lifecycle source');
@@ -42,6 +46,8 @@ requireText(configStore, 'Sha256::digest(source.raw_toml.as_bytes())', 'config s
 requireText(configLib, 'V3ConfigLoadedSnapshot', 'config lib export');
 requireText(configTests, 'config_source_identity_is_stable_sensitive_and_secret_free', 'config source identity test');
 requireText(cliManagedTests, 'managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes', 'managed CLI persistence test');
+requireText(cliManagedTests, 'fn stopped_instance_restarts_from_next_release_snapshot_executable()', 'managed CLI release rollover test');
+requireText(cliManagedTests, 'fn copy_release_binary(', 'managed CLI release rollover helper');
 requireText(cliManagedTests, 'scan_instance_files_for_secret', 'managed CLI secret scan');
 
 for (const command of ['Start', 'Status', 'Restart', 'Stop', 'RunManagedChild'])
@@ -64,6 +70,9 @@ for (let index = 1; index <= 7; index += 1)
   requireText(manifest, `V3Lifecycle0${index}`, 'lifecycle manifest');
 requireText(testDesign, 'External CLI black-box', 'test design');
 requireText(testDesign, 'Live matrix', 'test design');
+requireText(testDesign, 'release snapshot executable', 'test design');
+requireText(testDesign, 'may republish the same service declaration', 'test design');
+requireText(testDesign, 'Missing terminal proof', 'test design');
 requireText(packageJson, 'config_source_identity_is_stable_sensitive_and_secret_free', 'package test script');
 
 const forbidden = [

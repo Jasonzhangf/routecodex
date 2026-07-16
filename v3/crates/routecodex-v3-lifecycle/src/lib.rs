@@ -678,23 +678,37 @@ fn reap_inactive_runtime_files(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<(), V3LifecycleError> {
-    let declaration_path = instance_dir.join("instance.json");
-    if declaration_path.exists() {
-        let declaration: V3ManagedInstanceDeclaration = read_json(&declaration_path)?;
-        if declaration != *expected {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap state for a different instance declaration".to_string(),
-            ));
-        }
-    }
     let status_path = instance_dir.join("status.json");
-    if status_path.exists() {
+    let status = if status_path.exists() {
         let status: V3ManagedStatusRecord = read_json(&status_path)?;
         if status.instance_id != expected.instance_id {
             return Err(V3LifecycleError::IdentityMismatch(
                 "refusing to reap status for a different instance".to_string(),
             ));
         }
+        Some(status)
+    } else {
+        None
+    };
+    let terminal_status = status.as_ref().is_some_and(|status| {
+        matches!(
+            status.state,
+            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+        )
+    });
+    let declaration_path = instance_dir.join("instance.json");
+    if declaration_path.exists() {
+        let declaration: V3ManagedInstanceDeclaration = read_json(&declaration_path)?;
+        if declaration != *expected
+            && !(terminal_status
+                && same_instance_declaration_except_executable_path(&declaration, expected))
+        {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap state for a different instance declaration".to_string(),
+            ));
+        }
+    }
+    if let Some(status) = status {
         if !matches!(
             status.state,
             V3ManagedRunState::Stopped | V3ManagedRunState::Failed
@@ -735,6 +749,17 @@ fn reap_inactive_runtime_files(
         }
     }
     Ok(())
+}
+
+fn same_instance_declaration_except_executable_path(
+    stored: &V3ManagedInstanceDeclaration,
+    expected: &V3ManagedInstanceDeclaration,
+) -> bool {
+    stored.schema_version == expected.schema_version
+        && stored.instance_id == expected.instance_id
+        && stored.config_path == expected.config_path
+        && stored.config_digest == expected.config_digest
+        && stored.listeners == expected.listeners
 }
 
 fn managed_control_socket_path(instance_id: &str) -> PathBuf {
@@ -874,6 +899,36 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     }
 
     #[test]
+    fn terminal_state_allows_reaping_stale_release_executable_path_for_same_config_identity() {
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&declaration.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+        let mut old_release = declaration.clone();
+        old_release.executable_path = root
+            .path()
+            .join("old-release")
+            .join("routecodex-v3")
+            .display()
+            .to_string();
+        write_json_atomic(&instance_dir.join("instance.json"), &old_release).unwrap();
+        write_status(
+            &instance_dir,
+            &declaration.instance_id,
+            V3ManagedRunState::Stopped,
+            Some("old release path removed after install".to_string()),
+        )
+        .unwrap();
+
+        reap_inactive_runtime_files(&instance_dir, &declaration).unwrap();
+        assert!(instance_dir.join("instance.json").exists());
+        assert!(instance_dir.join("status.json").exists());
+    }
+
+    #[test]
     fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
         std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
         let root = TempDir::new().unwrap();
@@ -937,5 +992,96 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         ));
         assert!(foreign_socket.exists());
         let _ = fs::remove_file(foreign_socket);
+    }
+
+    #[test]
+    fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (published, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&published.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+
+        let next_release = root.path().join("next-release-routecodex-v3");
+        fs::write(&next_release, b"next release executable identity").unwrap();
+        let mut expected = published.clone();
+        expected.executable_path = fs::canonicalize(&next_release)
+            .unwrap()
+            .display()
+            .to_string();
+
+        write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+        write_status(
+            &instance_dir,
+            &published.instance_id,
+            V3ManagedRunState::Stopped,
+            Some("previous release stopped cleanly".to_string()),
+        )
+        .unwrap();
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                pid: 42,
+                start_nonce: "previous-release".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
+        let socket_path = managed_control_socket_path(&published.instance_id);
+        fs::write(&socket_path, b"stale owned control socket").unwrap();
+        write_json_atomic(
+            &instance_dir.join("control.json"),
+            &V3ManagedControlRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                socket_path: socket_path.display().to_string(),
+                start_nonce: "previous-release".to_string(),
+            },
+        )
+        .unwrap();
+
+        reap_inactive_runtime_files(&instance_dir, &expected).unwrap();
+
+        assert!(!instance_dir.join("pid.cache").exists());
+        assert!(!instance_dir.join("control.json").exists());
+        assert!(!socket_path.exists());
+    }
+
+    #[test]
+    fn running_instance_state_rejects_release_snapshot_executable_rollover() {
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (published, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&published.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+
+        let mut expected = published.clone();
+        expected.executable_path = root
+            .path()
+            .join("active-release-must-not-be-taken-over")
+            .display()
+            .to_string();
+        write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+        write_status(
+            &instance_dir,
+            &published.instance_id,
+            V3ManagedRunState::Running,
+            Some("active previous release".to_string()),
+        )
+        .unwrap();
+        fs::write(instance_dir.join("pid.cache"), b"preserve-active-cache").unwrap();
+
+        assert!(matches!(
+            reap_inactive_runtime_files(&instance_dir, &expected),
+            Err(V3LifecycleError::IdentityMismatch(_))
+        ));
+        assert!(instance_dir.join("pid.cache").exists());
+        assert!(instance_dir.join("instance.json").exists());
     }
 }

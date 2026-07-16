@@ -28,6 +28,13 @@ Every schema uses `deny_unknown_fields`; every write is temp-file plus rename; s
 owner-only. No resolved secret, provider/client payload, Metadata, Debug snapshot, request ID, session,
 or continuation truth may enter lifecycle state.
 
+The instance ID is the stable service identity derived from canonical config path plus config digest.
+`executable_path` is exact launch provenance: it must match while state is non-terminal, but a
+`stopped` or `failed` instance may republish the same service declaration from a new canonical release
+snapshot executable. That rollover is legal only when instance ID, config path/digest, listener set,
+and schema are unchanged and terminal status/control ownership are verified. Missing terminal proof,
+active state, or any other declaration difference must fail without reaping state.
+
 ## Positive white-box matrix
 
 - same canonical config produces the same instance ID and config digest;
@@ -38,6 +45,8 @@ or continuation truth may enter lifecycle state.
 - stop transitions running -> stopping -> stopped and closes all aggregate listeners;
 - restart is one stop plus one start for the instance, never per listener;
 - stale stopped PID/control caches are reaped after exact state/schema validation;
+- a stopped instance starts from the next release snapshot executable while retaining one stable
+  service instance ID and publishing the new canonical executable path;
 - multi-listener instance publishes and closes the complete listener set.
 
 ## Negative white-box matrix
@@ -46,6 +55,7 @@ or continuation truth may enter lifecycle state.
 - concurrent lifecycle operation lock contention;
 - PID cache nonce mismatch / PID reuse simulation;
 - wrong executable identity or config digest;
+- release executable rollover while state is running or terminal proof is missing;
 - port occupied by an unknown process;
 - malformed JSON or unknown state field;
 - missing/unreadable auth handle at provider-send boundary remains explicit and is never persisted;
@@ -64,6 +74,7 @@ config check
   -> duplicate start fails
   -> server restart
   -> stable instance ID + changed PID/start nonce
+  -> stop -> copy/invoke next release snapshot executable -> start with stable instance ID
   -> health
   -> server stop
   -> all listeners closed

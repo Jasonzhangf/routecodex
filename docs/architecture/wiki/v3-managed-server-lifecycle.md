@@ -17,6 +17,10 @@ flowchart LR
 
 - `instance.json` is the authoritative declaration: deterministic config identity, executable, and
   complete aggregate listener set.
+- The instance ID is stable config identity. The executable path is exact launch provenance and may
+  advance to a new release snapshot only after matching `stopped|failed` truth proves the previous
+  release is terminal; active, missing-terminal, or otherwise different declarations remain
+  non-transferable.
 - `pid.cache` is transient and useful only together with the exact instance ID and start nonce.
 - `control.json` points to an owner-only Unix socket and carries no secret.
 - `status.json` is an observation of starting/running/stopping/stopped/failed, not authority to take
@@ -48,6 +52,8 @@ does not publish managed state.
 - [ ] Duplicate start fails while exact control identity is live.
 - [ ] Restart is one aggregate operation, not a listener loop.
 - [ ] Wrong nonce/config/executable and unknown port occupancy fail explicitly.
+- [ ] A stopped exact-config instance can start from the next release snapshot executable; an active
+      or missing-terminal instance cannot be reaped or taken over.
 - [ ] State/argv/log/evidence scans contain no resolved secret.
 - [ ] Temporary CLI blackbox and live 5555 restart evidence both pass.
 - [ ] V2 5520/10000/4444 stay healthy throughout the V3 restart.

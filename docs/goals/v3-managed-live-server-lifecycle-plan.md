@@ -36,6 +36,9 @@ Claim：`feature_id:v3.managed_server_lifecycle`
 
 - Config authoring -> validated deterministic Manifest -> lifecycle；runtime 不宽松扫描目录拼能力。
 - 服务身份由 config digest + instance declaration +启动 nonce/时间绑定；端口和 PID 都不是唯一真相。
+- `instance_id` 由 canonical config path + config digest 定义；`executable_path` 是精确启动来源。
+  只有已验证 `stopped|failed` 且其余声明字段完全一致时，才允许把同一服务前向发布到新的
+  release snapshot executable。运行中、缺 terminal truth 或其他字段变化一律拒绝接管。
 - start/restart/stop 只允许显式匹配 V3 instance；发现端口被未知进程占用时 fail-fast，不接管、不杀进程。
 - restart 是一个 aggregate instance 操作，不逐 listener 循环。
 - stop/restart 使用显式 control channel 或已验证 PID；发送前再次校验 identity，超时显式失败。
@@ -88,7 +91,8 @@ Claim：`feature_id:v3.managed_server_lifecycle`
 
 - 红测先行：当前 V3 只有前台 `server start`，`status` 仅打印 config，不验证 live instance；managed restart/stop 缺失。
 - 正向白盒：deterministic instance ID、atomic state、lock、live identity、graceful stop/restart、multi-listener aggregate identity、stale cache cleanup。
-- 反向白盒：PID reuse、wrong executable、wrong config digest、unknown port owner、duplicate start、concurrent restart、malformed/unknown state field、missing auth handle、shutdown timeout、already terminal/stopped。
+- 正向白盒：补充 stopped/failed terminal state 下同 config 的 release snapshot executable 前向轮换。
+- 反向白盒：PID reuse、active/missing-terminal executable rollover、wrong config digest、unknown port owner、duplicate start、concurrent restart、malformed/unknown state field、missing auth handle、shutdown timeout、already terminal/stopped。
 - CLI controlled blackbox：start -> health -> status -> duplicate start fails -> restart -> PID/nonce changes且 instance identity 稳定 -> stop -> listeners closed -> status stopped。
 - 安全黑盒：argv/state/log/evidence 不含 resolved secret；只向已验证 PID/control endpoint 发精确操作；source gate 禁 broad kill/port kill。
 - live closeout：受控切换当前 5555；restart 前后 `/health`、`/v1/models`、真实 JSON/SSE `/v1/responses`；同时验证 V2 5520/10000/4444 不受影响。

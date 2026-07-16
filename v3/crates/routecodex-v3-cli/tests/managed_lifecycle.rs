@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::fs;
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
@@ -130,6 +131,14 @@ fn scan_instance_files_for_secret(instance_dir: &Path) {
         }
     }
     assert!(!projected.contains(SECRET));
+}
+
+fn copy_release_binary(source: &str, release_root: &Path) -> PathBuf {
+    let binary = release_root.join("bin").join("routecodex-v3");
+    fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    fs::copy(source, &binary).unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    binary
 }
 
 #[test]
@@ -269,6 +278,87 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
         stop_from_new_cli.status.success(),
         "{}",
         String::from_utf8_lossy(&stop_from_new_cli.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn stopped_instance_restarts_from_next_release_snapshot_executable() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let source_binary = env!("CARGO_BIN_EXE_routecodex-v3");
+    let first_release = copy_release_binary(source_binary, &root.path().join("release-a"));
+    let second_release = copy_release_binary(source_binary, &root.path().join("release-b"));
+
+    let first_start = run(
+        first_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "start",
+    );
+    assert!(
+        first_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first_start.stderr)
+    );
+    let first_instance_id = last_json(&first_start)["instance_id"].clone();
+    let first_stop = run(
+        first_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "stop",
+    );
+    assert!(
+        first_stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first_stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+
+    let second_start = run(
+        second_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "start",
+    );
+    assert!(
+        second_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second_start.stderr)
+    );
+    assert_eq!(last_json(&second_start)["instance_id"], first_instance_id);
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let instance_dir = single_instance_dir(&state_root);
+    let declaration: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("instance.json")).unwrap()).unwrap();
+    assert_eq!(
+        declaration["executable_path"],
+        fs::canonicalize(&second_release)
+            .unwrap()
+            .display()
+            .to_string()
+    );
+
+    let second_stop = run(
+        second_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "stop",
+    );
+    assert!(
+        second_stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second_stop.stderr)
     );
     for port in ports {
         wait_port(port, false);

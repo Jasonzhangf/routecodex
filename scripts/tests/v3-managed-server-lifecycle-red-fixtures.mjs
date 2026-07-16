@@ -8,6 +8,7 @@ const repo = process.cwd();
 const files = [
   'v3/crates/routecodex-v3-lifecycle/src/lib.rs',
   'v3/crates/routecodex-v3-cli/src/main.rs',
+  'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs',
   'v3/crates/routecodex-v3-config/src/store.rs',
   'v3/crates/routecodex-v3-config/src/lib.rs',
   'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs',
@@ -27,8 +28,14 @@ const mutations = [
   ['remove strict schema', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', '#[serde(deny_unknown_fields)]', '#[serde(default)]'],
   ['remove non-terminal reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure', 'removed_non_terminal_runtime_state_guard'],
   ['remove foreign control reaping guard', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'foreign_control_record_is_never_reaped_from_terminal_state', 'removed_foreign_control_reaping_guard'],
+  ['remove release executable rollover helper', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn same_instance_declaration_except_executable_path(', 'fn removed_same_instance_declaration_except_executable_path('],
+  ['remove terminal release rollover positive test', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn stopped_instance_state_allows_release_snapshot_executable_rollover()', 'fn removed_stopped_release_snapshot_rollover_test()'],
+  ['remove active release rollover negative test', 'v3/crates/routecodex-v3-lifecycle/src/lib.rs', 'fn running_instance_state_rejects_release_snapshot_executable_rollover()', 'fn removed_running_release_snapshot_rollover_test()'],
+  ['remove CLI release rollover blackbox', 'v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs', 'fn stopped_instance_restarts_from_next_release_snapshot_executable()', 'fn removed_stopped_instance_restarts_from_next_release_snapshot_executable()'],
   ['remove config source identity', 'v3/crates/routecodex-v3-config/src/store.rs', 'pub struct V3ConfigLoadedSnapshot', 'pub struct RemovedConfigLoadedSnapshot'],
   ['remove PID cache resource', 'docs/architecture/v3-resource-operation-map.yml', 'v3.lifecycle.pid_cache', 'v3.lifecycle.removed_pid_cache'],
+  ['remove release rollover contract from test design', 'docs/goals/v3-managed-server-lifecycle-test-design.md', 'may republish the same service declaration', 'may use a different executable'],
+  ['remove release rollover negative contract from test design', 'docs/goals/v3-managed-server-lifecycle-test-design.md', 'Missing terminal proof', 'Missing proof'],
   ['remove live matrix', 'docs/goals/v3-managed-server-lifecycle-test-design.md', '## Live matrix', '## Removed matrix'],
 ];
 
