@@ -817,6 +817,21 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["input_modalities"], json!(["text", "image"]));
     assert_eq!(model["context_window"], 128000);
     assert_eq!(model["max_context_window"], 128000);
+    let gpt55 = response["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "gpt-5.5")
+        .expect("gpt-5.5 must expose the full Codex model metadata");
+    assert_eq!(gpt55["supports_reasoning_summaries"], true);
+    assert_eq!(gpt55["support_verbosity"], true);
+    assert_eq!(gpt55["supports_parallel_tool_calls"], true);
+    assert_eq!(gpt55["context_window"], 272000);
+    assert_eq!(gpt55["max_context_window"], 272000);
+    assert_eq!(gpt55["supports_search_tool"], true);
+    assert_eq!(gpt55["use_responses_lite"], true);
+    assert_eq!(gpt55["tool_mode"], "code_mode_only");
+    assert_eq!(gpt55["input_modalities"], json!(["text", "image"]));
     let sol = response["data"]
         .as_array()
         .unwrap()

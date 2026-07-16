@@ -1355,7 +1355,7 @@ fn build_v3_codex_model_metadata(
         ("context_window".to_string(), json!(context_window)),
         ("max_context_window".to_string(), json!(context_window)),
     ]);
-    if is_gpt_56 {
+    if is_gpt_55 || is_gpt_56 {
         item.insert("tool_mode".to_string(), json!("code_mode_only"));
         item.insert("use_responses_lite".to_string(), json!(true));
     }
