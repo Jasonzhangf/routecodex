@@ -898,7 +898,7 @@ features:
       - v3.continuation.remote_binding
       - v3.request.normal_payload
       - v3.target.concrete_provider
-      - v3.provider.responses_raw
+      - v3.response.provider_raw
       - v3.provider.responses_transport_capability
       - v3.provider.responses_websocket_connection
     mainline_bindings:
@@ -1723,3 +1723,39 @@ features:
     pending_runtime:
       - live provider compatibility
       - global install restart release and production cutover
+
+  - feature_id: v3.resource_relation_edge_lock
+    owner_kind: v3_architecture_gate
+    owner_scope: "V3 resource nodes remain in the resource registry while every resource relationship is carried only by an explicit adjacent source-to-target mainline edge."
+    owner_files:
+      - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
+      - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
+    resource_bindings:
+      - v3.config.resource_registry
+    entry_symbols:
+      - verifyResourceMap
+      - verifyMainlineEdges
+      - verifyFunctionResourceBindings
+    allowed_paths:
+      - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
+      - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
+      - package.json
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - v3/crates
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - provider credentials
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run verify:v3-resource-relation-edge-lock
+      - npm run test:v3-resource-relation-edge-lock-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - git diff --check
+    runtime_status: architecture_gate_only

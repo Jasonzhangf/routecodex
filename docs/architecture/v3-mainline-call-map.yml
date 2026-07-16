@@ -155,7 +155,7 @@ chains:
         callee_file: v3/crates/routecodex-v3-server/src/lib.rs
         owner_feature_id: v3.entry_protocol_endpoint_binding
         binding_kind: review_gate_source_binding
-        resource_flow: { consumes: [v3.server.endpoint_binding_projection], produces: [v3.hub.entry_protocol], side_channel_reads: [v3.entry_protocol.binding_registry], side_channel_writes: [v3.hub.entry_protocol] }
+        resource_flow: { consumes: [v3.server.endpoint_binding_projection], produces: [v3.hub.entry_protocol, v3.protocol.pending_projection], side_channel_reads: [v3.entry_protocol.binding_registry], side_channel_writes: [v3.hub.entry_protocol, v3.protocol.pending_projection] }
         status: anchored
 
   - chain_id: v3.hub_pipeline.v1.hook_registry_compile

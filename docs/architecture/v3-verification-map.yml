@@ -1506,3 +1506,42 @@ features:
       source: "Complete when controlled WebSocket JSON/SSE/malformed tests, source verifier, red fixtures, maps, architecture/resource/module/rust-only/fmt/clippy/workspace gates, and diff check pass."
       runtime: "Controlled Server WebSocket proxy only; no live provider compatibility, global install, restart, release, or production cutover is claimed."
       forbidden_claim: "Do not claim provider WebSocket endpoint compatibility, production readiness, live config mutation, global install, restart, release, or P6 deletion."
+
+  - feature_id: v3.resource_relation_edge_lock
+    status: source_gate_verified
+    change_risk: medium
+    owner_kind: v3_architecture_gate
+    owner_scope: "Machine gate for resource node ownership, edge-only resource relationships, and one explicit source-to-target constraint per callable path."
+    owner_modules:
+      - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
+      - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+    required_contract:
+      - "Resources are nodes/truth resources, not edges."
+      - "Every callable source-to-target path is one mainline edge with scalar from_node and to_node."
+      - "Every resource relationship is encoded only under the owning mainline edge resource_flow with consumes, produces, side_channel_reads, and side_channel_writes arrays."
+      - "Multiple callable paths require multiple edges; multi-source or multi-target shortcuts are forbidden."
+      - "Every resource_flow id and function-map resource binding resolves to the resource registry, and every declared resource participates in at least one edge resource_flow."
+    required_unit:
+      - resource map relation fields are rejected
+      - missing malformed unknown or top-level resource_flow fields are rejected
+      - undeclared and unused resources are rejected
+      - function-map bindings to undeclared or edge-unbound resources are rejected
+      - scalar distinct source and target nodes are required
+      - duplicate step ids and multi-source or multi-target shortcuts are rejected
+      - package wiring keeps the edge lock inside verify:v3-architecture-docs
+    required_gates:
+      - npm run verify:v3-resource-relation-edge-lock
+      - npm run test:v3-resource-relation-edge-lock-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - git diff --check
+    completion_rule:
+      source: "Complete when the verifier is green, all mutation fixtures are red, architecture docs invoke the gate, and the V3 maps parse and remain edge/resource consistent."
+      runtime: "Architecture documentation and gate only; no runtime behavior, live provider compatibility, global install, restart, release, or production cutover is claimed."
+      forbidden_claim: "Do not treat resource declarations as callable paths, collapse multiple paths into one multi-target edge, or claim live/runtime closure from this source gate."
