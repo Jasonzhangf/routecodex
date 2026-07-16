@@ -2800,6 +2800,136 @@ mod tests {
     }
 
     #[test]
+    fn non_default_route_with_forwarder_pools_preserves_default_floor_after_all_real_targets_excluded(
+    ) {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for provider_key in [
+            "cc.key1.gpt-5.5",
+            "asxs.crsa.gpt-5.5",
+            "1token.key1.gpt-5.5",
+            "55ai.key1.gpt-5.5",
+        ] {
+            providers.insert(
+                provider_key.to_string(),
+                json!({
+                    "providerKey": provider_key,
+                    "providerType": "openai",
+                    "providerProtocol": "openai-responses",
+                    "modelId": "gpt-5.5",
+                    "enabled": true,
+                    "maxContextTokens": 900000
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        let keys = core.provider_registry.list_keys();
+        core.health_manager.register_providers(&keys);
+
+        let mut forwarders = Map::new();
+        forwarders.insert(
+            "fwd.free.gpt-5.5".to_string(),
+            json!({
+                "forwarderId": "fwd.free.gpt-5.5",
+                "protocol": "openai",
+                "modelId": "gpt-5.5",
+                "resolutionMode": "model-first",
+                "strategy": "weighted",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": "cc.key1.gpt-5.5", "weight": 1, "disabled": false }
+                ]
+            }),
+        );
+        forwarders.insert(
+            "fwd.paid.gpt-5.5".to_string(),
+            json!({
+                "forwarderId": "fwd.paid.gpt-5.5",
+                "protocol": "openai",
+                "modelId": "gpt-5.5",
+                "resolutionMode": "model-first",
+                "strategy": "priority",
+                "stickyKey": "none",
+                "targets": [
+                    { "providerKey": "asxs.crsa.gpt-5.5", "priority": 1, "disabled": false },
+                    { "providerKey": "1token.key1.gpt-5.5", "priority": 2, "disabled": false },
+                    { "providerKey": "55ai.key1.gpt-5.5", "priority": 3, "disabled": false }
+                ]
+            }),
+        );
+        let provider_keys = keys.into_iter().collect::<HashSet<String>>();
+        core.forwarder_registry
+            .load(&forwarders, &provider_keys)
+            .expect("forwarder load");
+
+        let routing = Map::from_iter([
+            (
+                "longcontext".to_string(),
+                Value::Array(vec![
+                    json!({
+                        "id": "longcontext-free",
+                        "priority": 150,
+                        "mode": "priority",
+                        "targets": ["fwd.free.gpt-5.5"]
+                    }),
+                    json!({
+                        "id": "longcontext-paid",
+                        "priority": 100,
+                        "mode": "priority",
+                        "targets": ["fwd.paid.gpt-5.5"]
+                    }),
+                ]),
+            ),
+            (
+                "default".to_string(),
+                Value::Array(vec![
+                    json!({
+                        "id": "default-free",
+                        "priority": 150,
+                        "mode": "priority",
+                        "targets": ["fwd.free.gpt-5.5"]
+                    }),
+                    json!({
+                        "id": "default-paid",
+                        "priority": 100,
+                        "mode": "priority",
+                        "targets": ["fwd.paid.gpt-5.5"]
+                    }),
+                ]),
+            ),
+        ]);
+        core.routing = parse_routing(&routing);
+
+        let selected = core
+            .select_provider(
+                "longcontext",
+                &json!({
+                    "excludedProviderKeys": [
+                        "cc.key1.gpt-5.5",
+                        "asxs.crsa.gpt-5.5",
+                        "1token.key1.gpt-5.5",
+                        "55ai.key1.gpt-5.5"
+                    ]
+                }),
+                &ClassificationResult {
+                    route_name: "longcontext".to_string(),
+                    confidence: 1.0,
+                    reasoning: "longcontext:token-threshold".to_string(),
+                    candidates: vec!["longcontext".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("non-default route exhaustion must preserve the default forwarder floor");
+
+        assert_eq!(selected.route_used, "default");
+        assert_eq!(selected.provider_key, "cc.key1.gpt-5.5");
+        assert!(selected.default_floor_protected);
+    }
+
+    #[test]
     fn priority_pool_expands_forwarder_before_provider_filters() {
         let mut core = VirtualRouterEngineCore::new();
         let mut providers = Map::new();
