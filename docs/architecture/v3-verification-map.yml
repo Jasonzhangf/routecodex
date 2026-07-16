@@ -1311,3 +1311,145 @@ features:
       source: "Complete when controlled closeout test, source verifier, mutation fixtures, copy-budget probes, architecture/resource/module/static-hook/fmt/clippy/workspace gates, and diff check pass."
       runtime: "Controlled Rust Runtime closeout only; live Relay Server entry, P6 deletion, global install, restart, release, real-provider compatibility, and production cutover are not claimed."
       forbidden_claim: "Do not claim live Relay, P6 deletion, global installation, restart, production cutover, or real ~/.rcc mutation."
+
+  - feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    status: controlled_runtime_parity_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_gate
+    owner_scope: "V3 Relay tool/servertool multiturn controlled parity matrix over request tool output governance, response tool harvest, servertool hook profile, attachment history placeholder, local continuation, JSON/SSE ordering, and single response exit."
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+    design:
+      - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
+      - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+    contract:
+      - docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+    required_unit:
+      - protocol transport continuation matrix covers Responses Anthropic OpenAI Chat and Gemini entries over JSON SSE New Local and Remote continuation states
+      - request governance matches function custom servertool apply_patch MCP and native tool outputs only to current or restored tool calls
+      - orphan tool output missing call_id and wrong custom/function output kind fail fast inside Req04
+      - attachment history placeholder releases only historical image/media payloads and preserves current request media payload
+      - malformed attachment resource fails explicitly without handler/server/provider repair
+      - response governance classifies function custom servertool apply_patch MCP and native calls before Resp04 commit
+      - JSON and SSE use one response exit and SSE arbitrary chunks preserve delta order terminal tool order DONE/finish reason parity
+      - provider/client payloads reject RouteCodex control metadata_center debug/resource/continuation leakage
+    required_gates:
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+      - npm run test:v3-anthropic-codec-characterization
+      - npm run test:v3-openai-chat-codec-characterization
+      - npm run test:v3-gemini-codec-characterization
+      - npm run test:v3-hub-relay-runtime-closeout
+      - npm run verify:v3-hub-relay-runtime-closeout
+      - npm run test:v3-relay-payload-copy-runtime-probes
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    completion_rule:
+      source: "Complete when focused parity tests, protocol codec characterization gates, source verifier, red fixtures, existing Hub Relay closeout/copy gates, architecture/resource/module/static-hook/fmt/clippy/workspace gates, and diff check pass."
+      runtime: "Controlled Rust Runtime parity only; live provider replay, live inbound WebSocket replay, Direct remote continuation live closeout, P6 deletion, global install, restart, release, production cutover, and ~/.rcc mutation are not claimed."
+      forbidden_claim: "Do not claim live Relay/provider compatibility, P6 deletion, global installation, restart, production cutover, or real ~/.rcc mutation from this controlled parity feature."
+
+  - feature_id: v3.live_provider_compat_parity_closeout
+    status: matrix_contract_verified_pending_live_replay
+    change_risk: high
+    owner_kind: docs_verifier_v3_compat_gate
+    owner_scope: "V3 live provider compatibility parity matrix across endpoint protocol provider/model transport tool image and error scenarios."
+    owner_modules:
+      - docs/architecture/manifests/v3.live_provider_compat.parity.yml
+      - scripts/architecture/verify-v3-live-provider-compat-parity.mjs
+      - scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+    design:
+      - docs/goals/v3-live-provider-compat-parity-closeout-plan.md
+    contract:
+      - v3.live_provider_compat.matrix
+      - docs/architecture/manifests/v3.live_provider_compat.parity.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+    required_unit:
+      - manifest covers responses_direct responses_relay anthropic_messages openai_chat_completions and gemini_generate_content across json_http sse_http and websocket_v2
+      - every case separates controlled_evidence from live_evidence and cannot claim production ready without both
+      - error matrix covers 401 402 403 429 5xx SSE body-level failure malformed provider body timeout disconnect and cancel
+      - /v1/models capability case lists Codex request-builder fields
+      - production blockers remain explicit for inbound WebSocket live replay Responses WebSocket v2 live endpoint live Relay cutover and live replay matrix
+    required_gates:
+      - npm run verify:v3-live-provider-compat-parity
+      - npm run test:v3-live-provider-compat-parity-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    completion_rule:
+      source: "Complete when manifest verifier red fixtures maps wiki and architecture gates prove the matrix contract and blocker projection."
+      runtime: "This feature is a parity/evidence gate. It does not mutate live config credentials provider routes global install restart or runtime behavior."
+      forbidden_claim: "Do not claim V3 production readiness live provider compatibility P6 deletion global install restart or cutover unless every production-ready case has controlled and live evidence."
+
+  - feature_id: v3.responses_inbound_websocket_proxy
+    status: controlled_runtime_proxy_verified
+    change_risk: high
+    owner_kind: rust_server_transport_shell
+    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell into the existing Responses Direct Runtime and Provider path."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
+      - scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs
+    design:
+      - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
+    contract:
+      - docs/architecture/manifests/v3.responses_inbound_websocket_proxy.mainline.yml
+      - docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_unit:
+      - WebSocket handshake rejects plain GET without upgrade and missing OpenAI-Beta responses_websockets=2026-02-06 while preserving ping/pong transport behavior
+      - controlled JSON WebSocket response.create enters the existing Responses Direct Runtime and returns response.completed
+      - controlled binary JSON response.create enters the same Runtime path
+      - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
+      - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
+      - same client WebSocket can send a second response.create with previous_response_id and function_call_output through the existing continuation owner without Router re-entry
+      - continuation scope mismatch fails before provider send
+      - provider WebSocket/runtime error projects an explicit WebSocket error event without HTTP fallback
+      - client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of draining to terminal behind the client
+      - Server owns only client upgrade and framing while provider WebSocket state remains provider-owned
+      - control fields do not enter provider/client normal payloads
+    required_gates:
+      - npm run test:v3-responses-inbound-websocket-proxy
+      - npm run verify:v3-responses-inbound-websocket-proxy
+      - npm run test:v3-responses-inbound-websocket-proxy-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    completion_rule:
+      source: "Complete when controlled WebSocket JSON/SSE/malformed tests, source verifier, red fixtures, maps, architecture/resource/module/rust-only/fmt/clippy/workspace gates, and diff check pass."
+      runtime: "Controlled Server WebSocket proxy only; no live provider compatibility, global install, restart, release, or production cutover is claimed."
+      forbidden_claim: "Do not claim provider WebSocket endpoint compatibility, production readiness, live config mutation, global install, restart, release, or P6 deletion."

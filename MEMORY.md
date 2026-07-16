@@ -3424,3 +3424,16 @@
 - `vr.route_token_estimation` must derive route `estimated_tokens` from Rust tiktoken request counting, not from client-provided `estimatedInputTokens` / `estimatedTokens` / `estimated_tokens` metadata. Client metadata can remain for diagnostics/usage projection but must not control longcontext classification.
 - Top-level `/v1/responses` `input` is part of the Rust estimate, with image/video media bytes omitted and real text/tool/function output counted. The estimator uses `max(top_level_input, semantics.responses.context.input)` to avoid duplicate counting when both carriers mirror the same Responses context.
 - `server.bodyLimit` remains only an HTTP request allocation guard. It is not a token policy and must not be reintroduced inside Hub semantic nodes.
+
+# 2026-07-16 V3 live provider compat parity matrix closeout
+
+- `v3.live_provider_compat_parity_closeout` is a docs/verifier matrix closeout, not a production provider compatibility claim. The manifest `docs/architecture/manifests/v3.live_provider_compat.parity.yml` covers Responses Direct, Responses Relay, Anthropic Messages, OpenAI Chat, and Gemini across JSON HTTP, SSE HTTP, and WebSocket v2.
+- Completion truth: matrix contract and controlled/source evidence indexing are verified; production-ready cases remain zero unless controlled + live evidence are both present and blockers are empty. Current live V3 provider replay is pending/blocker and must not be presented as production-ready.
+- Verified gates for the closeout: `npm run verify:v3-live-provider-compat-parity`, `npm run test:v3-live-provider-compat-parity-red-fixtures`, V3 architecture docs/resource/module/Rust-only/cargo-fmt/clippy/workspace, and `git diff --check`.
+
+# 2026-07-16 V3 inbound WebSocket and Relay parity dirty-review truth
+
+- v3.responses_inbound_websocket_proxy is a Server-owned client WebSocket upgrade/frame projection shell for GET /v1/responses; it requires OpenAI-Beta: responses_websockets=2026-02-06, parses flat response.create, enters the existing Responses Direct Runtime once, and forbids provider socket ownership, HTTP fallback, history/tool repair, and full SSE materialization in Server.
+- Inbound WebSocket runtime errors must be explicit client WebSocket error events before close. Invalid Runtime byte JSON projects runtime_error; malformed or unterminated Runtime SSE projects runtime_stream_error. Silent close is not a valid error projection.
+- v3.relay_tool_servertool_multiturn_parity_closeout is controlled Runtime parity only: Req04 validates tool outputs against current/restored tool calls, preserves current-turn media while placeholdering historical attachments, rejects side-channel leakage, and Resp03 classifies function/custom/servertool/apply_patch/MCP/native before Resp04 continuation commit.
+- Global/release install including v3/ is expected for V3 bin/test validation. Verified installed surface: routecodex --version = 0.90.3935, routecodex-v3 --help works. Port 5555 has no listener, so V3 live provider replay remains pending and must not be claimed complete.

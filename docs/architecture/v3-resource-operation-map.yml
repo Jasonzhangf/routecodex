@@ -564,6 +564,32 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.hub.tool_governance_truth
+    resource_kind: side_channel
+    lifecycle: v3.hub_relay.tool_servertool_multiturn_parity
+    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqChatProcess04Governed
+    identity: [entryProtocol, requestId, continuationOwner, callId, toolKind]
+    allowed_writers: [govern_tool_outputs_at_req04, govern_v3_hub_relay_response, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed]
+    allowed_readers: [V3HubReqChatProcess04Governed, V3HubRespContinuation04Committed, V3HubReqOutbound07ProviderSemantic]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hub.attachment_history_placeholder
+    resource_kind: normal_payload
+    lifecycle: v3.hub_relay.tool_servertool_multiturn_parity
+    owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqChatProcess04Governed
+    identity: [entryProtocol, requestId, inputIndex, mediaResourceKind]
+    allowed_writers: [govern_attachment_history_at_req04, V3HubReqChatProcess04Governed]
+    allowed_readers: [V3HubReqChatProcess04Governed, V3HubReqOutbound07ProviderSemantic]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.hub.static_hook_registry
     resource_kind: control
     lifecycle: v3.hub_pipeline.compile
@@ -757,6 +783,50 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     release_point: V3ServerRespOutbound06ClientFrame
+    binding_status: anchored
+
+  - resource_id: v3.live_provider_compat.matrix
+    resource_kind: verification_manifest
+    lifecycle: v3.live_provider_compat.parity
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    owner_crate: routecodex-v3-docs
+    owner_node: V3LiveCompat01MatrixDeclared
+    identity: [endpoint, protocol, providerModelScope, transport, scenarioGroup, evidenceLevel]
+    allowed_writers: [docs/architecture/manifests/v3.live_provider_compat.parity.yml, scripts/architecture/verify-v3-live-provider-compat-parity.mjs]
+    allowed_readers: [docs/architecture/wiki/v3-live-provider-compat-parity.md, docs/architecture/v3-verification-map.yml]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+
+  - resource_id: v3.responses.inbound_websocket_client_connection
+    resource_kind: client_transport_handle
+    lifecycle: v3.responses.inbound_websocket_proxy
+    owner_feature_id: v3.responses_inbound_websocket_proxy
+    owner_crate: routecodex-v3-server
+    owner_node: V3ResponsesInboundWs01ClientUpgrade
+    identity: [serverId, requestId, sessionId, threadId, endpoint, OpenAI-Beta]
+    allowed_writers: [responses_websocket_endpoint, responses_websocket_session]
+    allowed_readers: [responses_websocket_create_payload, send_responses_websocket_frame]
+    forbidden_writers: [routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: V3ResponsesInboundWs04ClientEventProjected
+    binding_status: anchored
+
+  - resource_id: v3.responses.inbound_websocket_frame_projection
+    resource_kind: client_transport_projection
+    lifecycle: v3.responses.inbound_websocket_proxy
+    owner_feature_id: v3.responses_inbound_websocket_proxy
+    owner_crate: routecodex-v3-server
+    owner_node: V3ResponsesInboundWs04ClientEventProjected
+    identity: [requestId, entryProtocol, frameSequence]
+    allowed_writers: [send_responses_websocket_frame, send_responses_websocket_sse_stream]
+    allowed_readers: [client WebSocket peer]
+    forbidden_writers: [routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: WebSocket close
     binding_status: anchored
   - resource_id: v3.gemini.client_sse_stream
     resource_kind: client_transport_projection

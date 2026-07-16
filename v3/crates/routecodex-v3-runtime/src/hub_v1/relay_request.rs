@@ -1,12 +1,12 @@
 use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
-    build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, V3HubContinuationOwnership,
-    V3HubEntryProtocol, V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw,
-    V3HubReqInbound02Normalized,
+    build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
+    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
+    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
 };
 use serde_json::Value;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubRequestSemanticProtocol {
@@ -113,6 +113,12 @@ impl V3HubServertoolRequestProfile {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3HubAttachmentHistoryPolicy {
+    Preserve,
+    Placeholder { placeholder: &'static str },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubRelayRequestHookEvent {
     Req01Entry,
@@ -140,6 +146,14 @@ pub enum V3HubRelayRequestError {
     AmbiguousContinuationOwnership { continuation_id: String },
     #[error("malformed tool output at input index {index}: call_id is required")]
     MalformedToolOutput { index: usize },
+    #[error("orphan tool output at input index {index}: call_id {call_id}")]
+    OrphanToolOutput { index: usize, call_id: String },
+    #[error("tool output kind mismatch at input index {index}: call_id {call_id}")]
+    ToolOutputKindMismatch { index: usize, call_id: String },
+    #[error("attachment resource missing at input index {index}")]
+    AttachmentResourceMissing { index: usize },
+    #[error("side-channel field leaked into normal request payload: {key}")]
+    SideChannelLeaked { key: &'static str },
     #[error("required request hook failed: {hook_id}")]
     RequiredHookFailed { hook_id: &'static str },
     #[error("local continuation context disappeared before Req04 restore: {continuation_id}")]
@@ -154,6 +168,7 @@ pub enum V3HubRelayRequestError {
 pub struct V3HubRelayRequestOutcome {
     governed: V3HubReqChatProcess04Governed,
     local_context: Option<Arc<Value>>,
+    tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
 }
 impl V3HubRelayRequestOutcome {
@@ -175,6 +190,9 @@ impl V3HubRelayRequestOutcome {
     pub fn hook_events(&self) -> &[V3HubRelayRequestHookEvent] {
         &self.events
     }
+    pub fn tool_output_count(&self) -> usize {
+        self.tool_output_count
+    }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
         self.governed
     }
@@ -195,6 +213,21 @@ impl V3HubRelayRequestHooks {
         lookup: &V3HubContinuationLookup,
         profile: &V3HubServertoolRequestProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
+        self.run_with_attachment_history_policy(
+            raw,
+            lookup,
+            profile,
+            V3HubAttachmentHistoryPolicy::Preserve,
+        )
+    }
+
+    pub fn run_with_attachment_history_policy(
+        &self,
+        raw: V3HubReqInbound01ClientRaw,
+        lookup: &V3HubContinuationLookup,
+        profile: &V3HubServertoolRequestProfile,
+        attachment_history_policy: V3HubAttachmentHistoryPolicy,
+    ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let mut events = vec![
             V3HubRelayRequestHookEvent::Req01Entry,
             V3HubRelayRequestHookEvent::Req01Exit,
@@ -205,7 +238,13 @@ impl V3HubRelayRequestHooks {
             V3HubRelayRequestHookEvent::Req02Exit,
             V3HubRelayRequestHookEvent::Req03Entry,
         ]);
-        self.run_from_normalized_with_events(normalized, lookup, profile, events)
+        self.run_from_normalized_with_events(
+            normalized,
+            lookup,
+            profile,
+            &attachment_history_policy,
+            events,
+        )
     }
 
     pub fn run_from_normalized(
@@ -218,6 +257,7 @@ impl V3HubRelayRequestHooks {
             normalized,
             lookup,
             profile,
+            &V3HubAttachmentHistoryPolicy::Preserve,
             vec![V3HubRelayRequestHookEvent::Req03Entry],
         )
     }
@@ -227,10 +267,11 @@ impl V3HubRelayRequestHooks {
         normalized: V3HubReqInbound02Normalized,
         lookup: &V3HubContinuationLookup,
         profile: &V3HubServertoolRequestProfile,
+        attachment_history_policy: &V3HubAttachmentHistoryPolicy,
         mut events: Vec<V3HubRelayRequestHookEvent>,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         let ownership = classify_continuation(lookup)?;
-        let classified =
+        let mut classified =
             build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(normalized, ownership);
         events.extend([
             V3HubRelayRequestHookEvent::Req03Exit,
@@ -240,7 +281,17 @@ impl V3HubRelayRequestHooks {
         if local_context.is_some() {
             events.push(V3HubRelayRequestHookEvent::Req04LocalContextRestored);
         }
-        govern_tool_outputs(&classified.previous.previous.payload.0)?;
+        if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
+            return Err(V3HubRelayRequestError::SideChannelLeaked { key });
+        }
+        let tool_output_count = govern_tool_outputs_at_req04(
+            &classified.previous.previous.payload.0,
+            local_context.as_deref(),
+        )?;
+        govern_attachment_history_at_req04(
+            &mut classified.previous.previous.payload.0,
+            attachment_history_policy,
+        )?;
         events.extend([
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
             V3HubRelayRequestHookEvent::Req04HistoryGoverned,
@@ -251,6 +302,7 @@ impl V3HubRelayRequestHooks {
         Ok(V3HubRelayRequestOutcome {
             governed,
             local_context,
+            tool_output_count,
             events,
         })
     }
@@ -326,21 +378,127 @@ fn restore_local_context_at_req04(
     Ok(Some(Arc::clone(&local.canonical_context)))
 }
 
-fn govern_tool_outputs(payload: &Value) -> Result<(), V3HubRelayRequestError> {
+fn govern_tool_outputs_at_req04(
+    payload: &Value,
+    local_context: Option<&Value>,
+) -> Result<usize, V3HubRelayRequestError> {
     let Some(input) = payload.get("input").and_then(Value::as_array) else {
-        return Ok(());
+        return Ok(0);
     };
+    let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
+    let mut output_count = 0;
     for (index, item) in input.iter().enumerate() {
-        if matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call_output" | "custom_tool_call_output")
-        ) && item
+        if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
+            expected_outputs.insert(call_id, expected_kind);
+            continue;
+        }
+        let actual_kind = match item.get("type").and_then(Value::as_str) {
+            Some("function_call_output") => V3HubRelayExpectedToolOutputKind::Function,
+            Some("custom_tool_call_output") => V3HubRelayExpectedToolOutputKind::Custom,
+            _ => continue,
+        };
+        output_count += 1;
+        let call_id = item
             .get("call_id")
             .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            return Err(V3HubRelayRequestError::MalformedToolOutput { index });
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
+        if let Some(expected_kind) = expected_outputs.get(call_id) {
+            if *expected_kind != actual_kind {
+                return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
+                    index,
+                    call_id: call_id.to_owned(),
+                });
+            }
+        } else {
+            return Err(V3HubRelayRequestError::OrphanToolOutput {
+                index,
+                call_id: call_id.to_owned(),
+            });
         }
+    }
+    Ok(output_count)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3HubRelayExpectedToolOutputKind {
+    Function,
+    Custom,
+}
+
+fn expected_tool_outputs(context: &Value) -> BTreeMap<String, V3HubRelayExpectedToolOutputKind> {
+    let mut expected = BTreeMap::new();
+    for key in ["output", "input"] {
+        let Some(items) = context.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
+                expected.insert(call_id, expected_kind);
+            }
+        }
+    }
+    expected
+}
+
+fn expected_tool_call_output_from_item(
+    item: &Value,
+) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
+    let expected_kind = match item.get("type").and_then(Value::as_str) {
+        Some("custom_tool_call") => V3HubRelayExpectedToolOutputKind::Custom,
+        Some("function_call" | "tool_call") => V3HubRelayExpectedToolOutputKind::Function,
+        _ => return None,
+    };
+    let call_id = item
+        .get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    Some((call_id.to_owned(), expected_kind))
+}
+
+fn govern_attachment_history_at_req04(
+    payload: &mut Value,
+    policy: &V3HubAttachmentHistoryPolicy,
+) -> Result<(), V3HubRelayRequestError> {
+    let V3HubAttachmentHistoryPolicy::Placeholder { placeholder } = policy else {
+        return Ok(());
+    };
+    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let historical_len = input.len().saturating_sub(1);
+    for (index, item) in input.iter_mut().take(historical_len).enumerate() {
+        replace_historical_media_with_placeholder(item, placeholder, index)?;
+    }
+    Ok(())
+}
+
+fn replace_historical_media_with_placeholder(
+    value: &mut Value,
+    placeholder: &str,
+    index: usize,
+) -> Result<(), V3HubRelayRequestError> {
+    match value {
+        Value::Object(object) => {
+            if object.get("type").and_then(Value::as_str) == Some("input_image")
+                && !object.contains_key("image_url")
+            {
+                return Err(V3HubRelayRequestError::AttachmentResourceMissing { index });
+            }
+            for child in object.values_mut() {
+                replace_historical_media_with_placeholder(child, placeholder, index)?;
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                replace_historical_media_with_placeholder(child, placeholder, index)?;
+            }
+        }
+        Value::String(text) if text.contains("data:image") => {
+            *text = placeholder.to_owned();
+        }
+        _ => {}
     }
     Ok(())
 }

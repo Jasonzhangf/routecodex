@@ -1,0 +1,32 @@
+lifecycle_id: v3.hub_relay.tool_servertool_multiturn_parity
+owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+summary: Controlled V3 Hub Relay tool/servertool multiturn parity closeout over Req04 tool/history governance, Resp03 tool harvest, Resp04 continuation commit, and Resp06 single response exit.
+entrypoint:
+  node_id: V3HubReqContinuation03Classified
+return_path:
+  node_id: V3ServerRespOutbound06ClientFrame
+call_map_chain_id: v3.hub_relay.tool_servertool_multiturn_parity
+node_ids:
+  - V3HubReqContinuation03Classified
+  - V3HubReqChatProcess04Governed
+  - V3HubRespInbound02Normalized
+  - V3HubRespChatProcess03Governed
+  - V3HubRespContinuation04Committed
+  - V3HubRespOutbound05ClientSemantic
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - { step_id: v3-relay-tool-parity-01, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+  - { step_id: v3-relay-tool-parity-02, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+  - { step_id: v3-relay-tool-parity-03, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+  - { step_id: v3-relay-tool-parity-04, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+  - { step_id: v3-relay-tool-parity-05, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+  - { step_id: v3-relay-tool-parity-06, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored, owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout }
+verification_gates:
+  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+  - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+  - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+completion_boundary:
+  controlled_runtime: true
+  live_cutover: false
+  p6_deletion: false
+  global_install_restart: false

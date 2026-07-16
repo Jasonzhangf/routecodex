@@ -168,8 +168,43 @@ Relay is borrow-first and move-at-boundary:
   live cutover, global install, restart, release, real-provider compatibility, or production
   replacement.
 
+## Relay tool/servertool multiturn parity closeout
+
+- Feature: `v3.relay_tool_servertool_multiturn_parity_closeout`.
+- Machine lifecycle: `v3.hub_relay.tool_servertool_multiturn_parity`.
+- Manifest:
+  [v3.hub_relay.tool_servertool_multiturn_parity](../manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml).
+- Edges: `v3-relay-tool-parity-01` through `v3-relay-tool-parity-06`.
+- Owner boundary: Req04 request Chat Process governs tool outputs, attachment history placeholders,
+  and servertool request hook profile; Resp03 response Chat Process harvests tool calls and
+  classifies servertool/apply_patch/MCP/native/custom/function tools before Resp04 continuation
+  commit.
+- Positive matrix:
+  - ordinary function/tool output;
+  - custom tool output;
+  - servertool hook profile;
+  - apply_patch, MCP, and native tool families;
+  - historical image/attachment placeholder with current-turn payload preserved;
+  - JSON and SSE arbitrary chunk ordering through the one `V3ServerRespOutbound06ClientFrame` exit.
+- Negative matrix:
+  - orphan tool output;
+  - missing `call_id`;
+  - custom/function output kind mismatch;
+  - malformed attachment resource;
+  - provider/client payload `metadata_center`/RouteCodex control leakage;
+  - Server/handler/provider/runtime/SSE repair or full materialization.
+- Completion boundary: this is controlled Rust Runtime parity only. It does not change provider
+  transport socket/cache, inbound WebSocket proxy, Direct remote continuation, live config, P6,
+  global install/restart/release, or production cutover.
+
 ## Required gates
 
+- `npm run test:v3-relay-tool-servertool-multiturn-parity-closeout`
+- `npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout`
+- `npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures`
+- `npm run test:v3-anthropic-codec-characterization`
+- `npm run test:v3-openai-chat-codec-characterization`
+- `npm run test:v3-gemini-codec-characterization`
 - `npm run test:v3-hub-relay-runtime-closeout`
 - `npm run verify:v3-hub-relay-runtime-closeout`
 - `npm run test:v3-hub-relay-runtime-closeout-red-fixtures`

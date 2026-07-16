@@ -6,7 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }

@@ -11,11 +11,16 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{net::TcpListener, sync::Arc};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::{
+    sync::{mpsc, oneshot, Mutex},
+    time::{timeout, Duration},
+};
 use tokio_tungstenite::{
-    accept_hdr_async,
+    accept_hdr_async, connect_async,
     tungstenite::{
+        client::IntoClientRequest,
         handshake::server::{Request, Response as WsResponse},
+        http::HeaderValue,
         Message,
     },
 };
@@ -488,6 +493,110 @@ async fn start_controlled_continuation_websocket() -> (
         format!("ws://{address}/v1/responses"),
         captures_rx,
         shutdown_tx,
+    )
+}
+
+#[allow(clippy::result_large_err)]
+async fn start_incremental_controlled_continuation_websocket() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Receiver<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (closed_tx, closed_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let captures = captures_tx.clone();
+        let mut socket =
+            accept_hdr_async(stream, move |request: &Request, response: WsResponse| {
+                let authorization = request
+                    .headers()
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok())
+                    .map(ToOwned::to_owned);
+                captures
+                    .send(ProviderCapture {
+                        authorization,
+                        accept: None,
+                        body: json!({"handshake": true}),
+                    })
+                    .unwrap();
+                Ok(response)
+            })
+            .await
+            .unwrap();
+        let Some(Ok(message)) = socket.next().await else {
+            let _ = closed_tx.send(());
+            return;
+        };
+        let bytes = match message {
+            Message::Text(text) => text.as_bytes().to_vec(),
+            Message::Binary(bytes) => bytes.to_vec(),
+            Message::Close(_) => {
+                let _ = closed_tx.send(());
+                return;
+            }
+            Message::Ping(bytes) => {
+                socket.send(Message::Pong(bytes)).await.unwrap();
+                let Some(Ok(next)) = socket.next().await else {
+                    let _ = closed_tx.send(());
+                    return;
+                };
+                match next {
+                    Message::Text(text) => text.as_bytes().to_vec(),
+                    Message::Binary(bytes) => bytes.to_vec(),
+                    _ => {
+                        let _ = closed_tx.send(());
+                        return;
+                    }
+                }
+            }
+            Message::Pong(_) | Message::Frame(_) => {
+                let _ = closed_tx.send(());
+                return;
+            }
+        };
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        captures_tx
+            .send(ProviderCapture {
+                authorization: None,
+                accept: None,
+                body,
+            })
+            .unwrap();
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&json!({
+                    "type":"response.output_text.delta",
+                    "delta":"first"
+                }))
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let _ = socket
+            .send(Message::Text(
+                serde_json::to_string(&json!({
+                    "type":"response.completed",
+                    "response":{
+                        "id":"resp_incremental_after_disconnect",
+                        "status":"completed",
+                        "output":[{"type":"output_text","text":"first"}]
+                    }
+                }))
+                .unwrap(),
+            ))
+            .await;
+        let _ = socket.next().await;
+        let _ = closed_tx.send(());
+    });
+    (
+        format!("ws://{address}/v1/responses"),
+        captures_rx,
+        closed_rx,
     )
 }
 
@@ -1058,6 +1167,590 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
     shutdown.send(()).unwrap();
 }
 
+#[tokio::test]
+// feature_id: v3.responses_inbound_websocket_proxy
+async fn responses_inbound_websocket_requires_beta_upgrade_and_handles_ping() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-handshake");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let http_endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let plain_get = reqwest::Client::new()
+        .get(&http_endpoint)
+        .header("openai-beta", "responses_websockets=2026-02-06")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(plain_get.status(), StatusCode::BAD_REQUEST);
+    let plain_body: Value = plain_get.json().await.unwrap();
+    assert_eq!(plain_body["error"]["code"], "websocket_upgrade_required");
+
+    let ws_endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let missing_beta_error = connect_async(ws_endpoint.clone())
+        .await
+        .expect_err("missing beta handshake must be rejected");
+    match missing_beta_error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        other => panic!("unexpected missing beta error: {other}"),
+    }
+
+    let mut request = ws_endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Ping(vec![1_u8, 2_u8, 3_u8]))
+        .await
+        .unwrap();
+    let pong = socket.next().await.unwrap().unwrap();
+    assert_eq!(pong, Message::Pong(vec![1_u8, 2_u8, 3_u8]));
+    assert!(captures.try_recv().is_err());
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_projects_json_completed_event_and_enters_runtime() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-json");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("session-inbound-json"),
+    );
+    request
+        .headers_mut()
+        .insert("thread-id", HeaderValue::from_static("thread-inbound-json"));
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "use tool",
+                "tools": [{"type":"function","name":"lookup"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["id"], "resp_server_remote_1");
+    assert_eq!(event["response"]["output"][0]["type"], "function_call");
+
+    let handshake_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        handshake_capture.authorization.as_deref(),
+        Some("Bearer secret-p6-inbound-ws-json")
+    );
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["type"], "response.create");
+    assert_eq!(provider_event.body["model"], "wire-test");
+    assert_eq!(provider_event.body["input"], "use tool");
+    assert_control_fields_absent(&provider_event.body);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_accepts_binary_response_create_payload() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-binary");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Binary(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "binary ok"
+            })
+            .to_string()
+            .into_bytes(),
+        ))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["id"], "resp_server_remote_1");
+
+    let _handshake_capture = captures.recv().await.unwrap();
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["input"], "binary ok");
+    assert_control_fields_absent(&provider_event.body);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_projects_sse_runtime_events_as_websocket_frames() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-sse");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("session-inbound-sse"),
+    );
+    request
+        .headers_mut()
+        .insert("thread-id", HeaderValue::from_static("thread-inbound-sse"));
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "stream": true,
+                "input": "use tool",
+                "tools": [{"type":"function","name":"lookup"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["id"], "resp_server_remote_1");
+
+    let _handshake_capture = captures.recv().await.unwrap();
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["type"], "response.create");
+    assert!(provider_event.body.get("stream").is_none());
+    assert_eq!(provider_event.body["model"], "wire-test");
+    assert_control_fields_absent(&provider_event.body);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_rejects_malformed_client_event_without_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-malformed");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    for invalid_event in [
+        "{not-json".to_string(),
+        json!({"model": "client-test", "input": "missing type"}).to_string(),
+        json!({"type": "response.cancel", "response_id": "resp_bad"}).to_string(),
+        json!({
+            "type": "response.create",
+            "response": {"model": "client-test", "input": "nested shape"}
+        })
+        .to_string(),
+    ] {
+        let mut request = endpoint.clone().into_client_request().unwrap();
+        request.headers_mut().insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+        let (mut socket, handshake) = connect_async(request).await.unwrap();
+        assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+        socket.send(Message::Text(invalid_event)).await.unwrap();
+        let message = socket.next().await.unwrap().unwrap();
+        let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+        assert_eq!(event["type"], "error");
+        assert_eq!(event["error"]["code"], "invalid_client_event");
+        let _ = socket.close(None).await;
+    }
+    assert!(captures.try_recv().is_err());
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_socket() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-two-turn");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("session-inbound-two-turn"),
+    );
+    request.headers_mut().insert(
+        "thread-id",
+        HeaderValue::from_static("thread-inbound-two-turn"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "use tool",
+                "tools": [{"type":"function","name":"lookup"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let first_message = socket.next().await.unwrap().unwrap();
+    let first_event: Value = serde_json::from_str(first_message.to_text().unwrap()).unwrap();
+    assert_eq!(first_event["type"], "response.completed");
+    assert_eq!(first_event["response"]["id"], "resp_server_remote_1");
+    assert_eq!(
+        first_event["response"]["output"][0]["type"],
+        "function_call"
+    );
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "previous_response_id": "resp_server_remote_1",
+                "input": [{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let second_message = socket.next().await.unwrap().unwrap();
+    let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
+    assert_eq!(second_event["type"], "response.completed");
+    assert_eq!(second_event["response"]["id"], "resp_server_remote_2");
+
+    let handshake_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        handshake_capture.authorization.as_deref(),
+        Some("Bearer secret-p6-inbound-ws-two-turn")
+    );
+    let first_capture = captures.recv().await.unwrap();
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["type"], "response.create");
+    assert_eq!(second_capture.body["type"], "response.create");
+    assert_eq!(
+        second_capture.body["previous_response_id"],
+        "resp_server_remote_1"
+    );
+    assert_control_fields_absent(&first_capture.body);
+    assert_control_fields_absent(&second_capture.body);
+
+    let logs: Value = reqwest::Client::new()
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().unwrap();
+    let router_hits = events
+        .iter()
+        .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
+        .count();
+    assert_eq!(
+        router_hits, 1,
+        "second WebSocket turn must use existing continuation owner without Router re-entry"
+    );
+    assert!(events
+        .iter()
+        .any(|event| event["node_id"] == "V3HubReqContinuation03Classified"));
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, shutdown) =
+        start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-scope");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut first_request = endpoint.clone().into_client_request().unwrap();
+    first_request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    first_request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("session-inbound-scope-a"),
+    );
+    first_request.headers_mut().insert(
+        "thread-id",
+        HeaderValue::from_static("thread-inbound-scope-a"),
+    );
+    let (mut first_socket, _) = connect_async(first_request).await.unwrap();
+    first_socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "use tool",
+                "tools": [{"type":"function","name":"lookup"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let first_message = first_socket.next().await.unwrap().unwrap();
+    let first_event: Value = serde_json::from_str(first_message.to_text().unwrap()).unwrap();
+    assert_eq!(first_event["response"]["id"], "resp_server_remote_1");
+    let _ = first_socket.close(None).await;
+
+    let mut second_request = endpoint.into_client_request().unwrap();
+    second_request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    second_request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("session-inbound-scope-b"),
+    );
+    second_request.headers_mut().insert(
+        "thread-id",
+        HeaderValue::from_static("thread-inbound-scope-b"),
+    );
+    let (mut second_socket, _) = connect_async(second_request).await.unwrap();
+    second_socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "previous_response_id": "resp_server_remote_1",
+                "input": [{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let second_message = second_socket.next().await.unwrap().unwrap();
+    let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
+    assert_eq!(second_event["type"], "error");
+    assert_eq!(second_event["error"]["code"], "runtime_error");
+
+    let _handshake_capture = captures.recv().await.unwrap();
+    let first_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["type"], "response.create");
+    assert!(captures.try_recv().is_err());
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = second_socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let closed_websocket_url = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        format!("ws://{addr}/v1/responses")
+    };
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-provider-error");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &closed_websocket_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "hello"
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(3), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "error");
+    assert_eq!(event["error"]["code"], "runtime_error");
+    assert!(event["error"]["message"].as_str().unwrap_or_default().len() > 8);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (websocket_v2_url, mut captures, provider_closed) =
+        start_incremental_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-inbound-ws-disconnect");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &websocket_v2_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "stream": true,
+                "input": "stream then disconnect"
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let first_message = timeout(Duration::from_secs(3), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let first_event: Value = serde_json::from_str(first_message.to_text().unwrap()).unwrap();
+    assert_eq!(first_event["type"], "response.output_text.delta");
+    drop(socket);
+    timeout(Duration::from_secs(3), provider_closed)
+        .await
+        .expect("provider websocket must observe client disconnect")
+        .unwrap();
+
+    let handshake_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        handshake_capture.authorization.as_deref(),
+        Some("Bearer secret-p6-inbound-ws-disconnect")
+    );
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["type"], "response.create");
+    assert_control_fields_absent(&provider_event.body);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+}
+
 fn assert_control_fields_absent(body: &Value) {
     for forbidden in [
         "session_id",
@@ -1412,8 +2105,8 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
                 .send()
                 .await
                 .unwrap(),
-            StatusCode::METHOD_NOT_ALLOWED,
-            "method_not_allowed",
+            StatusCode::BAD_REQUEST,
+            "websocket_upgrade_required",
         ),
         (
             client

@@ -85,7 +85,10 @@ fn local_context_restores_at_req04_before_servertool_governance() {
     let lookup = V3HubContinuationLookup::new(Some("rcc_local"), scope()).with_local_context(
         "rcc_local",
         scope(),
-        json!({"input":[{"role":"assistant","content":"prior"}]}),
+        json!({
+            "input":[{"role":"assistant","content":"prior"}],
+            "output":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"}]
+        }),
     );
     let governed = hooks
         .run(

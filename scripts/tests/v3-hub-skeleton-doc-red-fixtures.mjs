@@ -36,10 +36,12 @@ const fixtures = [
     diagnostic: /v3-hub-req-01 must remain adjacent/,
   },
   {
-    name: 'pending continuation truth falsely anchored',
+    name: 'anchored continuation truth falsely returned to pending',
     file: 'docs/architecture/v3-resource-operation-map.yml',
     resourceId: 'v3.continuation.local_context_truth',
-    diagnostic: /unimplemented Hub v1 business resource must remain binding_pending/,
+    bindingFrom: 'anchored',
+    bindingTo: 'binding_pending',
+    diagnostic: /implemented Hub v1 H1 resource must be anchored/,
   },
   {
     name: 'relay worker split removed',
@@ -91,6 +93,7 @@ for (const fixture of fixtures) {
   try {
     cpSync(resolve(repoRoot, 'docs'), join(root, 'docs'), { recursive: true });
     cpSync(resolve(repoRoot, 'package.json'), join(root, 'package.json'));
+    cpSync(resolve(repoRoot, 'scripts'), join(root, 'scripts'), { recursive: true });
     cpSync(resolve(repoRoot, 'v3'), join(root, 'v3'), {
       recursive: true,
       filter: (source) => !source.includes('/target/'),
@@ -103,7 +106,13 @@ for (const fixture of fixtures) {
       const next = source.indexOf('\n  - resource_id:', start + marker.length);
       if (start < 0) throw new Error(`resource marker missing: ${fixture.resourceId}`);
       const end = next < 0 ? source.length : next;
-      const block = source.slice(start, end).replace('binding_status: binding_pending', 'binding_status: anchored');
+      const bindingFrom = `binding_status: ${fixture.bindingFrom}`;
+      const bindingTo = `binding_status: ${fixture.bindingTo}`;
+      const sourceBlock = source.slice(start, end);
+      if (!sourceBlock.includes(bindingFrom)) {
+        throw new Error(`resource binding marker missing: ${fixture.resourceId} ${bindingFrom}`);
+      }
+      const block = sourceBlock.replace(bindingFrom, bindingTo);
       source = source.slice(0, start) + block + source.slice(end);
     } else {
       if (!source.includes(fixture.from)) throw new Error(`fixture source missing: ${fixture.from}`);

@@ -1,0 +1,37 @@
+lifecycle_id: v3.responses.inbound_websocket_proxy
+owner_feature_id: v3.responses_inbound_websocket_proxy
+summary: Client-facing /v1/responses WebSocket upgrade and frame projection shell that enters the existing V3 Responses Direct Runtime.
+entrypoint: responses_websocket_endpoint
+canonical_docs:
+  - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
+  - docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md
+nodes:
+  - id: V3ResponsesInboundWs01ClientUpgrade
+    owner: routecodex-v3-server
+    symbol: responses_websocket_endpoint
+  - id: V3ResponsesInboundWs02CreateEventParsed
+    owner: routecodex-v3-server
+    symbol: responses_websocket_create_payload
+  - id: V3Server03HttpRequestRaw
+    owner: routecodex-v3-runtime
+    symbol: build_v3_server_03_http_request_raw
+  - id: V3Resp15ClientPayload
+    owner: routecodex-v3-runtime
+    symbol: execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation
+  - id: V3ResponsesInboundWs04ClientEventProjected
+    owner: routecodex-v3-server
+    symbol: send_responses_websocket_frame
+edges:
+  - { id: v3-inws-01, from: V3ResponsesInboundWs01ClientUpgrade, to: V3ResponsesInboundWs02CreateEventParsed }
+  - { id: v3-inws-02, from: V3ResponsesInboundWs02CreateEventParsed, to: V3Server03HttpRequestRaw }
+  - { id: v3-inws-03, from: V3Server03HttpRequestRaw, to: V3Resp15ClientPayload }
+  - { id: v3-inws-04, from: V3Resp15ClientPayload, to: V3ResponsesInboundWs04ClientEventProjected }
+verification_gates:
+  - npm run test:v3-responses-inbound-websocket-proxy
+  - npm run verify:v3-responses-inbound-websocket-proxy
+  - npm run test:v3-responses-inbound-websocket-proxy-red-fixtures
+forbidden:
+  - Server-owned provider WebSocket state
+  - HTTP fallback after WebSocket failure
+  - Server continuation/history/tool repair
+  - full SSE or WebSocket event materialization

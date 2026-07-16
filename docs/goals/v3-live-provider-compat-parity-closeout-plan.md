@@ -1,0 +1,95 @@
+# V3 Live Provider Compat Parity Closeout Plan
+
+## 1. 目标与验收标准
+
+目标：建立并绿化 V3 面向真实 provider 的 compat parity matrix，区分 controlled/source 已完成和 live/provider 真实兼容未证明的部分，确保 V3 在切流前覆盖主要协议、transport、工具、图片和错误场景。
+
+验收标准：
+
+- 形成 endpoint × protocol × provider/model × transport × tool/image/error 的机器可读兼容矩阵。
+- 每个 live case 先有 controlled fixture，再用真实 provider 或授权 live profile 重放。
+- provider-specific 差异只在 provider runtime/codec owner 解决，不进入 Hub Pipeline 或 Virtual Router。
+- 401/402/403/429/5xx、SSE body-level failure、malformed provider body、disconnect/cancel 均进入 Error01-06 或对应 typed provider error。
+- 未验证项保持 explicit pending，不被标记为 production ready。
+
+## 2. 范围与边界
+
+In scope：
+
+- 新 feature：v3.live_provider_compat_parity_closeout。
+- Responses Direct、Responses Relay、Anthropic Messages、OpenAI Chat、Gemini 的 JSON/SSE/WebSocket compat matrix。
+- 真实 provider quirks：request shape、stream framing、tool deltas、image/multimodal payload、rate/billing/quota errors、provider error bodies。
+- Codex client protocol alignment：/v1/models capabilities、Responses WebSocket beta header、Responses HTTP/WS event shape。
+- Live replay evidence、samples/log review、failure classification 和 owner routing。
+
+Out of scope：
+
+- client-facing inbound WebSocket proxy implementation；它归 v3.responses_inbound_websocket_proxy。
+- Direct remote continuation state machine implementation；它归 v3.responses_direct_remote_continuation_integration。
+- V2 config compatibility/importer、P6 deletion、production cutover。
+- 未授权的 ~/.rcc mutation、credential mutation、global install/restart。
+
+## 3. 设计原则
+
+- controlled 证据不能冒充 live/provider 证据；每个结论必须标明证据层级。
+- live replay 只能验证真实 provider 行为，不允许为绕过 provider 缺陷改真实用户配置。
+- provider quirk 修复只落在对应 provider runtime/codec owner；Hub/VR 禁 provider-specific 分支。
+- compat 不是 fallback；不兼容必须红测、显式错误、唯一 owner 修复。
+- 请求/响应语义等价；允许清理 debug/snapshot，禁止裁剪真实 payload。
+
+## 4. 技术方案与文件清单
+
+必须先查：
+
+- docs/design/v3-system-definition.md
+- docs/architecture/v3-verification-map.yml
+- docs/architecture/v3-function-map.yml
+- docs/architecture/v3-mainline-call-map.yml
+- docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+- docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
+- docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
+- docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
+
+候选实现面：
+
+- provider runtime/codec owners under v3/crates/routecodex-v3-provider-*
+- protocol runtime owners under v3/crates/routecodex-v3-runtime/src/hub_v1*
+- server thin IO tests under v3/crates/routecodex-v3-server/tests
+- live replay scripts under scripts/tests or scripts/architecture
+- docs/architecture/manifests/v3.live_provider_compat.parity.yml
+- resource binding v3.live_provider_compat.matrix
+- scripts/architecture/verify-v3-live-provider-compat-parity.mjs
+- scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs
+
+## 5. 风险与规避
+
+- 风险：live provider 临时故障被误判为 V3 bug。规避：controlled fixture 与 live sample 双证据；provider HTTP/error body 原样归档。
+- 风险：为 live 通过修改真实配置。规避：只读 live probe；需要配置变更时输出 patch/plan 并停止等待授权。
+- 风险：provider-specific 修复污染 Hub/VR。规避：source gate 禁止 Hub/VR provider key/model 特判。
+- 风险：SSE/WS 错误被 HTTP status 200 掩盖。规避：body-level failure guard 与 stream error replay。
+- 风险：模型能力目录不全导致 Codex 请求形态错误。规避：/v1/models capability live/client replay。
+
+## 6. 测试计划
+
+- Matrix：Responses Direct/Relay、Anthropic、OpenAI Chat、Gemini × JSON/SSE/WS × text/tool/image/error。
+- Controlled：每个 live case 必须先有 loopback/fixture，锁 provider wire 与 client projection。
+- Live：授权 profile 上重放最小真实样本，记录 request id、samples、server log、provider response。
+- Error：401/402/403/429/5xx、SSE response.failed/error、malformed body、timeout、disconnect、cancel。
+- Capability：/v1/models 与 Codex request builder 所需字段对齐。
+- Gates：focused tests、live replay verifier、architecture/resource/module/Rust-only/fmt/clippy/workspace/diff gates。
+
+## 7. 实施步骤
+
+1. 刷新 .agent-collab，claim feature_id:v3.live_provider_compat_parity_closeout。
+2. 生成 compat matrix manifest，给每个 case 标明 owner、required gate、evidence level。
+3. 对未验证项先写 controlled fixture 和 red gate。
+4. 逐项 live replay；只读真实配置，不改 credential/config。
+5. 对真实失败按唯一 owner 修复或标 explicit pending。
+6. 同步 maps/wiki/manifest/evidence，生成 production readiness blocker list。
+7. 做 architecture review，确认无 fallback、无 provider-specific Hub/VR 分支、无 payload 泄漏。
+
+## 8. 完成定义
+
+- live/provider compat matrix 可查询，verified/pending/blocker 状态明确。
+- 所有 declared production-ready case 均有 controlled + live 双证据。
+- 未完成项不冒充完成；阻塞切流的 provider/protocol/transport/tool/image/error 缺口被列成明确 owner backlog。

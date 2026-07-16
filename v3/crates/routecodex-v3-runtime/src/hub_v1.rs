@@ -173,10 +173,21 @@ pub enum V3HubServertoolResponseAction {
     FollowupRequired,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum V3HubRelayToolKind {
+    Function,
+    Custom,
+    Servertool,
+    ApplyPatch,
+    Mcp,
+    Native,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct V3HubResponseToolCall {
     call_id: String,
     name: String,
+    kind: V3HubRelayToolKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,6 +411,13 @@ impl V3HubRespChatProcess03Governed {
     pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
         self.servertool_action
     }
+
+    pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
+        self.tool_calls
+            .iter()
+            .map(|tool_call| tool_call.kind)
+            .collect()
+    }
 }
 
 impl V3HubRespContinuation04Committed {
@@ -415,6 +433,19 @@ impl V3HubRespContinuation04Committed {
         self.canonical_context.as_ref().is_some_and(|context| {
             Arc::ptr_eq(&context.payload, &self.previous.previous.previous.payload.0)
         })
+    }
+
+    pub fn canonical_tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
+        self.canonical_context
+            .as_ref()
+            .map(|context| {
+                context
+                    .tool_calls
+                    .iter()
+                    .map(|tool_call| tool_call.kind)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -463,6 +494,8 @@ pub enum V3HubRelayResponseError {
     ExecutionModeNotRelay,
     #[error("provider response must be an object")]
     ProviderResponseNotObject,
+    #[error("provider response leaked RouteCodex side-channel field: {key}")]
+    SideChannelLeaked { key: &'static str },
     #[error("provider response output must be an array")]
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
@@ -528,6 +561,9 @@ fn normalize_v3_hub_relay_response(
     if !input.payload.0.is_object() {
         return Err(V3HubRelayResponseError::ProviderResponseNotObject);
     }
+    if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
+        return Err(V3HubRelayResponseError::SideChannelLeaked { key });
+    }
     Ok(build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(input))
 }
 
@@ -581,6 +617,7 @@ fn govern_v3_hub_relay_response(
         tool_calls.push(V3HubResponseToolCall {
             call_id: call_id.to_owned(),
             name: name.to_owned(),
+            kind: classify_v3_hub_relay_tool_kind(kind, name),
         });
     }
     let status = object
@@ -615,6 +652,48 @@ fn govern_v3_hub_relay_response(
         tool_calls,
         servertool_action,
     })
+}
+
+pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3HubRelayToolKind {
+    if raw_kind == "custom_tool_call" {
+        return V3HubRelayToolKind::Custom;
+    }
+    if name == "apply_patch" {
+        return V3HubRelayToolKind::ApplyPatch;
+    }
+    if name.strip_prefix("servertool.").is_some() || name.strip_prefix("servertool__").is_some() {
+        return V3HubRelayToolKind::Servertool;
+    }
+    if name.strip_prefix("mcp.").is_some() || name.strip_prefix("mcp__").is_some() {
+        return V3HubRelayToolKind::Mcp;
+    }
+    if name.strip_prefix("native.").is_some() || name.strip_prefix("native__").is_some() {
+        return V3HubRelayToolKind::Native;
+    }
+    V3HubRelayToolKind::Function
+}
+
+pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {
+    const FORBIDDEN: [&str; 6] = [
+        "routecodex_internal",
+        "metadata_center",
+        "debug_snapshot",
+        "provider_protocol",
+        "resource_handle",
+        "continuation_owner",
+    ];
+    match value {
+        Value::Array(items) => items.iter().find_map(find_v3_hub_side_channel_key),
+        Value::Object(object) => {
+            for key in FORBIDDEN {
+                if object.contains_key(key) {
+                    return Some(key);
+                }
+            }
+            object.values().find_map(find_v3_hub_side_channel_key)
+        }
+        _ => None,
+    }
 }
 
 fn commit_v3_hub_relay_response(

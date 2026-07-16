@@ -1,0 +1,229 @@
+lifecycle_id: v3.live_provider_compat.parity
+owner_feature_id: v3.live_provider_compat_parity_closeout
+summary: V3 live provider compatibility parity matrix, separating controlled/source evidence from live/provider evidence and production blockers.
+entrypoint:
+  node_id: V3LiveCompat01MatrixDeclared
+return_path:
+  node_id: V3LiveCompat04ProductionReadinessProjected
+call_map_chain_id: v3.live_provider_compat.parity
+node_ids:
+  - V3LiveCompat01MatrixDeclared
+  - V3LiveCompat02ControlledEvidenceBound
+  - V3LiveCompat03LiveEvidenceBound
+  - V3LiveCompat04ProductionReadinessProjected
+evidence_levels:
+  controlled_verified: Controlled loopback/source/test evidence exists and is linked.
+  live_verified: Read-only live/provider replay evidence exists and is linked.
+  pending: Required evidence is intentionally not claimed yet.
+  blocker: Required evidence is blocked by a named owner backlog or external provider/config condition.
+production_policy:
+  no_fallback: true
+  provider_specific_hub_vr_forbidden: true
+  production_ready_requires:
+    - controlled_evidence.status == controlled_verified
+    - live_evidence.status == live_verified
+    - production.status == ready
+    - production.blockers is empty
+  pending_or_blocker_must_not_claim_ready: true
+axes:
+  endpoints: [responses_direct, responses_relay, anthropic_messages, openai_chat_completions, gemini_generate_content]
+  transports: [json_http, sse_http, websocket_v2]
+  scenario_groups: [text, tool, image, error]
+cases:
+  - id: responses_direct_json_http
+    endpoint: responses_direct
+    protocol: responses
+    transport: json_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.responses_direct_mvp
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-implementation-plan.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
+    live_evidence: { status: pending, refs: [], blockers: [no current V3 production listener evidence for generic live provider JSON parity] }
+    production: { status: blocked, blockers: [live_provider_json_replay_pending] }
+  - id: responses_direct_sse_http
+    endpoint: responses_direct
+    protocol: responses
+    transport: sse_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.responses_direct_mvp
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-mvp-test-design.md, docs/architecture/wiki/v3-responses-direct-mainline.md], gates: [npm run test:v3-responses-direct-blackbox, npm run verify:v3-p6-freeze] }
+    live_evidence: { status: pending, refs: [], blockers: [read_only_live_sse_replay_pending_for_v3_binary] }
+    production: { status: blocked, blockers: [live_provider_sse_replay_pending] }
+  - id: responses_direct_websocket_v2
+    endpoint: responses_direct
+    protocol: responses
+    transport: websocket_v2
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, error]
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-direct-remote-continuation-integration-plan.md, docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md], gates: [npm run test:v3-responses-direct-remote-continuation, npm run verify:v3-responses-websocket-v2-transport-hardening] }
+    live_evidence: { status: blocker, refs: [MEMORY.md], blockers: [provider_verified_responses_websocket_v2_endpoint_pending, live_5555_two_turn_success_pending] }
+    production: { status: blocked, blockers: [responses_websocket_v2_live_endpoint_pending] }
+  - id: responses_relay_json_http
+    endpoint: responses_relay
+    protocol: responses
+    transport: json_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-hub-relay-runtime-closeout] }
+    live_evidence: { status: blocker, refs: [docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], blockers: [live_relay_server_cutover_pending, p6_deletion_pending] }
+    production: { status: blocked, blockers: [live_relay_cutover_pending] }
+  - id: responses_relay_sse_http
+    endpoint: responses_relay
+    protocol: responses
+    transport: sse_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-hub-relay-runtime-closeout-plan.md, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-hub-relay-runtime-closeout, npm run verify:v3-relay-payload-copy-budget] }
+    live_evidence: { status: blocker, refs: [docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], blockers: [live_relay_sse_cutover_pending, real_provider_sse_relay_pending] }
+    production: { status: blocked, blockers: [live_relay_cutover_pending] }
+  - id: responses_relay_websocket_v2
+    endpoint: responses_relay
+    protocol: responses
+    transport: websocket_v2
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [tool, error]
+    owner_feature_id: v3.responses_inbound_websocket_proxy
+    controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-inbound-websocket-proxy-plan.md, docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md], gates: [npm run test:v3-responses-inbound-websocket-proxy, npm run verify:v3-responses-inbound-websocket-proxy] }
+    live_evidence: { status: pending, refs: [], blockers: [live_inbound_websocket_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_inbound_websocket_replay_pending] }
+  - id: anthropic_messages_json_http
+    endpoint: anthropic_messages
+    protocol: anthropic
+    transport: json_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, error]
+    owner_feature_id: v3.anthropic_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_anthropic_messages_json_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
+  - id: anthropic_messages_sse_http
+    endpoint: anthropic_messages
+    protocol: anthropic
+    transport: sse_http
+    provider_model_scope: generic_responses_provider_models
+    scenario_groups: [text, tool, error]
+    owner_feature_id: v3.anthropic_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_anthropic_messages_sse_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
+  - id: anthropic_messages_websocket_v2
+    endpoint: anthropic_messages
+    protocol: anthropic
+    transport: websocket_v2
+    provider_model_scope: not_declared_for_anthropic_messages
+    scenario_groups: [error]
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    controlled_evidence: { status: blocker, refs: [docs/design/v3-system-definition.md], gates: [], blockers: [no_anthropic_messages_websocket_v2_entry_contract] }
+    live_evidence: { status: blocker, refs: [], blockers: [no_anthropic_messages_websocket_v2_entry_contract] }
+    production: { status: blocked, blockers: [transport_not_declared_for_endpoint] }
+  - id: openai_chat_json_http
+    endpoint: openai_chat_completions
+    protocol: openai_chat
+    transport: json_http
+    provider_model_scope: generic_openai_chat_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_openai_chat_json_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_openai_chat_provider_compat_pending] }
+  - id: openai_chat_sse_http
+    endpoint: openai_chat_completions
+    protocol: openai_chat
+    transport: sse_http
+    provider_model_scope: generic_openai_chat_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.openai_chat_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md], gates: [npm run test:v3-openai-chat-relay-runtime-integration, npm run verify:v3-openai-chat-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_openai_chat_sse_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_openai_chat_provider_compat_pending] }
+  - id: openai_chat_websocket_v2
+    endpoint: openai_chat_completions
+    protocol: openai_chat
+    transport: websocket_v2
+    provider_model_scope: not_declared_for_openai_chat_completions
+    scenario_groups: [error]
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    controlled_evidence: { status: blocker, refs: [docs/design/v3-system-definition.md], gates: [], blockers: [no_openai_chat_websocket_v2_entry_contract] }
+    live_evidence: { status: blocker, refs: [], blockers: [no_openai_chat_websocket_v2_entry_contract] }
+    production: { status: blocked, blockers: [transport_not_declared_for_endpoint] }
+  - id: gemini_generate_content_json_http
+    endpoint: gemini_generate_content
+    protocol: gemini
+    transport: json_http
+    provider_model_scope: generic_gemini_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.gemini_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_gemini_json_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
+  - id: gemini_generate_content_sse_http
+    endpoint: gemini_generate_content
+    protocol: gemini
+    transport: sse_http
+    provider_model_scope: generic_gemini_provider_models
+    scenario_groups: [text, tool, image, error]
+    owner_feature_id: v3.gemini_relay_runtime_integration
+    controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md], gates: [npm run test:v3-gemini-relay-runtime-integration, npm run verify:v3-gemini-relay-runtime-integration] }
+    live_evidence: { status: pending, refs: [], blockers: [live_gemini_sse_provider_replay_pending] }
+    production: { status: blocked, blockers: [live_gemini_provider_compat_pending] }
+  - id: gemini_generate_content_websocket_v2
+    endpoint: gemini_generate_content
+    protocol: gemini
+    transport: websocket_v2
+    provider_model_scope: not_declared_for_gemini_generate_content
+    scenario_groups: [error]
+    owner_feature_id: v3.live_provider_compat_parity_closeout
+    controlled_evidence: { status: blocker, refs: [docs/design/v3-system-definition.md], gates: [], blockers: [no_gemini_websocket_v2_entry_contract] }
+    live_evidence: { status: blocker, refs: [], blockers: [no_gemini_websocket_v2_entry_contract] }
+    production: { status: blocked, blockers: [transport_not_declared_for_endpoint] }
+error_cases:
+  - { id: http_401, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 typed provider authentication failure }
+  - { id: http_402, status: controlled_verified, owner_feature_id: v3.responses_direct_sse_provider_failure_guard, required_path: SSE or HTTP provider billing failure becomes typed provider error before client success }
+  - { id: http_403, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 typed provider authorization failure }
+  - { id: http_429, status: controlled_verified, owner_feature_id: v3.openai_chat_relay_runtime_integration, required_path: Error01-06 provider rate limit projection without success wrapping }
+  - { id: http_5xx, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: Error01-06 retryable provider runtime failure }
+  - { id: sse_body_level_failure, status: controlled_verified, owner_feature_id: v3.responses_direct_sse_provider_failure_guard, required_path: first semantic SSE failure block maps to typed provider failure }
+  - { id: malformed_provider_body, status: controlled_verified, owner_feature_id: v3.gemini_relay_runtime_integration, required_path: provider_error_body_malformed through Error01-06 }
+  - { id: timeout, status: pending, owner_feature_id: v3.live_provider_compat_parity_closeout, required_path: typed timeout or provider transport error without success wrapping }
+  - { id: disconnect, status: controlled_verified, owner_feature_id: v3.responses_websocket_v2_transport_hardening, required_path: client_disconnect remains health-neutral and discards active WebSocket connection }
+  - { id: cancel, status: controlled_verified, owner_feature_id: v3.responses_websocket_v2_transport_hardening, required_path: cancellation before connect or send or read remains typed and clears dirty connection }
+capability_cases:
+  - id: codex_models_capability_catalog
+    endpoint: /v1/models
+    owner_feature_id: models.capability_contract
+    controlled_evidence: { status: controlled_verified, refs: [docs/design/codex-model-capability-contract.md, MEMORY.md], gates: [npm run verify:models-capability-contract] }
+    live_evidence: { status: pending, refs: [], blockers: [V3 live /v1/models capability projection pending] }
+    required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, use_responses_lite, tool_mode, input_modalities]
+production_blockers:
+  - { blocker_id: live_inbound_websocket_replay_pending, owner_feature_id: v3.responses_inbound_websocket_proxy, evidence: docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md }
+  - { blocker_id: responses_websocket_v2_live_endpoint_pending, owner_feature_id: v3.responses_direct_remote_continuation_integration, evidence: MEMORY.md }
+  - { blocker_id: live_relay_cutover_pending, owner_feature_id: v3.hub_relay_runtime_closeout, evidence: docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md }
+  - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
+live_read_only_audit:
+  timestamp: 2026-07-16T01:09:15Z
+  command_scope: routecodex --version and read-only /health probes on ports 5520 5555 4444 10000
+  finding: Reachable ports 5520 4444 and 10000 report RouteCodex 0.90.3935; port 5555 has no listener; this is not V3 live provider parity evidence.
+  status: live_v3_provider_replay_pending
+verification_gates:
+  - npm run verify:v3-live-provider-compat-parity
+  - npm run test:v3-live-provider-compat-parity-red-fixtures
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-rust-only
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  - npm run test:v3-workspace
+  - git diff --check
+completion_boundary:
+  matrix_contract: true
+  controlled_source_evidence_indexed: true
+  live_provider_evidence_indexed: true
+  production_ready_claim: false
+  live_config_mutation: false
+  global_install_restart: false
+  p6_deletion: false

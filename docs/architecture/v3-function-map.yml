@@ -1427,3 +1427,227 @@ features:
       - live Relay Server entry wiring and replay
       - P6 deletion
       - global install restart release and production replacement
+
+  - feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
+    status: controlled_runtime_parity_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_gate
+    owner_scope: "Controlled V3 Hub Relay tool/servertool multiturn parity matrix across Req04 tool/history governance, Resp03 tool harvest, Resp04 continuation commit, attachment history placeholder, JSON/SSE ordering, and one response exit."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.continuation.local_context_truth
+      - v3.hub.tool_governance_truth
+      - v3.hub.attachment_history_placeholder
+      - v3.hub.response_semantic
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-relay-tool-parity-01
+      - v3-relay-tool-parity-02
+      - v3-relay-tool-parity-03
+      - v3-relay-tool-parity-04
+      - v3-relay-tool-parity-05
+      - v3-relay-tool-parity-06
+    entry_symbols:
+      - V3HubRelayRequestHooks::run_with_attachment_history_policy
+      - govern_tool_outputs_at_req04
+      - govern_attachment_history_at_req04
+      - V3HubRelayToolKind
+      - response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
+      - responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
+      - verify-v3-relay-tool-servertool-multiturn-parity-closeout
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+      - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
+      - docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
+      - package.json
+      - note.md
+      - MEMORY.md
+      - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - ~/.rcc
+      - provider credentials
+      - live config mutation
+      - global install
+      - restart
+      - release
+      - production cutover
+      - P6 deletion
+      - fallback
+    required_gates:
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+      - npm run test:v3-hub-relay-runtime-closeout
+      - npm run verify:v3-hub-relay-runtime-closeout
+      - npm run test:v3-relay-payload-copy-runtime-probes
+      - npm run verify:v3-relay-payload-copy-budget
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: controlled_parity_verified
+    pending_runtime:
+      - live provider replay matrix
+      - live inbound Responses WebSocket replay
+      - Direct remote continuation live closeout
+      - P6 deletion and production cutover
+
+  - feature_id: v3.live_provider_compat_parity_closeout
+    status: matrix_contract_verified_pending_live_replay
+    change_risk: high
+    owner_kind: docs_verifier_v3_compat_gate
+    owner_scope: "V3 live provider compatibility parity matrix and production blocker projection. This owner records evidence levels; it does not mutate live config or runtime provider behavior."
+    owner_files:
+      - docs/architecture/manifests/v3.live_provider_compat.parity.yml
+      - scripts/architecture/verify-v3-live-provider-compat-parity.mjs
+      - scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+      - docs/goals/v3-live-provider-compat-parity-closeout-plan.md
+    resource_bindings:
+      - v3.live_provider_compat.matrix
+    mainline_bindings:
+      - v3-live-compat-01
+      - v3-live-compat-02
+      - v3-live-compat-03
+    entry_symbols:
+      - verify-v3-live-provider-compat-parity
+      - v3.live_provider_compat.parity
+    allowed_paths:
+      - docs/architecture/manifests/v3.live_provider_compat.parity.yml
+      - scripts/architecture/verify-v3-live-provider-compat-parity.mjs
+      - scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-live-provider-compat-parity.md
+      - docs/goals/v3-live-provider-compat-parity-closeout-plan.md
+      - package.json
+      - note.md
+      - MEMORY.md
+    forbidden_paths:
+      - ~/.rcc
+      - provider credentials
+      - live config mutation
+      - global install
+      - restart
+      - P6 deletion
+      - Hub or Virtual Router provider-specific runtime branches
+    required_gates:
+      - npm run verify:v3-live-provider-compat-parity
+      - npm run test:v3-live-provider-compat-parity-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: matrix_contract_only
+    pending_runtime:
+      - live provider replay matrix
+      - inbound Responses WebSocket live replay
+      - provider verified Responses WebSocket v2 endpoint
+      - live Relay cutover
+
+  - feature_id: v3.responses_inbound_websocket_proxy
+    status: controlled_runtime_proxy_verified
+    change_risk: high
+    owner_kind: rust_server_transport_shell
+    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell. It parses response.create, calls the existing Responses Direct Runtime entry, and projects Runtime JSON/SSE output as WebSocket events without owning provider socket state or continuation semantics."
+    owner_crates: [routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
+      - scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs
+      - docs/architecture/manifests/v3.responses_inbound_websocket_proxy.mainline.yml
+      - docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md
+    resource_bindings:
+      - v3.responses.inbound_websocket_client_connection
+      - v3.responses.inbound_websocket_frame_projection
+      - v3.request.normal_payload
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-inws-01
+      - v3-inws-02
+      - v3-inws-03
+      - v3-inws-04
+    entry_symbols:
+      - responses_websocket_endpoint
+      - responses_websocket_create_payload
+      - execute_responses_direct_server_frame
+      - send_responses_websocket_sse_stream
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/Cargo.toml
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
+      - docs/architecture/manifests/v3.responses_inbound_websocket_proxy.mainline.yml
+      - docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
+      - scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs
+      - package.json
+      - note.md
+      - MEMORY.md
+      - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - ~/.rcc
+      - live config
+      - provider credentials
+      - global install
+      - restart
+      - P6 deletion
+    required_gates:
+      - npm run test:v3-responses-inbound-websocket-proxy
+      - npm run verify:v3-responses-inbound-websocket-proxy
+      - npm run test:v3-responses-inbound-websocket-proxy-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: controlled_server_websocket_proxy_verified
+    pending_runtime:
+      - live provider compatibility
+      - global install restart release and production cutover

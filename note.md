@@ -1,3 +1,10 @@
+# 2026-07-16T09:58+08:00 V3 inbound Responses WebSocket proxy closeout
+
+- Scope: `feature_id:v3.responses_inbound_websocket_proxy` owns only the client-facing `/v1/responses` WebSocket upgrade/framing/projection shell in `routecodex-v3-server`; provider/upstream WebSocket connection/cache/continuation remains `v3.responses_websocket_v2_transport_hardening` / Responses Direct Runtime owner.
+- Red/green finding: initial disconnect test proved Server SSE projection read only provider stream, so client close could let provider stream drain to terminal behind a disconnected client. Fix: `send_responses_websocket_sse_stream` now `tokio::select!`s provider chunks and client WebSocket messages; close/error returns early and drops the provider stream/connection.
+- Matrix now covered in controlled server tests: beta/upgrade handshake + ping/pong, flat text/binary `response.create`, malformed/missing type/unsupported `response.cancel`/nested `response` rejection before provider send, JSON/SSE projection, same-socket tool continuation without Router re-entry, scope mismatch before provider send, provider error as WS error event, client disconnect drop.
+- Verification passed current source: `npm run test:v3-responses-inbound-websocket-proxy` (9/9), `npm run verify:v3-responses-inbound-websocket-proxy`, `npm run test:v3-responses-inbound-websocket-proxy-red-fixtures` (10 mutations), function-map compile gate, owner queryability, feature-map growth, V3 architecture/resource/module/Rust-only/fmt/clippy/workspace, provider WebSocket hardening tests/verifier/red fixtures, and `git diff --check`.
+
 # 2026-07-14 16:20 CST: RouteCodex V3 Responses direct Rust MVP implemented
 - Scope: project-level V3 under `v3/`; Rust config/server/runtime/provider/CLI only. Relay, continuation, servertool/stopless, V2 compatibility, global install, and live replacement remain out of scope.
 - Architecture: runtime kernel is sole lifecycle executor; static hook registry stores callable functions and kernel executes every hook; shared Rust helpers own route selection and provider-response projection; server uniquely owns `V3Server11HttpFrame`; provider uniquely owns wire/auth/HTTP/raw response.
@@ -30896,3 +30903,38 @@ Pure Rust NAPI candidates:
 - Review fix: Anthropic Relay Server SSE writer now uses shared sse-transport-core builders/encoder and fails malformed/missing event data explicitly instead of silently skipping or materializing bytes.
 - Gates PASS: npm run test:sse-transport-core; cargo test -p router-hotpath-napi hub_resp_inbound_sse_stream_sniffer --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml -- --nocapture; npm run test:v3-sse-transport-adapter; direct continuation focused 8/8; server multi-listener 14/14; cargo test --workspace --manifest-path v3/Cargo.toml; shared fmt check; cargo clippy -p sse-transport-core --all-targets -- -D warnings; npm run verify:v3-cargo-fmt; V3 workspace Clippy; verify:sse-transport-core-shared; verify:sse-architecture-boundary; resource/function/mainline/manifest gates; verify:architecture-review-surface-light; git diff --check.
 - Boundary: no live config, ~/.rcc, global install, restart, release, provider credentials, or production cutover were changed or claimed.
+
+# 2026-07-16T01:11:06Z V3 live provider compat parity matrix progress
+
+- Claim: feature_id:v3.live_provider_compat_parity_closeout, run 20260716T005348Z-Macstudio.local-88078-livecompat.
+- Added machine matrix manifest docs/architecture/manifests/v3.live_provider_compat.parity.yml with endpoint x transport cases for Responses Direct, Responses Relay, Anthropic Messages, OpenAI Chat, and Gemini; each case separates controlled_evidence, live_evidence, production status, and blockers.
+- Added verifier/red fixtures: npm run verify:v3-live-provider-compat-parity passed; npm run test:v3-live-provider-compat-parity-red-fixtures rejected 8 mutations covering missing matrix pair, production-ready without live evidence, missing 402, missing Codex model field, Hub/VR provider branch ban removal, package script removal, function-map drift, and wiki production rule drift.
+- Added resource/function/mainline/verification/wiki bindings for v3.live_provider_compat.matrix and v3.live_provider_compat.parity. Architecture docs/resource/module/Rust-only gates passed.
+- Read-only live audit: global routecodex is 0.90.3935; ports 5520/4444/10000 report 0.90.3935, 5555 has no listener. This is not V3 live provider parity evidence, so live_v3_provider_replay_pending remains explicit.
+- Remaining blockers: npm run verify:v3-cargo-fmt fails on current v3/crates/routecodex-v3-server/tests/multi_listener_server.rs formatting drift in inbound WebSocket tests; npm run test:v3-workspace fails in responses_inbound_websocket_* tests with HTTP 405 method_not_allowed, matching the separate v3.responses_inbound_websocket_proxy blocker. No live config, credentials, install, restart, or runtime code were changed.
+
+## 2026-07-16T09:42:00+08:00 V3 live provider compat parity resume closeout
+
+- Objective: /Users/fanzhang/.codex/attachments/107d389c-95a5-4d4e-ae26-e5535056811a/pasted-text-1.txt, feature_id:v3.live_provider_compat_parity_closeout.
+- Current matrix evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml covers 5 endpoints x 3 transports = 15 cases; production_ready_cases=0; all live/provider unproven cases remain pending/blocker instead of readiness.
+- Final evidence run: .agent-collab/runs/20260716T012216Z-Macstudio.local-65890-livecompat-resume/evidence.jsonl and logs/final2-gate-*.log.
+- Final gates passed: verify/test v3-live-provider-compat parity, 8 livecompat red mutations, v3 architecture docs/resource/module/rust-only/cargo-fmt/clippy/workspace, git diff --check.
+- Forward fixes needed to unblock final gates: relay tool/servertool parity stale/no-pid claim compile+fmt drift; inbound WebSocket GET /v1/responses no-upgrade had axum extractor裸400, fixed with typed WebSocket boundary projection and updated red fixture marker.
+- Boundary: no ~/.rcc, credential, live config, global install, restart, release, P6 deletion, or production cutover was performed; live V3 provider replay remains explicit production blocker, not a production-ready claim.
+
+## 2026-07-16T09:45:26+08:00 V3 Relay tool/servertool multiturn parity progress
+
+- Objective: /Users/fanzhang/.codex/attachments/cedf98ea-487e-454b-b26f-c5757110e88c/pasted-text-1.txt, feature_id:v3.relay_tool_servertool_multiturn_parity_closeout.
+- Implemented Rust Hub Req04/Resp03 parity slice: request tool outputs now must match a current or restored function/custom tool call; orphan, missing call_id, wrong custom/function output kind, malformed historical attachment resource, and normal payload side-channel leakage fail fast. Attachment placeholder now runs inside Req04 after local context restore/tool governance and preserves current-turn media.
+- Implemented response tool kind classification for function/custom/servertool/apply_patch/MCP/native before Resp04 commit; canonical continuation context preserves classified tool kinds; side-channel leakage fails before client success projection.
+- Added controlled matrix test covering Responses, Anthropic, OpenAI Chat, and Gemini entries over JSON/SSE and New/Local/Remote continuation states, plus focused attachment, SSE ordering, one response exit, and leakage negative tests.
+- Gates passed for this slice: focused parity 8/8, feature verifier, 9 red mutations, hub_relay_request_semantics 6/6, Anthropic/OpenAI Chat/Gemini codec characterization 5/5 each, Hub Relay closeout 3/3 + verifier + red 10, relay payload-copy probes 4/4 + verifier + red 7, V3 architecture docs/resource/module/rust-only/static-hook, cargo fmt, V3 clippy, full V3 workspace, hub skeleton doc red 11, and git diff --check.
+- Not complete: `npm run test:v3-compile-fail` still fails outside this feature because provider transport private-constructor fixture reports `E0071` instead of private-field `E0451`; source truth shows `V3Transport13ResponsesHttpRequest` aliases public `V3Transport13ResponsesRequest` variants. Current goal forbids provider transport owner changes, so handoff recorded at `.agent-collab/handoff/20260716T014526Z-provider-transport-private-constructor-gate.md`.
+
+# 2026-07-16 dirty review closeout: V3 inbound WS, Relay parity, live matrix
+
+- Reviewed all current dirty V3 source/docs/scripts after Jason correction: release/global install copying v3/ is expected and required so routecodex-v3 bin/tests are globally installable; not treated as a bug.
+- Review fix: V3 inbound Responses WebSocket no longer silently closes on invalid Runtime byte JSON or malformed/unterminated Runtime SSE; it sends explicit WebSocket error events (runtime_error / runtime_stream_error) and the source verifier/red fixture locks the decode-error projection.
+- Validation PASS on current tree: focused inbound WS verifier/red/tests, Relay tool/servertool verifier/red/tests, live provider compat verifier/red, hub skeleton doc red, provider-failure blackbox including HTTP 402 reroute, V3 fmt/clippy/workspace, V3 architecture/resource/module/Rust-only/static-hook, resource/function/mainline/review gates, and git diff --check.
+- Global install verification PASS: ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555 ./scripts/install-global.sh; installed routecodex --version reports 0.90.3935; installed routecodex-v3 --help works from /Users/fanzhang/.local/bin/routecodex-v3.
+- Boundary: port 5555 still has no listener, so real V3 JSON/SSE/WS live provider replay and active goal v3.responses_direct_remote_continuation_integration remain not complete. No live config, credential, restart, P6 deletion, or production cutover was performed beyond the authorized global install.

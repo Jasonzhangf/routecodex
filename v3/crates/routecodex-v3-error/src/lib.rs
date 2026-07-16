@@ -267,6 +267,8 @@ pub enum V3HttpBoundaryErrorKind {
     MethodNotAllowed,
     PathNotFound,
     EndpointNotEnabled,
+    WebSocketUpgradeRequired,
+    WebSocketBetaRequired,
 }
 
 pub fn project_v3_http_boundary_error(
@@ -296,6 +298,13 @@ pub fn project_v3_http_boundary_error(
         }
         V3HttpBoundaryErrorKind::EndpointNotEnabled => {
             (V3ErrorSourceKind::PendingEndpoint, "endpoint_not_enabled")
+        }
+        V3HttpBoundaryErrorKind::WebSocketUpgradeRequired => (
+            V3ErrorSourceKind::InvalidRequest,
+            "websocket_upgrade_required",
+        ),
+        V3HttpBoundaryErrorKind::WebSocketBetaRequired => {
+            (V3ErrorSourceKind::InvalidRequest, "websocket_beta_required")
         }
     };
     let source =
