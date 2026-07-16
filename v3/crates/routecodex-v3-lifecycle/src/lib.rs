@@ -1,7 +1,8 @@
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ConfigStore};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -15,6 +16,9 @@ use tokio::net::{UnixListener, UnixStream};
 
 const SCHEMA_VERSION: u16 = 1;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+const START_TAKEOVER_POLL: Duration = Duration::from_millis(150);
+const DEFAULT_START_GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -126,6 +130,8 @@ struct ControlResponse {
 pub struct V3ManagedLifecycle {
     config_path: PathBuf,
     state_root: PathBuf,
+    force_snapshots: bool,
+    force_console: bool,
 }
 
 #[derive(Debug)]
@@ -156,6 +162,8 @@ impl V3ManagedLifecycle {
         Ok(Self {
             config_path: config_path.into(),
             state_root,
+            force_snapshots: false,
+            force_console: false,
         })
     }
 
@@ -166,7 +174,19 @@ impl V3ManagedLifecycle {
         Self {
             config_path: config_path.into(),
             state_root: state_root.into(),
+            force_snapshots: false,
+            force_console: false,
         }
+    }
+
+    pub fn with_snapshots_enabled(mut self, enabled: bool) -> Self {
+        self.force_snapshots = enabled;
+        self
+    }
+
+    pub fn with_console_enabled(mut self, enabled: bool) -> Self {
+        self.force_console = enabled;
+        self
     }
 
     pub fn declaration(
@@ -183,7 +203,13 @@ impl V3ManagedLifecycle {
         identity.update([0]);
         identity.update(config_digest.as_bytes());
         let instance_id = format!("v3-{}", &format!("{:x}", identity.finalize())[..20]);
-        let manifest = snapshot.manifest;
+        let mut manifest = snapshot.manifest;
+        if self.force_snapshots {
+            manifest.debug.snapshots = true;
+        }
+        if self.force_console {
+            manifest.debug.log_console = true;
+        }
         let listeners = manifest
             .servers
             .values()
@@ -222,11 +248,7 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "start")?;
-        if let Ok(status) = self.query_live(&declaration).await {
-            if status.state == V3ManagedRunState::Running {
-                return Err(V3LifecycleError::AlreadyRunning(declaration.instance_id));
-            }
-        }
+        release_listener_set_for_start(&instance_dir, &declaration).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
         write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
         write_status(
@@ -243,7 +265,11 @@ impl V3ManagedLifecycle {
             .arg("server")
             .arg("run-managed-child")
             .arg("--config")
-            .arg(&declaration.config_path)
+            .arg(&declaration.config_path);
+        if self.force_snapshots {
+            command.arg("--snap");
+        }
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr))
@@ -276,6 +302,29 @@ impl V3ManagedLifecycle {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    pub async fn start_foreground(
+        &self,
+        executable_path: impl AsRef<Path>,
+    ) -> Result<(), V3LifecycleError> {
+        let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
+        validate_auth_handles(&manifest)?;
+        let instance_dir = self.instance_dir(&declaration.instance_id);
+        ensure_private_dir(&instance_dir)?;
+        {
+            let _lock = acquire_operation_lock(&instance_dir, "start")?;
+            release_listener_set_for_start(&instance_dir, &declaration).await?;
+            reap_inactive_runtime_files(&instance_dir, &declaration)?;
+            write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
+            write_status(
+                &instance_dir,
+                &declaration.instance_id,
+                V3ManagedRunState::Starting,
+                None,
+            )?;
+        }
+        self.run_managed_child(executable_path).await
     }
 
     pub async fn status(
@@ -386,6 +435,7 @@ impl V3ManagedLifecycle {
                 return Err(error.into());
             }
         };
+        let mut handle = Some(handle);
         write_json_atomic(
             &instance_dir.join("pid.cache"),
             &V3ManagedPidCache {
@@ -411,8 +461,26 @@ impl V3ManagedLifecycle {
             V3ManagedRunState::Running,
             None,
         )?;
+        let mut ctrl_c = Box::pin(tokio::signal::ctrl_c());
         loop {
-            let (mut stream, _) = listener.accept().await?;
+            let (mut stream, _) = tokio::select! {
+                signal = &mut ctrl_c => {
+                    if let Err(error) = signal {
+                        write_status(
+                            &instance_dir,
+                            &declaration.instance_id,
+                            V3ManagedRunState::Failed,
+                            Some(format!("ctrl_c handler failed: {error}")),
+                        )?;
+                        return Err(error.into());
+                    }
+                    let handle = handle.take().ok_or_else(|| {
+                        V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
+                    })?;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                }
+                accepted = listener.accept() => accepted?,
+            };
             let mut line = String::new();
             BufReader::new(&mut stream).read_line(&mut line).await?;
             let request: ControlRequest = serde_json::from_str(&line)?;
@@ -440,23 +508,18 @@ impl V3ManagedLifecycle {
             stream.write_all(b"\n").await?;
             stream.flush().await?;
             if should_stop {
-                write_status(
+                let handle = handle.take().ok_or_else(|| {
+                    V3LifecycleError::Validation(
+                        "managed runtime handle was already consumed".to_string(),
+                    )
+                })?;
+                return shutdown_managed_runtime(
                     &instance_dir,
                     &declaration.instance_id,
-                    V3ManagedRunState::Stopping,
-                    None,
-                )?;
-                handle.shutdown().await;
-                write_status(
-                    &instance_dir,
-                    &declaration.instance_id,
-                    V3ManagedRunState::Stopped,
-                    None,
-                )?;
-                let _ = fs::remove_file(instance_dir.join("pid.cache"));
-                let _ = fs::remove_file(instance_dir.join("control.json"));
-                let _ = fs::remove_file(&socket_path);
-                return Ok(());
+                    &socket_path,
+                    handle,
+                )
+                .await;
             }
         }
     }
@@ -483,6 +546,21 @@ impl V3ManagedLifecycle {
             detail: None,
         })
     }
+}
+
+async fn shutdown_managed_runtime(
+    instance_dir: &Path,
+    instance_id: &str,
+    socket_path: &Path,
+    handle: V3ServerAggregateHandle,
+) -> Result<(), V3LifecycleError> {
+    write_status(instance_dir, instance_id, V3ManagedRunState::Stopping, None)?;
+    handle.shutdown().await;
+    write_status(instance_dir, instance_id, V3ManagedRunState::Stopped, None)?;
+    let _ = fs::remove_file(instance_dir.join("pid.cache"));
+    let _ = fs::remove_file(instance_dir.join("control.json"));
+    let _ = fs::remove_file(socket_path);
+    Ok(())
 }
 
 async fn send_control(
@@ -674,6 +752,185 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, V3Lifecycle
     Ok(serde_json::from_reader(File::open(path)?)?)
 }
 
+async fn release_listener_set_for_start(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    if listener_set_is_available(&declaration.listeners) {
+        return Ok(());
+    }
+
+    let graceful_timeout = env_duration_ms(
+        &[
+            "ROUTECODEX_V3_STOP_TIMEOUT_MS",
+            "RCC_V3_STOP_TIMEOUT_MS",
+            "ROUTECODEX_STOP_TIMEOUT_MS",
+        ],
+        DEFAULT_START_GRACEFUL_STOP_TIMEOUT,
+    );
+    let force_timeout = env_duration_ms(
+        &[
+            "ROUTECODEX_V3_KILL_TIMEOUT_MS",
+            "RCC_V3_KILL_TIMEOUT_MS",
+            "ROUTECODEX_KILL_TIMEOUT_MS",
+        ],
+        DEFAULT_START_FORCE_KILL_TIMEOUT,
+    );
+
+    let _ = send_control(instance_dir, declaration, ControlOperation::Stop).await;
+    if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
+        return Ok(());
+    }
+
+    let terminate_pids = explicit_listener_pids(&declaration.listeners)?;
+    signal_explicit_listener_pids(&terminate_pids, V3LifecycleSignal::Terminate)?;
+    if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
+        return Ok(());
+    }
+
+    let kill_pids = explicit_listener_pids(&declaration.listeners)?;
+    signal_explicit_listener_pids(&kill_pids, V3LifecycleSignal::Kill)?;
+    if wait_for_listener_set_available(&declaration.listeners, force_timeout).await {
+        return Ok(());
+    }
+
+    let remaining = explicit_listener_pids(&declaration.listeners)?;
+    Err(V3LifecycleError::Timeout(format!(
+        "free managed listener set for start {} remaining_pids={}",
+        declaration.instance_id,
+        format_pid_list(&remaining)
+    )))
+}
+
+fn listener_set_is_available(listeners: &[V3ManagedListenerDeclaration]) -> bool {
+    listeners
+        .iter()
+        .all(|listener| listener_address_is_available(&listener.bind, listener.port))
+}
+
+async fn wait_for_listener_set_available(
+    listeners: &[V3ManagedListenerDeclaration],
+    timeout: Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if listener_set_is_available(listeners) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return listener_set_is_available(listeners);
+        }
+        tokio::time::sleep(START_TAKEOVER_POLL).await;
+    }
+}
+
+fn explicit_listener_pids(
+    listeners: &[V3ManagedListenerDeclaration],
+) -> Result<Vec<u32>, V3LifecycleError> {
+    let mut pids = BTreeSet::new();
+    for listener in listeners {
+        for pid in listening_pids_for_port(listener.port)? {
+            if pid != std::process::id() {
+                pids.insert(pid);
+            }
+        }
+    }
+    Ok(pids.into_iter().collect())
+}
+
+fn listening_pids_for_port(port: u16) -> Result<Vec<u32>, V3LifecycleError> {
+    let output = Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .map_err(|error| {
+            V3LifecycleError::Validation(format!(
+                "failed to discover explicit listener PID for port {port}: {error}"
+            ))
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() && stdout.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    if !output.status.success() {
+        return Err(V3LifecycleError::Validation(format!(
+            "failed to discover explicit listener PID for port {port}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let mut pids = Vec::new();
+    for line in stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let pid = line.parse::<u32>().map_err(|error| {
+            V3LifecycleError::Validation(format!(
+                "lsof returned non-numeric listener PID for port {port}: {line}: {error}"
+            ))
+        })?;
+        if pid > 0 {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum V3LifecycleSignal {
+    Terminate,
+    Kill,
+}
+
+fn signal_explicit_listener_pids(
+    pids: &[u32],
+    signal: V3LifecycleSignal,
+) -> Result<(), V3LifecycleError> {
+    for pid in pids {
+        signal_explicit_pid(*pid, signal)?;
+    }
+    Ok(())
+}
+
+fn signal_explicit_pid(pid: u32, signal: V3LifecycleSignal) -> Result<(), V3LifecycleError> {
+    if pid == 0 || pid == std::process::id() {
+        return Ok(());
+    }
+    let raw_signal = match signal {
+        V3LifecycleSignal::Terminate => libc::SIGTERM,
+        V3LifecycleSignal::Kill => libc::SIGKILL,
+    };
+    let result = unsafe { libc::kill(pid as libc::pid_t, raw_signal) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
+    Err(V3LifecycleError::Io(error))
+}
+
+fn pid_is_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if result == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+fn format_pid_list(pids: &[u32]) -> String {
+    if pids.is_empty() {
+        return "none".to_string();
+    }
+    pids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn reap_inactive_runtime_files(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
@@ -766,6 +1023,19 @@ fn owned_unreachable_runtime_state_is_reapable(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<bool, V3LifecycleError> {
+    let pid_path = instance_dir.join("pid.cache");
+    let cached_pid = if pid_path.exists() {
+        let pid: V3ManagedPidCache = read_json(&pid_path)?;
+        if pid.instance_id != expected.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap pid cache for a different instance".to_string(),
+            ));
+        }
+        Some(pid)
+    } else {
+        None
+    };
+
     let control_path = instance_dir.join("control.json");
     if control_path.exists() {
         let control: V3ManagedControlRecord = read_json(&control_path)?;
@@ -780,21 +1050,10 @@ fn owned_unreachable_runtime_state_is_reapable(
                 "refusing to reap non-canonical managed control socket path".to_string(),
             ));
         }
-        if socket_path.exists() {
+        if socket_path.exists() && cached_pid.as_ref().is_some_and(|pid| pid_is_alive(pid.pid)) {
             return Ok(false);
         }
-    }
-
-    let pid_path = instance_dir.join("pid.cache");
-    if pid_path.exists() {
-        let pid: V3ManagedPidCache = read_json(&pid_path)?;
-        if pid.instance_id != expected.instance_id {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap pid cache for a different instance".to_string(),
-            ));
-        }
-        if control_path.exists() {
-            let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if let Some(pid) = cached_pid.as_ref() {
             if pid.start_nonce != control.start_nonce {
                 return Err(V3LifecycleError::IdentityMismatch(
                     "refusing to reap pid/control cache with mismatched nonce".to_string(),
@@ -843,6 +1102,22 @@ fn epoch_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn env_duration_ms(names: &[&str], default: Duration) -> Duration {
+    for name in names {
+        let Some(raw) = std::env::var_os(name) else {
+            continue;
+        };
+        let Some(raw) = raw.to_str() else {
+            continue;
+        };
+        let Ok(parsed) = raw.trim().parse::<u64>() else {
+            continue;
+        };
+        return Duration::from_millis(parsed);
+    }
+    default
 }
 
 #[cfg(test)]

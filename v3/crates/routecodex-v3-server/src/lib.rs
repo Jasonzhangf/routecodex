@@ -22,6 +22,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     execute_v3_responses_relay_dry_run_runtime,
     execute_v3_responses_relay_runtime_with_default_transport,
+    execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_relay_runtime_failure, register_responses_direct_hooks,
@@ -30,7 +31,9 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayLocalContinuationScope,
+    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayRuntimeOutput,
 };
 use serde_json::{json, Map, Value};
 use sse_transport_core::{
@@ -55,6 +58,7 @@ struct V3ListenerState {
     manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
+    responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +141,8 @@ pub async fn spawn_v3_server_aggregate(
     let debug =
         build_v3_debug_runtime_from_manifest(&manifest.debug).map_err(std::io::Error::other)?;
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
+    let responses_relay_local_continuation =
+        Arc::new(V3ResponsesRelayLocalContinuationState::default());
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -156,6 +162,7 @@ pub async fn spawn_v3_server_aggregate(
             manifest: manifest.clone(),
             debug: debug.clone(),
             responses_direct_continuation: responses_direct_continuation.clone(),
+            responses_relay_local_continuation: responses_relay_local_continuation.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -170,6 +177,22 @@ pub async fn spawn_v3_server_aggregate(
             addr,
             shutdown: Some(shutdown_tx),
         });
+    }
+    for listener in &listeners {
+        let scope = debug
+            .start_trace(&listener.server_id, "startup", "listener")
+            .map_err(std::io::Error::other)?;
+        debug
+            .record_node_event(
+                &scope,
+                "V3ServerStartup01ListenerSetPreflight",
+                "listening",
+                Some(json!({
+                    "server_id": listener.server_id,
+                    "address": listener.addr.to_string()
+                })),
+            )
+            .map_err(std::io::Error::other)?;
     }
     Ok(V3ServerAggregateHandle { listeners })
 }
@@ -262,6 +285,35 @@ async fn pending_endpoint(
     };
     let request_id = state.debug.next_request_id(&state.server.id);
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    let trace_scope = match state
+        .debug
+        .start_trace(&state.server.id, &request_id, &execution_id)
+    {
+        Ok(scope) => scope,
+        Err(error) => {
+            return foundation_output_response(project_v3_debug_failure(
+                "V3Server03HttpRequestRaw",
+                error,
+            ))
+        }
+    };
+    if let Err(error) = state.debug.record_node_event(
+        &trace_scope,
+        "V3Server03HttpRequestRaw",
+        "received",
+        Some(json!({
+            "method": method.clone(),
+            "path": path.clone(),
+            "entry_protocol": entry_protocol.clone(),
+            "execution_mode": execution_mode.as_str(),
+            "server_id": state.server.id.clone()
+        })),
+    ) {
+        return foundation_output_response(project_v3_debug_failure(
+            "V3Server03HttpRequestRaw",
+            error,
+        ));
+    }
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
@@ -352,19 +404,49 @@ async fn pending_endpoint(
         return gemini_relay_output_response(output);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let output = match execute_v3_responses_relay_request(
-            &state.manifest,
-            V3ResponsesRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                request_id,
-                payload,
-            },
-        )
-        .await
-        {
-            Ok(output) => output,
-            Err(error) => project_v3_responses_relay_runtime_failure(error),
+        let continuation_scope = match build_responses_relay_local_continuation_scope(
+            &request_headers,
+            &request_id,
+            &state.server,
+            &path,
+        ) {
+            Ok(scope) => scope,
+            Err(message) => {
+                return error_output_response(project_http_input_error(
+                    V3HttpBoundaryErrorKind::MalformedJson,
+                    message,
+                ))
+            }
         };
+        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3HubReqContinuation03Classified",
+                    V3DebugError::MalformedFixture(format!(
+                        "system time precedes Unix epoch: {error}"
+                    )),
+                ))
+            }
+        };
+        let output =
+            match execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation(
+                &state.manifest,
+                V3ResponsesRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    request_id,
+                    payload,
+                },
+                &state.responses_relay_local_continuation,
+                continuation_scope,
+                now_epoch_ms,
+            )
+            .await
+            {
+                Ok(output) => output,
+                Err(error) => project_v3_responses_relay_runtime_failure(error),
+            };
         return responses_relay_output_response(output);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
@@ -881,6 +963,51 @@ fn build_responses_direct_continuation_scope(
         })
         .unwrap_or_else(|| session_id.clone());
     Ok(V3ResponsesDirectContinuationScope::responses(
+        endpoint,
+        session_id,
+        conversation_id,
+        server.port,
+        server.routing_group.clone(),
+    ))
+}
+
+fn build_responses_relay_local_continuation_scope(
+    headers: &HeaderMap,
+    request_id: &str,
+    server: &V3ServerManifest,
+    endpoint: &str,
+) -> Result<V3ResponsesRelayLocalContinuationScope, String> {
+    let turn_metadata = match headers.get("x-codex-turn-metadata") {
+        Some(value) => {
+            let text = value
+                .to_str()
+                .map_err(|error| format!("x-codex-turn-metadata is not UTF-8: {error}"))?;
+            Some(
+                serde_json::from_str::<serde_json::Value>(text)
+                    .map_err(|error| format!("x-codex-turn-metadata is not valid JSON: {error}"))?,
+            )
+        }
+        None => None,
+    };
+    let session_id = header_text(headers, "session-id")?
+        .or_else(|| {
+            turn_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("session_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| request_id.to_string());
+    let conversation_id = header_text(headers, "thread-id")?
+        .or_else(|| {
+            turn_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("thread_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| session_id.clone());
+    Ok(V3ResponsesRelayLocalContinuationScope::responses(
         endpoint,
         session_id,
         conversation_id,

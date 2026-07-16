@@ -1,4 +1,5 @@
 use super::*;
+use crate::V3LocalContinuationReq04RestoreRequest;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
@@ -18,7 +19,9 @@ use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -40,6 +43,75 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub client_body: V3ResponsesRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ResponsesRelayLocalContinuationScope {
+    entry_endpoint: String,
+    session_id: String,
+    conversation_id: String,
+    port: u16,
+    routing_group: String,
+}
+
+impl V3ResponsesRelayLocalContinuationScope {
+    pub fn responses(
+        entry_endpoint: impl Into<String>,
+        session_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        port: u16,
+        routing_group: impl Into<String>,
+    ) -> Self {
+        Self {
+            entry_endpoint: entry_endpoint.into(),
+            session_id: session_id.into(),
+            conversation_id: conversation_id.into(),
+            port,
+            routing_group: routing_group.into(),
+        }
+    }
+
+    fn local_key(&self) -> V3LocalContinuationScopeKey {
+        V3LocalContinuationScopeKey::responses(
+            self.entry_endpoint.clone(),
+            self.session_id.clone(),
+            self.conversation_id.clone(),
+            self.port,
+            self.routing_group.clone(),
+        )
+    }
+
+    fn hub_scope(&self, server_id: &str) -> V3HubContinuationScope {
+        V3HubContinuationScope::new(
+            V3HubEntryProtocol::Responses,
+            server_id,
+            self.routing_group.clone(),
+            self.session_id.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct V3ResponsesRelayLocalContinuationState {
+    store: Mutex<V3LocalContinuationStore>,
+}
+
+impl V3ResponsesRelayLocalContinuationState {
+    pub fn len(&self) -> Result<usize, V3ResponsesRelayRuntimeError> {
+        Ok(self.lock_store()?.len())
+    }
+
+    pub fn is_empty(&self) -> Result<bool, V3ResponsesRelayRuntimeError> {
+        Ok(self.lock_store()?.is_empty())
+    }
+
+    fn lock_store(
+        &self,
+    ) -> Result<MutexGuard<'_, V3LocalContinuationStore>, V3ResponsesRelayRuntimeError> {
+        self.store
+            .lock()
+            .map_err(|_| V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned)
+    }
 }
 
 impl std::fmt::Debug for V3ResponsesRelayRuntimeOutput {
@@ -74,6 +146,12 @@ pub enum V3ResponsesRelayRuntimeError {
     Provider(#[from] V3ProviderError),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
+    #[error(transparent)]
+    LocalContinuation(#[from] V3LocalContinuationError),
+    #[error("V3 Responses Relay local continuation scope routing group does not match server")]
+    LocalContinuationScopeMismatch,
+    #[error("V3 Responses Relay local continuation state lock is poisoned")]
+    LocalContinuationStatePoisoned,
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_default_transport(
@@ -83,10 +161,64 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     execute_v3_responses_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
 }
 
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    state: &V3ResponsesRelayLocalContinuationState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_with_local_continuation(
+        manifest,
+        input,
+        &ReqwestResponsesTransport::default(),
+        state,
+        scope,
+        now_epoch_ms,
+    )
+    .await
+}
+
 pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(manifest, input, transport, None).await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    state: &V3ResponsesRelayLocalContinuationState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state,
+            scope,
+            now_epoch_ms,
+        }),
+    )
+    .await
+}
+
+struct V3ResponsesRelayLocalContinuationExecution<'state> {
+    state: &'state V3ResponsesRelayLocalContinuationState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+}
+
+async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -96,6 +228,7 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     } else {
         V3HubTransportIntent::Json
     };
+    let requested_local_ids = find_responses_tool_output_ids(&input.payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -105,15 +238,51 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     trace.push("V3HubReqInbound01ClientRaw");
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
     trace.push("V3HubReqInbound02Normalized");
-    let lookup = V3HubContinuationLookup::new(
-        None,
-        V3HubContinuationScope::new(
-            V3HubEntryProtocol::Responses,
-            &input.server_id,
-            server_routing_group(manifest, &input.server_id)?,
-            &input.request_id,
-        ),
+    let base_hub_scope = V3HubContinuationScope::new(
+        V3HubEntryProtocol::Responses,
+        &input.server_id,
+        server_routing_group(manifest, &input.server_id)?,
+        &input.request_id,
     );
+    let mut restored_context = None;
+    let lookup =
+        if let (Some(local), Some(context_id)) = (local.as_ref(), requested_local_ids.first()) {
+            if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
+                return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
+            }
+            let request = V3LocalContinuationReq04RestoreRequest::local(
+                context_id,
+                local.scope.local_key(),
+                local.now_epoch_ms,
+            );
+            let store = local.state.lock_store()?;
+            let context = store
+                .restore_at_req04(&request)?
+                .canonical_context()
+                .clone();
+            for additional_id in requested_local_ids.iter().skip(1) {
+                let additional = store
+                    .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
+                        additional_id,
+                        local.scope.local_key(),
+                        local.now_epoch_ms,
+                    ))?
+                    .canonical_context();
+                if additional != &context {
+                    return Err(V3LocalContinuationError::Codec {
+                        message: "tool outputs reference different local continuation contexts"
+                            .to_string(),
+                    }
+                    .into());
+                }
+            }
+            drop(store);
+            restored_context = Some(context.clone());
+            V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
+                .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
+        } else {
+            V3HubContinuationLookup::new(None, base_hub_scope)
+        };
     let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
         req02,
         &lookup,
@@ -121,7 +290,13 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     )?;
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
-    let req04 = request_outcome.into_governed();
+    let mut req04 = request_outcome.into_governed();
+    if let Some(context) = restored_context.as_ref() {
+        merge_v3_relay_restored_local_context_at_req04(
+            &mut req04.previous.previous.previous.payload.0,
+            context,
+        )?;
+    }
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
@@ -185,7 +360,13 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     match provider_raw.into_body() {
         V3ProviderResponseBody::Json(bytes) => {
             let provider_value: Value = serde_json::from_slice(&bytes)?;
-            run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+            let action = run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+            commit_or_release_responses_local_continuation(
+                local.as_ref(),
+                &requested_local_ids,
+                &provider_value,
+                action,
+            )?;
             Ok(V3ResponsesRelayRuntimeOutput {
                 status: 200,
                 client_body: V3ResponsesRelayClientBody::Json(provider_value),
@@ -203,6 +384,58 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
             })
         }
     }
+}
+
+fn find_responses_tool_output_ids(
+    payload: &Value,
+) -> Result<Vec<String>, V3ResponsesRelayRuntimeError> {
+    let mut ids = Vec::new();
+    for item in payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if !matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call_output" | "custom_tool_call_output" | "tool_call_output")
+        ) {
+            continue;
+        }
+        let id = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| V3LocalContinuationError::Codec {
+                message: "Responses tool output requires call_id".to_string(),
+            })?;
+        if !ids.iter().any(|existing| existing == id) {
+            ids.push(id.to_owned());
+        }
+    }
+    Ok(ids)
+}
+
+fn commit_or_release_responses_local_continuation(
+    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
+    restored_context_ids: &[String],
+    canonical_response: &Value,
+    action: V3HubContinuationCommit,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(local) = local else {
+        return Ok(());
+    };
+    let mut store = local.state.lock_store()?;
+    commit_or_release_v3_relay_local_continuation_at_resp04(
+        &mut store,
+        local.scope.local_key(),
+        local.now_epoch_ms,
+        V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
+        restored_context_ids,
+        canonical_response,
+        action,
+    )?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -344,7 +577,7 @@ fn run_json_response_hooks(
     provider_value: &Value,
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
+) -> Result<V3HubContinuationCommit, V3ResponsesRelayRuntimeError> {
     let resp01 = build_v3_provider_resp_inbound_01_raw(
         provider_value.clone(),
         V3HubEntryProtocol::Responses,
@@ -361,12 +594,13 @@ fn run_json_response_hooks(
     let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
+    let action = resp04.action();
     trace.push("V3HubRespContinuation04Committed");
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(())
+    Ok(action)
 }
 
 fn push_streaming_response_trace(trace: &mut Vec<&'static str>) {

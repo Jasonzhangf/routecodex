@@ -6,6 +6,7 @@ const files = {
   response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   tests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
+  responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   manifest: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
   functionMap: 'docs/architecture/v3-function-map.yml',
   mainlineMap: 'docs/architecture/v3-mainline-call-map.yml',
@@ -131,6 +132,14 @@ requireAll(text.tests, files.tests, [
   'V3HubContinuationOwnership::RouteCodexLocalOwned',
   'data:image/png;base64,CURRENT',
 ]);
+requireAll(text.responsesLocalTests, files.responsesLocalTests, [
+  'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
+  'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
+  'assert_eq!(captures[1]["tools"], second_tools);',
+  '"type":"function_call"',
+  '"type":"function_call_output"',
+  'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
+]);
 
 requireAll(text.functionMap, files.functionMap, [featureId, lifecycleId]);
 requireAll(text.mainlineMap, files.mainlineMap, [featureId, lifecycleId, ...requiredSteps]);
@@ -158,6 +167,7 @@ forbid(responseOwnerSource, files.response, /handler|server_frame|provider_runti
 forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /fallback|full_materiali[sz]e|collect\s*::<\s*Vec|read_dir|libloading/i, 'fallback/materialization/dynamic hook');
 forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
+forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay local continuation tests');
 
 if (failures.length) {
   console.error('[verify:v3-relay-tool-servertool-multiturn-parity-closeout] failed');

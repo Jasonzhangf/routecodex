@@ -10,6 +10,7 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
+  'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-function-map.yml',
@@ -62,6 +63,13 @@ const cases = [
     marker: 'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
     mutation: 'request_governance_missing_negative_case',
     diagnostic: /request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id/,
+  },
+  {
+    name: 'Responses Relay provider tools preservation removed',
+    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+    marker: 'assert_eq!(captures[1]["tools"], second_tools);',
+    mutation: '',
+    diagnostic: /assert_eq!\(captures\[1\]\["tools"\], second_tools\);/,
   },
   {
     name: 'mainline edge owner drift',

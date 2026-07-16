@@ -1,3 +1,7 @@
+use crate::{
+    V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
+    V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
+};
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -718,6 +722,113 @@ fn commit_v3_hub_relay_response(
         action,
         canonical_context,
     })
+}
+
+pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
+    current: &mut Value,
+    restored: &Value,
+) -> Result<(), V3LocalContinuationError> {
+    let restored_items = restored
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| V3LocalContinuationError::Codec {
+            message: "restored local continuation output must be an array".to_string(),
+        })?;
+    let current_items = current
+        .get_mut("input")
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .ok_or_else(|| V3LocalContinuationError::Codec {
+            message: "Req04 provider semantic input must be an array".to_string(),
+        })?;
+    let mut merged = restored_items;
+    let mut restored_keys = BTreeSet::new();
+    for item in &merged {
+        if let (Some(item_type), Some(call_id)) = (
+            item.get("type").and_then(Value::as_str),
+            item.get("call_id").and_then(Value::as_str),
+        ) {
+            restored_keys.insert((item_type.to_owned(), call_id.to_owned()));
+        }
+    }
+    merged.extend(current_items.into_iter().filter(|item| {
+        let current_call_id = item.get("call_id").and_then(Value::as_str);
+        current_call_id.is_none_or(|call_id| {
+            !restored_keys.iter().any(|(restored_type, restored_id)| {
+                restored_id == call_id
+                    && Some(restored_type.as_str()) == item.get("type").and_then(Value::as_str)
+            })
+        })
+    }));
+    current["input"] = Value::Array(merged);
+    Ok(())
+}
+
+pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
+    store: &mut V3LocalContinuationStore,
+    scope: V3LocalContinuationScopeKey,
+    now_epoch_ms: u64,
+    ttl_ms: u64,
+    restored_context_ids: &[String],
+    canonical_response: &Value,
+    action: V3HubContinuationCommit,
+) -> Result<(), V3LocalContinuationError> {
+    for context_id in restored_context_ids {
+        store.release(context_id);
+    }
+    if action != V3HubContinuationCommit::LocalContext {
+        return Ok(());
+    }
+    let context_ids = canonical_response
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "custom_tool_call" | "tool_call")
+            )
+        })
+        .map(|item| {
+            item.get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| V3LocalContinuationError::Codec {
+                    message: "Resp04 local context has a tool call without id".to_string(),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if context_ids.is_empty() {
+        return Err(V3LocalContinuationError::Codec {
+            message: "Resp04 local context has no tool call id".to_string(),
+        });
+    }
+    if let Some(duplicate) = context_ids.iter().find(|id| store.contains(id)) {
+        return Err(V3LocalContinuationError::AlreadyCommitted {
+            context_id: duplicate.clone(),
+        });
+    }
+    let expires_at_epoch_ms =
+        now_epoch_ms
+            .checked_add(ttl_ms)
+            .ok_or_else(|| V3LocalContinuationError::Codec {
+                message: "local continuation clock overflow".to_string(),
+            })?;
+    for context_id in context_ids {
+        store.commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
+            context_id,
+            scope.clone(),
+            canonical_response.clone(),
+            V3LocalContinuationTerminalOutcome::NonTerminal,
+            now_epoch_ms,
+            expires_at_epoch_ms,
+        ))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

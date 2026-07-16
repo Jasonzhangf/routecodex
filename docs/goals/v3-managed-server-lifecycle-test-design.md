@@ -44,6 +44,8 @@ active state, or any other declaration difference must fail without reaping stat
 - status challenge validates instance ID plus nonce through the control socket;
 - stop transitions running -> stopping -> stopped and closes all aggregate listeners;
 - restart is one stop plus one start for the instance, never per listener;
+- start over an already-running exact instance performs the old `rcc start` takeover: graceful
+  control stop, then a fresh child with the same instance ID and a new PID/start nonce;
 - stale stopped PID/control caches are reaped after exact state/schema validation;
 - a stopped instance starts from the next release snapshot executable while retaining one stable
   service instance ID and publishing the new canonical executable path;
@@ -56,12 +58,15 @@ active state, or any other declaration difference must fail without reaping stat
 - PID cache nonce mismatch / PID reuse simulation;
 - wrong executable identity or config digest;
 - release executable rollover while state is running or terminal proof is missing;
-- port occupied by an unknown process;
+- a configured listener port that remains occupied after graceful control stop proceeds through
+  explicit listener PID SIGTERM then SIGKILL; if no explicit listener PID can be discovered, start
+  fails instead of using a broad kill;
 - malformed JSON or unknown state field;
 - missing/unreadable auth handle at provider-send boundary remains explicit and is never persisted;
 - control socket missing, wrong nonce, wrong instance ID, shutdown timeout;
 - stop/restart for missing or already-stopped instance;
-- no signal/broad kill/port-owner takeover compensation.
+- no broad kill, `pkill`, `killall`, `xargs kill`, shell PID expansion, or non-listener process
+  compensation.
 
 ## External CLI black-box
 
@@ -69,26 +74,37 @@ Use a temporary config, state root, ports, executable, and controlled Responses 
 
 ```text
 config check
-  -> server start
+  -> top-level start
   -> health/status
-  -> duplicate start fails
-  -> server restart
+  -> duplicate start takes over the exact instance with stable instance ID + changed PID/start nonce
+  -> top-level restart
   -> stable instance ID + changed PID/start nonce
   -> stop -> copy/invoke next release snapshot executable -> start with stable instance ID
   -> health
-  -> server stop
+  -> top-level stop
   -> all listeners closed
   -> status reports stopped
 ```
 
 The test invokes the actual CLI binary; it does not call lifecycle internals or Server spawn APIs.
 State, process argv, logs, and evidence are scanned for the controlled secret.
+The user-facing parse shape is the old-style top-level command set:
+`rccv3 start|status|restart|stop -c|--config <path>`. Without `-c`, the same commands resolve
+`~/.rcc/config.v3.toml`. The `rccv3 server ...` namespace remains hidden compatibility only and
+must not be documented as the normal start path.
+The same black-box suite also holds a SIGTERM-resistant process on a configured listener port and
+requires `rccv3 start` to free it with explicit listener PID SIGTERM then SIGKILL before binding.
+Foreground `rccv3 start` also forces console visibility even when config has `debug.log_console=false`:
+startup must emit `V3ServerStartup01ListenerSetPreflight`, and a dry-run request must emit
+`V3Server03HttpRequestRaw`. `rccv3 start --snap` must force `/_routecodex/debug/status` to report
+`snapshots_enabled=true` even when the config has snapshots disabled.
 
 ## Live matrix
 
 After every source/controlled gate passes, migrate only the already-known V3 5555 instance to the
 managed owner. Before acting, verify its executable/config/listener identity. Use the lifecycle
-control surface; do not stop unknown processes and do not touch the V2 aggregate.
+control surface first. If the configured listener is still occupied, release only explicit PIDs
+listening on that configured V3 listener set; do not broad kill and do not touch the V2 aggregate.
 
 Before and after one managed restart:
 

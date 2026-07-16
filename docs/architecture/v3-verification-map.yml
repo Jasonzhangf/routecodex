@@ -10,6 +10,7 @@ features:
     owner_modules:
       - v3/crates/routecodex-v3-lifecycle
       - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-config/src/store.rs
     design:
       - docs/goals/v3-managed-live-server-lifecycle-plan.md
@@ -24,10 +25,13 @@ features:
       - deterministic identity and strict state schema
       - exclusive operation lock and auth-handle preflight
       - no resolved secret in lifecycle projection
-      - wrong identity, stale state, already-running, and already-stopped failures
+      - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, and already-stopped failures
       - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
+      - top-level start without -c resolves ~/.rcc/config.v3.toml and --snap forces snapshots
+      - foreground start forces startup and common HTTP request console even when config log_console is false
     required_integration:
       - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+      - foreground startup emits V3ServerStartup01ListenerSetPreflight and Relay/Direct requests emit V3Server03HttpRequestRaw
       - stable instance identity and changed PID/start nonce across restart
       - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path
       - all listeners close on one stop
@@ -48,7 +52,7 @@ features:
     completion_rule:
       source: "Lifecycle whitebox, negative, CLI blackbox, architecture/resource/module, fmt, Clippy, workspace, and secret/broad-kill gates pass."
       runtime: "5555 is owned by the managed instance rather than an agent exec session; managed restart preserves real JSON/SSE Responses and leaves V2 5520/10000/4444 healthy."
-      forbidden_claim: "Do not claim completion from source or temporary-port evidence alone; no unknown-process takeover, broad kill, fallback, second supervisor, SSE/continuation/Anthropic ownership, or secret persistence is allowed."
+      forbidden_claim: "Do not claim completion from source or temporary-port evidence alone; no broad kill, fallback, second supervisor, SSE/continuation/Anthropic ownership, or secret persistence is allowed. Start takeover may only signal explicit PIDs listening on the configured listener set."
 
   - feature_id: v3.config_server_full_function
     status: source_and_controlled_cli_verified
@@ -1318,6 +1322,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-config
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
@@ -1338,11 +1343,14 @@ features:
       - V2 default config projection binds /v1/responses to the Responses Relay runtime owner while explicit Direct remains a valid manual binding
       - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - local continuation two-turn restores saved context before current tool output and releases on terminal success
+      - Responses Relay provider-facing JSON blackbox preserves tools and sends restored function_call immediately before current function_call_output
+      - wrong Responses Relay call_id fails before provider send and preserves the saved continuation context
       - servertool response hook profile is consumed by Runtime response governance
       - provider error enters Error01-06 without Resp01 success projection
       - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
     required_gates:
       - npm run test:v3-hub-relay-runtime-closeout
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-hub-relay-runtime-closeout
       - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
       - npm run test:v3-config-v2-compat-5555
@@ -1373,6 +1381,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
       - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
     design:
@@ -1393,8 +1402,11 @@ features:
       - response governance classifies function custom servertool apply_patch MCP and native calls before Resp04 commit
       - JSON and SSE use one response exit and SSE arbitrary chunks preserve delta order terminal tool order DONE/finish reason parity
       - provider/client payloads reject RouteCodex control metadata_center debug/resource/continuation leakage
+      - Responses Relay JSON two-turn provider request preserves tools and pairs restored function_call with current function_call_output
+      - wrong Responses Relay call_id fails before provider send without consuming the saved context
     required_gates:
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
       - npm run test:v3-anthropic-codec-characterization

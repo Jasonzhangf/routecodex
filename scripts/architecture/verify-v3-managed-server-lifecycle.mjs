@@ -7,12 +7,18 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const requireText = (source, needle, label) => {
   if (!source.includes(needle)) throw new Error(`${label}: missing ${needle}`);
 };
+const requireCount = (source, needle, expected, label) => {
+  const actual = source.split(needle).length - 1;
+  if (actual !== expected) throw new Error(`${label}: expected ${expected} occurrences of ${needle}, found ${actual}`);
+};
 
 const lifecycle = read('v3/crates/routecodex-v3-lifecycle/src/lib.rs');
 const cli = read('v3/crates/routecodex-v3-cli/src/main.rs');
+const server = read('v3/crates/routecodex-v3-server/src/lib.rs');
 const configStore = read('v3/crates/routecodex-v3-config/src/store.rs');
 const configLib = read('v3/crates/routecodex-v3-config/src/lib.rs');
 const configTests = read('v3/crates/routecodex-v3-config/tests/config_v3_contract.rs');
+const cliFoundationTests = read('v3/crates/routecodex-v3-cli/tests/foundation_cli.rs');
 const cliManagedTests = read('v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs');
 const workspace = read('v3/Cargo.toml');
 const packageJson = read('package.json');
@@ -26,7 +32,9 @@ const testDesign = read('docs/goals/v3-managed-server-lifecycle-test-design.md')
 for (const symbol of [
   'V3ManagedInstanceDeclaration', 'V3ManagedPidCache', 'V3ManagedControlRecord',
   'pub struct V3ManagedLifecycle', 'pub async fn start', 'pub async fn status', 'pub async fn restart',
-  'pub async fn stop', 'pub async fn run_managed_child', 'acquire_operation_lock',
+  'pub async fn stop', 'pub async fn start_foreground', 'pub async fn run_managed_child',
+  'pub fn with_snapshots_enabled', 'pub fn with_console_enabled', 'acquire_operation_lock',
+  'release_listener_set_for_start', 'signal_explicit_listener_pids', 'explicit_listener_pids',
   'spawn_v3_server_aggregate', 'handle.shutdown().await', 'serde(deny_unknown_fields)',
   'non_terminal_runtime_state_is_never_reaped_after_control_probe_failure',
   'stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone',
@@ -43,20 +51,38 @@ for (const symbol of [
 if ((lifecycle.match(/#\[serde\(deny_unknown_fields\)\]/g) || []).length < 7)
   throw new Error('lifecycle state/control schemas must all deny unknown fields');
 requireText(lifecycle, 'load_snapshot_with_source_identity', 'lifecycle source');
+requireText(lifecycle, 'release_listener_set_for_start(&instance_dir, &declaration).await?;', 'lifecycle start takeover call');
+requireCount(lifecycle, 'release_listener_set_for_start(&instance_dir, &declaration).await?;', 2, 'lifecycle start takeover calls');
 requireText(configStore, 'pub struct V3ConfigLoadedSnapshot', 'config store source identity owner');
 requireText(configStore, 'source_sha256', 'config store source identity owner');
 requireText(configStore, 'Sha256::digest(source.raw_toml.as_bytes())', 'config store source identity owner');
 requireText(configLib, 'V3ConfigLoadedSnapshot', 'config lib export');
 requireText(configTests, 'config_source_identity_is_stable_sensitive_and_secret_free', 'config source identity test');
 requireText(cliManagedTests, 'managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes', 'managed CLI persistence test');
+requireText(cliManagedTests, 'top_level_start_status_restart_stop_match_legacy_cli_shape', 'managed CLI top-level lifecycle compatibility test');
+requireText(cliManagedTests, 'top_level_lifecycle_without_config_uses_home_config_v3_toml', 'managed CLI default config test');
+requireText(cliManagedTests, 'top_level_start_snap_forces_debug_snapshots', 'managed CLI snap override test');
+requireText(cliManagedTests, 'start_force_kills_explicit_listener_pid_after_graceful_timeout', 'managed CLI explicit PID takeover test');
+requireText(cliManagedTests, 'config log_console=false', 'managed CLI foreground console test');
+requireText(cliManagedTests, 'V3ServerStartup01ListenerSetPreflight', 'managed CLI startup console assertion');
+requireText(cliManagedTests, 'V3Server03HttpRequestRaw', 'managed CLI request console assertion');
+requireText(cliFoundationTests, 'top_level_start_help_exposes_snap_and_optional_config', 'CLI top-level start help test');
 requireText(cliManagedTests, 'fn stopped_instance_restarts_from_next_release_snapshot_executable()', 'managed CLI release rollover test');
 requireText(cliManagedTests, 'fn copy_release_binary(', 'managed CLI release rollover helper');
 requireText(cliManagedTests, 'scan_instance_files_for_secret', 'managed CLI secret scan');
 
 for (const command of ['Start', 'Status', 'Restart', 'Stop', 'RunManagedChild'])
   requireText(cli, command, 'CLI managed command');
+requireText(cli, '#[command(hide = true)]\n    Server', 'CLI compatible server namespace is hidden from user-facing help');
+requireText(cli, 'Command::Start { config, snap }', 'CLI top-level foreground start dispatch');
+requireText(cli, '.with_snapshots_enabled(snap)', 'CLI snap override dispatch');
+requireText(cli, '.with_console_enabled(true)', 'CLI foreground console force');
 requireText(cli, 'V3ManagedLifecycle::new', 'CLI thin lifecycle call');
 requireText(workspace, 'crates/routecodex-v3-lifecycle', 'workspace member');
+requireText(server, 'V3ServerStartup01ListenerSetPreflight', 'Server startup console event');
+requireText(server, 'V3Server03HttpRequestRaw', 'Server common request console event');
+requireText(server, '"V3ServerStartup01ListenerSetPreflight",\n                "listening"', 'Server startup console event recording');
+requireText(server, '"V3Server03HttpRequestRaw",\n        "received"', 'Server common request console event recording');
 
 for (const id of [
   'v3.lifecycle.instance_declaration', 'v3.lifecycle.pid_cache',
@@ -76,6 +102,7 @@ requireText(testDesign, 'Live matrix', 'test design');
 requireText(testDesign, 'release snapshot executable', 'test design');
 requireText(testDesign, 'may republish the same service declaration', 'test design');
 requireText(testDesign, 'Missing terminal proof', 'test design');
+requireText(testDesign, 'SIGTERM-resistant process on a configured listener port', 'test design');
 requireText(packageJson, 'config_source_identity_is_stable_sensitive_and_secret_free', 'package test script');
 
 const forbidden = [

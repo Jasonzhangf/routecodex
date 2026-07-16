@@ -7,6 +7,7 @@ const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/respons
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs';
+const localContinuationTestPath = 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs';
 const manifestPath = 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml';
 const functionMapPath = 'docs/architecture/v3-function-map.yml';
 const mainlinePath = 'docs/architecture/v3-mainline-call-map.yml';
@@ -19,6 +20,7 @@ const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
 const server = readFileSync(serverPath, 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
+const localContinuationTests = readFileSync(localContinuationTestPath, 'utf8');
 const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const functionMap = readFileSync(functionMapPath, 'utf8');
 const mainline = readFileSync(mainlinePath, 'utf8');
@@ -137,6 +139,13 @@ forbid(tests, testPath, [
 
 for (const phrase of [
   'execute_v3_responses_relay_runtime_with_default_transport',
+  'execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation',
+  'execute_v3_responses_relay_runtime_with_local_continuation',
+  'V3ResponsesRelayLocalContinuationState',
+  'V3ResponsesRelayLocalContinuationScope',
+  'find_responses_tool_output_ids',
+  'merge_v3_relay_restored_local_context_at_req04',
+  'commit_or_release_v3_relay_local_continuation_at_resp04',
   'execute_v3_responses_relay_runtime',
   'execute_v3_responses_relay_dry_run_runtime',
   'project_v3_responses_relay_runtime_failure',
@@ -164,12 +173,20 @@ forbid(responsesRuntime, responsesRuntimePath, [
 for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
-  'execute_v3_responses_relay_runtime_with_default_transport',
+  'execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation',
+  'responses_relay_local_continuation',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
   'execute_v3_responses_relay_dry_run_runtime',
   'return responses_relay_output_response(output);',
 ]) requireText(server, serverPath, phrase);
+for (const phrase of [
+  'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
+  'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
+  'assert_eq!(captures[1]["tools"], second_tools);',
+  '"type":"function_call_output"',
+  'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
+]) requireText(localContinuationTests, localContinuationTestPath, phrase);
 requireOrdered(
   server,
   serverPath,

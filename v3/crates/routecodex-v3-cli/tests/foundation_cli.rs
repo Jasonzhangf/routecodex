@@ -41,7 +41,7 @@ fn config_check_and_server_status_use_config_store_manifest() {
     let config = write_config();
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let check = Command::new(binary)
-        .args(["config", "check", "--config", config.to_str().unwrap()])
+        .args(["config", "check", "-c", config.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(check.status.success());
@@ -57,7 +57,46 @@ fn config_check_and_server_status_use_config_store_manifest() {
     let stdout = String::from_utf8(status.stdout).unwrap();
     assert!(stdout.contains("a enabled=true address=127.0.0.1:4444"));
     assert!(stdout.contains("b enabled=true address=127.0.0.1:4445"));
+
+    let top_level_status = Command::new(binary)
+        .args(["status", "-c", config.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(top_level_status.status.success());
+    let stdout = String::from_utf8(top_level_status.stdout).unwrap();
+    assert!(stdout.contains("a enabled=true address=127.0.0.1:4444"));
+    assert!(stdout.contains("b enabled=true address=127.0.0.1:4445"));
     fs::remove_dir_all(config.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn help_exposes_old_style_top_level_lifecycle_commands() {
+    let help = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8(help.stdout).unwrap();
+    for command in ["start", "status", "restart", "stop"] {
+        assert!(stdout.contains(command), "{stdout}");
+    }
+    assert!(
+        !stdout.contains("server"),
+        "server namespace must stay compatible but not be the user-facing lifecycle shape:\n{stdout}"
+    );
+}
+
+#[test]
+fn top_level_start_help_exposes_snap_and_optional_config() {
+    let help = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args(["start", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8(help.stdout).unwrap();
+    assert!(stdout.contains("--snap"), "{stdout}");
+    assert!(stdout.contains("--config"), "{stdout}");
+    assert!(stdout.contains("-c"), "{stdout}");
 }
 
 #[test]

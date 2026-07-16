@@ -17,6 +17,29 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    Start {
+        #[arg(short, long)]
+        config: Option<String>,
+        #[arg(long, default_value_t = false)]
+        snap: bool,
+    },
+    Status {
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+    Restart {
+        #[arg(short, long)]
+        config: Option<String>,
+        #[arg(long, default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    Stop {
+        #[arg(short, long)]
+        config: Option<String>,
+        #[arg(long, default_value_t = 15_000)]
+        timeout_ms: u64,
+    },
+    #[command(hide = true)]
     Server {
         #[command(subcommand)]
         command: ServerCommand,
@@ -26,7 +49,7 @@ enum Command {
 #[derive(Subcommand)]
 enum ConfigCommand {
     Check {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
     },
 }
@@ -34,31 +57,35 @@ enum ConfigCommand {
 #[derive(Subcommand)]
 enum ServerCommand {
     Start {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
         #[arg(long, default_value_t = false)]
         foreground: bool,
+        #[arg(long, default_value_t = false)]
+        snap: bool,
     },
     Status {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
     },
     Restart {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
     Stop {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
     #[command(hide = true)]
     RunManagedChild {
-        #[arg(long)]
+        #[arg(short, long)]
         config: Option<String>,
+        #[arg(long, default_value_t = false)]
+        snap: bool,
     },
 }
 
@@ -76,27 +103,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 manifest.servers.len()
             );
         }
+        Command::Start { config, snap } => {
+            let config = resolve_config_path(config)?;
+            let executable = std::env::current_exe()?;
+            V3ManagedLifecycle::new(config)?
+                .with_snapshots_enabled(snap)
+                .with_console_enabled(true)
+                .start_foreground(&executable)
+                .await?;
+        }
         Command::Server {
-            command: ServerCommand::Start { config, foreground },
+            command:
+                ServerCommand::Start {
+                    config,
+                    foreground,
+                    snap,
+                },
         } => {
             let config = resolve_config_path(config)?;
-            let manifest = load_manifest(&config)?;
-            for server in manifest.servers.values().filter(|server| server.enabled) {
-                println!("starting {} on {}:{}", server.id, server.bind, server.port);
-            }
             if foreground {
-                routecodex_v3_server::serve_v3_server_aggregate_until_shutdown(manifest).await?;
+                let executable = std::env::current_exe()?;
+                V3ManagedLifecycle::new(config)?
+                    .with_snapshots_enabled(snap)
+                    .with_console_enabled(true)
+                    .start_foreground(&executable)
+                    .await?;
             } else {
                 let executable = std::env::current_exe()?;
-                let status = V3ManagedLifecycle::new(config)?
+                V3ManagedLifecycle::new(config)?
+                    .with_snapshots_enabled(snap)
                     .start(&executable, Duration::from_secs(15))
                     .await?;
-                println!("{}", serde_json::to_string(&status)?);
             }
         }
         Command::Server {
             command: ServerCommand::Status { config },
-        } => {
+        }
+        | Command::Status { config } => {
             let config = resolve_config_path(config)?;
             let manifest = load_manifest(&config)?;
             for server in manifest.servers.values() {
@@ -111,7 +154,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Server {
             command: ServerCommand::Restart { config, timeout_ms },
-        } => {
+        }
+        | Command::Restart { config, timeout_ms } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
             let status = V3ManagedLifecycle::new(config)?
@@ -121,7 +165,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Server {
             command: ServerCommand::Stop { config, timeout_ms },
-        } => {
+        }
+        | Command::Stop { config, timeout_ms } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
             let status = V3ManagedLifecycle::new(config)?
@@ -130,11 +175,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
-            command: ServerCommand::RunManagedChild { config },
+            command: ServerCommand::RunManagedChild { config, snap },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
             V3ManagedLifecycle::new(config)?
+                .with_snapshots_enabled(snap)
                 .run_managed_child(&executable)
                 .await?;
         }

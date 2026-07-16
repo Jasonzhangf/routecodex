@@ -103,9 +103,13 @@ Relay is borrow-first and move-at-boundary:
 - Hub Relay runtime closeout: `v3.hub_relay_runtime_closeout` binds controlled JSON/SSE E2E,
   local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation,
   copy-budget probes, Responses Relay source server entry, and one `V3ServerRespOutbound06ClientFrame` response exit.
+- Responses Relay JSON local continuation is provider-facing black-box verified: Resp04 saves the
+  function call, the next Req04 restores it before the current `function_call_output`, `tools`
+  remains intact, and a wrong `call_id` fails before provider send without consuming saved state.
 - Live 5555 Responses Relay JSON/SSE validation is verified on the globally installed managed
-  5555 instance. Live remote/local continuation E2E, P6 deletion, Anthropic/Gemini live replay,
-  live error samples, and full production replacement remain pending.
+  5555 instance. Live provider-triggered two-turn local continuation, SSE local-continuation save,
+  remote continuation, P6 deletion, Anthropic/Gemini live replay, live error samples, and full
+  production replacement remain pending.
 
 ## Anthropic controlled Runtime evidence
 
@@ -187,6 +191,8 @@ Relay is borrow-first and move-at-boundary:
   commit.
 - Positive matrix:
   - ordinary function/tool output;
+  - Responses Relay JSON restores the saved function call before the current tool output and
+    preserves the current request's `tools` declaration;
   - custom tool output;
   - servertool hook profile;
   - apply_patch, MCP, and native tool families;
@@ -194,6 +200,7 @@ Relay is borrow-first and move-at-boundary:
   - JSON and SSE arbitrary chunk ordering through the one `V3ServerRespOutbound06ClientFrame` exit.
 - Negative matrix:
   - orphan tool output;
+  - wrong Responses Relay `call_id` fails before provider send and leaves saved state available;
   - missing `call_id`;
   - custom/function output kind mismatch;
   - malformed attachment resource;

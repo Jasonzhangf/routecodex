@@ -15,17 +15,24 @@ features:
     entry_symbols:
       - V3ManagedLifecycle::declaration
       - V3ManagedLifecycle::start
+      - V3ManagedLifecycle::start_foreground
+      - V3ManagedLifecycle::with_snapshots_enabled
+      - V3ManagedLifecycle::with_console_enabled
       - V3ManagedLifecycle::status
       - V3ManagedLifecycle::restart
       - V3ManagedLifecycle::stop
       - V3ManagedLifecycle::run_managed_child
+      - V3ServerStartup01ListenerSetPreflight
+      - V3Server03HttpRequestRaw
     allowed_paths:
       - v3/crates/routecodex-v3-lifecycle
       - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-config/src/store.rs
       - v3/crates/routecodex-v3-config/src/lib.rs
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
       - v3/crates/routecodex-v3-config/Cargo.toml
+      - v3/Cargo.toml
       - docs/goals/v3-managed-live-server-lifecycle-plan.md
       - docs/goals/v3-managed-server-lifecycle-test-design.md
       - docs/architecture/v3-resource-operation-map.yml
@@ -33,6 +40,8 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/wiki/v3-managed-server-lifecycle.md
+      - scripts/architecture/verify-v3-managed-server-lifecycle.mjs
+      - scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs
       - scripts/architecture/verify-v3-module-boundaries.mjs
     forbidden_paths:
       - sharedmodule/llmswitch-core
@@ -1389,6 +1398,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-config/src/v2_compat.rs
       - v3/crates/routecodex-v3-config/src/validate.rs
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
@@ -1433,8 +1443,12 @@ features:
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile
       - execute_v3_responses_relay_runtime_with_default_transport
+      - execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation
       - execute_v3_responses_relay_runtime
+      - execute_v3_responses_relay_runtime_with_local_continuation
       - execute_v3_responses_relay_dry_run_runtime
+      - V3ResponsesRelayLocalContinuationState
+      - V3ResponsesRelayLocalContinuationScope
       - execute_v3_responses_relay_request
       - responses_relay_output_response
       - hub_relay_runtime_closeout::controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit
@@ -1443,12 +1457,15 @@ features:
       - multi_listener_server::responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send
       - hub_relay_runtime_closeout::local_continuation_servertool_roundtrip_is_runtime_e2e
       - hub_relay_runtime_closeout::provider_error_closeout_enters_error01_06_without_success_projection
+      - responses_relay_local_continuation_integration::json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
+      - responses_relay_local_continuation_integration::wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
       - verify-v3-hub-relay-runtime-closeout
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-config/src/v2_compat.rs
       - v3/crates/routecodex-v3-config/src/validate.rs
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
@@ -1478,6 +1495,7 @@ features:
       - live runtime
     required_gates:
       - npm run test:v3-hub-relay-runtime-closeout
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-hub-relay-runtime-closeout
       - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
       - npm run test:v3-config-v2-compat-5555
@@ -1508,6 +1526,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
       - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
     resource_bindings:
@@ -1531,11 +1550,14 @@ features:
       - V3HubRelayToolKind
       - response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
       - responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
+      - json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
+      - wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
       - verify-v3-relay-tool-servertool-multiturn-parity-closeout
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
       - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
       - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
@@ -1568,6 +1590,7 @@ features:
       - fallback
     required_gates:
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
       - npm run test:v3-hub-relay-runtime-closeout
