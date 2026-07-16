@@ -197,6 +197,7 @@ fn responses_direct_request_projection_hook(
         policy.request_id.clone(),
         V3ResponsesProviderTarget {
             provider_id: candidate.provider_id.clone(),
+            provider_type: candidate.provider_type.clone(),
             base_url: candidate.base_url.clone(),
             canonical_model_id: candidate.model_id.clone(),
             wire_model: candidate.wire_model.clone(),

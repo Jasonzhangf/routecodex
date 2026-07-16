@@ -730,10 +730,11 @@ features:
     status: source_verified_controlled_upstream
     change_risk: high
     owner_kind: rust_project_v3
-    owner_scope: "Generic Rust Responses Provider runtime slice: selected Target -> Provider wire -> transport request -> typed raw response/source error"
+    owner_scope: "Generic Rust Provider runtime slice for Responses entry: selected Target with provider_type -> provider wire -> protocol-specific transport request -> typed raw response/source error"
     owner_modules:
       - v3/crates/routecodex-v3-provider-responses
       - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-target
     design:
       - docs/goals/v3-responses-direct-mvp-implementation-plan.md
       - docs/goals/v3-responses-direct-mvp-test-design.md
@@ -747,9 +748,10 @@ features:
       - Provider wire moves the request body, changes only selected wire model, and preserves client extensions
       - Provider transport resolves env and token-file auth only at send boundary
       - Provider raw response preserves JSON bytes and validated SSE event bytes
+      - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
       - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
     required_contract:
-      - routecodex-v3-provider-responses remains generic across provider IDs and contains no deployment provider branch
+      - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
       - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources
       - Server and CLI cannot import Provider transport
       - Provider node structs 12, 13, and 14 cannot be constructed by non-owner code

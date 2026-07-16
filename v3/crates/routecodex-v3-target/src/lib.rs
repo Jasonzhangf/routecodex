@@ -245,6 +245,7 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3TargetCandidate {
     pub provider_id: String,
+    pub provider_type: String,
     pub auth_alias: String,
     pub model_id: String,
     pub wire_model: String,
@@ -548,6 +549,7 @@ impl V3TargetInterpreter {
             .into_iter()
             .map(|entry| V3TargetCandidate {
                 provider_id: provider_id.to_string(),
+                provider_type: provider.provider_type.clone(),
                 auth_alias: entry.alias.clone(),
                 model_id: model.id.clone(),
                 wire_model: model.wire_name.clone(),

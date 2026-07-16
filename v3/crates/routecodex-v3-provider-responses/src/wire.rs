@@ -17,6 +17,7 @@ pub struct V3ProviderAuthHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesProviderTarget {
     pub provider_id: String,
+    pub provider_type: String,
     pub base_url: String,
     pub canonical_model_id: String,
     pub wire_model: String,
@@ -118,6 +119,7 @@ mod tests {
             "req-1",
             V3ResponsesProviderTarget {
                 provider_id: "neutral-provider".into(),
+                provider_type: "responses".into(),
                 base_url: "http://upstream.invalid/v1".into(),
                 canonical_model_id: "canonical-model".into(),
                 wire_model: "upstream-model".into(),
@@ -142,6 +144,7 @@ mod tests {
     fn non_object_or_non_boolean_stream_fails_without_rebuilding_payload() {
         let target = V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
+            provider_type: "responses".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "model".into(),
             wire_model: "model".into(),

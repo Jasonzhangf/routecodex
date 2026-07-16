@@ -198,7 +198,7 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-target
     owner_node: V3Target10ConcreteProviderSelected
-    identity: [requestId, targetId, providerId, authAlias, modelId]
+    identity: [requestId, targetId, providerId, providerType, authAlias, modelId]
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
@@ -222,7 +222,7 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3Provider12ResponsesWirePayload
-    identity: [requestId, providerId, modelId]
+    identity: [requestId, providerId, providerType, modelId]
     allowed_writers: [V3Provider12ResponsesWirePayload]
     allowed_readers: [V3Transport13ResponsesHttpRequest]
     forbidden_writers: [V3Resp15ClientPayload, V3Server16HttpFrame, V3DebugArtifact]
@@ -234,7 +234,7 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3Transport13ResponsesHttpRequest
-    identity: [requestId, providerId, upstreamUrl]
+    identity: [requestId, providerId, providerType, upstreamUrl]
     allowed_writers: [V3Transport13ResponsesHttpRequest]
     allowed_readers: [V3ProviderResp14Raw]
     forbidden_writers: [routecodex-v3-server, V3Resp15ClientPayload]

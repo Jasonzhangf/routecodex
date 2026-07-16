@@ -9,9 +9,10 @@ use routecodex_v3_error::{
     V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    build_v3_transport_13_responses_http_request_from_parts, ReqwestResponsesTransport,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ProviderResponseBody, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
+    V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -235,17 +236,15 @@ fn build_v3_gemini_transport_09(
         target.base_url.trim_end_matches('/'),
         target.wire_model
     );
-    let url = reqwest::Url::parse(&url_text)
-        .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?;
-    Ok(V3Transport13ResponsesHttpRequest::Http {
-        request_id: request_id.to_string(),
-        provider_id: target.provider_id,
-        url,
-        auth: target.auth,
+    build_v3_transport_13_responses_http_request_from_parts(
+        request_id,
+        target.provider_id,
+        url_text,
+        target.auth,
         stream_intent,
         body,
-        cancellation: None,
-    })
+    )
+    .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
 }
 
 pub fn project_v3_gemini_relay_runtime_failure(
@@ -555,6 +554,7 @@ fn provider_target(
     };
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),

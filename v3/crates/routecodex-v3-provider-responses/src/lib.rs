@@ -16,6 +16,7 @@ pub use raw_response::{
     V3ProviderResponseHeader, V3ProviderSseStream,
 };
 pub use transport::{
+    build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_request_from_v3_provider_12, ProviderResponsesTransport,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation,

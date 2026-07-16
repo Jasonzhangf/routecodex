@@ -746,6 +746,7 @@ mod tests {
             V3HubTargetResolution::Routed,
             routecodex_v3_target::V3TargetCandidate {
                 provider_id: "provider".into(),
+                provider_type: "responses".into(),
                 auth_alias: "primary".into(),
                 model_id: "model".into(),
                 wire_model: "wire-model".into(),

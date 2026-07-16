@@ -671,6 +671,7 @@ fn provider_target(
     };
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),

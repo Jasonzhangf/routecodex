@@ -193,7 +193,7 @@ for (const fixture of [
   },
   {
     name: 'transport request private constructor',
-    code: 'use routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest;\nfn main() { let _ = V3Transport13ResponsesHttpRequest { request_id: String::new(), provider_id: String::new(), url: todo!(), auth: todo!(), stream_intent: todo!(), body: todo!(), cancellation: None }; }\n',
+    code: 'use routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest;\nfn main() { let _ = V3Transport13ResponsesHttpRequest { _sealed: () }; }\n',
   },
   {
     name: 'provider raw private constructor',

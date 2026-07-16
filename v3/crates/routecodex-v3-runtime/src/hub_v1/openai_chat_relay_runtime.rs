@@ -9,9 +9,10 @@ use routecodex_v3_error::{
     V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
-    V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
+    build_v3_provider_12_responses_wire_payload,
+    build_v3_transport_13_responses_http_request_from_parts, ReqwestResponsesTransport,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ProviderResponseBody, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -217,17 +218,15 @@ fn build_v3_openai_chat_transport_09_from_v3_provider_08(
     let stream_intent = wire.stream_intent();
     let body = wire.body().clone();
     let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
-    let url = reqwest::Url::parse(&url_text)
-        .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
-    Ok(V3Transport13ResponsesHttpRequest::Http {
+    build_v3_transport_13_responses_http_request_from_parts(
         request_id,
-        provider_id: target.provider_id,
-        url,
-        auth: target.auth,
+        target.provider_id,
+        url_text,
+        target.auth,
         stream_intent,
         body,
-        cancellation: None,
-    })
+    )
+    .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
@@ -590,6 +589,7 @@ fn provider_target(
     };
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),

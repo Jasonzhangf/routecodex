@@ -171,6 +171,7 @@ fn target(url: &str) -> V3ResponsesProviderTarget {
 fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {
         provider_id: "ws-provider".into(),
+        provider_type: "responses".into(),
         base_url: "https://http-endpoint.invalid/v1".into(),
         canonical_model_id: "model".into(),
         wire_model: "model".into(),
