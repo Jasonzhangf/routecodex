@@ -93,7 +93,18 @@ function installLocalLlmsFromTarball() {
       throw new Error(`local llms tarball missing (stdout=${JSON.stringify(String(pack.stdout || '').trim())})`);
     }
 
-    runNpm(['install', '--no-audit', '--no-fund', '--no-save', tarballPath]);
+    runNpm([
+      'install',
+      '--no-audit',
+      '--no-fund',
+      '--no-save',
+      '--omit=optional',
+      '--ignore-scripts',
+      '--offline',
+      '--progress=false',
+      '--loglevel=warn',
+      tarballPath,
+    ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

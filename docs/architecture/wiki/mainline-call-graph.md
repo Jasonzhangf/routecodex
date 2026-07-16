@@ -479,6 +479,32 @@ flowchart LR
 | err-04 | `ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` | anchored | `resolveProviderRetryExecutionPlan -> resolve_error_err05_execution_decision` |  | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
 | err-05 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` |  | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
 
+## vr.route_token_estimation.mainline
+
+Virtual Router derives request token estimate with Rust tiktoken before route classification; image/video bytes do not inflate the estimate.
+
+Entry contract: `HubReqChatProcess03Governed` via `docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  VrRouteTokenEstimate03Derived["VrRouteTokenEstimate03Derived"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqChatProcess03Governed -->|vrt-01| VrRouteTokenEstimate03Derived
+  VrRouteTokenEstimate03Derived -->|vrt-02| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubReqChatProcess03Governed anchored;
+  class VrRouteTokenEstimate03Derived anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrt-01 | `HubReqChatProcess03Governed -> VrRouteTokenEstimate03Derived` | anchored | `route -> build_routing_features` |  | `vr.route_token_estimation`<br/>Virtual Router request token counting uses the retired tiktoken semantics in Rust |
+| vrt-02 | `VrRouteTokenEstimate03Derived -> VrRoute04SelectedTarget` | anchored | `classify -> long_context_threshold_tokens` |  | `vr.route_selection`<br/>virtual router route classification and selected target truth |
+
 ## vr.route_availability.mainline
 
 Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider.

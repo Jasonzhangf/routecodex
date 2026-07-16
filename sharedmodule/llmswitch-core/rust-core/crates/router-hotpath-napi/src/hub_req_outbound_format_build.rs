@@ -4,9 +4,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::req_outbound_stage3_compat::responses::apply_responses_instructions_to_input;
-use crate::shared_json_utils::serialized_json_size;
-
-const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,20 +16,6 @@ pub struct FormatBuildInput {
 #[serde(rename_all = "camelCase")]
 pub struct FormatBuildOutput {
     pub payload: Value,
-}
-
-fn validate_payload_size(payload: &Value) -> Result<(), String> {
-    let payload_size = serialized_json_size(payload)
-        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
-
-    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
-        return Err(format!(
-            "Payload size {} exceeds maximum allowed {} bytes",
-            payload_size, MAX_PAYLOAD_SIZE_BYTES
-        ));
-    }
-
-    Ok(())
 }
 
 fn strip_private_fields(value: &Value) -> Value {
@@ -705,8 +688,6 @@ pub fn build_format_request(input: FormatBuildInput) -> Result<FormatBuildOutput
             strip_private_fields(payload)
         }
     };
-
-    validate_payload_size(&payload)?;
 
     Ok(FormatBuildOutput { payload })
 }
@@ -1752,12 +1733,6 @@ mod tests {
 
         let err = build_format_request(input).unwrap_err();
         assert_eq!(err, "Missing 'payload' field in format envelope");
-    }
-
-    #[test]
-    fn test_payload_size_limit() {
-        let small_payload = serde_json::json!({"model": "test"});
-        assert!(validate_payload_size(&small_payload).is_ok());
     }
 
     // Critical path test: Protocol not found fallback

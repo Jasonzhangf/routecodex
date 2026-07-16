@@ -2,6 +2,10 @@ mod media;
 mod tools;
 
 use serde_json::{json, Value};
+use tiktoken_rs::{
+    cl100k_base_singleton, o200k_base_singleton, p50k_base_singleton, p50k_edit_singleton,
+    r50k_base_singleton, CoreBPE,
+};
 
 use crate::virtual_router_engine::message_utils::{extract_message_text, get_latest_message_role};
 use media::analyze_media_attachments;
@@ -529,45 +533,153 @@ pub(crate) fn estimate_request_tokens_payload_json(input_json: String) -> napi::
     })
 }
 
+// feature_id: vr.route_token_estimation
 fn estimate_request_tokens(request: &Value, _latest_user_text: &str) -> i64 {
-    let mut total_chars: usize = 0;
+    let encoder = select_legacy_request_encoder(request);
+    let mut total_tokens: usize = 0;
     if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {
         for msg in messages {
-            total_chars += estimate_message_text_chars(msg);
+            total_tokens += count_message_tokens(msg, encoder);
         }
     }
-    let message_estimate = (total_chars as f64 / 4.0).ceil() as i64;
-    let responses_estimate = estimate_responses_context_tokens(request);
-    // Some tool-heavy turns keep most payload in structured fields
-    // (tool_calls arguments, function_call_output, rich input blocks),
-    // while message-text extraction only sees plain text and underestimates context.
-    // Use a structured estimation over core request carriers as a guardrail.
-    let mut structured_chars: usize = 0;
-    if let Some(messages) = request.get("messages").and_then(|v| v.as_array()) {
-        structured_chars += estimate_messages_structured_chars(messages);
-    }
-    if let Some(input) = request.get("input") {
-        structured_chars += estimate_structured_chars(input);
-    }
-    if let Some(tools) = request.get("tools") {
-        structured_chars += estimate_structured_chars(tools);
-    }
-    if let Some(semantics) = request.get("semantics") {
-        structured_chars += estimate_structured_chars(semantics);
-    }
-    let structured_estimate = if structured_chars == 0 {
-        0
-    } else {
-        (structured_chars as f64 / 3.2).ceil() as i64
-    };
-    message_estimate
-        .max(responses_estimate)
-        .max(structured_estimate)
-        .max(0)
+    let request_extras = count_request_extras_tokens(request, encoder);
+    total_tokens += request_extras;
+    let responses_context_tokens = count_responses_context_tokens(request, encoder);
+    total_tokens.max(responses_context_tokens + request_extras) as i64
 }
 
-fn estimate_responses_context_tokens(request: &Value) -> i64 {
-    let mut total_chars: usize = 0;
+fn select_legacy_request_encoder(request: &Value) -> &'static CoreBPE {
+    let model = request
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    match legacy_tiktoken_encoding_name(model) {
+        "o200k_base" => o200k_base_singleton(),
+        "p50k_base" => p50k_base_singleton(),
+        "p50k_edit" => p50k_edit_singleton(),
+        "r50k_base" | "gpt2" => r50k_base_singleton(),
+        _ => cl100k_base_singleton(),
+    }
+}
+
+fn legacy_tiktoken_encoding_name(model: &str) -> &'static str {
+    match model {
+        "gpt-4o"
+        | "gpt-4o-2024-05-13"
+        | "gpt-4o-2024-08-06"
+        | "gpt-4o-2024-11-20"
+        | "gpt-4o-mini-2024-07-18"
+        | "gpt-4o-mini"
+        | "gpt-4o-search-preview"
+        | "gpt-4o-search-preview-2025-03-11"
+        | "gpt-4o-mini-search-preview"
+        | "gpt-4o-mini-search-preview-2025-03-11"
+        | "gpt-4o-audio-preview"
+        | "gpt-4o-audio-preview-2024-12-17"
+        | "gpt-4o-audio-preview-2024-10-01"
+        | "gpt-4o-mini-audio-preview"
+        | "gpt-4o-mini-audio-preview-2024-12-17"
+        | "o1"
+        | "o1-2024-12-17"
+        | "o1-mini"
+        | "o1-mini-2024-09-12"
+        | "o1-preview"
+        | "o1-preview-2024-09-12"
+        | "o1-pro"
+        | "o1-pro-2025-03-19"
+        | "o3"
+        | "o3-2025-04-16"
+        | "o3-mini"
+        | "o3-mini-2025-01-31"
+        | "o4-mini"
+        | "o4-mini-2025-04-16"
+        | "chatgpt-4o-latest"
+        | "gpt-4o-realtime"
+        | "gpt-4o-realtime-preview-2024-10-01"
+        | "gpt-4o-realtime-preview-2024-12-17"
+        | "gpt-4o-mini-realtime-preview"
+        | "gpt-4o-mini-realtime-preview-2024-12-17"
+        | "gpt-4.1"
+        | "gpt-4.1-2025-04-14"
+        | "gpt-4.1-mini"
+        | "gpt-4.1-mini-2025-04-14"
+        | "gpt-4.1-nano"
+        | "gpt-4.1-nano-2025-04-14"
+        | "gpt-4.5-preview"
+        | "gpt-4.5-preview-2025-02-27"
+        | "gpt-5"
+        | "gpt-5-2025-08-07"
+        | "gpt-5-nano"
+        | "gpt-5-nano-2025-08-07"
+        | "gpt-5-mini"
+        | "gpt-5-mini-2025-08-07"
+        | "gpt-5-chat-latest" => "o200k_base",
+        "text-davinci-003" | "text-davinci-002" | "code-davinci-002" | "code-davinci-001"
+        | "code-cushman-002" | "code-cushman-001" | "davinci-codex" | "cushman-codex" => {
+            "p50k_base"
+        }
+        "text-davinci-edit-001" | "code-davinci-edit-001" => "p50k_edit",
+        "text-davinci-001"
+        | "text-curie-001"
+        | "text-babbage-001"
+        | "text-ada-001"
+        | "davinci"
+        | "curie"
+        | "babbage"
+        | "ada"
+        | "text-similarity-davinci-001"
+        | "text-similarity-curie-001"
+        | "text-similarity-babbage-001"
+        | "text-similarity-ada-001"
+        | "text-search-davinci-doc-001"
+        | "text-search-curie-doc-001"
+        | "text-search-babbage-doc-001"
+        | "text-search-ada-doc-001"
+        | "code-search-babbage-code-001"
+        | "code-search-ada-code-001" => "r50k_base",
+        "gpt2" => "gpt2",
+        _ => "cl100k_base",
+    }
+}
+
+fn count_message_tokens(message: &Value, encoder: &CoreBPE) -> usize {
+    let mut total = 0;
+    if let Some(role) = message.get("role").and_then(Value::as_str) {
+        total += count_text_tokens(role, encoder);
+    }
+    if let Some(content) = message.get("content") {
+        total += count_content_tokens(content, encoder);
+    }
+    if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+        for call in tool_calls {
+            total += count_json_value_as_text_tokens(call, encoder);
+        }
+    }
+    if let Some(name) = message.get("name").and_then(Value::as_str) {
+        total += count_text_tokens(name, encoder);
+    }
+    if let Some(tool_call_id) = message.get("tool_call_id").and_then(Value::as_str) {
+        total += count_text_tokens(tool_call_id, encoder);
+    }
+    total
+}
+
+fn count_request_extras_tokens(request: &Value, encoder: &CoreBPE) -> usize {
+    let mut total = 0;
+    if let Some(tools) = request.get("tools").and_then(Value::as_array) {
+        for tool in tools {
+            total += count_json_value_as_text_tokens(tool, encoder);
+        }
+    }
+    if let Some(parameters) = request.get("parameters") {
+        total += count_json_value_as_text_tokens(parameters, encoder);
+    }
+    total
+}
+
+fn count_responses_context_tokens(request: &Value, encoder: &CoreBPE) -> usize {
+    let mut total = 0;
     if let Some(input) = request
         .get("semantics")
         .and_then(|v| v.get("responses"))
@@ -576,56 +688,25 @@ fn estimate_responses_context_tokens(request: &Value) -> i64 {
         .and_then(|v| v.as_array())
     {
         for entry in input {
-            total_chars += estimate_structured_chars(entry);
+            total += count_structured_tokens(entry, encoder);
         }
     }
-    if let Some(tools) = request.get("tools") {
-        total_chars += estimate_structured_chars(tools);
-    }
-    if total_chars == 0 {
-        return 0;
-    }
-    (total_chars as f64 / 3.0).ceil() as i64
+    total
 }
 
-fn estimate_message_text_chars(message: &Value) -> usize {
-    let Some(content) = message.get("content") else {
-        return 0;
-    };
-    estimate_message_content_chars(content)
-}
-
-fn estimate_messages_structured_chars(messages: &[Value]) -> usize {
-    messages.iter().map(estimate_message_structured_chars).sum()
-}
-
-fn estimate_message_structured_chars(message: &Value) -> usize {
-    let Some(map) = message.as_object() else {
-        return estimate_structured_chars(message);
-    };
-    map.iter()
-        .filter_map(|(key, entry)| {
-            if key == "metadata" {
-                return None;
-            }
-            if key == "content" {
-                return Some(key.len() + estimate_message_content_chars(entry));
-            }
-            Some(key.len() + estimate_structured_chars(entry))
-        })
-        .sum()
-}
-
-fn estimate_message_content_chars(content: &Value) -> usize {
+fn count_content_tokens(content: &Value, encoder: &CoreBPE) -> usize {
     match content {
-        Value::String(text) => estimate_message_content_string_chars(text),
-        Value::Array(items) => items.iter().map(estimate_message_content_part_chars).sum(),
-        Value::Object(map) => estimate_message_content_object_chars(map),
+        Value::String(text) => count_content_string_tokens(text, encoder),
+        Value::Array(items) => items
+            .iter()
+            .map(|part| count_content_part_tokens(part, encoder))
+            .sum(),
+        Value::Object(map) => count_content_object_tokens(map, encoder),
         _ => 0,
     }
 }
 
-fn estimate_message_content_string_chars(raw: &str) -> usize {
+fn count_content_string_tokens(raw: &str, encoder: &CoreBPE) -> usize {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return 0;
@@ -634,69 +715,71 @@ fn estimate_message_content_string_chars(raw: &str) -> usize {
         || (trimmed.starts_with('[') && trimmed.ends_with(']'));
     if likely_json {
         if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-            return estimate_message_content_chars(&parsed);
+            return count_content_tokens(&parsed, encoder);
         }
     }
-    raw.len()
+    count_text_tokens(raw, encoder)
 }
 
-fn estimate_message_content_part_chars(part: &Value) -> usize {
+fn count_content_part_tokens(part: &Value, encoder: &CoreBPE) -> usize {
     match part {
-        Value::String(text) => text.len(),
-        Value::Object(map) => estimate_message_content_object_chars(map),
-        _ => estimate_structured_chars(part),
+        Value::String(text) => count_text_tokens(text, encoder),
+        Value::Object(map) => count_content_object_tokens(map, encoder),
+        _ => count_structured_tokens(part, encoder),
     }
 }
 
-fn estimate_message_content_object_chars(map: &serde_json::Map<String, Value>) -> usize {
+fn count_content_object_tokens(map: &serde_json::Map<String, Value>, encoder: &CoreBPE) -> usize {
     if detect_media_kind(map).is_some() {
         return 0;
     }
     if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
-        return text.len();
+        return count_text_tokens(text, encoder);
     }
     if let Some(content) = map.get("content").and_then(|v| v.as_str()) {
-        return content.len();
+        return count_text_tokens(content, encoder);
     }
-    estimate_structured_chars(&Value::Object(map.clone()))
+    count_json_value_as_text_tokens(&Value::Object(map.clone()), encoder)
 }
 
-fn estimate_structured_chars(value: &Value) -> usize {
+fn count_structured_tokens(value: &Value, encoder: &CoreBPE) -> usize {
     match value {
         Value::Null => 0,
-        Value::Bool(v) => v.to_string().len(),
-        Value::Number(v) => v.to_string().len(),
-        Value::String(v) => estimate_text_or_structured_chars(v),
-        Value::Array(values) => values.iter().map(estimate_structured_chars).sum(),
+        Value::Bool(v) => count_text_tokens(&v.to_string(), encoder),
+        Value::Number(v) => count_text_tokens(&v.to_string(), encoder),
+        Value::String(v) => count_text_tokens(v, encoder),
+        Value::Array(values) => values
+            .iter()
+            .map(|entry| count_structured_tokens(entry, encoder))
+            .sum(),
         Value::Object(map) => {
             if detect_media_kind(map).is_some() {
                 let type_len = map
                     .get("type")
                     .and_then(|v| v.as_str())
-                    .map(|v| v.len())
-                    .unwrap_or(5);
-                return type_len + "[omitted_media]".len();
+                    .map(|v| count_text_tokens(v, encoder))
+                    .unwrap_or_else(|| count_text_tokens("media", encoder));
+                return type_len + count_text_tokens("[omitted_media]", encoder);
             }
             map.iter()
-                .map(|(key, entry)| key.len() + estimate_structured_chars(entry))
+                .map(|(key, entry)| {
+                    count_text_tokens(key, encoder) + count_structured_tokens(entry, encoder)
+                })
                 .sum()
         }
     }
 }
 
-fn estimate_text_or_structured_chars(raw: &str) -> usize {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+fn count_json_value_as_text_tokens(value: &Value, encoder: &CoreBPE) -> usize {
+    let text = serde_json::to_string(value).expect("serde_json::Value serialization cannot fail");
+    count_text_tokens(&text, encoder)
+}
+
+fn count_text_tokens(text: &str, encoder: &CoreBPE) -> usize {
+    if text.trim().is_empty() {
         return 0;
     }
-    let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-    if likely_json {
-        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-            return estimate_structured_chars(&parsed);
-        }
-    }
-    raw.len()
+    encoder.count_with_special_tokens(text)
 }
 
 fn detect_media_kind(map: &serde_json::Map<String, Value>) -> Option<&'static str> {
@@ -810,8 +893,40 @@ mod tests {
     }
 
     #[test]
+    fn estimate_tokens_matches_retired_tiktoken_model_table() {
+        let alias_request = json!({
+            "model": "gpt-5.6-sol",
+            "messages": [
+                { "role": "user", "content": "你好 hello" }
+            ]
+        });
+        let known_request = json!({
+            "model": "gpt-5",
+            "messages": [
+                { "role": "user", "content": "你好 hello" }
+            ]
+        });
+
+        assert_eq!(
+            build_routing_features(&alias_request, &json!({})).estimated_tokens,
+            4
+        );
+        assert_eq!(
+            build_routing_features(&known_request, &json!({})).estimated_tokens,
+            3
+        );
+    }
+
+    #[test]
     fn estimate_tokens_accounts_for_structured_tool_payload_without_metadata_hint() {
-        let big_args = "z".repeat(700_000);
+        let compact_request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "user", "content": "run tool" }
+            ],
+            "tools": []
+        });
+        let big_args = "grep needle src && ".repeat(200);
         let request = json!({
             "model": "glm-5",
             "messages": [
@@ -836,18 +951,26 @@ mod tests {
                 }
             ]
         });
+        let compact = build_routing_features(&compact_request, &json!({})).estimated_tokens;
         let features = build_routing_features(&request, &json!({}));
         assert!(
-            features.estimated_tokens >= 180_000,
-            "expected structured payload to exceed longcontext threshold, got {}",
+            features.estimated_tokens > compact + 200,
+            "expected structured payload to increase estimate, compact={compact}, actual={}",
             features.estimated_tokens
         );
     }
 
     #[test]
     fn estimate_tokens_accounts_for_large_responses_context_without_metadata_hint() {
-        let large_output = "y".repeat(2_200);
-        let input: Vec<Value> = (0..280)
+        let compact_request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "assistant", "content": "followup" }
+            ],
+            "semantics": { "responses": { "context": { "input": [] } } }
+        });
+        let large_output = "result line ".repeat(300);
+        let input: Vec<Value> = (0..8)
             .map(|idx| {
                 json!({
                     "type": "function_call_output",
@@ -872,10 +995,11 @@ mod tests {
                 }
             }
         });
+        let compact = build_routing_features(&compact_request, &json!({})).estimated_tokens;
         let features = build_routing_features(&request, &json!({}));
         assert!(
-            features.estimated_tokens >= 180_000,
-            "expected responses context payload to exceed longcontext threshold, got {}",
+            features.estimated_tokens > compact + 200,
+            "expected responses context payload to increase estimate, compact={compact}, actual={}",
             features.estimated_tokens
         );
     }
@@ -914,6 +1038,8 @@ mod tests {
         });
         let base = build_routing_features(&base_request, &json!({})).estimated_tokens;
         let actual = build_routing_features(&image_request, &json!({})).estimated_tokens;
+        assert_eq!(base, 4);
+        assert_eq!(actual, 4);
         assert!(
             actual <= base + 8,
             "expected media payload to be omitted from token estimate, base={base}, actual={actual}"

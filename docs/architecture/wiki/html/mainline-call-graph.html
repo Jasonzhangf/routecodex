@@ -567,6 +567,29 @@
         <tr><td>err-05</td><td><code>ErrorErr05ExecutionDecision -&gt; ErrorErr06ClientProjected</code></td><td>anchored</td><td><code>project_error_err_06_client_from_error_err_05_execution_decision -&gt; mapErrorToHttp</code></td><td></td><td><code>error.client_projection</code>&lt;br/&gt;ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames</td></tr>
         </tbody>
         </table>
+        <h2>vr.route_token_estimation.mainline</h2>
+        <p>Virtual Router derives request token estimate with Rust tiktoken before route classification; image/video bytes do not inflate the estimate.</p>
+        <p>Entry contract: <code>HubReqChatProcess03Governed</code> via <code>docs/goals/vr-rust-tiktoken-image-body-limit-test-design.md</code></p>
+        <pre class="mermaid">flowchart LR
+          VrRoute04SelectedTarget[&quot;VrRoute04SelectedTarget&quot;]
+          VrRouteTokenEstimate03Derived[&quot;VrRouteTokenEstimate03Derived&quot;]
+          HubReqChatProcess03Governed[&quot;HubReqChatProcess03Governed&quot;]
+          HubReqChatProcess03Governed --&gt;|vrt-01| VrRouteTokenEstimate03Derived
+          VrRouteTokenEstimate03Derived --&gt;|vrt-02| VrRoute04SelectedTarget
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class HubReqChatProcess03Governed anchored;
+          class VrRouteTokenEstimate03Derived anchored;
+          class VrRoute04SelectedTarget anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>vrt-01</td><td><code>HubReqChatProcess03Governed -&gt; VrRouteTokenEstimate03Derived</code></td><td>anchored</td><td><code>route -&gt; build_routing_features</code></td><td></td><td><code>vr.route_token_estimation</code>&lt;br/&gt;Virtual Router request token counting uses the retired tiktoken semantics in Rust</td></tr>
+        <tr><td>vrt-02</td><td><code>VrRouteTokenEstimate03Derived -&gt; VrRoute04SelectedTarget</code></td><td>anchored</td><td><code>classify -&gt; long_context_threshold_tokens</code></td><td></td><td><code>vr.route_selection</code>&lt;br/&gt;virtual router route classification and selected target truth</td></tr>
+        </tbody>
+        </table>
         <h2>vr.route_availability.mainline</h2>
         <p>Virtual Router ordinary-route filtering, default-pool availability floor, and primary_exhausted planning remain Rust-owned; TS may only consume the floor/plan output and must not locally re-decide terminal no-provider.</p>
         <p>Entry contract: <code>VrAvail01RouteCandidates</code> via <code>docs/architecture/wiki/virtual-router-route-availability-mainline-source.md</code></p>

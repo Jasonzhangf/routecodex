@@ -3,11 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::hub_resp_outbound_client_semantics::build_openai_chat_response_from_anthropic_message;
-use crate::shared_json_utils::serialized_json_size;
 
 // feature_id: hub.response_provider_sse_materialization
-
-const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,20 +57,6 @@ pub struct ProviderResponseSseStreamReadErrorOutput {
     pub status_code: i64,
     pub retryable: bool,
     pub request_executor_provider_error_stage: String,
-}
-
-fn validate_payload_size(payload: &Value) -> Result<(), String> {
-    let payload_size = serialized_json_size(payload)
-        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
-
-    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
-        return Err(format!(
-            "Payload size {} exceeds maximum allowed {} bytes",
-            payload_size, MAX_PAYLOAD_SIZE_BYTES
-        ));
-    }
-
-    Ok(())
 }
 
 fn read_non_empty_text(value: Option<&Value>) -> Option<String> {
@@ -192,7 +175,6 @@ pub fn build_provider_sse_stream_read_error_descriptor(
 
 fn parse_openai_responses_response(payload: &Value) -> Result<FormatEnvelope, String> {
     let materialized = materialize_openai_responses_response_payload(payload)?;
-    validate_payload_size(&materialized)?;
 
     // Extract model from response if available
     let model = materialized
@@ -288,7 +270,6 @@ fn normalize_openai_responses_tool_calls_arrays(value: &mut Value) {
 
 fn parse_openai_chat_response(payload: &Value) -> Result<FormatEnvelope, String> {
     let materialized = materialize_openai_chat_response_payload(payload)?;
-    validate_payload_size(&materialized)?;
 
     if !materialized.is_object() {
         return Err("OpenAI chat response must be a JSON object".to_string());
@@ -890,7 +871,6 @@ fn unsupported_protocol_error(protocol: &str) -> String {
 
 fn parse_anthropic_messages_response(payload: &Value) -> Result<FormatEnvelope, String> {
     let materialized = build_openai_chat_response_from_anthropic_message(payload, "resp_inbound")?;
-    validate_payload_size(&materialized)?;
 
     let model = materialized
         .get("model")
@@ -911,8 +891,6 @@ fn parse_anthropic_messages_response(payload: &Value) -> Result<FormatEnvelope, 
 }
 
 fn parse_gemini_chat_response(payload: &Value) -> Result<FormatEnvelope, String> {
-    validate_payload_size(payload)?;
-
     // Gemini response model might be in different locations
     let model = payload
         .get("modelVersion")
@@ -1577,12 +1555,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Failed to parse input JSON"));
-    }
-
-    #[test]
-    fn test_payload_size_limit() {
-        let small_payload = serde_json::json!({"test": "data"});
-        assert!(validate_payload_size(&small_payload).is_ok());
     }
 
     // Critical path test: Missing model field (should not fail, just empty string)

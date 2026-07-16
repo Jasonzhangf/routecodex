@@ -1,0 +1,31 @@
+lifecycle_id: vr.route_token_estimation.mainline
+summary: Virtual Router derives request token estimate with Rust tiktoken before
+  route classification; image/video bytes do not inflate the estimate.
+owner_feature_id: vr.route_token_estimation
+entrypoint:
+  node_id: HubReqChatProcess03Governed
+  wiki_page: null
+  call_map_chain_id: vr.route_token_estimation.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - VrRoute04SelectedTarget
+  - VrRouteTokenEstimate03Derived
+edges:
+  - step_id: vrt-01
+    from_node: HubReqChatProcess03Governed
+    to_node: VrRouteTokenEstimate03Derived
+    status: anchored
+    owner_feature_id: vr.route_token_estimation
+    binding_pending: null
+    split_binding_id: null
+  - step_id: vrt-02
+    from_node: VrRouteTokenEstimate03Derived
+    to_node: VrRoute04SelectedTarget
+    status: anchored
+    owner_feature_id: vr.route_selection
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

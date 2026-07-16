@@ -1,10 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared_json_utils::serialized_json_size;
-
-const MAX_PAYLOAD_SIZE_BYTES: usize = 50 * 1024 * 1024; // 50MB limit
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FormatParseInput {
@@ -26,20 +22,6 @@ pub struct FormatEnvelope {
 #[serde(rename_all = "camelCase")]
 pub struct FormatParseOutput {
     pub envelope: FormatEnvelope,
-}
-
-fn validate_payload_size(raw_request: &Value) -> Result<(), String> {
-    let payload_size = serialized_json_size(raw_request)
-        .map_err(|e| format!("Failed to serialize payload for size check: {}", e))?;
-
-    if payload_size > MAX_PAYLOAD_SIZE_BYTES {
-        return Err(format!(
-            "Payload size {} exceeds maximum allowed {} bytes",
-            payload_size, MAX_PAYLOAD_SIZE_BYTES
-        ));
-    }
-
-    Ok(())
 }
 
 fn normalize_protocol_token(raw_protocol: &str, payload: &Value) -> String {
@@ -67,7 +49,6 @@ pub fn parse_format_envelope(input: FormatParseInput) -> Result<FormatParseOutpu
     if !input.raw_request.is_object() {
         return Err("Request payload must be an object".to_string());
     }
-    validate_payload_size(&input.raw_request)?;
     let protocol = normalize_protocol_token(&input.protocol, &input.raw_request);
     let model = input
         .raw_request
@@ -306,15 +287,6 @@ mod tests {
         assert_eq!(result.envelope.format, "openai-responses");
     }
 
-    // Payload size limit test
-    #[test]
-    fn test_payload_size_limit() {
-        // Create a payload that exceeds 50MB would be too slow,
-        // so we just verify the validation function exists and works
-        let small_payload = serde_json::json!({"model": "test"});
-        assert!(validate_payload_size(&small_payload).is_ok());
-    }
-
     // NEW: Critical path test - OpenAI model field type object is accepted
     #[test]
     fn test_accepts_openai_model_type_object() {
@@ -361,36 +333,5 @@ mod tests {
         let result = parse_format_envelope(input).unwrap();
         assert_eq!(result.envelope.format, "gemini-chat");
         assert!(result.envelope.metadata.is_none());
-    }
-
-    // NEW: Critical path test - Payload at exactly 50MB limit (simulated with smaller size check)
-    #[test]
-    fn test_payload_at_size_limit() {
-        // Create a payload close to but under the limit
-        // 50MB = 52428800 bytes, we create ~1KB payload for fast test
-        let large_content = "x".repeat(1024);
-        let payload = serde_json::json!({
-            "model": "gpt-4",
-            "messages": [{"role": "user", "content": large_content}]
-        });
-
-        let payload_str = serde_json::to_string(&payload).unwrap();
-        assert!(
-            payload_str.len() < MAX_PAYLOAD_SIZE_BYTES,
-            "Test payload should be under limit"
-        );
-        assert!(validate_payload_size(&payload).is_ok());
-    }
-
-    // NEW: Critical path test - Payload exceeding size limit
-    #[test]
-    fn test_payload_exceeds_size_limit() {
-        // Create a payload that would exceed 50MB (simulated with validation function)
-        // We test the validation logic directly since creating 50MB+ JSON is slow
-        let tiny_payload = serde_json::json!({"model": "test"});
-        assert!(validate_payload_size(&tiny_payload).is_ok());
-
-        // Verify the limit constant is set correctly
-        assert_eq!(MAX_PAYLOAD_SIZE_BYTES, 50 * 1024 * 1024);
     }
 }

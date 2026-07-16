@@ -126,6 +126,15 @@ chains:
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: Stopless session chain is fully anchored and locked.
+  - chain_id: vr.route_token_estimation.mainline
+    expected_total_edges: 2
+    min_anchored_edges: 2
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router route-token estimation is fully anchored: Rust derives the
+      tiktoken estimate from the governed request and the classifier only
+      consumes that estimate for longcontext selection.
   - chain_id: vr.route_availability.mainline
     expected_total_edges: 4
     min_anchored_edges: 3
