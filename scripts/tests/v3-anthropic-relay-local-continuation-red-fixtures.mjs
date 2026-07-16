@@ -20,6 +20,7 @@ const files = [
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/manifests/v3.anthropic_relay.local_continuation.mainline.yml',
   'docs/architecture/wiki/v3-anthropic-relay-local-continuation.md',
+  'docs/architecture/wiki/v3-anthropic-relay-local-continuation.html',
   'docs/goals/v3-anthropic-relay-local-continuation-test-design.md',
 ];
 const runtime = files[0];

@@ -15,6 +15,7 @@ const paths = {
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   manifest: 'docs/architecture/manifests/v3.anthropic_relay.local_continuation.mainline.yml',
   wiki: 'docs/architecture/wiki/v3-anthropic-relay-local-continuation.md',
+  html: 'docs/architecture/wiki/v3-anthropic-relay-local-continuation.html',
   design: 'docs/goals/v3-anthropic-relay-local-continuation-test-design.md',
 };
 const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(path, 'utf8')]));
@@ -80,6 +81,8 @@ for (const phrase of [
   'multiple_pending_tool_calls_restore_one_canonical_context_and_release_all_aliases',
 ]) requireText('tests', phrase);
 for (const node of nodes) requireText('wiki', node);
+for (const node of nodes) requireText('html', node);
+for (const phrase of ['CONTROLLED JSON/SSE VERIFIED', 'implementation plan', 'test design', 'machine manifest']) requireText('html', phrase);
 
 forbid('runtime', [/fallback/i, /required_action/i, /unwrap_or_default\s*\(/, /history[_ -]?repair|context[_ -]?rebuild/i]);
 forbid('codec', [/metadata_center|debug_snapshot|continuation_owner|store_key/i, /unwrap_or_default\s*\(/]);
