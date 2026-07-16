@@ -169,7 +169,7 @@ Verified live cases:
 - Restored /v1/models on the original config: HTTP 200 with required Codex request-builder fields for gpt-5.6-sol.
 - Restored Responses Relay JSON/SSE on POST /v1/responses: HTTP 200, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
 
-Boundary: no provider credential mutation, no persistent original 5555 config mutation, no P6 deletion, and
-no full production cutover is claimed. The direct temporary config existed only to produce fresh Direct
-JSON/SSE/WS evidence on the non-production V3 5555 listener, and the listener was restored to the original
-Relay profile before closeout.
+Boundary: no provider credential mutation, no persistent original 5555 config mutation, no P6 deletion, no
+two-turn remote continuation/tool_outputs exact-pin live replay, and no full production cutover is claimed.
+The direct temporary config existed only to produce fresh Direct JSON/SSE/WS evidence on the non-production
+V3 5555 listener, and the listener was restored to the original Relay profile before closeout.

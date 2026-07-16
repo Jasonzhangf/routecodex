@@ -255,6 +255,7 @@ completion_boundary:
   controlled_source_evidence_indexed: true
   live_provider_evidence_indexed: true
   production_ready_claim: false
+  remote_continuation_two_turn_live: false
   live_config_mutation: false
   temporary_non_production_direct_config_emitted_removed: true
   global_install_restart: true

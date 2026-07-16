@@ -31062,6 +31062,7 @@ Pure Rust NAPI candidates:
 - Generated a temporary native V3 Direct config from `/Volumes/extension/.rcc/config.5555.v2.toml`, validated it with `rccv3 config check`, stopped the original managed Relay instance, started Direct on the same 5555 listener, and ran fresh real-provider replay.
 - Direct evidence: `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json` records Direct JSON HTTP 200 marker `V3_DIRECT_FRESH_JSON_OK`, Direct SSE HTTP 200 marker `V3_DIRECT_FRESH_SSE_OK` with `response.completed`, and Direct client WebSocket marker `V3_DIRECT_FRESH_WS_OK`; JSON/SSE traces show Direct/P6 nodes and no Relay trace.
 - Restore evidence: removed the temporary Direct config, restarted original `/Volumes/extension/.rcc/config.5555.v2.toml`, and replayed `/v1/models` plus Responses Relay JSON/SSE successfully in `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json`.
+- Boundary: this is not two-turn remote continuation/tool_outputs exact-pin live evidence.
 - Updated V3 live compat manifest/wiki/plan so Direct JSON/SSE/WS no longer depends only on same-day pre-cutover evidence; Relay restored replay remains the current final binding evidence.
 
 # 2026-07-16T19:44+08:00 V3 5555 Responses Relay live provider replay
