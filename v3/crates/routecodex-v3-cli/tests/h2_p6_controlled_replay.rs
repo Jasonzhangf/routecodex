@@ -20,6 +20,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+mod support;
+use support::{hub_v1_server_execution, hub_v1_test_declaration};
+
 const H2_SCENARIOS: &[&str] = &[
     "json_baseline",
     "sse_baseline",
@@ -523,6 +526,8 @@ version = 3
 responses_direct = true
 debug_events = true
 
+{hub_v1_declaration}
+
 [debug]
 log_console = false
 snapshots = true
@@ -538,17 +543,23 @@ port = {success_port}
 routing_group = "h2_success"
 endpoints = ["responses"]
 
+{success_execution}
+
 [servers.h2_reselect]
 bind = "127.0.0.1"
 port = {reselect_port}
 routing_group = "h2_reselect"
 endpoints = ["responses"]
 
+{reselect_execution}
+
 [servers.h2_exhausted]
 bind = "127.0.0.1"
 port = {exhausted_port}
 routing_group = "h2_exhausted"
 endpoints = ["responses"]
+
+{exhausted_execution}
 
 [providers.success]
 type = "responses"
@@ -630,6 +641,10 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
             success_base = success.base_url,
             failure_a_base = failure_a.base_url,
             failure_b_base = failure_b.base_url,
+            hub_v1_declaration = hub_v1_test_declaration(),
+            success_execution = hub_v1_server_execution("h2_success"),
+            reselect_execution = hub_v1_server_execution("h2_reselect"),
+            exhausted_execution = hub_v1_server_execution("h2_exhausted"),
         ),
     )
     .unwrap();

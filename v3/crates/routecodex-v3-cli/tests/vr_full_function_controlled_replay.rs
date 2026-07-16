@@ -20,6 +20,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+mod support;
+use support::{hub_v1_server_execution, hub_v1_test_declaration};
+
 #[derive(Debug, Clone)]
 struct ProviderCapture {
     body: Value,
@@ -241,17 +244,23 @@ fn write_config(
             r#"
 version = 3
 
+{hub_v1_declaration}
+
 [servers.vr_success]
 bind = "127.0.0.1"
 port = {success_port}
 routing_group = "vr_success"
 endpoints = ["responses"]
 
+{success_execution}
+
 [servers.vr_exhausted]
 bind = "127.0.0.1"
 port = {exhausted_port}
 routing_group = "vr_exhausted"
 endpoints = ["responses"]
+
+{exhausted_execution}
 
 [providers.optional]
 type = "responses"
@@ -296,6 +305,9 @@ targets = [{{ kind = "provider_model", provider = "exhausted", model = "test", k
             success_base = success.base_url,
             failure_a_base = failure_a.base_url,
             failure_b_base = failure_b.base_url,
+            hub_v1_declaration = hub_v1_test_declaration(),
+            success_execution = hub_v1_server_execution("vr_success"),
+            exhausted_execution = hub_v1_server_execution("vr_exhausted"),
         ),
     )
     .unwrap();

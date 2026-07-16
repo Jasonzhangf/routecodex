@@ -13,6 +13,9 @@ use serde_json::{json, Value};
 use std::{net::TcpListener, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+mod support;
+use support::{hub_v1_server_execution, hub_v1_test_declaration};
+
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug)]
@@ -268,11 +271,17 @@ fn manifest(
     let source = format!(
         r#"
 version = 3
+
+{hub_v1_declaration}
+
 [servers.controlled]
 bind = "127.0.0.1"
 port = {server_port}
 routing_group = "controlled"
 endpoints = ["openai_chat"]
+
+{server_execution}
+
 [providers.controlled]
 type = "openai_chat"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
@@ -287,6 +296,8 @@ capabilities = ["text", "tools", "streaming"]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]
 "#,
+        hub_v1_declaration = hub_v1_test_declaration(),
+        server_execution = hub_v1_server_execution("controlled"),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }

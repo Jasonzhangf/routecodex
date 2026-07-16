@@ -14,6 +14,7 @@ canonical_docs:
   - docs/goals/v3-anthropic-relay-local-continuation-integration-plan.md
   - docs/goals/v3-anthropic-relay-local-continuation-test-design.md
   - docs/architecture/wiki/v3-anthropic-relay-local-continuation.md
+  - docs/architecture/wiki/v3-anthropic-relay-local-continuation.html
 node_ids:
   - V3LocalContResp01ChatProcessGoverned
   - V3LocalContResp02ImmutableSaved
