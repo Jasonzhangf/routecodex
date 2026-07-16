@@ -130,3 +130,15 @@ evidence of remote-continuation availability.
   collect-to-Vec, or stream reconstruction from accumulated frames is forbidden.
 - `live_5555_pending` can change only after current managed 5555 completes both real JSON and SSE
   two-turn continuation with the exact provider/model/auth/transport pin.
+
+## V2 TOML Config Projection Gates（2026-07-16）
+
+- Positive: V2 root + provider `config.v2.toml` with `[provider.responses] transport = "websocket_v2"`
+  and `websocket_v2_url` publishes V3 `responses.transport = websocket_v2`, preserves the endpoint, and
+  carries `remote_continuation` + `tool_outputs` model capabilities into manifest truth.
+- Negative: V2 provider with `remote_continuation` + `tool_outputs` but no WebSocket v2 transport fails at
+  Config compile with the same HTTP-only capability error as native V3 config.
+- Negative: V2 provider with `transport = "websocket_v2"` but no endpoint fails at Config compile before
+  Runtime/Provider send.
+- Gate: `npm run test:v3-config-v2-compat-5555` must include the 5555 route contract plus these V2
+  transport-bound cases; live config mutation remains out of scope unless explicitly authorized.

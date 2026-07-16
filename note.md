@@ -31025,3 +31025,12 @@ Pure Rust NAPI candidates:
 - User contract: V3 distributed executable is `rccv3`; its default config is `$HOME/.rcc/config.v3.toml`.
 - Source truth: Cargo currently emits `routecodex-v3`; copy/package/shim/global/release scripts publish that old name; CLI currently requires `--config` even though `routecodex-v3-config::default_v3_config_path` already owns the canonical default path.
 - Test design: lock the distribution surface with `tests/scripts/v3-cli-distribution.spec.ts`; lock default config with positive `$HOME/.rcc/config.v3.toml` and negative missing-`HOME` CLI process tests before implementation.
+
+# 2026-07-16T17:55+08:00 V3 Config A remote-continuation V2 transport projection
+
+- Claim: `resource_id:v3.responses_provider_transport_config_projection`, run `20260716T092421Z-Macstudio.local-30016-d5abc9`.
+- Root gap found from current live 5555: live config is `/Volumes/extension/.rcc/config.5555.v2.toml` compiled by V3, and `~/.rcc/provider/cc-sol/config.v2.toml` only declares `[provider.responses] process="chat", streaming="always"`; model capabilities do not include `remote_continuation` / `tool_outputs`, and no `websocket_v2_url` is present.
+- Red test: `v2_compat_projects_responses_websocket_v2_transport_and_remote_capabilities` failed before source change because V2 compat forced Responses transport to HTTP, so Config compile rejected `remote_continuation` as HTTP-only.
+- Source fix: `routecodex-v3-config/src/v2_compat.rs` now reads V2 `[provider.responses] transport` and `websocket_v2_url` / `websocketV2Url`, defaults omitted transport to HTTP, and leaves V3 compile gates to reject HTTP-only remote continuation or WebSocket v2 without endpoint. Existing provider-protocol endpoint enablement remains a separate Config binding truth and was not changed in this transport-projection patch.
+- Gate evidence PASS: `npm run test:v3-config-v2-compat-5555`; `npm run test:v3-responses-direct-remote-continuation`; `npm run verify:v3-responses-direct-remote-continuation`; direct red fixtures; WS hardening verifier/red fixtures; V3 fmt; V3 Clippy; full V3 workspace; resource/module/Rust-only/mainline/manifest/review/function gates; `git diff --check`.
+- Boundary: no live credential/config/global install/restart was changed. Real 5555 two-turn remote continuation still needs a provider-verified WebSocket v2 endpoint plus authorized config/restart/replay.

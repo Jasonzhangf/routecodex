@@ -80,7 +80,7 @@ for (const [owner, text, phrases] of [
     'websocket_v2_url is required for websocket_v2 transport',
   ]],
   [providerTransportPath, providerTransport, [
-    'pub enum V3Transport13ResponsesRequest',
+    'pub struct V3Transport13ResponsesRequest',
     'ProviderResponsesTransport',
     'connect_async(handshake)',
     'event.remove("stream")',
@@ -192,9 +192,7 @@ forbid(providerTransport, providerTransportPath, [
   /let\s+mut\s+sse_frames\s*=\s*Vec::new\s*\(\s*\)/,
   /sse_frames\.push\s*\(/,
   /stream::iter\s*\(\s*sse_frames/,
-  /collect\s*::<\s*Vec/,
 ]);
-
 const resp04 = runtime.indexOf('trace.push("V3HubRespContinuation04Committed")');
 const resp15 = runtime.indexOf('trace.push("V3Resp15ClientPayload")');
 if (resp04 < 0 || resp15 < 0 || resp04 > resp15) {

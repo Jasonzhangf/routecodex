@@ -4418,4 +4418,5 @@ verification:
       - npm run verify:v3-clippy
     notes:
       - "Positive contract locks V2 root + provider config.v2.toml input, canonical Hub V1 endpoint bindings and server execution declarations, Jason-defined 5555 route ordering, provider type mapping, local token_file handle materialization, and secret-free manifest debug output."
+      - "Transport-bound V2 provider responses contract locks WebSocket v2 projection plus negative HTTP-only remote_continuation and missing websocket_v2_url cases."
       - "Live closure still requires global install, V3 managed restart on 5555, health, models, and same-entry route probes after source gates pass."

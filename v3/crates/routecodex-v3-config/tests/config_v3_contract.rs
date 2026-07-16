@@ -951,6 +951,132 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn v2_compat_projects_responses_websocket_v2_transport_and_remote_capabilities() {
+    let root =
+        std::env::temp_dir().join(format!("routecodex-v3-v2-compat-ws-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: r#"
+transport = "websocket_v2"
+websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
+"#,
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "remote_continuation",
+                "tool_outputs",
+            ],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let provider = &manifest.providers["cc-sol"];
+    let responses = provider
+        .responses
+        .as_ref()
+        .expect("v2 responses provider must project responses transport config");
+    assert_eq!(responses.transport.as_str(), "websocket_v2");
+    assert_eq!(
+        responses.websocket_v2_url.as_deref(),
+        Some("wss://provider.invalid/openai/v1/responses")
+    );
+    assert_eq!(
+        provider.models["gpt-5.6-sol"].capabilities,
+        [
+            "reasoning",
+            "remote_continuation",
+            "text",
+            "tool_outputs",
+            "tools"
+        ]
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_rejects_remote_continuation_on_http_only_provider() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-compat-http-remote-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: "",
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "remote_continuation",
+                "tool_outputs",
+            ],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let error = V3ConfigStore::new(&path).load_snapshot().unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("remote_continuation requires responses websocket_v2 transport"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn v2_compat_rejects_websocket_v2_transport_without_endpoint() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-compat-ws-no-endpoint-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider_with_options(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+        V2ProviderOptions {
+            responses_extra: r#"
+transport = "websocket_v2"
+"#,
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "remote_continuation",
+                "tool_outputs",
+            ],
+        },
+    );
+    let path = root.join("config.toml");
+    fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
+
+    let error = V3ConfigStore::new(&path).load_snapshot().unwrap_err();
+    assert!(error.to_string().contains("websocket_v2_url is required"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn assert_route_targets(actual: Vec<&str>, expected: &[&str]) {
     assert_eq!(actual, expected);
 }
@@ -962,6 +1088,41 @@ fn write_v2_provider(
     base_url: &str,
     default_model: &str,
     models: &[&str],
+) {
+    write_v2_provider_with_options(
+        root,
+        id,
+        provider_type,
+        base_url,
+        default_model,
+        models,
+        V2ProviderOptions {
+            responses_extra: "",
+            capabilities: &[
+                "text",
+                "reasoning",
+                "tools",
+                "web_search",
+                "multimodal",
+                "longcontext",
+            ],
+        },
+    );
+}
+
+struct V2ProviderOptions<'a> {
+    responses_extra: &'a str,
+    capabilities: &'a [&'a str],
+}
+
+fn write_v2_provider_with_options(
+    root: &std::path::Path,
+    id: &str,
+    provider_type: &str,
+    base_url: &str,
+    default_model: &str,
+    models: &[&str],
+    options: V2ProviderOptions<'_>,
 ) {
     let dir = root.join("provider").join(id);
     fs::create_dir_all(&dir).unwrap();
@@ -983,12 +1144,14 @@ apiKey = "secret-{id}-key1"
 [provider.responses]
 process = "chat"
 streaming = "always"
+{responses_extra}
 
 [provider.concurrency]
 maxInFlight = 8
 acquireTimeoutMs = 60000
 staleLeaseMs = 300000
-"#
+"#,
+        responses_extra = options.responses_extra
     );
     for model in models {
         raw.push_str(&format!(
@@ -999,12 +1162,52 @@ supportsThinking = true
 thinking = "low"
 maxTokens = 64000
 maxContext = 1048576
-capabilities = ["text", "reasoning", "tools", "web_search", "multimodal", "longcontext"]
-"#
+capabilities = [{}]
+"#,
+            quoted_list(options.capabilities)
         ));
     }
     fs::write(dir.join("config.v2.toml"), raw).unwrap();
 }
+
+fn quoted_list(values: &[&str]) -> String {
+    values
+        .iter()
+        .map(|value| format!("\"{value}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+const V2_SINGLE_RESPONSES_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.free.gpt-5.6-sol"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.free.gpt-5.6-sol".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.free.gpt-5.6-sol"]
+"#;
 
 const V2_5555_CONFIG: &str = r#"
 version = "2.0.0"

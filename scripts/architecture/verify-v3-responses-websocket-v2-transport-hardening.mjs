@@ -103,16 +103,17 @@ for (const script of [
 }
 
 const wsStart = transport.indexOf('async fn send_websocket_v2(');
-const wsJsonEnd = transport.indexOf('struct WebSocketSseState');
+const wsJsonEnd = transport.indexOf('fn anthropic_messages_url', wsStart);
+const wsSseStart = transport.indexOf('fn websocket_sse_stream(');
 const wsEnd = transport.indexOf('async fn read_response_body_bytes(');
-if (wsStart < 0 || wsJsonEnd <= wsStart || wsEnd <= wsJsonEnd) {
+if (wsStart < 0 || wsJsonEnd <= wsStart || wsSseStart <= wsJsonEnd || wsEnd <= wsSseStart) {
   failures.push(`${transportPath}: missing WebSocket transport owner boundary`);
 } else {
   const wsJsonOwner = transport.slice(wsStart, wsJsonEnd);
   if (!/None => \{\s*\*connection = None;\s*return Err\(websocket_protocol_error\([\s\S]{0,240}"server event is missing type"/.test(wsJsonOwner)) {
     failures.push(`${transportPath}: JSON protocol error must discard connection`);
   }
-  const wsOwner = transport.slice(wsStart, wsEnd);
+  const wsOwner = `${transport.slice(wsStart, wsJsonEnd)}\n${transport.slice(wsSseStart, wsEnd)}`;
   for (const pattern of [
     /collect\s*::<\s*Vec/,
     /let\s+mut\s+\w*(?:frames|events|responses)\w*\s*=\s*Vec::new/,

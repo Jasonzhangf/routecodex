@@ -569,20 +569,20 @@ fn compile_v2_providers(
                 }
             }
             .to_string();
+            let v2_responses = provider.responses.as_ref();
             let responses = if provider_type == "responses" {
                 Some(V3ProviderResponsesAuthoringConfig {
-                    process: provider
-                        .responses
-                        .as_ref()
+                    process: v2_responses
                         .map(|responses| responses.process.clone())
                         .unwrap_or_else(|| "chat".to_string()),
-                    streaming: provider
-                        .responses
-                        .as_ref()
+                    streaming: v2_responses
                         .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
                         .unwrap_or(V3StreamingPolicy::Always),
-                    transport: V3ResponsesTransportKind::Http,
-                    websocket_v2_url: None,
+                    transport: v2_responses
+                        .and_then(|responses| responses.transport)
+                        .unwrap_or(V3ResponsesTransportKind::Http),
+                    websocket_v2_url: v2_responses
+                        .and_then(|responses| responses.websocket_v2_url.clone()),
                 })
             } else {
                 None
@@ -848,9 +848,14 @@ struct V2ProviderAuthEntry {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct V2ProviderResponsesConfig {
     process: String,
     streaming: Option<String>,
+    #[serde(default)]
+    transport: Option<V3ResponsesTransportKind>,
+    #[serde(default, alias = "websocket_v2_url", alias = "websocketV2URL")]
+    websocket_v2_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

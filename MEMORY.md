@@ -3498,3 +3498,9 @@
 - `V3Transport13ResponsesRequest` is sealed behind Provider-owned builders; runtime relay helpers may request a protocol URL via `build_v3_transport_13_responses_http_request_from_parts`, but non-owner code cannot construct transport node variants directly.
 - Global installed 5555 live proof is current: `routecodex`, `rcc`, and install package version are `0.90.3935`; V3 `/health` is green; a `/v1/responses` request declaring `web_search_preview` and selecting `MiniMax-M3` returned HTTP 200, `status=completed`, `model=MiniMax-M3`, and `output_text=OK` without target-local reselection.
 - This evidence proves selected Anthropic protocol dispatch and the exercised JSON request/response shape. It does not prove real search execution quality, multimodal parity, full Anthropic SSE/tool-use parity, remote continuation, or the remaining protocol/error live matrix.
+
+# 2026-07-16 V3 V2 TOML Responses transport projection truth
+
+- `v3.v2_config_toml_compat_5555` now projects V2 `[provider.responses] transport` and `websocket_v2_url` / `websocketV2Url` into the V3 provider manifest. Omitted transport remains HTTP; `remote_continuation` still requires `tool_outputs` and WebSocket v2 at Config compile; WebSocket v2 without endpoint fails before Runtime/Provider send.
+- Existing V2 5555 provider-protocol endpoint enablement remains separate from this transport projection; Runtime and Provider transport must consume the compiled Config truth rather than infer or expand endpoint availability.
+- Current live 5555 gap remains external/config truth, not source wiring: `cc-sol` V2 provider config lacks `remote_continuation`, `tool_outputs`, and `websocket_v2_url`; no live config, credential, install, restart, or provider endpoint guessing was performed. Live remote-continuation closure still requires authorized config/restart and real two-turn replay proving the exact provider/model/auth/transport pin.

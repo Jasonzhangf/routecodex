@@ -178,3 +178,24 @@ Req03 load、Req06 exact pin、续接轮 Router hit=0、no Relay/local materiali
 release rollover 已把 5555 拉回 running，普通 HTTP JSON/SSE smoke 可用，但这只证明 terminal
 HTTP 请求可用，不证明 provider-owned remote continuation 两轮成功。按本目标执行规范，live config /
 credential / restart 仍需 Jason 明确授权后才能执行真实 JSON/SSE/client-WS 两轮 remote-continuation replay。
+
+## 13. V2 TOML transport projection audit（2026-07-16）
+
+当前 5555 live 已切到 `/Volumes/extension/.rcc/config.5555.v2.toml` 经 V3 config store 显式编译，
+因此 remote-continuation live gap 的配置入口从 `config.v3.toml` 变为 V2 root +
+`provider/<id>/config.v2.toml`。Config owner 必须投影 V2 `[provider.responses]` 的
+`transport` 与 `websocket_v2_url`，而不是在 Runtime 或 Provider transport 里猜测 HTTP/WS。
+
+本轮 source 修复边界：
+
+- V2 responses provider 未声明 `transport` 时仍发布 HTTP transport。
+- V2 responses provider 声明 `transport = "websocket_v2"` 时发布 WebSocket v2 transport，并保留
+  `websocket_v2_url` / `websocketV2Url` 到 V3 manifest。
+- V2 model capabilities 中 `remote_continuation` / `tool_outputs` 原样进入 V3 compile gate；HTTP-only
+  remote continuation、WebSocket v2 缺 endpoint 仍 fail-fast。
+- 不改 live provider credential、不写真实 `~/.rcc/provider/*/config.v2.toml`、不猜测 AnyInt WebSocket endpoint。
+
+Live 5555 现状（只读、已脱敏）：`cc-sol` provider 仍只有
+`[provider.responses] process="chat", streaming="always"`，模型 capability 缺
+`remote_continuation` / `tool_outputs`，且没有 `websocket_v2_url`。因此 source 能读取 V2 WS 声明后，
+真实两轮 live closeout 仍取决于 provider 侧给出可验证 WebSocket v2 endpoint 与 Jason 授权配置/restart。
