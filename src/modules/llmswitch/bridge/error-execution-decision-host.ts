@@ -90,6 +90,7 @@ export type ExecutionDecisionBridgeInput = {
   errorCode?: string;
   upstreamCode?: string;
   providerKey?: string;
+  routeName?: string;
   routePool?: string[];
   excludedProviderKeys?: string[];
   routePoolIsAuthoritative?: boolean;

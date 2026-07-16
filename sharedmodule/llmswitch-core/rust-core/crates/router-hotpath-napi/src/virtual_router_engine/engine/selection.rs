@@ -951,19 +951,33 @@ impl VirtualRouterEngineCore {
                                 "unavailableProviders": unavailable
                             }));
                         }
-                        if route_name == DEFAULT_ROUTE && default_floor_selection.is_none() {
-                            default_floor_selection = Some(
-                                SelectionResult::new(
-                                    filtered_candidates[0].clone(),
-                                    route_name.to_string(),
-                                    pool.targets.clone(),
-                                    execution_decision_route_pool.clone(),
-                                    Some(pool.id.clone()),
-                                )
-                                .with_route_params(pool.route_params.clone())
-                                .with_route_thinking(pool.thinking.clone())
-                                .with_default_floor_protected(true),
-                            );
+                        if route_name == DEFAULT_ROUTE {
+                            let floor_provider_key = filtered_candidates
+                                .iter()
+                                .find(|candidate| !excluded_keys.contains(*candidate))
+                                .cloned()
+                                .unwrap_or_else(|| filtered_candidates[0].clone());
+                            let should_replace_default_floor = default_floor_selection
+                                .as_ref()
+                                .map(|existing| {
+                                    excluded_keys.contains(&existing.provider_key)
+                                        && !excluded_keys.contains(&floor_provider_key)
+                                })
+                                .unwrap_or(true);
+                            if should_replace_default_floor {
+                                default_floor_selection = Some(
+                                    SelectionResult::new(
+                                        floor_provider_key,
+                                        route_name.to_string(),
+                                        pool.targets.clone(),
+                                        execution_decision_route_pool.clone(),
+                                        Some(pool.id.clone()),
+                                    )
+                                    .with_route_params(pool.route_params.clone())
+                                    .with_route_thinking(pool.thinking.clone())
+                                    .with_default_floor_protected(true),
+                                );
+                            }
                         }
                     }
                     continue;
@@ -4220,6 +4234,82 @@ mod tests {
 
         assert_eq!(selected.provider_key, provider_keys[0]);
         assert_eq!(selected.route_used, "default");
+        assert!(selected.default_floor_protected);
+    }
+
+    #[test]
+    fn default_floor_prefers_unexcluded_later_pool_before_exclusion_ignored_floor() {
+        let mut core = VirtualRouterEngineCore::new();
+        let mut providers = Map::new();
+        for provider_key in ["default-a.key1.model", "default-b.key1.model"] {
+            providers.insert(
+                provider_key.to_string(),
+                json!({
+                    "providerKey": provider_key,
+                    "providerType": "openai",
+                    "modelId": "model",
+                    "enabled": true
+                }),
+            );
+        }
+        core.provider_registry.load(&providers);
+        core.health_manager
+            .register_providers(&core.provider_registry.list_keys());
+        core.routing = parse_routing(&Map::from_iter([(
+            "default".to_string(),
+            Value::Array(vec![
+                json!({
+                    "id": "default-first",
+                    "priority": 200,
+                    "mode": "priority",
+                    "targets": ["default-a.key1.model"]
+                }),
+                json!({
+                    "id": "default-second",
+                    "priority": 100,
+                    "mode": "priority",
+                    "targets": ["default-b.key1.model"]
+                }),
+            ]),
+        )]));
+
+        for provider_key in ["default-a.key1.model", "default-b.key1.model"] {
+            for attempt in 1..=3 {
+                core.handle_provider_error(&json!({
+                    "code": "HTTP_503",
+                    "message": format!("failure {attempt}"),
+                    "stage": "provider.send",
+                    "status": 503,
+                    "errorClassification": "recoverable",
+                    "runtime": {
+                        "requestId": format!("{provider_key}-{attempt}"),
+                        "providerKey": provider_key,
+                        "runtimeKey": provider_key
+                    }
+                }));
+            }
+        }
+
+        let selected = core
+            .select_provider(
+                "thinking",
+                &json!({ "excludedProviderKeys": ["default-a.key1.model"] }),
+                &ClassificationResult {
+                    route_name: "thinking".to_string(),
+                    confidence: 1.0,
+                    reasoning: "thinking:user-input".to_string(),
+                    candidates: vec!["thinking".to_string(), "default".to_string()],
+                },
+                &RoutingFeatures::default(),
+                &RoutingInstructionState::default(),
+                None,
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+            )
+            .expect("default floor should try an unexcluded later-pool target before reusing an excluded provider");
+
+        assert_eq!(selected.provider_key, "default-b.key1.model");
+        assert_eq!(selected.route_used, "default");
+        assert_eq!(selected.pool_id.as_deref(), Some("default-second"));
         assert!(selected.default_floor_protected);
     }
 

@@ -199,6 +199,8 @@ pub struct ErrorErr05ExecutionDecisionInput {
     #[serde(default)]
     pub provider_key: Option<String>,
     #[serde(default)]
+    pub route_name: Option<String>,
+    #[serde(default)]
     pub route_pool: Vec<String>,
     #[serde(default)]
     pub excluded_provider_keys: Vec<String>,
@@ -286,6 +288,13 @@ pub fn resolve_error_err05_execution_decision(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let route_name = input
+        .route_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let on_default_route = route_name.as_deref() == Some("default");
     let route_pool = normalized_unique(&input.route_pool);
     let mut excluded = normalized_unique(&input.excluded_provider_keys);
     let remaining = |excluded_values: &[String]| {
@@ -438,12 +447,24 @@ pub fn resolve_error_err05_execution_decision(
             excluded_provider_keys: excluded,
         };
     }
-    let should_retry = should_exclude
+    let should_retry_candidate = should_exclude
         && (has_reroute_target || unproven_last_provider || continuing_reroute_chain);
+    let default_route_exhausted_after_exclusion =
+        on_default_route && remaining_after_exclusion.is_empty();
+    let allow_retry_beyond_attempt_budget = should_retry_candidate
+        && !default_route_exhausted_after_exclusion
+        && input.attempt >= input.max_attempts
+        && (!remaining_after_exclusion.is_empty()
+            || (!on_default_route && input.default_pool_available)
+            || unproven_last_provider
+            || continuing_reroute_chain);
+    let should_retry = should_retry_candidate
+        && !default_route_exhausted_after_exclusion
+        && (input.attempt < input.max_attempts || allow_retry_beyond_attempt_budget);
     ErrorErr05ExecutionDecision {
         should_retry,
         excluded_current_provider: should_exclude,
-        allow_retry_beyond_attempt_budget: should_retry,
+        allow_retry_beyond_attempt_budget,
         retry_switch_plan: should_retry.then(error_err05_switch_plan),
         retry_execution_policy_reason: should_retry.then_some(native_policy.reason),
         route_pool_remaining_after_exclusion: remaining_after_exclusion,
@@ -1568,6 +1589,7 @@ mod tests {
             error_code: Some("HTTP_503".to_string()),
             upstream_code: Some("HTTP_503".to_string()),
             provider_key: Some("p1.model".to_string()),
+            route_name: Some("thinking".to_string()),
             route_pool: vec!["p1.model".to_string(), "p2.model".to_string()],
             excluded_provider_keys: Vec::new(),
             route_pool_is_authoritative: true,
@@ -1647,6 +1669,64 @@ mod tests {
             decision.retry_switch_plan.unwrap().switch_action,
             "exclude_and_reroute"
         );
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_default_route_remaining_candidate_may_switch_beyond_attempt_budget() {
+        let mut input = error_err05_input();
+        input.route_name = Some("default".to_string());
+        input.route_pool = vec!["p1.model".to_string(), "p2.model".to_string()];
+        input.default_pool_available = true;
+        input.attempt = 6;
+        input.max_attempts = 6;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert!(decision.allow_retry_beyond_attempt_budget);
+        assert_eq!(
+            decision.route_pool_remaining_after_exclusion,
+            vec!["p2.model"]
+        );
+        assert_eq!(decision.excluded_provider_keys, vec!["p1.model"]);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_default_route_exhausted_floor_stops_reroute_loop() {
+        let mut input = error_err05_input();
+        input.route_name = Some("default".to_string());
+        input.route_pool = vec!["p1.model".to_string(), "p2.model".to_string()];
+        input.excluded_provider_keys = vec!["p2.model".to_string()];
+        input.default_pool_available = true;
+        input.attempt = 6;
+        input.max_attempts = 6;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(!decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert!(!decision.allow_retry_beyond_attempt_budget);
+        assert!(decision.route_pool_remaining_after_exclusion.is_empty());
+        assert_eq!(
+            decision.excluded_provider_keys,
+            vec!["p2.model", "p1.model"]
+        );
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_primary_route_default_pool_may_switch_beyond_attempt_budget() {
+        let mut input = error_err05_input();
+        input.route_name = Some("thinking".to_string());
+        input.route_pool = vec!["p1.model".to_string()];
+        input.default_pool_available = true;
+        input.attempt = 6;
+        input.max_attempts = 6;
+        let decision = resolve_error_err05_execution_decision(input);
+        assert!(decision.should_retry);
+        assert!(decision.excluded_current_provider);
+        assert!(decision.allow_retry_beyond_attempt_budget);
+        assert!(decision.route_pool_remaining_after_exclusion.is_empty());
         assert!(!decision.may_project);
     }
 

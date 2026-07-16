@@ -112,6 +112,7 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     maxAttempts: args.maxAttempts,
     stage: reportPlan.stageHint as RequestExecutorProviderErrorStage,
     providerKey: args.providerKey,
+    routeName: args.routeName,
     runtimeKey: args.runtimeKey,
     logicalRequestChainKey: args.logicalRequestChainKey,
     logicalChainRetryLimitStageRequestId: args.logicalChainRetryLimitStageRequestId,

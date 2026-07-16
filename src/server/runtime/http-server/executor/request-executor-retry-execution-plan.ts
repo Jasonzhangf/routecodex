@@ -37,6 +37,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
   maxAttempts: number;
   stage?: RequestExecutorProviderErrorStage;
   providerKey?: string;
+  routeName?: string;
   runtimeKey?: string;
   logicalRequestChainKey: string;
   logicalChainRetryLimitStageRequestId: string;
@@ -78,6 +79,7 @@ export async function resolveProviderRetryExecutionPlan(args: {
     errorCode: args.retryError.errorCode,
     upstreamCode: args.retryError.upstreamCode,
     providerKey: args.providerKey,
+    routeName: args.routeName,
     routePool: args.routePool ?? [],
     excludedProviderKeys: Array.from(args.excludedProviderKeys),
     routePoolIsAuthoritative: args.routePoolIsAuthoritative === true,

@@ -31167,3 +31167,34 @@ Pure Rust NAPI candidates:
 - 5520 route status after restart: multimodal/default include `cc.key1.gpt-5.5` in `fwd.free.gpt-5.5` and `asxs.crsa.gpt-5.5` in `fwd.paid.gpt-5.5`; `/v1/models` lists `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`.
 - Live log truth uses active aggregate log `~/.rcc/logs/server-4444.log`, not stale `server-5520.log`. Post-restart live 5520 traffic shows `router-direct:longcontext/tools` requests successfully selecting/using `cc.key1.gpt-5.5`.
 - Gap: I did not intentionally force a real upstream provider-failure chain after restart; the error-chain behavior is covered by the red/green source test plus previous source gates, and live closeout is install/restart/health/installed-code/VR-default-floor dry-run/live-traffic evidence.
+
+# 2026-07-17T00:34+08:00 router-direct retry loop correction
+- Jason corrected delivery gate: not normal until online original replay no longer returns/finishes as 400. The prior live replay request `openai-responses-router-gpt-5.5-20260717T001857163-554055-189` still ended with final `HTTP_400` after repeated default-route `cc.key1.gpt-5.5`, so the previous fix is not complete.
+- New target: fix Rust/TS retry-floor behavior, global install + managed 5520 restart, then replay the reconstructed original request and require no client-visible 400 before claiming completion.
+
+# 2026-07-17T00:52+08:00 V3 foreground console + Relay tool-turn closeout
+- Closed the V3 user-visible startup gap: installed `rccv3 start -c /Volumes/extension/.rcc/config.5555.v2.toml --snap` now stays foreground, prints `V3ServerStartup01ListenerSetPreflight`, forces console/snapshots, and logs common `V3Server03HttpRequestRaw` for Relay POST `/v1/responses`.
+- Closed the V3 Responses Relay JSON multi-turn gap with a server-scoped local continuation store: Resp04 commits pending tool calls, Req04 restores the saved function call before the next `function_call_output`, preserves `tools`, and rejects wrong/missing `call_id` before provider send.
+- Source gates passed: V3 fmt, lifecycle/relay verifiers and red fixtures, runtime/CLI/lifecycle/server targeted cargo tests, V3 architecture/resource/module/Rust-only/static-hook/fmt/clippy/workspace gates, and `git diff --check`.
+- Global install completed for routecodex/rcc/rccv3 0.90.3935; live 5555 `/health`, `/v1/models`, JSON, SSE, and real-provider two-turn JSON tool replay passed. SSE replay emitted marker + `response.completed` but no `[DONE]`; SSE local continuation was not claimed.
+- Stop/coexistence evidence: `rccv3 stop -c /Volumes/extension/.rcc/config.5555.v2.toml --timeout-ms 30000` returned stopped, foreground process exited, and existing V2 ports 5520/4444/10000 stayed healthy.
+
+# 2026-07-17T01:26+08:00 5520 router-direct original replay no client-visible 400
+- Root cause confirmed from reconstructed original request: default-floor reselect was finite only for selection, not for retry; after primary route exhausted, default route could keep reselecting already-failed default floor providers past attempt budget and then project raw upstream HTTP_400 to the client.
+- Source correction:
+  - Rust VR selection now prefers an unexcluded later default pool provider before falling back to excluded default-floor protection.
+  - Rust ErrorErr05 input carries route_name; on route=default, beyond-budget retry continues only when a concrete request-local default candidate remains.
+  - TS ErrorErr05 bridge/executor passes routeName.
+  - Provider-send terminal non-projectable state throws ROUTECODEX_PROVIDER_RETRY_STOPPED 502; upstream 400 is retained only under non-projecting retryStoppedEvidence, not as client error.code.
+- Red/green evidence: added red test initially failed because mapErrorToHttp(thrown).body.error.code was HTTP_400; after fix it is ROUTECODEX_PROVIDER_RETRY_STOPPED and response body contains no HTTP_400.
+- Verification PASS:
+  - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/request-executor-provider-send-failure.abort.spec.ts --runInBand --verbose
+  - npm run jest:run -- --runTestsByPath tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts --runInBand -t 'default-route switch beyond cap|stops default-route reroute loop'
+  - npm run verify:error-pipeline-contract
+  - npm run verify:provider-failure-ban-blackbox
+  - npm run verify:vr-route-availability-default-floor
+  - git diff --check on owned files
+  - Global ROUTECODEX_BUILD_RESTART_ONLY=0 ROUTECODEX_INSTALL_VERIFY_PORT=5520 npm run install:global completed; installed snapshots current routecodex-0.90.3935-2026-07-16T172213Z; installed dist contains retryStoppedEvidence + ROUTECODEX_PROVIDER_RETRY_STOPPED.
+  - Managed aggregate restart: ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 ... routecodex restart --port 5520; health ok on 5520/4444/10000.
+- Online replay evidence: reconstructed original request replay prefix .agent-collab/runs/20260716T150428Z-Macstudio.local-3022-1620b00d/replay-original-224657-after-client-code-fix-20260716T172323Z; request openai-responses-router-gpt-5.5-20260717T012323938-554447-581; curl HTTP status 502, SSE error.code=ROUTECODEX_PROVIDER_RETRY_STOPPED, sse_contains_HTTP_400=False, no literal 400 in SSE, log direct attempts exactly [1,2,3,4,5,6], no directAttempt>=7, no final HTTP_400 failure, final log status=502 code=ROUTECODEX_PROVIDER_RETRY_STOPPED.
+- Boundary: upstream cc still returns provider-level 400 on attempts 1 and 6, and other live providers returned 502/403, so this replay proves no client-visible 400 / no default retry loop, not a successful 200 completion.

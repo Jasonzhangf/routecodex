@@ -593,6 +593,90 @@ describe('resolveProviderRetryExecutionPlan priority retry exclusions', () => {
     expect(Array.from(excludedProviderKeys)).toEqual(['primary.key1.gpt-5.5']);
   });
 
+  it('allows default-route switch beyond cap only when a concrete default candidate remains', async () => {
+    const excludedProviderKeys = new Set<string>();
+    const error = Object.assign(new Error('HTTP 400: invalid prompt'), {
+      statusCode: 400,
+      code: 'HTTP_400',
+      upstreamCode: 'HTTP_400'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 400,
+        errorCode: 'HTTP_400',
+        upstreamCode: 'HTTP_400',
+        reason: 'HTTP 400: invalid prompt'
+      },
+      attempt: 6,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'default-a.key1.model',
+      routeName: 'default',
+      runtimeKey: 'default-a.key1',
+      logicalRequestChainKey: 'req-default-route-remaining-beyond-cap',
+      logicalChainRetryLimitStageRequestId: 'req-default-route-remaining-beyond-cap',
+      routePool: ['default-a.key1.model', 'default-b.key1.model'],
+      routePoolIsAuthoritative: true,
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(true);
+    expect(plan.allowRetryBeyondAttemptBudget).toBe(true);
+    expect(plan.retrySwitchPlan?.switchAction).toBe('exclude_and_reroute');
+    expect(plan.routePoolRemainingAfterExclusion).toEqual(['default-b.key1.model']);
+    expect(Array.from(excludedProviderKeys)).toEqual(['default-a.key1.model']);
+  });
+
+  it('stops default-route reroute loop when every concrete default candidate is already excluded', async () => {
+    const excludedProviderKeys = new Set<string>(['default-b.key1.model']);
+    const error = Object.assign(new Error('HTTP 400: invalid prompt'), {
+      statusCode: 400,
+      code: 'HTTP_400',
+      upstreamCode: 'HTTP_400'
+    });
+
+    const plan = await resolveProviderRetryExecutionPlan({
+      error,
+      retryError: {
+        statusCode: 400,
+        errorCode: 'HTTP_400',
+        upstreamCode: 'HTTP_400',
+        reason: 'HTTP 400: invalid prompt'
+      },
+      attempt: 6,
+      maxAttempts: 6,
+      stage: 'provider.send',
+      providerKey: 'default-a.key1.model',
+      routeName: 'default',
+      runtimeKey: 'default-a.key1',
+      logicalRequestChainKey: 'req-default-route-exhausted-loop-stop',
+      logicalChainRetryLimitStageRequestId: 'req-default-route-exhausted-loop-stop',
+      routePool: ['default-a.key1.model', 'default-b.key1.model'],
+      routePoolIsAuthoritative: true,
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt: jest.fn(),
+      logStage: jest.fn(),
+      logNonBlockingError: jest.fn(),
+      isStreamingRequest: true
+    });
+
+    expect(plan.shouldRetry).toBe(false);
+    expect(plan.allowRetryBeyondAttemptBudget).toBe(false);
+    expect(plan.retrySwitchPlan).toBeUndefined();
+    expect(plan.routePoolRemainingAfterExclusion).toEqual([]);
+    expect(plan.defaultPoolAvailable).toBe(true);
+    expect(plan.mayProject).toBe(false);
+    expect(Array.from(excludedProviderKeys)).toEqual(['default-b.key1.model', 'default-a.key1.model']);
+  });
+
   it('keeps the sole default provider after request-local exclusion and retries it', async () => {
     const excludedProviderKeys = new Set<string>(['default.key1.model']);
     const error = Object.assign(new Error('HTTP 502: upstream failed'), {

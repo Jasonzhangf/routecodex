@@ -113,6 +113,41 @@ type RequestExecutorProviderSendFailureArgs = {
   }) => Promise<void>;
 };
 
+function createNonProjectableProviderRetryStoppedError(args: {
+  requestId: string;
+  providerKey: string;
+  routeName?: string;
+  retryError: RetryErrorSnapshot;
+  retryExecutionPlan: ProviderRetryExecutionPlan;
+}): Error {
+  return Object.assign(
+    new Error('Provider retry stopped before client projection; default pool remains available but no request-local retry candidate remains'),
+    {
+      code: 'ROUTECODEX_PROVIDER_RETRY_STOPPED',
+      statusCode: 502,
+      status: 502,
+      upstreamMessage: 'Provider retry candidates exhausted before client projection',
+      requestId: args.requestId,
+      providerKey: args.providerKey,
+      routeName: args.routeName,
+      details: {
+        code: 'ROUTECODEX_PROVIDER_RETRY_STOPPED',
+        status: 502,
+        retryStoppedEvidence: {
+          upstreamCode: args.retryError.errorCode ?? args.retryError.upstreamCode,
+          upstreamStatus: args.retryError.statusCode,
+        },
+        providerKey: args.providerKey,
+        routeName: args.routeName,
+        defaultPoolAvailable: args.retryExecutionPlan.defaultPoolAvailable,
+        policyExhausted: args.retryExecutionPlan.policyExhausted,
+        mayProject: args.retryExecutionPlan.mayProject,
+        routePoolRemainingAfterExclusion: args.retryExecutionPlan.routePoolRemainingAfterExclusion,
+      }
+    }
+  );
+}
+
 export type RequestExecutorProviderSendFailureResult = {
   lastError: unknown;
   forcedRouteHint?: string;
@@ -316,6 +351,18 @@ export async function processProviderSendFailure(
   });
   const retryExecutionPlan = providerFailurePlan.retryExecutionPlan;
   if (!retryExecutionPlan.shouldRetry) {
+    if (
+      retryExecutionPlan.mayProject !== true
+      && retryExecutionPlan.defaultPoolAvailable === true
+    ) {
+      throw createNonProjectableProviderRetryStoppedError({
+        requestId: args.requestId,
+        providerKey: args.providerKey,
+        routeName: args.routeName,
+        retryError,
+        retryExecutionPlan
+      });
+    }
     throw args.error;
   }
   if (retryExecutionPlan.retrySwitchPlan) {

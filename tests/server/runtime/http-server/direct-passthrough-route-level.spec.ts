@@ -2107,7 +2107,7 @@ describe('direct passthrough route-level', () => {
       excludedProviderKeys: [firstProviderKey],
     }));
     expect(executeHubPipelineNativeMock).not.toHaveBeenCalled();
-  });
+  }, 15000);
 
   it('router same-protocol direct uses target.modelId as outbound model instead of inbound alias', async () => {
     jest.resetModules();

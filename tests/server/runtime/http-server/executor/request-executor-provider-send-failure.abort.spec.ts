@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { processProviderSendFailure } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-send-failure.js';
 import { resetErrorActionQueueStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
+import { mapErrorToHttp } from '../../../../../src/server/utils/http-error-mapper.js';
 
 jest.setTimeout(10_000);
 
@@ -480,5 +481,98 @@ describe('request executor provider send failure abort handling', () => {
       stage: 'provider.send',
       providerKey: 'asxs.crsa.gpt-5.4-mini'
     }));
+  });
+
+  it('does not rethrow raw provider 400 when default-route retry candidates are exhausted but default floor remains', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-17T00:00:00.000Z'));
+    const error = Object.assign(new Error('HTTP 400: invalid_prompt'), {
+      statusCode: 400,
+      status: 400,
+      code: 'HTTP_400',
+      upstreamCode: 'HTTP_400'
+    });
+    const excludedProviderKeys = new Set<string>(['default-b.key1.model']);
+    const recordAttempt = jest.fn();
+
+    const pending = processProviderSendFailure({
+      error,
+      requestId: 'req_default_route_no_raw_400_after_floor_exhausted',
+      providerKey: 'default-a.key1.model',
+      providerId: 'default-a',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      providerModel: 'model',
+      routeName: 'default',
+      runtimeKey: 'default-a.key1.model',
+      target: { providerKey: 'default-a.key1.model', runtimeKey: 'default-a.key1.model' },
+      dependencies: { errorHandlingCenter: {}, debugCenter: {}, logger: {} } as any,
+      runtimeManager: { resolveRuntimeKey: (providerKey?: string) => providerKey },
+      attempt: 6,
+      maxAttempts: 6,
+      logicalRequestChainKey: 'req_default_route_no_raw_400_after_floor_exhausted',
+      routePoolForAttempt: ['default-a.key1.model', 'default-b.key1.model'],
+      routePoolIsAuthoritative: true,
+      defaultTierAvailable: true,
+      excludedProviderKeys,
+      recordAttempt,
+      logStage: jest.fn(),
+      logProviderRetrySwitch: jest.fn(),
+      bypassTrafficGovernor: true,
+      trafficActiveInFlightAtAcquire: 0,
+      trafficPolicyMaxInFlight: 0,
+      providerSendStartedAtMs: Date.now(),
+      providerSendElapsedMs: 0,
+      cumulativeExternalLatencyMs: 0,
+      contextOverflowRetries: 0,
+      maxContextOverflowRetries: 0,
+      isStreamingRequest: true,
+      phase: 'provider_send',
+      logNonBlockingError: jest.fn(),
+      writeProviderSnapshot: jest.fn(async () => undefined),
+      extractRetryErrorSnapshot: () => ({
+        statusCode: 400,
+        errorCode: 'HTTP_400',
+        upstreamCode: 'HTTP_400',
+        reason: 'HTTP 400: invalid_prompt'
+      })
+    });
+
+    const captured = pending.then(
+      () => undefined,
+      (error_) => error_
+    );
+    await jest.advanceTimersByTimeAsync(3000);
+    const thrown = await captured;
+
+    expect(thrown).toBeDefined();
+    expect(thrown).not.toBe(error);
+    expect(thrown).toMatchObject({
+      code: 'ROUTECODEX_PROVIDER_RETRY_STOPPED',
+      statusCode: 502,
+      status: 502,
+      requestId: 'req_default_route_no_raw_400_after_floor_exhausted',
+      providerKey: 'default-a.key1.model',
+      routeName: 'default',
+      details: expect.objectContaining({
+        retryStoppedEvidence: {
+          upstreamCode: 'HTTP_400',
+          upstreamStatus: 400,
+        },
+        defaultPoolAvailable: true,
+        policyExhausted: false,
+        mayProject: false,
+        routePoolRemainingAfterExclusion: []
+      })
+    });
+    const projected = mapErrorToHttp(thrown);
+    expect(projected.status).toBe(502);
+    expect(projected.body.error.code).toBe('ROUTECODEX_PROVIDER_RETRY_STOPPED');
+    expect(JSON.stringify(projected.body)).not.toContain('HTTP_400');
+    expect((thrown as { upstreamCode?: unknown }).upstreamCode).toBeUndefined();
+    expect((thrown as { upstreamStatus?: unknown }).upstreamStatus).toBeUndefined();
+    expect(Array.from(excludedProviderKeys)).toEqual(['default-b.key1.model', 'default-a.key1.model']);
+    expect(recordAttempt).toHaveBeenCalledWith({ error: true });
   });
 });
