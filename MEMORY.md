@@ -3541,6 +3541,13 @@
 - The gate enforces: resources stay registry nodes; callable paths are scalar adjacent mainline edges; resource relationships appear only under edge resource_flow; every declared resource and function-map resource binding is carried by some edge resource_flow; duplicate edge ids, same-node edges, and multi-source/multi-target shortcuts fail.
 - Current map closure: 69 resources are bound through 178 mainline edge resource_flow payloads; mutation red fixture rejects 15 forbidden changes.
 
+# 2026-07-17: V3 mainline edge owner queryability is not optional
+
+- V3 resource/edge lock can pass while mainline `chain.owner_feature_id` or `edge.owner_feature_id` is absent from `docs/architecture/v3-function-map.yml`; this is an architecture gap, not a harmless doc mismatch.
+- Current audit found 69 resources and 178 edge `resource_flow` payloads closed, but these owner IDs were not function-map queryable: `v3.config_interpreter_contract`, `v3.debug_error_foundation`, `v3.foundation_p0_p2`, `v3.responses_direct_mvp_architecture`, `v3.responses_provider_runtime`, `v3.virtual_router_target_interpreter`.
+- Rule: V3 mainline owner IDs must resolve through function-map first, then verification-map and source/manifest anchors. Verification-only owner IDs are insufficient for traceable writes and edge-locked module calls.
+- Follow-up gate target: `verify:v3-resource-relation-edge-lock` or a sibling verifier must fail when any V3 mainline chain/edge owner is missing from function-map, and red fixtures must cover missing chain owner and missing edge owner.
+
 # 2026-07-16: V3 5555 Direct fresh replay truth
 - V3 5555 is non-production for this live compat task per Jason, so V3 connection/config/restart/live replay did not need extra approval.
 - Fresh Direct JSON/SSE/WS evidence now exists at `.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/direct-fresh-live-20260716T122025Z/summary.json`: Direct JSON and SSE returned HTTP 200 with markers `V3_DIRECT_FRESH_JSON_OK` / `V3_DIRECT_FRESH_SSE_OK`, SSE had `response.completed`, and WebSocket returned marker `V3_DIRECT_FRESH_WS_OK`.
@@ -3618,3 +3625,8 @@
 - V3 is a transparent server for client/provider protocol data. It must not invent protocol-visible headers, session IDs, thread IDs, or continuation identity. Client-provided headers and body fields remain protocol data plane; RouteCodex may read them for routing/continuation scope, but must not add replacement session headers or synthesize a client identity.
 - For Responses continuation, valid scope truth comes from transparent client input such as `session-id`/`thread-id`, `x-codex-turn-metadata`, or body `client_metadata.session_id` / `client_metadata.thread_id`. If a request can create or consume continuation state and no client scope exists, fail explicitly instead of using `request_id` as a fake session.
 - Internal request-scoped identifiers may be used only for non-continuation single-turn execution and must never enter provider/client normal payloads or headers.
+
+# 2026-07-17: V3 F1 mainline owner queryability gate is locked
+- V3 mainline chain/edge `owner_feature_id` is now checked by `npm run verify:v3-resource-relation-edge-lock`: every owner used in `docs/architecture/v3-mainline-call-map.yml` must resolve through both `docs/architecture/v3-function-map.yml` and `docs/architecture/v3-verification-map.yml`.
+- The F1 missing owners are registered in V3 function map: `v3.config_interpreter_contract`, `v3.debug_error_foundation`, `v3.foundation_p0_p2`, `v3.responses_direct_mvp_architecture`, `v3.responses_provider_runtime`, and `v3.virtual_router_target_interpreter`; `v3.config_interpreter_contract` also has its verification-map row.
+- Red fixtures lock the regression: missing chain owner, missing edge owner, and missing verification owner all fail in `npm run test:v3-resource-relation-edge-lock-red-fixtures`. This closes only F1; F2/F3/F4 stay independent.

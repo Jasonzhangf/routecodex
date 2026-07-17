@@ -99,6 +99,418 @@ features:
       - npm run test:v3-workspace
     runtime_status: config_and_server_bound_p6_preserved
 
+  - feature_id: v3.config_interpreter_contract
+    owner_crate: routecodex-v3-config
+    owner_files:
+      - v3/crates/routecodex-v3-config/src/store.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+    resource_bindings:
+      - v3.config.file_source
+      - v3.config.authoring_parsed
+      - v3.config.schema_validated
+      - v3.config.resource_registry
+      - v3.config.published_manifest
+      - v3.config.hub_pipeline_declarations
+      - v3.config.route_pool_match_declarations
+      - v3.hub.runtime_resource_declarations
+      - v3.secret.provider_auth_handle
+    mainline_bindings:
+      - v3-cfg-01
+      - v3-cfg-02
+      - v3-cfg-03
+      - v3-cfg-04
+    entry_symbols:
+      - V3ConfigStore::read_authoring
+      - V3ConfigStore::load_snapshot
+      - parse_v3_config_02_authoring
+      - validate_v3_config_03_schema_from_v3_config_02
+      - build_v3_config_04_resource_registry_from_v3_config_03
+      - publish_v3_config_05_manifest_from_v3_config_04
+    allowed_paths:
+      - v3/crates/routecodex-v3-config
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+      - docs/goals/v3-foundation-p0-p2-test-design.md
+      - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs
+      - scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run verify:v3-resource-relation-edge-lock
+      - npm run test:v3-resource-relation-edge-lock-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_config_contract_source
+
+  - feature_id: v3.foundation_p0_p2
+    owner_crates: [routecodex-v3-config, routecodex-v3-debug, routecodex-v3-error, routecodex-v3-server, routecodex-v3-cli]
+    owner_files:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-debug/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+    resource_bindings:
+      - v3.config.published_manifest
+      - v3.server.listener_set
+      - v3.server.validated_http_input
+      - v3.request.protocol_context
+      - v3.debug.artifact
+      - v3.error.chain
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-srv-01
+      - v3-srv-02
+      - v3-srv-03
+      - v3-srv-04
+      - v3-srv-05
+    entry_symbols:
+      - spawn_v3_server_aggregate
+      - pending_endpoint
+      - build_v3_server_startup_01_listener_set_from_config_05
+      - build_v3_server_03_http_request_raw
+      - register_v3_debug_01_pending_endpoint_event
+      - project_v3_pending_endpoint_error
+      - build_v3_server_16_http_frame_from_v3_error_06
+    allowed_paths:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-cli
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-rust-module-boundaries.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+      - docs/goals/v3-foundation-implementation-order.md
+      - docs/goals/v3-foundation-p0-p2-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_p0_p2_foundation
+
+  - feature_id: v3.debug_error_foundation
+    owner_crates: [routecodex-v3-debug, routecodex-v3-error, routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-debug/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - v3/crates/routecodex-v3-provider-responses/src/health.rs
+      - v3/crates/routecodex-v3-runtime/src/foundation.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+    resource_bindings:
+      - v3.request.protocol_context
+      - v3.debug.trace_context
+      - v3.debug.raw_capture
+      - v3.debug.event_ledger
+      - v3.debug.dry_run_fixture
+      - v3.debug.dry_run_execution
+      - v3.debug.snapshot_session
+      - v3.error.source
+      - v3.error.classified
+      - v3.error.action_plan
+      - v3.error.exhaustion_decision
+      - v3.error.execution_decision
+      - v3.error.client_projection
+      - v3.provider.health_state
+      - v3.provider.availability_projection
+    mainline_bindings:
+      - v3-de-01
+      - v3-de-02
+      - v3-de-03
+      - v3-de-04
+      - v3-de-05
+      - v3-de-06
+      - v3-de-07
+      - v3-de-08
+      - v3-de-09
+      - v3-de-10
+      - v3-de-11
+      - v3-de-12
+      - v3-de-13
+    entry_symbols:
+      - execute_v3_foundation_pending_runtime
+      - execute_v3_responses_direct_dry_run_runtime
+      - V3DebugRuntime::start_trace
+      - V3DebugRuntime::capture_raw_request
+      - V3DebugRuntime::record_node_event
+      - V3DebugRuntime::build_dry_run_execution_plan
+      - V3DebugRuntime::start_snapshot_session
+      - build_v3_error_01_source_raised
+      - build_v3_error_02_classified_from_v3_error_01
+      - build_v3_error_03_target_local_action_from_v3_error_02
+      - build_v3_error_04_target_exhaustion_decision_from_v3_error_03
+      - build_v3_error_05_execution_decision_from_v3_error_04
+      - build_v3_error_06_client_projected_from_v3_error_05
+      - V3ProviderHealthStore::apply_error_action
+      - V3ProviderHealthStore::availability
+    allowed_paths:
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-error
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+      - docs/goals/v3-debug-error-foundation-plan.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run test:v3-debug-contract
+      - npm run test:v3-error-contract
+      - npm run test:v3-provider-health-contract
+      - npm run test:v3-foundation-runtime-contract
+      - npm run test:v3-server-debug-error-blackbox
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_p3_p4_foundation
+
+  - feature_id: v3.responses_direct_mvp_architecture
+    owner_crates: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      - v3.request.protocol_context
+      - v3.request.normal_payload
+      - v3.target.concrete_provider
+      - v3.responses_direct.policy
+      - v3.response.provider_raw
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-rd-09
+      - v3-rd-13
+      - v3-rd-14
+    entry_symbols:
+      - execute_v3_responses_direct_runtime_kernel
+      - responses_direct_route_hook
+      - responses_direct_response_projection_hook
+      - build_v3_server_16_http_frame_from_v3_resp_15
+      - pending_endpoint
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-server
+      - docs/design/v3-system-definition.md
+      - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+      - docs/goals/v3-responses-direct-mvp-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run test:v3-compile-fail
+      - npm run test:v3-provider-responses
+      - npm run test:v3-responses-direct-unit
+      - npm run test:v3-responses-direct-blackbox
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_p6_source
+
+  - feature_id: v3.responses_provider_runtime
+    owner_crates: [routecodex-v3-provider-responses, routecodex-v3-runtime, routecodex-v3-target]
+    owner_files:
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/src/raw_response.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-target/src/lib.rs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.target.concrete_provider
+      - v3.responses_direct.policy
+      - v3.provider.responses_wire_payload
+      - v3.provider.transport_request
+      - v3.response.provider_raw
+      - v3.secret.provider_auth_handle
+    mainline_bindings:
+      - v3-rd-10
+      - v3-rd-11
+      - v3-rd-12
+    entry_symbols:
+      - responses_direct_request_projection_hook
+      - responses_direct_provider_transport_hook
+      - build_v3_provider_12_responses_wire_payload
+      - build_v3_transport_13_responses_http_request_from_v3_provider_12
+      - ReqwestResponsesTransport::send
+      - V3ProviderResp14Raw::from_json
+    allowed_paths:
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-target
+      - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+      - docs/goals/v3-responses-direct-mvp-test-design.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-virtual-router
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run test:v3-provider-responses
+      - npm run test:v3-responses-direct-blackbox
+      - npm run test:v3-provider-health-contract
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-source-gate-red-fixtures
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-static-hook-registry
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_provider_runtime_source
+
+  - feature_id: v3.virtual_router_target_interpreter
+    owner_crates: [routecodex-v3-target, routecodex-v3-runtime, routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-target/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/foundation.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      - v3.config.published_manifest
+      - v3.request.protocol_context
+      - v3.request.normal_payload
+      - v3.route.opaque_target
+      - v3.target.candidate_set
+      - v3.target.concrete_provider
+    mainline_bindings:
+      - v3-rd-01
+      - v3-rd-02
+      - v3-rd-06
+      - v3-rd-07
+      - v3-rd-08
+    entry_symbols:
+      - pending_endpoint
+      - execute_v3_p5_routing_runtime
+      - build_v3_server_03_http_request_raw
+      - build_v3_req_04_standardized_responses_from_v3_server_03
+      - V3TargetInterpreter::classify_kind
+      - V3TargetInterpreter::expand_candidates
+      - V3TargetInterpreter::select_available
+    allowed_paths:
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+      - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/design/v3-system-definition.md
+      - docs/design/v3-routecodex-rust-module-boundaries.md
+      - docs/design/v3-routecodex-runtime-resource-contract.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-config/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
+    required_gates:
+      - npm run test:v3-p5-router-target
+      - npm run test:v3-p5-server-blackbox
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-compile-fail
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+      - git diff --check
+    runtime_status: owner_queryability_bound_to_existing_p5_source
+
   - feature_id: v3.models_capability_catalog
     owner_crates: [routecodex-v3-server]
     owner_files:

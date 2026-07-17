@@ -93,6 +93,7 @@ for (const rel of [files.verifier, files.redFixture]) {
 
 const resourceIds = verifyResourceMap(resourceMap);
 const resourceUsage = verifyMainlineEdges(mainlineMap, resourceIds);
+verifyMainlineOwnerQueryability(mainlineMap, functionMap, verificationMap);
 verifyAllResourcesUsed(resourceIds, resourceUsage);
 verifyFunctionResourceBindings(functionMap, resourceIds, resourceUsage);
 verifyGateMaps(functionMap, verificationMap);
@@ -276,6 +277,45 @@ function verifyAllResourcesUsed(resourceIds, resourceUsage) {
   }
 }
 
+function featureIdSet(parsed) {
+  const ids = new Set();
+  for (const [index, feature] of array(parsed?.features).entries()) {
+    const id = feature?.feature_id;
+    if (typeof id !== 'string' || id.length === 0) {
+      fail('feature map entry[' + index + '] missing feature_id');
+      continue;
+    }
+    if (ids.has(id)) fail('feature map duplicate feature_id ' + id);
+    ids.add(id);
+  }
+  return ids;
+}
+
+function requireOwnerFeatureId(ownerFeatureId, where, functionFeatureIds, verificationFeatureIds) {
+  if (typeof ownerFeatureId !== 'string' || ownerFeatureId.length === 0) {
+    fail(where + ': owner_feature_id must be a non-empty string');
+    return;
+  }
+  if (!functionFeatureIds.has(ownerFeatureId)) {
+    fail(where + ': owner_feature_id ' + ownerFeatureId + ' is not declared in ' + files.functionMap);
+  }
+  if (!verificationFeatureIds.has(ownerFeatureId)) {
+    fail(where + ': owner_feature_id ' + ownerFeatureId + ' is not declared in ' + files.verificationMap);
+  }
+}
+
+function verifyMainlineOwnerQueryability(mainlineMapParsed, functionMapParsed, verificationMapParsed) {
+  const functionFeatureIds = featureIdSet(functionMapParsed);
+  const verificationFeatureIds = featureIdSet(verificationMapParsed);
+  for (const [chainIndex, chain] of array(mainlineMapParsed?.chains).entries()) {
+    const chainLabel = files.mainlineMap + ': chain[' + chainIndex + '] ' + (chain?.chain_id ?? '<missing-chain_id>');
+    requireOwnerFeatureId(chain?.owner_feature_id, chainLabel, functionFeatureIds, verificationFeatureIds);
+    for (const [edgeIndex, edge] of array(chain?.edges).entries()) {
+      requireOwnerFeatureId(edge?.owner_feature_id, edgeLabel(chain, edgeIndex, edge), functionFeatureIds, verificationFeatureIds);
+    }
+  }
+}
+
 function verifyFunctionResourceBindings(parsed, resourceIds, resourceUsage) {
   for (const feature of array(parsed?.features)) {
     const featureIdValue = feature?.feature_id ?? '<missing-feature_id>';
@@ -325,6 +365,7 @@ function verifyGateMaps(functionMapParsed, verificationMapParsed) {
       'Resources are nodes/truth resources, not edges',
       'resource_flow',
       'Multiple callable paths require multiple edges',
+      'Every mainline chain and edge owner_feature_id resolves through the V3 function map and verification map',
     ]) {
       if (!requiredContract.includes(phrase)) {
         fail(files.verificationMap + ': ' + featureId + ' required_contract missing phrase ' + phrase);

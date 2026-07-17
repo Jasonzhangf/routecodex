@@ -91,6 +91,30 @@ const cases = [
     diagnostic: /duplicate step_id v3-cfg-01/u,
   },
   {
+    name: 'chain owner missing from function map',
+    path: 'docs/architecture/v3-function-map.yml',
+    mutate: function(source) {
+      return source.replace(/\n  - feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n  - feature_id: |\n?$)/u, '\n');
+    },
+    diagnostic: /chain\[1\] v3\.config\.compile: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-function-map\.yml/u,
+  },
+  {
+    name: 'edge owner missing from function map',
+    path: 'docs/architecture/v3-mainline-call-map.yml',
+    mutate: function(source) {
+      return source.replace('owner_feature_id: v3.config_interpreter_contract\n        resource_flow:', 'owner_feature_id: v3.test_missing_edge_owner\n        resource_flow:');
+    },
+    diagnostic: /v3-cfg-01: owner_feature_id v3\.test_missing_edge_owner is not declared in docs\/architecture\/v3-function-map\.yml/u,
+  },
+  {
+    name: 'mainline owner missing from verification map',
+    path: 'docs/architecture/v3-verification-map.yml',
+    mutate: function(source) {
+      return source.replace(/\n  - feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n  - feature_id: |\n?$)/u, '\n');
+    },
+    diagnostic: /chain\[1\] v3\.config\.compile: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-verification-map\.yml/u,
+  },
+  {
     name: 'same node edge',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
@@ -137,7 +161,10 @@ const cases = [
     name: 'remove gate from verification map',
     path: 'docs/architecture/v3-verification-map.yml',
     mutate: function(source) {
-      return source.replace('      - npm run test:v3-resource-relation-edge-lock-red-fixtures\n', '');
+      return source.replace(
+        /(\n  - feature_id: v3\.resource_relation_edge_lock[\s\S]*?)      - npm run test:v3-resource-relation-edge-lock-red-fixtures\n/u,
+        '$1',
+      );
     },
     diagnostic: /missing required gate npm run test:v3-resource-relation-edge-lock-red-fixtures/u,
   },

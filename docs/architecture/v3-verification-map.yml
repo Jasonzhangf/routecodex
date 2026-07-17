@@ -632,6 +632,43 @@ features:
       runtime: "H2 runtime evidence is the actual rccv3 CLI controlled-upstream replay artifact for JSON, SSE, reselection, default exhaustion, Dry Run, Debug, and side-channel isolation."
       forbidden_claim: "Do not claim Hub v1 Direct migrated, Server switched, Relay/continuation available, P6 deleted, global install, production runtime, or real provider compatibility."
 
+  - feature_id: v3.config_interpreter_contract
+    status: owner_queryability_bound
+    change_risk: medium
+    owner_kind: rust_project_v3
+    owner_scope: "Unique V3 config read/parse/validate/resource-registry/published-manifest chain used by mainline v3.config.compile."
+    owner_modules:
+      - v3/crates/routecodex-v3-config
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-responses-direct-mainline.md
+    required_unit:
+      - V3ConfigStore::read_authoring reads the config file source once
+      - parse_v3_config_02_authoring builds V3Config02AuthoringParsed
+      - validate_v3_config_03_schema_from_v3_config_02 rejects invalid schema
+      - build_v3_config_04_resource_registry_from_v3_config_03 creates resource and hook declarations
+      - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published manifest and auth handles
+    required_contract:
+      - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map
+      - v3-cfg-01 through v3-cfg-04 remain adjacent config compiler edges
+      - Config owns config file IO; Runtime/Server/Provider cannot read config source files directly
+      - Secrets are emitted only as auth handles and never enter published manifest debug or client payloads
+    required_gates:
+      - npm run verify:v3-resource-relation-edge-lock
+      - npm run test:v3-resource-relation-edge-lock-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run test:v3-workspace
+      - git diff --check
+    completion_rule:
+      source: "Config chain owner row, verification row, mainline edge owner IDs, and resource bindings are all queryable through V3 maps and locked by owner-queryability red fixtures."
+      runtime: "No runtime claim in this F1 fix; existing config runtime evidence remains owned by the original V3 foundation/config goals."
+      forbidden_claim: "Do not claim runtime behavior, global install, restart, live config mutation, or F2/F3/F4 closure from this owner-queryability row."
+
   - feature_id: v3.foundation_p0_p2
     change_risk: high
     owner_kind: rust_project_v3
@@ -1542,11 +1579,13 @@ features:
       - "Every resource relationship is encoded only under the owning mainline edge resource_flow with consumes, produces, side_channel_reads, and side_channel_writes arrays."
       - "Multiple callable paths require multiple edges; multi-source or multi-target shortcuts are forbidden."
       - "Every resource_flow id and function-map resource binding resolves to the resource registry, and every declared resource participates in at least one edge resource_flow."
+      - "Every mainline chain and edge owner_feature_id resolves through the V3 function map and verification map."
     required_unit:
       - resource map relation fields are rejected
       - missing malformed unknown or top-level resource_flow fields are rejected
       - undeclared and unused resources are rejected
       - function-map bindings to undeclared or edge-unbound resources are rejected
+      - missing mainline chain owner and edge owner function-map/verification-map bindings are rejected
       - scalar distinct source and target nodes are required
       - duplicate step ids and multi-source or multi-target shortcuts are rejected
       - package wiring keeps the edge lock inside verify:v3-architecture-docs

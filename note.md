@@ -1,3 +1,13 @@
+# 2026-07-17T11:20+08:00 V3 skeleton / edge / control architecture audit
+
+- Scope: audit-only for `feature_id:v3.skeleton_edge_control_architecture_audit`; no runtime behavior, live config, global install, restart, credential, or provider traffic mutation.
+- Goal source read: `/Users/fanzhang/.codex/attachments/9ac17c79-4b7e-434e-8e87-84ce6989abb9/pasted-text-1.txt`; plan doc exists at `docs/goals/v3-skeleton-edge-control-architecture-audit-plan.md`.
+- MemoryPalace reminders used: MetadataCenter/control writes need manifest/code-sync gate with family/slot/owning feature/writer/stage/write policy/verification mapping; V3 resource relationships must ride on mainline edge `resource_flow`, not resource nodes.
+- Current map counts: 69 resources, 28 function-map features, 34 verification features, 30 mainline chains, 178 mainline edges; every edge has `resource_flow`, every resource is carried by at least one edge.
+- Gates PASS on current worktree: `npm run verify:v3-resource-map`; `npm run verify:v3-module-boundaries`; `npm run verify:v3-rust-only`; `npm run verify:v3-resource-relation-edge-lock` (`69 resources bound through 178 edge resource_flow payloads`); `npm run verify:v3-architecture-docs` (`docs: 25`, `resources: 69`, `edges: 178`).
+- Main audit findings written to `docs/architecture/reviews/v3-skeleton-edge-control-architecture-audit-2026-07-17.md`: mainline chain/edge owner IDs missing from function-map, source-symbol queryability gate missing, V3 control-center registry missing, and continuation scope transparency needs owner decision/red tests.
+- Missing mainline owner IDs from function-map: `v3.config_interpreter_contract`, `v3.debug_error_foundation`, `v3.foundation_p0_p2`, `v3.responses_direct_mvp_architecture`, `v3.responses_provider_runtime`, `v3.virtual_router_target_interpreter`. `v3.config_interpreter_contract` is also absent from verification-map.
+
 # 2026-07-16T10:21+08:00 V3 Responses Direct remote continuation live 5555 probe
 
 - Accepted Jason correction: release/global install copying `v3/` is expected because `routecodex-v3` bin/tests must be globally installable for V3 validation; do not treat that copy scope as dirty code.
@@ -31233,3 +31243,10 @@ Pure Rust NAPI candidates:
 - Current V3 server source had partial body `client_metadata` support but still fell back to `request_id` as session and to session as conversation. That is not acceptable for continuation-capable requests.
 - Minimal correction direction: continuation scope may read transparent client inputs (`session-id`/`thread-id`, `x-codex-turn-metadata`, `client_metadata.session_id/thread_id`); if a request has tools, `previous_response_id`, or `function_call_output` and lacks scope, fail explicitly rather than synthesizing session/thread.
 - Boundary: this correction is separate from provider WebSocket error parsing. It must not add headers, rewrite provider payload, rebuild continuation locally, or mutate live config.
+
+# 2026-07-17T11:38+08:00 V3 F1 mainline owner queryability closeout
+- Baseline gap confirmed: `npm run verify:v3-resource-relation-edge-lock` passed while current `docs/architecture/v3-mainline-call-map.yml` still had 6 owner IDs missing from `docs/architecture/v3-function-map.yml`: `v3.config_interpreter_contract`, `v3.debug_error_foundation`, `v3.foundation_p0_p2`, `v3.responses_direct_mvp_architecture`, `v3.responses_provider_runtime`, `v3.virtual_router_target_interpreter`. `v3.config_interpreter_contract` was also missing from `docs/architecture/v3-verification-map.yml`.
+- Fix: added V3 function-map owner rows for all 6 IDs, added the missing `v3.config_interpreter_contract` verification-map row, and extended `verify-v3-resource-relation-edge-lock` to require every mainline chain/edge `owner_feature_id` to resolve through both V3 function map and V3 verification map.
+- Red fixtures added: missing chain owner in function map, missing edge owner in function map, and missing mainline owner in verification map. `test:v3-resource-relation-edge-lock-red-fixtures` now rejects 18 forbidden mutations.
+- Verification passed: `npm run verify:v3-resource-relation-edge-lock`; `npm run test:v3-resource-relation-edge-lock-red-fixtures`; `npm run verify:v3-architecture-docs`; `npm run verify:function-map-compile-gate`; `npm run verify:architecture-owner-queryability`; `git diff --check`.
+- Boundary: this closes F1 map/gate owner queryability only. F2 source-anchor queryability, F3 dedicated V3 control-center registry, and F4 runtime/server behavior remain separate goals.
