@@ -999,21 +999,52 @@ pub async fn execute_v3_responses_relay_dry_run_runtime(
 pub fn project_v3_responses_relay_runtime_failure(
     error: V3ResponsesRelayRuntimeError,
 ) -> V3ResponsesRelayRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3HubRuntime",
-        "responses_relay_runtime_error",
-        error.to_string(),
-    );
-    error_output(
-        source,
-        500,
-        json!({"error":{"type":"runtime_error","message":error.to_string()}}),
-        "none",
-        Vec::new(),
-        None,
-        0,
-    )
+    match error {
+        V3ResponsesRelayRuntimeError::Target(_) => {
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::TargetPoolExhausted,
+                "V3Target10ConcreteProviderSelected",
+                "selected_target_exhausted",
+                "all selected provider candidates are unavailable",
+            );
+            let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
+            let local = build_v3_error_03_target_local_action_from_v3_error_02(
+                classified,
+                V3ErrorActionScope::None,
+                0,
+            );
+            let exhausted = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, 0);
+            let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
+            let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
+            error_output(
+                source,
+                projected.status,
+                projected.body,
+                "none",
+                Vec::new(),
+                None,
+                0,
+            )
+        }
+        error => {
+            let message = error.to_string();
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3HubRuntime",
+                "responses_relay_runtime_error",
+                message.clone(),
+            );
+            error_output(
+                source,
+                500,
+                json!({"error":{"type":"runtime_error","message":message}}),
+                "none",
+                Vec::new(),
+                None,
+                0,
+            )
+        }
+    }
 }
 
 fn run_json_response_hooks(
@@ -1561,6 +1592,50 @@ mod tests {
         .expect("usage summary");
         assert_eq!(summary.input_tokens, Some(59_842));
         assert_eq!(summary.cached_tokens, Some(41_984));
+    }
+
+    #[test]
+    fn target_resolution_failure_projects_compact_target_exhaustion() {
+        let output =
+            project_v3_responses_relay_runtime_failure(V3ResponsesRelayRuntimeError::Target(
+                "V3TargetExhaustion { route: internal debug state }".to_string(),
+            ));
+
+        assert_eq!(output.status, 503);
+        let body = match &output.client_body {
+            V3ResponsesRelayClientBody::Json(body) => body,
+            V3ResponsesRelayClientBody::Sse(_) => panic!("target exhaustion must project as JSON"),
+        };
+        assert_eq!(body["error"]["code"], "selected_target_exhausted");
+        assert_eq!(body["error"]["class"], "target_pool_exhausted");
+        assert_eq!(body["error"]["target_exhausted"], true);
+        assert_eq!(
+            body["error"]["message"],
+            "all selected provider candidates are unavailable"
+        );
+        assert!(!body.to_string().contains("V3TargetExhaustion"));
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+    }
+
+    #[test]
+    fn non_target_runtime_failure_remains_runtime_error() {
+        let output = project_v3_responses_relay_runtime_failure(
+            V3ResponsesRelayRuntimeError::StaticRegistry("registry unavailable".to_string()),
+        );
+
+        assert_eq!(output.status, 500);
+        let body = match &output.client_body {
+            V3ResponsesRelayClientBody::Json(body) => body,
+            V3ResponsesRelayClientBody::Sse(_) => panic!("runtime failure must project as JSON"),
+        };
+        assert_eq!(body["error"]["type"], "runtime_error");
+        assert_eq!(
+            body["error"]["message"],
+            "V3 Hub static hook registry failed: registry unavailable"
+        );
     }
 
     async fn collect_projected_sse(
