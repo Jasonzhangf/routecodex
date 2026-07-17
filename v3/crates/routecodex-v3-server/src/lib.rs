@@ -27,12 +27,13 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
-    project_v3_responses_relay_runtime_failure, project_v3_virtual_router_status,
-    register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
-    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
+    project_v3_virtual_router_status, register_responses_direct_hooks,
+    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
+    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
@@ -508,6 +509,10 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             "/_routecodex/diagnostics/virtual-router/status",
             get(virtual_router_status),
         )
+        .route(
+            "/_routecodex/diagnostics/virtual-router/dry-run",
+            post(virtual_router_dry_run),
+        )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
         .with_state(Arc::new(state))
@@ -554,6 +559,59 @@ async fn virtual_router_status(
             json!({"error":{"message":message,"code":"virtual_router_diagnostics_failed"}}),
         ),
     }
+}
+
+async fn virtual_router_dry_run(
+    State(state): State<Arc<V3ListenerState>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> Response<Body> {
+    if !remote.ip().is_loopback() {
+        return json_response(
+            403,
+            json!({"error":{"message":"forbidden","code":"forbidden"}}),
+        );
+    }
+    let payload = match read_json_payload(request).await {
+        Ok(payload) => payload,
+        Err(projected) => {
+            return error_output_response_for_server(
+                &state.server,
+                "/_routecodex/diagnostics/virtual-router/dry-run",
+                "pre-request",
+                projected,
+            );
+        }
+    };
+    match project_v3_virtual_router_dry_run(
+        &state.manifest,
+        &state.server.id,
+        &payload,
+        &state.provider_health.store(),
+        current_epoch_ms(),
+    ) {
+        Ok(diagnostics) => json_response(
+            200,
+            json!({
+                "ok": true,
+                "serverId": state.server.id,
+                "localPort": state.server.port,
+                "routingPolicyGroup": state.server.routing_group,
+                "diagnostics": diagnostics
+            }),
+        ),
+        Err(message) => json_response(
+            500,
+            json!({"error":{"message":message,"code":"virtual_router_dry_run_failed"}}),
+        ),
+    }
+}
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 async fn pending_endpoint(
@@ -683,6 +741,14 @@ async fn pending_endpoint(
             error,
         ));
     }
+    let snapshot_session_id = if entry_protocol == "responses" {
+        match start_v3_live_snapshot_session(&state, &trace_scope) {
+            Ok(session_id) => session_id,
+            Err(response) => return *response,
+        }
+    } else {
+        None
+    };
     emit_v3_request_start_console_line(&state, &path, &request_id, &request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
@@ -722,6 +788,16 @@ async fn pending_endpoint(
             started_at,
             true,
         );
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            output.status,
+            &output.node_trace,
+            "provider_request_dry_run",
+        ) {
+            return response;
+        }
         return foundation_output_response(output);
     }
     if is_provider_request_dry_run(&request_headers)
@@ -753,6 +829,16 @@ async fn pending_endpoint(
             started_at,
             true,
         );
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            output.status,
+            &output.node_trace,
+            "provider_request_dry_run",
+        ) {
+            return response;
+        }
         return foundation_output_response(output);
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -893,6 +979,16 @@ async fn pending_endpoint(
                 Ok(output) => output,
                 Err(error) => project_v3_responses_relay_runtime_failure(error),
             };
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            output.status,
+            &output.node_trace,
+            "live_response",
+        ) {
+            return response;
+        }
         if let Some(error_chain) = output.error_chain.as_deref() {
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
@@ -950,6 +1046,16 @@ async fn pending_endpoint(
             payload,
         )
         .await;
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            frame.status,
+            &frame.node_trace,
+            "live_response",
+        ) {
+            return response;
+        }
         emit_v3_frame_error_console_line(&state.server, &path, &request_id, &frame);
         responses_direct_output_response(frame)
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
@@ -978,6 +1084,16 @@ async fn pending_endpoint(
             },
             &state.debug,
         );
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            output.status,
+            &output.node_trace,
+            "live_response",
+        ) {
+            return response;
+        }
         pending_binding_output_response(
             output,
             &entry_protocol,
@@ -1564,6 +1680,58 @@ fn record_and_emit_v3_error_projection(
         error_chain,
         body,
     );
+    None
+}
+
+fn start_v3_live_snapshot_session(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+) -> Result<Option<String>, Box<Response<Body>>> {
+    match state.debug.start_snapshot_session(trace_scope, "live") {
+        Ok(session_id) => Ok(Some(session_id)),
+        Err(V3DebugError::Disabled("snapshots")) => Ok(None),
+        Err(error) => Err(Box::new(foundation_output_response(
+            project_v3_debug_failure("V3SnapshotSessionStarted", error),
+        ))),
+    }
+}
+
+fn record_v3_live_snapshot_projection(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    snapshot_session_id: Option<&str>,
+    status: u16,
+    node_trace: &[&'static str],
+    phase: &'static str,
+) -> Option<Response<Body>> {
+    let session_id = snapshot_session_id?;
+    for node_id in node_trace {
+        if let Err(error) = state.debug.record_snapshot(
+            trace_scope,
+            session_id,
+            *node_id,
+            json!({
+                "node_id": node_id,
+                "phase": phase,
+                "status": status,
+                "live": true
+            }),
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3SnapshotNodeCaptured",
+                error,
+            )));
+        }
+    }
+    if let Err(error) = state
+        .debug
+        .close_snapshot_session_keep_snapshots(trace_scope, session_id)
+    {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3SnapshotSessionClosed",
+            error,
+        )));
+    }
     None
 }
 

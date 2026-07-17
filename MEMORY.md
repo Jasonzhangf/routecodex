@@ -3692,6 +3692,12 @@
 - The current profile is explicit `compat:passthrough`; this closes the runtime/map/hook landing point only. It does not claim V2 provider-specific profile loader parity or migration of the old 7 compat JSON profiles.
 - Compat boundary: provider-family micro-adjustments may live here later, but tool governance, apply_patch/servertool/stopless lifecycle, tool identity pairing, route/model selection, fallback, silent repair, and MetadataCenter/side-channel injection must remain outside these compat nodes.
 - Verified source baseline: V3 static hook/resource/normalization/module/architecture/function-map/mainline gates, V3 fmt/clippy, controlled Relay runtime integration tests, continuation/config/managed lifecycle tests, build:v3-cli, and red fixtures passed. No global install, restart, or live 5555 replay is claimed for this source slice.
+# 2026-07-17: 5555 glm-5.2 context overflow truth
+
+- Historical 5555 context-over-limit errors with message `maximum context length is 202752 tokens ... messages resulted in 203475 tokens` were caused by the selected `orangeai/glm-5.2` upstream path hitting its real provider-side limit around 202752 tokens, not by MiniMax M3 being limited to 200k and not by a confirmed local hardcoded Rust cap.
+- Evidence: live logs in `/Volumes/extension/.rcc/logs/server-4444.log` around 2026-07-03 06:28-06:29 show 5555 longcontext selecting `orangeai[key1].glm-5.2` for requests with ~1.02M estimated text chars and provider usage totals rising to exactly `202752`; current `/v1/models` still projects `glm-5.2` from config as 1048576 while `MiniMax-M3` projects 1000000.
+- Config implication: provider config/capability catalog for `orangeai/glm-5.2` over-advertised context versus observed upstream behavior. Do not hardcode the cap in code; either live-probe provider context and update provider config, or let provider context errors enter failure policy and reselect/cooldown. Current V3 regression locks a context-length provider error reselecting from a limited provider to `minimax:key1:MiniMax-M3` before client projection.
+
 # 2026-07-17: V3 stopless continuation closeout
 
 - The reported `local continuation is already committed: call_stopless_reasoning` was a local Resp04 store collision, not an SSE projection failure. A fixed stopless call id must be keyed by the full continuation scope; local continuation records now use `(scope, context_id)`.

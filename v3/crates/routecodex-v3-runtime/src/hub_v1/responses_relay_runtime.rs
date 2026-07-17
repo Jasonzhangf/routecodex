@@ -166,6 +166,10 @@ impl V3ResponsesRelayProviderHealthHandle {
             store: V3ProviderHealthStore::from_manifest(manifest),
         }
     }
+
+    pub fn store(&self) -> V3ProviderHealthStore {
+        self.store.clone()
+    }
 }
 
 struct V3ResponsesRelayProviderRetryState<'state> {
@@ -239,6 +243,23 @@ impl V3RuntimeStreamObservation {
         }
         if usage.is_some() {
             snapshot.usage = usage;
+        }
+        Ok(())
+    }
+
+    fn record_finish_reason_if_missing(&self, finish_reason: Option<&str>) -> Result<(), String> {
+        let Some(finish_reason) = finish_reason
+            .map(str::trim)
+            .filter(|finish_reason| !finish_reason.is_empty())
+        else {
+            return Ok(());
+        };
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if snapshot.finish_reason.is_none() {
+            snapshot.finish_reason = Some(finish_reason.to_string());
         }
         Ok(())
     }
@@ -714,12 +735,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
                 observability.transport = "json".to_string();
-                observability.response_status =
-                    read_v3_runtime_response_status(&finalized_provider_value);
+                let response_status = read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
                         .or_else(|| read_v3_runtime_finish_reason(&provider_value))
-                        .or_else(|| infer_v3_runtime_finish_reason(action));
+                        .or_else(|| {
+                            infer_v3_runtime_finish_reason(action, response_status.as_deref())
+                        });
+                observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
@@ -752,8 +775,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
                 observability.transport = "sse".to_string();
-                observability.response_status =
-                    read_v3_runtime_response_status(&finalized_provider_value);
+                let response_status = read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
                         .or_else(|| read_v3_runtime_finish_reason(&provider_value))
@@ -763,7 +785,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 .ok()
                                 .and_then(|snapshot| snapshot.finish_reason)
                         })
-                        .or_else(|| infer_v3_runtime_finish_reason(action));
+                        .or_else(|| {
+                            infer_v3_runtime_finish_reason(action, response_status.as_deref())
+                        });
+                stream_observation
+                    .record_finish_reason_if_missing(observability.finish_reason.as_deref())
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
                     .or_else(|| extract_v3_runtime_usage_summary(&provider_value))
                     .or_else(|| {
@@ -1216,10 +1244,20 @@ fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["candidates", "0", "finishReason"]))
 }
 
-fn infer_v3_runtime_finish_reason(action: V3HubContinuationCommit) -> Option<String> {
+fn infer_v3_runtime_finish_reason(
+    action: V3HubContinuationCommit,
+    response_status: Option<&str>,
+) -> Option<String> {
     match action {
         V3HubContinuationCommit::LocalContext => Some("tool_calls".to_string()),
-        V3HubContinuationCommit::None | V3HubContinuationCommit::RemoteBinding => None,
+        V3HubContinuationCommit::None | V3HubContinuationCommit::RemoteBinding => {
+            match response_status.map(str::trim) {
+                Some(status) if status.eq_ignore_ascii_case("completed") => {
+                    Some("stop".to_string())
+                }
+                _ => None,
+            }
+        }
     }
 }
 
@@ -1532,14 +1570,64 @@ fn project_finalized_response_sse_stream(response: Value) -> V3ResponsesRelayCli
         Some("failed" | "incomplete") => "response.failed",
         _ => "response.completed",
     };
+    let mut frames = Vec::new();
+    if event_name == "response.completed" {
+        if let Some(response_id) = response.get("id").and_then(Value::as_str) {
+            frames.push(Ok(build_v3_runtime_sse_json_frame(
+                "response.created",
+                &json!({
+                    "type": "response.created",
+                    "response": {
+                        "id": response_id,
+                        "status": response
+                            .get("status")
+                            .cloned()
+                            .unwrap_or_else(|| json!("in_progress")),
+                    }
+                }),
+            )));
+            if let Some(output) = response.get("output").and_then(Value::as_array) {
+                for (index, item) in output.iter().enumerate() {
+                    let projected_item = project_v3_responses_sse_output_item_done_item(item);
+                    frames.push(Ok(build_v3_runtime_sse_json_frame(
+                        "response.output_item.done",
+                        &json!({
+                            "type": "response.output_item.done",
+                            "response_id": response_id,
+                            "output_index": index,
+                            "item": projected_item,
+                        }),
+                    )));
+                }
+            }
+        }
+    }
     let payload = json!({
         "type": event_name,
         "response": response,
     });
-    Box::pin(stream::iter([
-        Ok(build_v3_runtime_sse_json_frame(event_name, &payload)),
-        Ok(b"data: [DONE]\n\n".to_vec()),
-    ]))
+    frames.push(Ok(build_v3_runtime_sse_json_frame(event_name, &payload)));
+    frames.push(Ok(b"data: [DONE]\n\n".to_vec()));
+    Box::pin(stream::iter(frames))
+}
+
+fn project_v3_responses_sse_output_item_done_item(item: &Value) -> Value {
+    if item.get("type").and_then(Value::as_str) != Some("output_text") {
+        return item.clone();
+    }
+    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut projected = json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{
+            "type": "output_text",
+            "text": text,
+        }],
+    });
+    if let Some(id) = item.get("id").cloned() {
+        projected["id"] = id;
+    }
+    projected
 }
 
 #[cfg(test)]

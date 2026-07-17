@@ -223,6 +223,11 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         Some("completed")
     );
     assert_eq!(
+        json_observability.finish_reason.as_deref(),
+        Some("stop"),
+        "ordinary completed Responses Relay JSON without provider finish_reason must infer stop for console observability"
+    );
+    assert_eq!(
         json_observability
             .usage
             .as_ref()
@@ -277,6 +282,11 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         sse_observability.response_status.as_deref(),
         Some("completed")
     );
+    assert_eq!(
+        sse_observability.finish_reason.as_deref(),
+        Some("tool_calls"),
+        "Responses Relay SSE with materialized local tool calls must keep tool_calls observability"
+    );
     assert_eq!(sse_observability.provider_status, Some(200));
     let stream_observation = sse_output
         .stream_observation
@@ -300,6 +310,11 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(
         stream_snapshot.response_status.as_deref(),
         Some("completed")
+    );
+    assert_eq!(
+        stream_snapshot.finish_reason.as_deref(),
+        Some("tool_calls"),
+        "stream observation used by closeout must preserve local tool-call finish reason"
     );
     assert_eq!(
         stream_snapshot
@@ -336,6 +351,107 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(captures[0]["input"], "json");
     assert_eq!(captures[1]["model"], "responses-wire-model");
     assert_eq!(captures[1]["stream"], true);
+}
+
+struct CompletedTextSseTransport;
+
+#[async_trait]
+impl ResponsesTransport for CompletedTextSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let completed = json!({
+            "type":"response.completed",
+            "response":{
+                "id":"resp_completed_text_sse",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"done"}],
+                "usage":{
+                    "input_tokens":17,
+                    "input_tokens_details":{"cached_tokens":5},
+                    "output_tokens":3,
+                    "total_tokens":20
+                }
+            }
+        });
+        let stream = futures_util::stream::iter([
+            Ok(format!("event: response.completed\ndata: {completed}\n\n").into_bytes()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_sse_completed_without_provider_finish_reason_infers_stop_observability() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-relay-sse-stop-observability".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"sse text",
+                "stream":true
+            }),
+        },
+        &CompletedTextSseTransport,
+    )
+    .await
+    .unwrap();
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("Responses Relay SSE text output must carry console observability");
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(
+        observability.finish_reason.as_deref(),
+        Some("stop"),
+        "completed text SSE without provider finish_reason must infer stop for console observability"
+    );
+    assert_eq!(
+        observability
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.cached_tokens),
+        Some(5)
+    );
+    let stream_observation = output
+        .stream_observation
+        .clone()
+        .expect("Responses Relay SSE text output must expose stream observability");
+    match output.client_body {
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("controlled SSE text chunk must project"));
+            }
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("event: response.output_item.done"));
+            assert!(text.contains("event: response.completed"));
+            assert!(text.contains("data: [DONE]"));
+        }
+        V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
+    }
+    let snapshot = stream_observation
+        .snapshot()
+        .expect("SSE text observation state must stay readable");
+    assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(
+        snapshot.usage.as_ref().and_then(|usage| usage.total_tokens),
+        Some(20)
+    );
 }
 
 struct ServertoolContinuationTransport {

@@ -389,7 +389,25 @@ impl V3DebugRuntime {
             payload: redact_debug_value(&self.config.redaction, payload),
         };
         state.snapshots.push_back(snapshot.clone());
+        retain_latest(&mut state.snapshots, self.config.event_retention);
         Ok(snapshot)
+    }
+
+    pub fn close_snapshot_session_keep_snapshots(
+        &self,
+        scope: &V3DebugTraceScope,
+        session_id: &str,
+    ) -> V3DebugResult<()> {
+        let mut state = self.write_state()?;
+        let session = state
+            .snapshot_sessions
+            .get(session_id)
+            .ok_or_else(|| V3DebugError::SnapshotSessionNotFound(session_id.to_string()))?;
+        if session.scope_key != scope.key() {
+            return Err(V3DebugError::SnapshotScopeMismatch(session_id.to_string()));
+        }
+        state.snapshot_sessions.remove(session_id);
+        Ok(())
     }
 
     pub fn release_snapshot_session(

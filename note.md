@@ -31357,6 +31357,20 @@ Pure Rust NAPI candidates:
 - Boundary held: current profile is explicit `compat:passthrough`; this anchors the runtime landing point only. V2 provider-specific profile loader / seven JSON profiles are not claimed. Tool governance, apply_patch lifecycle, stopless, servertool harvest, identity pairing, route/model selection, fallback, and side-channel injection stay out of compat.
 - Gate evidence PASS after final fmt: `git diff --check`; `verify:v3-static-hook-registry`; `verify:v3-relay-hook-resources`; `verify:v3-normalization-payload-logic-boundary`; normalization red fixtures; `verify:v3-module-boundaries`; `verify:v3-architecture-docs`; `verify:architecture-mainline-manifest-sync`; `verify:function-map-compile-gate`; V3 fmt/clippy; runtime closeout + Anthropic/OpenAI Chat/Gemini integration tests; Responses Relay local continuation; config contract; managed lifecycle; build:v3-cli; relay closeout/protocol/managed/source red fixtures.
 - Not claimed: no global install/restart/live 5555 replay was run for this compat-node slice; this is source/controlled-runtime closure, not live provider profile parity or V2 compat profile loader migration.
+# 2026-07-17T23:xx+08:00 glm-5.2 context overflow diagnosis
+- User asked what the earlier `glm-5.2` context-over-limit error actually was.
+- Evidence checked:
+  - Current 5555 health is V3 running; `rccv3 status -c /Volumes/extension/.rcc/config.5555.v2.toml` reports `gateway_priority_5555` running on `0.0.0.0:5555`.
+  - Current `/v1/models` on 5555 projects `MiniMax-M3` context as `1000000`, and `glm-5.2` as `1048576` from provider config.
+  - Current 5555 VR diagnostics shows all route pools ordered `orangeai.glm-5.2 -> minimax.MiniMax-M3 -> cc.gpt-5.5 -> cc-sol.gpt-5.6-sol`; current availability has all four candidates available.
+  - Historical live log `/Volumes/extension/.rcc/logs/server-4444.log` around 2026-07-03 06:28-06:29 shows 5555 longcontext requests selecting `orangeai[key1].glm-5.2` with ~1.02M estimated text chars / ~968k prepared chars and provider usage totals `202496`, `202683`, then exactly `202752`.
+  - User-observed provider error shape `This model's maximum context length is 202752 tokens... messages resulted in 203475 tokens` matches that live boundary and matches the V3 regression fixture for context-error provider reselection.
+- Diagnosis:
+  - This was not MiniMax M3 being configured as 200k; M3 is configured/projected as 1M.
+  - This was not local hardcoded Rust context. The 202752 number came from upstream/provider-side behavior on the selected `orangeai/glm-5.2` path, while local provider config over-advertised `glm-5.2` as 1048576.
+  - Payload was large text/history/tool-result accumulation, not proven image-token inflation; logs show large `estimatedTextChars` and many function/tool items.
+- The correct runtime behavior after such a provider context error is reselect/cooldown: current V3 tests lock context error from a limited provider reselecting to `minimax:key1:MiniMax-M3`, and only projecting after candidate exhaustion.
+
 # 2026-07-17T23:xx+08:00 stopless continuation closeout evidence
 - Reproduced the reported `local continuation is already committed: call_stopless_reasoning` failure as a Resp04 local-store collision: the fixed stopless call id was treated as globally unique and consumed contexts were not released before the next Resp04 projection.
 - Source fix is scope-keyed local continuation storage plus separate `restore_ids` and `consumed_ids`; paired full-history outputs skip restore but still release consumed context before the next commit.

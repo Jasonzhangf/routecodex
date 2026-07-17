@@ -324,7 +324,8 @@ impl V3ManagedLifecycle {
                 None,
             )?;
         }
-        self.run_managed_child(executable_path).await
+        self.run_managed_child_with_declaration(executable_path, declaration, manifest)
+            .await
     }
 
     pub async fn status(
@@ -408,7 +409,18 @@ impl V3ManagedLifecycle {
         &self,
         executable_path: impl AsRef<Path>,
     ) -> Result<(), V3LifecycleError> {
-        let (declaration, manifest) = self.declaration(executable_path)?;
+        let (declaration, manifest) = self.declaration(&executable_path)?;
+        validate_auth_handles(&manifest)?;
+        self.run_managed_child_with_declaration(executable_path, declaration, manifest)
+            .await
+    }
+
+    async fn run_managed_child_with_declaration(
+        &self,
+        _executable_path: impl AsRef<Path>,
+        declaration: V3ManagedInstanceDeclaration,
+        manifest: V3Config05ManifestPublished,
+    ) -> Result<(), V3LifecycleError> {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;

@@ -470,6 +470,14 @@ async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context
                 forwarded.extend(chunk.expect("projected stopless SSE chunk"));
             }
             let text = String::from_utf8(forwarded).unwrap();
+            assert!(
+                text.contains("event: response.output_item.done"),
+                "Codex-compatible SSE must project stopless function_call as output_item.done: {text}"
+            );
+            assert!(
+                text.contains("event: response.completed"),
+                "Codex-compatible SSE must still emit semantic completed terminal: {text}"
+            );
             assert!(text.contains("\"status\":\"requires_action\""));
             assert!(text.contains("\"call_id\":\"call_stopless_reasoning\""));
             assert!(text.contains("routecodex hook run reasoningStop"));
@@ -531,6 +539,14 @@ async fn sse_runtime_projects_apply_patch_at_resp03_before_client_frame_and_comm
                 forwarded.extend(chunk.expect("projected apply_patch SSE chunk"));
             }
             let text = String::from_utf8(forwarded).unwrap();
+            assert!(
+                text.contains("event: response.output_item.done"),
+                "Codex-compatible SSE must project apply_patch custom_tool_call as output_item.done: {text}"
+            );
+            assert!(
+                text.contains("event: response.completed"),
+                "Codex-compatible SSE must still emit semantic completed terminal: {text}"
+            );
             assert!(text.contains("\"type\":\"custom_tool_call\""));
             assert!(text.contains("\"name\":\"apply_patch\""));
             assert!(text.contains("\"call_id\":\"call_apply_patch_sse\""));
