@@ -164,6 +164,77 @@ async fn start_incremental_controlled_websocket() -> ControlledIncrementalWebSoc
     }
 }
 
+async fn start_asxs_shaped_function_call_websocket() -> ControlledWebSocket {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let requests_task = requests.clone();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, _) = tokio::select! {
+            accepted = listener.accept() => accepted.unwrap(),
+            _ = &mut shutdown_rx => return,
+        };
+        let mut socket = accept_hdr_async(stream, require_websocket_auth)
+            .await
+            .unwrap();
+        let Some(Ok(message)) = socket.next().await else {
+            return;
+        };
+        let text = match message {
+            Message::Text(text) => text.to_string(),
+            Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
+            _ => return,
+        };
+        requests_task
+            .lock()
+            .unwrap()
+            .push(serde_json::from_str(&text).unwrap());
+        for event in [
+            json!({"type":"response.created","response":{"id":"resp_asxs_1","status":"in_progress","output":[]}}),
+            json!({"type":"response.in_progress","response":{"id":"resp_asxs_1","status":"in_progress","output":[]}}),
+            json!({
+                "type":"response.output_item.added",
+                "output_index":0,
+                "item":{
+                    "id":"fc_asxs_1",
+                    "type":"function_call",
+                    "status":"in_progress",
+                    "call_id":"call_asxs_1",
+                    "name":"lookup_v3_pin",
+                    "arguments":""
+                }
+            }),
+            json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_asxs_1","delta":"{\"pin\""}),
+            json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_asxs_1","delta":":\"asxs\"}"}),
+            json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_asxs_1","arguments":"{\"pin\":\"asxs\"}"}),
+            json!({
+                "type":"response.output_item.done",
+                "output_index":0,
+                "item":{
+                    "id":"fc_asxs_1",
+                    "type":"function_call",
+                    "status":"completed",
+                    "call_id":"call_asxs_1",
+                    "name":"lookup_v3_pin",
+                    "arguments":"{\"pin\":\"asxs\"}"
+                }
+            }),
+            json!({"type":"response.completed","response":{"id":"resp_asxs_1","status":"completed","output":[]}}),
+        ] {
+            socket
+                .send(Message::Text(serde_json::to_string(&event).unwrap()))
+                .await
+                .unwrap();
+        }
+    });
+    ControlledWebSocket {
+        url: format!("ws://{address}/v1/responses"),
+        requests,
+        shutdown: shutdown_tx,
+    }
+}
+
 fn target(url: &str) -> V3ResponsesProviderTarget {
     target_with_env(url, "V3_WS_KEY")
 }
@@ -279,6 +350,44 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
     ));
 
     std::env::remove_var("V3_WS_KEY_BINARY");
+    let _ = controlled.shutdown.send(());
+}
+
+#[tokio::test]
+async fn websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty() {
+    let controlled = start_asxs_shaped_function_call_websocket().await;
+    std::env::set_var("V3_WS_KEY_ASXS_SHAPE", "websocket-secret");
+    let mut selected = target(&controlled.url);
+    selected.auth.secret = V3ProviderAuthSecretHandle::Environment("V3_WS_KEY_ASXS_SHAPE".into());
+    let transport = ProviderResponsesTransport::default();
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-asxs-shape",
+        selected,
+        json!({
+            "model":"client",
+            "input":"force lookup_v3_pin",
+            "stream":false,
+            "tools":[{"type":"function","name":"lookup_v3_pin","parameters":{"type":"object","properties":{}}}],
+            "tool_choice":{"type":"function","name":"lookup_v3_pin"}
+        }),
+    )
+    .unwrap();
+
+    let raw = transport
+        .send(build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(raw.body_kind(), V3ProviderResponseBodyKind::Json);
+    let body: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
+    assert_eq!(body["id"], "resp_asxs_1");
+    let output = body["output"].as_array().unwrap();
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0]["type"], "function_call");
+    assert_eq!(output[0]["call_id"], "call_asxs_1");
+    assert_eq!(output[0]["name"], "lookup_v3_pin");
+    assert_eq!(output[0]["arguments"], "{\"pin\":\"asxs\"}");
+
+    std::env::remove_var("V3_WS_KEY_ASXS_SHAPE");
     let _ = controlled.shutdown.send(());
 }
 
@@ -463,6 +572,87 @@ async fn start_bad_then_good_server(bad_message: Message) -> WebSocketMatrixServ
     }
 }
 
+async fn start_retry_after_error_server() -> WebSocketMatrixServer {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let connection_count = Arc::new(Mutex::new(0usize));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let connection_count_task = connection_count.clone();
+    let requests_task = requests.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let turn = {
+                let mut count = connection_count_task.lock().unwrap();
+                *count += 1;
+                *count
+            };
+            let requests_task = requests_task.clone();
+            tokio::spawn(async move {
+                let mut socket = accept_hdr_async(stream, require_websocket_auth)
+                    .await
+                    .unwrap();
+                if turn == 1 {
+                    for response in [
+                        completed_event("resp_anchor", "anchor"),
+                        Message::Text(
+                            serde_json::to_string(&json!({
+                                "type":"error",
+                                "status_code":400,
+                                "error":{
+                                    "type":"invalid_request_error",
+                                    "message":"stale websocket connection"
+                                },
+                                "headers":{
+                                    "x-request-id":"req_ws_error"
+                                }
+                            }))
+                            .unwrap(),
+                        ),
+                    ] {
+                        let Some(Ok(message)) = socket.next().await else {
+                            return;
+                        };
+                        let text = match message {
+                            Message::Text(text) => text.to_string(),
+                            Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
+                            _ => return,
+                        };
+                        requests_task
+                            .lock()
+                            .unwrap()
+                            .push(serde_json::from_str(&text).unwrap());
+                        socket.send(response).await.unwrap();
+                    }
+                } else {
+                    let Some(Ok(message)) = socket.next().await else {
+                        return;
+                    };
+                    let text = match message {
+                        Message::Text(text) => text.to_string(),
+                        Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
+                        _ => return,
+                    };
+                    let request: Value = serde_json::from_str(&text).unwrap();
+                    assert_eq!(request["previous_response_id"], "resp_anchor");
+                    requests_task.lock().unwrap().push(request);
+                    socket
+                        .send(completed_event("resp_retry_after_error", "fresh"))
+                        .await
+                        .unwrap();
+                }
+            });
+        }
+    });
+    WebSocketMatrixServer {
+        url: format!("ws://{address}/v1/responses"),
+        connection_count,
+        requests,
+    }
+}
+
 async fn send_json(
     transport: &ProviderResponsesTransport,
     request_id: &str,
@@ -475,6 +665,28 @@ async fn send_json(
         json!({"model":"client","input":"hello","stream":false}),
     )
     .unwrap();
+    let raw = transport
+        .send(build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap())
+        .await?;
+    serde_json::from_slice(&raw.into_body_bytes().await?).map_err(|error| {
+        V3ProviderError::WebSocketProtocol {
+            request_id: request_id.to_string(),
+            provider_id: "ws-provider".to_string(),
+            reason: error.to_string(),
+        }
+    })
+}
+
+async fn send_json_body(
+    transport: &ProviderResponsesTransport,
+    request_id: &str,
+    url: &str,
+    env: &str,
+    body: Value,
+) -> Result<Value, V3ProviderError> {
+    let wire =
+        build_v3_provider_12_responses_wire_payload(request_id, target_with_env(url, env), body)
+            .unwrap();
     let raw = transport
         .send(build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap())
         .await?;
@@ -617,6 +829,74 @@ async fn websocket_v2_provider_and_protocol_errors_discard_connection_before_reu
         );
         std::env::remove_var(env);
     }
+}
+
+#[tokio::test]
+async fn websocket_v2_codex_error_event_discards_connection_and_allows_client_retry_with_previous_response_id(
+) {
+    let controlled = start_retry_after_error_server().await;
+    std::env::set_var("V3_WS_KEY_RETRY_AFTER_ERROR", "websocket-secret");
+    let transport = ProviderResponsesTransport::default();
+
+    let first = send_json(
+        &transport,
+        "req-ws-anchor-before-error",
+        &controlled.url,
+        "V3_WS_KEY_RETRY_AFTER_ERROR",
+    )
+    .await
+    .unwrap();
+    assert_eq!(first["id"], "resp_anchor");
+
+    let second_error = send_json_body(
+        &transport,
+        "req-ws-error-with-previous",
+        &controlled.url,
+        "V3_WS_KEY_RETRY_AFTER_ERROR",
+        json!({
+            "model":"client",
+            "previous_response_id":"resp_anchor",
+            "input":[{"type":"function_call_output","call_id":"call_ws_anchor","output":"retry"}],
+            "stream":false
+        }),
+    )
+    .await
+    .unwrap_err();
+    let V3ProviderError::WebSocketProviderEvent {
+        status,
+        code,
+        message,
+        ..
+    } = second_error
+    else {
+        panic!("expected typed WebSocket provider event, got {second_error:?}");
+    };
+    assert_eq!(status, Some(400));
+    assert_eq!(code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(message, "stale websocket connection");
+
+    let retried = send_json_body(
+        &transport,
+        "req-ws-retry-after-error",
+        &controlled.url,
+        "V3_WS_KEY_RETRY_AFTER_ERROR",
+        json!({
+            "model":"client",
+            "previous_response_id":"resp_anchor",
+            "input":[{"type":"function_call_output","call_id":"call_ws_anchor","output":"retry"}],
+            "stream":false
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(retried["id"], "resp_retry_after_error");
+    assert_eq!(*controlled.connection_count.lock().unwrap(), 2);
+    let requests = controlled.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1]["previous_response_id"], "resp_anchor");
+    assert_eq!(requests[2]["previous_response_id"], "resp_anchor");
+    drop(requests);
+    std::env::remove_var("V3_WS_KEY_RETRY_AFTER_ERROR");
 }
 
 #[tokio::test]

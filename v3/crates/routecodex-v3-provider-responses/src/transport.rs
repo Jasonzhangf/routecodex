@@ -748,6 +748,7 @@ impl ProviderResponsesTransport {
             ));
         }
 
+        let mut json_events = WebSocketJsonEventAccumulator::default();
         loop {
             let next = match cancellation.clone() {
                 Some(cancellation) => {
@@ -816,43 +817,19 @@ impl ProviderResponsesTransport {
                 }
             };
 
-            if event_type == "error" {
+            if let Some(error) =
+                websocket_server_event_error(event_type, &server_event, &request_id, &provider_id)
+            {
                 *connection = None;
-                let error = server_event.get("error").unwrap_or(&server_event);
-                return Err(V3ProviderError::WebSocketProviderEvent {
-                    request_id,
-                    provider_id,
-                    status: server_event
-                        .get("status")
-                        .and_then(Value::as_u64)
-                        .and_then(|status| u16::try_from(status).ok()),
-                    code: error
-                        .get("code")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    message: error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("provider WebSocket error")
-                        .to_string(),
-                });
-            }
-            if matches!(event_type, "response.failed" | "response.incomplete") {
-                *connection = None;
-                return Err(V3ProviderError::WebSocketProviderEvent {
-                    request_id,
-                    provider_id,
-                    status: None,
-                    code: Some(event_type.to_string()),
-                    message: server_event
-                        .pointer("/response/error/message")
-                        .or_else(|| server_event.pointer("/response/incomplete_details/reason"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("provider response did not complete")
-                        .to_string(),
-                });
+                return Err(error);
             }
 
+            if let Err(error) =
+                json_events.record(event_type, &server_event, &request_id, &provider_id)
+            {
+                *connection = None;
+                return Err(error);
+            }
             if event_type != "response.completed" {
                 continue;
             }
@@ -868,7 +845,9 @@ impl ProviderResponsesTransport {
                     ));
                 }
             };
-            let body = match serde_json::to_vec(response) {
+            let response =
+                json_events.apply_to_terminal_response(response, &request_id, &provider_id)?;
+            let body = match serde_json::to_vec(&response) {
                 Ok(body) => body,
                 Err(error) => {
                     *connection = None;
@@ -884,6 +863,159 @@ impl ProviderResponsesTransport {
             ));
         }
     }
+}
+
+#[derive(Default)]
+struct WebSocketJsonEventAccumulator {
+    function_call_items: BTreeMap<u64, Value>,
+}
+
+impl WebSocketJsonEventAccumulator {
+    fn record(
+        &mut self,
+        event_type: &str,
+        event: &Value,
+        request_id: &str,
+        provider_id: &str,
+    ) -> Result<(), V3ProviderError> {
+        match event_type {
+            "response.output_item.added" | "response.output_item.done" => {
+                let Some(item) = event.get("item") else {
+                    return Err(websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        format!("{event_type} is missing item"),
+                    ));
+                };
+                if item.get("type").and_then(Value::as_str) == Some("function_call") {
+                    let output_index =
+                        websocket_output_index(event, event_type, request_id, provider_id)?;
+                    self.function_call_items.insert(output_index, item.clone());
+                }
+            }
+            "response.function_call_arguments.delta" => {
+                let output_index =
+                    websocket_output_index(event, event_type, request_id, provider_id)?;
+                let delta = event.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "response.function_call_arguments.delta is missing delta",
+                    )
+                })?;
+                let item = self
+                    .function_call_items
+                    .get_mut(&output_index)
+                    .ok_or_else(|| {
+                        websocket_protocol_error(
+                            request_id,
+                            provider_id,
+                            "response.function_call_arguments.delta arrived before function_call output_item",
+                        )
+                    })?;
+                let object = item.as_object_mut().ok_or_else(|| {
+                    websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "function_call output_item is not an object",
+                    )
+                })?;
+                let current = object
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                object.insert(
+                    "arguments".to_string(),
+                    Value::String(format!("{current}{delta}")),
+                );
+            }
+            "response.function_call_arguments.done" => {
+                let output_index =
+                    websocket_output_index(event, event_type, request_id, provider_id)?;
+                let arguments =
+                    event
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            websocket_protocol_error(
+                                request_id,
+                                provider_id,
+                                "response.function_call_arguments.done is missing arguments",
+                            )
+                        })?;
+                let item = self
+                    .function_call_items
+                    .get_mut(&output_index)
+                    .ok_or_else(|| {
+                        websocket_protocol_error(
+                            request_id,
+                            provider_id,
+                            "response.function_call_arguments.done arrived before function_call output_item",
+                        )
+                    })?;
+                let object = item.as_object_mut().ok_or_else(|| {
+                    websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "function_call output_item is not an object",
+                    )
+                })?;
+                object.insert(
+                    "arguments".to_string(),
+                    Value::String(arguments.to_string()),
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn apply_to_terminal_response(
+        &self,
+        response: &Value,
+        request_id: &str,
+        provider_id: &str,
+    ) -> Result<Value, V3ProviderError> {
+        let has_terminal_output = response
+            .get("output")
+            .and_then(Value::as_array)
+            .is_some_and(|output| !output.is_empty());
+        if has_terminal_output || self.function_call_items.is_empty() {
+            return Ok(response.clone());
+        }
+
+        let mut projected = response.clone();
+        let object = projected.as_object_mut().ok_or_else(|| {
+            websocket_protocol_error(
+                request_id,
+                provider_id,
+                "response.completed response is not an object",
+            )
+        })?;
+        object.insert(
+            "output".to_string(),
+            Value::Array(self.function_call_items.values().cloned().collect()),
+        );
+        Ok(projected)
+    }
+}
+
+fn websocket_output_index(
+    event: &Value,
+    event_type: &str,
+    request_id: &str,
+    provider_id: &str,
+) -> Result<u64, V3ProviderError> {
+    event
+        .get("output_index")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            websocket_protocol_error(
+                request_id,
+                provider_id,
+                format!("{event_type} is missing output_index"),
+            )
+        })
 }
 
 fn anthropic_messages_url(base_url: &str) -> String {
@@ -1586,14 +1718,8 @@ fn websocket_server_event_error(
         return Some(V3ProviderError::WebSocketProviderEvent {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
-            status: server_event
-                .get("status")
-                .and_then(Value::as_u64)
-                .and_then(|status| u16::try_from(status).ok()),
-            code: error
-                .get("code")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+            status: websocket_error_status(server_event),
+            code: websocket_error_code(error),
             message: error
                 .get("message")
                 .and_then(Value::as_str)
@@ -1602,11 +1728,14 @@ fn websocket_server_event_error(
         });
     }
     if matches!(event_type, "response.failed" | "response.incomplete") {
+        let response_error = server_event.pointer("/response/error");
         return Some(V3ProviderError::WebSocketProviderEvent {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
             status: None,
-            code: Some(event_type.to_string()),
+            code: response_error
+                .and_then(websocket_error_code)
+                .or_else(|| Some(event_type.to_string())),
             message: server_event
                 .pointer("/response/error/message")
                 .or_else(|| server_event.pointer("/response/incomplete_details/reason"))
@@ -1616,6 +1745,22 @@ fn websocket_server_event_error(
         });
     }
     None
+}
+
+fn websocket_error_status(server_event: &Value) -> Option<u16> {
+    server_event
+        .get("status")
+        .or_else(|| server_event.get("status_code"))
+        .and_then(Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
+}
+
+fn websocket_error_code(error: &Value) -> Option<String> {
+    error
+        .get("code")
+        .or_else(|| error.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn websocket_event_to_sse(

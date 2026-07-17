@@ -97,8 +97,9 @@ for (const [owner, text, phrases] of [
   [serverPath, server, [
     'responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>',
     'build_responses_direct_continuation_scope(',
-    'header_text(headers, "session-id")',
-    'header_text(headers, "thread-id")',
+    'first_header_text(headers, &["session-id", "session_id", "x-session-id"])',
+    'resolve_transparent_continuation_scope(',
+    'payload_needs_continuation_scope(payload)',
     'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(',
   ]],
   [testPath, tests, [
@@ -126,6 +127,8 @@ for (const [owner, text, phrases] of [
   [serverTestPath, serverTests, [
     'responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry',
     'responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry',
+    'responses_relay_local_continuation_uses_body_client_metadata_without_inventing_headers',
+    'responses_relay_missing_client_scope_for_tool_turn_fails_before_provider_send',
     'start_controlled_continuation_websocket',
     'p6_remote_continuation_manifest',
   ]],

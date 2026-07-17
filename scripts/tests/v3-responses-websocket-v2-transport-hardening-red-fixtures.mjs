@@ -26,6 +26,8 @@ const cases = [
   ['WebSocket event accumulation', transport, 'async fn send_websocket_v2(', 'fn forbidden() { let mut response_events = Vec::new(); response_events.push(1); }\n    async fn send_websocket_v2(', /Vec/],
   ['WebSocket beta header removed', transport, 'handshake.headers_mut().insert(\n                OPENAI_BETA_HEADER,\n                HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),\n            );', '// mutated: missing beta header', /OPENAI_BETA_HEADER|responses_websockets/],
   ['HTTP retry fallback', transport, 'async fn send_websocket_v2(', 'fn fallback_http_retry() {}\n    async fn send_websocket_v2(', /fallback/i],
+  ['Codex status_code parsing removed', transport, '.or_else(|| server_event.get("status_code"))', '', /status_code/],
+  ['Codex error type parsing removed', transport, '.or_else(|| error.get("type"))', '', /error parsing|error\.get\("type"\)/],
   ['Server socket owner', server, 'pub struct V3ServerAggregateHandle {', 'struct SharedResponsesWebSocket;\npub struct V3ServerAggregateHandle {', /socket owner|SharedResponsesWebSocket/],
   ['concurrency case removed', tests, 'websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage', 'websocket_v2_concurrency_case_removed', /concurrent/],
 ];

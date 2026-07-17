@@ -46,6 +46,7 @@ use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
@@ -57,6 +58,7 @@ struct V3ListenerState {
     manifest_version: u16,
     manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
+    console_enabled: bool,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
 }
@@ -161,6 +163,7 @@ pub async fn spawn_v3_server_aggregate(
             manifest_version: preflight.manifest_version,
             manifest: manifest.clone(),
             debug: debug.clone(),
+            console_enabled: manifest.debug.log_console,
             responses_direct_continuation: responses_direct_continuation.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
         });
@@ -314,6 +317,7 @@ async fn pending_endpoint(
             error,
         ));
     }
+    emit_v3_request_start_console_line(&state, &path, &request_id, &request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
@@ -358,7 +362,7 @@ async fn pending_endpoint(
             &state.manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 payload,
             },
         )
@@ -367,6 +371,19 @@ async fn pending_endpoint(
             Ok(output) => output,
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
         };
+        if let Some(error_chain) = output.error_chain.as_deref() {
+            if let Some(response) = record_and_emit_v3_error_projection(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                output.status,
+                error_chain,
+                openai_chat_error_body_for_console(&output.client_body),
+            ) {
+                return response;
+            }
+        }
         return openai_chat_relay_output_response(output);
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -375,7 +392,7 @@ async fn pending_endpoint(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 payload,
             },
         )
@@ -384,6 +401,19 @@ async fn pending_endpoint(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
+        if let Some(error_chain) = output.error_chain.as_deref() {
+            if let Some(response) = record_and_emit_v3_error_projection(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                output.status,
+                error_chain,
+                Some(&output.client_response),
+            ) {
+                return response;
+            }
+        }
         return anthropic_relay_output_response(output, stream);
     }
     if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -391,7 +421,7 @@ async fn pending_endpoint(
             &state.manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 endpoint_path: path.clone(),
                 payload,
             },
@@ -401,6 +431,19 @@ async fn pending_endpoint(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
+        if let Some(error_chain) = output.error_chain.as_deref() {
+            if let Some(response) = record_and_emit_v3_error_projection(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                output.status,
+                error_chain,
+                gemini_error_body_for_console(&output.client_body),
+            ) {
+                return response;
+            }
+        }
         return gemini_relay_output_response(output);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -409,6 +452,7 @@ async fn pending_endpoint(
             &request_id,
             &state.server,
             &path,
+            &payload,
         ) {
             Ok(scope) => scope,
             Err(message) => {
@@ -435,7 +479,7 @@ async fn pending_endpoint(
                 &state.manifest,
                 V3ResponsesRelayRuntimeInput {
                     server_id: state.server.id.clone(),
-                    request_id,
+                    request_id: request_id.clone(),
                     payload,
                 },
                 &state.responses_relay_local_continuation,
@@ -447,6 +491,19 @@ async fn pending_endpoint(
                 Ok(output) => output,
                 Err(error) => project_v3_responses_relay_runtime_failure(error),
             };
+        if let Some(error_chain) = output.error_chain.as_deref() {
+            if let Some(response) = record_and_emit_v3_error_projection(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                output.status,
+                error_chain,
+                relay_error_body_for_console(&output.client_body),
+            ) {
+                return response;
+            }
+        }
         return responses_relay_output_response(output);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
@@ -454,12 +511,13 @@ async fn pending_endpoint(
             &state,
             &request_headers,
             method,
-            path,
-            request_id,
+            path.clone(),
+            request_id.clone(),
             execution_id,
             payload,
         )
         .await;
+        emit_v3_frame_error_console_line(&state.server, &path, &request_id, &frame);
         responses_direct_output_response(frame)
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
         let pending_not_implemented = execution_mode.as_str();
@@ -819,6 +877,7 @@ async fn execute_responses_direct_server_frame(
         &request_id,
         &state.server,
         &path,
+        &payload,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -926,42 +985,203 @@ fn insert_v3_projection_header(headers: &mut HeaderMap, name: &'static str, valu
     );
 }
 
+fn record_and_emit_v3_error_projection(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) -> Option<Response<Body>> {
+    if let Err(error) = state.debug.record_node_event(
+        trace_scope,
+        "V3Error06ClientProjected",
+        "projected",
+        Some(json!({
+            "status": status,
+            "error_chain": error_chain,
+            "body": body
+        })),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3Error06ClientProjected",
+            error,
+        )));
+    }
+    emit_v3_error_console_line(
+        &state.server,
+        endpoint,
+        request_id,
+        status,
+        error_chain,
+        body,
+    );
+    None
+}
+
+fn relay_error_body_for_console(body: &V3ResponsesRelayClientBody) -> Option<&Value> {
+    match body {
+        V3ResponsesRelayClientBody::Json(value) => Some(value),
+        V3ResponsesRelayClientBody::Sse(_) => None,
+    }
+}
+
+fn openai_chat_error_body_for_console(body: &V3OpenAiChatRelayClientBody) -> Option<&Value> {
+    match body {
+        V3OpenAiChatRelayClientBody::Json(value) => Some(value),
+        V3OpenAiChatRelayClientBody::Sse(_) => None,
+    }
+}
+
+fn gemini_error_body_for_console(body: &V3GeminiRelayClientBody) -> Option<&Value> {
+    match body {
+        V3GeminiRelayClientBody::Json(value) => Some(value),
+        V3GeminiRelayClientBody::Sse(_) => None,
+    }
+}
+
+fn emit_v3_request_start_console_line(
+    state: &V3ListenerState,
+    endpoint: &str,
+    request_id: &str,
+    headers: &HeaderMap,
+    payload: &Value,
+) {
+    if !state.console_enabled {
+        return;
+    }
+    let stream = payload.get("stream").and_then(Value::as_bool) == Some(true);
+    let accepts_sse = request_accepts_sse(headers) || stream;
+    let raw_input_items = response_input_item_count(payload.get("input"));
+    println!(
+        "[{}] ▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
+        state.server.port,
+        endpoint,
+        console_timestamp_hhmmss(),
+        request_id,
+        stream,
+        accepts_sse,
+        raw_input_items,
+        raw_input_items
+    );
+}
+
+fn emit_v3_frame_error_console_line(
+    server: &V3ServerManifest,
+    endpoint: &str,
+    request_id: &str,
+    frame: &V3Server16HttpFrame,
+) {
+    if frame.error_chain.is_empty() && frame.status < 400 {
+        return;
+    }
+    emit_v3_error_console_line(
+        server,
+        endpoint,
+        request_id,
+        frame.status,
+        &frame.error_chain,
+        match &frame.body {
+            V3Server16Body::Json(value) => Some(value),
+            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+        },
+    );
+}
+
+fn emit_v3_error_console_line(
+    server: &V3ServerManifest,
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) {
+    let error_code = body
+        .and_then(|value| value.pointer("/error/code").and_then(Value::as_str))
+        .or_else(|| body.and_then(|value| value.pointer("/error/type").and_then(Value::as_str)))
+        .unwrap_or("v3_error");
+    let message = body
+        .and_then(|value| value.pointer("/error/message").and_then(Value::as_str))
+        .unwrap_or("V3 request failed");
+    let error_node = error_chain
+        .last()
+        .copied()
+        .unwrap_or("V3Error06ClientProjected");
+    eprintln!(
+        "[{}] ❌ [{}] {} request {} failed (status={} code={} errorNode={} errorChain={}) {}",
+        server.port,
+        endpoint,
+        console_timestamp_hhmmss(),
+        request_id,
+        status,
+        error_code,
+        error_node,
+        if error_chain.is_empty() {
+            "none".to_string()
+        } else {
+            error_chain.join(",")
+        },
+        message
+    );
+}
+
+fn console_timestamp_hhmmss() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() % 86_400)
+        .unwrap_or(0);
+    let hour = seconds / 3_600;
+    let minute = (seconds % 3_600) / 60;
+    let second = seconds % 60;
+    format!("{hour:02}:{minute:02}:{second:02}")
+}
+
+fn request_accepts_sse(headers: &HeaderMap) -> bool {
+    headers
+        .get("accept")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case("text/event-stream"))
+        })
+}
+
+fn response_input_item_count(value: Option<&Value>) -> usize {
+    match value {
+        Some(Value::Array(items)) => items.len(),
+        Some(Value::Null) | None => 0,
+        Some(Value::String(text)) if text.trim().is_empty() => 0,
+        Some(_) => 1,
+    }
+}
+
 fn build_responses_direct_continuation_scope(
     headers: &HeaderMap,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
+    payload: &Value,
 ) -> Result<V3ResponsesDirectContinuationScope, String> {
-    let turn_metadata = match headers.get("x-codex-turn-metadata") {
-        Some(value) => {
-            let text = value
-                .to_str()
-                .map_err(|error| format!("x-codex-turn-metadata is not UTF-8: {error}"))?;
-            Some(
-                serde_json::from_str::<serde_json::Value>(text)
-                    .map_err(|error| format!("x-codex-turn-metadata is not valid JSON: {error}"))?,
-            )
-        }
-        None => None,
-    };
-    let session_id = header_text(headers, "session-id")?
-        .or_else(|| {
-            turn_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.get("session_id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| request_id.to_string());
-    let conversation_id = header_text(headers, "thread-id")?
-        .or_else(|| {
-            turn_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.get("thread_id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| session_id.clone());
+    let turn_metadata = parse_codex_turn_metadata(headers)?;
+    let session_id = first_header_text(headers, &["session-id", "session_id", "x-session-id"])?
+        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
+        .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS));
+    let conversation_id = first_header_text(
+        headers,
+        &[
+            "thread-id",
+            "thread_id",
+            "conversation-id",
+            "conversation_id",
+            "x-conversation-id",
+        ],
+    )?
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
+    let (session_id, conversation_id) =
+        resolve_transparent_continuation_scope(session_id, conversation_id, payload, request_id)?;
     Ok(V3ResponsesDirectContinuationScope::responses(
         endpoint,
         session_id,
@@ -976,37 +1196,26 @@ fn build_responses_relay_local_continuation_scope(
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
+    payload: &Value,
 ) -> Result<V3ResponsesRelayLocalContinuationScope, String> {
-    let turn_metadata = match headers.get("x-codex-turn-metadata") {
-        Some(value) => {
-            let text = value
-                .to_str()
-                .map_err(|error| format!("x-codex-turn-metadata is not UTF-8: {error}"))?;
-            Some(
-                serde_json::from_str::<serde_json::Value>(text)
-                    .map_err(|error| format!("x-codex-turn-metadata is not valid JSON: {error}"))?,
-            )
-        }
-        None => None,
-    };
-    let session_id = header_text(headers, "session-id")?
-        .or_else(|| {
-            turn_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.get("session_id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| request_id.to_string());
-    let conversation_id = header_text(headers, "thread-id")?
-        .or_else(|| {
-            turn_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.get("thread_id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| session_id.clone());
+    let turn_metadata = parse_codex_turn_metadata(headers)?;
+    let session_id = first_header_text(headers, &["session-id", "session_id", "x-session-id"])?
+        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
+        .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS));
+    let conversation_id = first_header_text(
+        headers,
+        &[
+            "thread-id",
+            "thread_id",
+            "conversation-id",
+            "conversation_id",
+            "x-conversation-id",
+        ],
+    )?
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
+    let (session_id, conversation_id) =
+        resolve_transparent_continuation_scope(session_id, conversation_id, payload, request_id)?;
     Ok(V3ResponsesRelayLocalContinuationScope::responses(
         endpoint,
         session_id,
@@ -1014,6 +1223,183 @@ fn build_responses_relay_local_continuation_scope(
         server.port,
         server.routing_group.clone(),
     ))
+}
+
+fn resolve_transparent_continuation_scope(
+    session_id: Option<String>,
+    conversation_id: Option<String>,
+    payload: &Value,
+    request_id: &str,
+) -> Result<(String, String), String> {
+    match (session_id, conversation_id) {
+        (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
+        (None, None) if !payload_needs_continuation_scope(payload) => {
+            let request_scope = format!("request:{request_id}");
+            Ok((request_scope.clone(), request_scope))
+        }
+        _ => Err(
+            "Responses continuation requires client-provided session_id and thread_id via transparent headers, x-codex-turn-metadata, or body client_metadata"
+                .to_string(),
+        ),
+    }
+}
+
+fn payload_needs_continuation_scope(payload: &Value) -> bool {
+    payload.get("previous_response_id").is_some()
+        || payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+        || payload_input_has_function_call_output(payload.get("input"))
+}
+
+fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
+    match input {
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output")),
+        Some(Value::Object(item)) => {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+        }
+        _ => false,
+    }
+}
+
+const TURN_METADATA_SESSION_PATHS: &[&[&str]] = &[&["session_id"], &["sessionId"], &["session-id"]];
+
+const TURN_METADATA_CONVERSATION_PATHS: &[&[&str]] = &[
+    &["thread_id"],
+    &["threadId"],
+    &["thread-id"],
+    &["conversation_id"],
+    &["conversationId"],
+    &["conversation-id"],
+];
+
+const BODY_SESSION_PATHS: &[&[&str]] = &[
+    &["client_metadata", "session_id"],
+    &["client_metadata", "sessionId"],
+    &["client_metadata", "session-id"],
+    &["clientMetadata", "session_id"],
+    &["clientMetadata", "sessionId"],
+    &["metadata", "session_id"],
+    &["metadata", "sessionId"],
+    &["metadata", "client_metadata", "session_id"],
+    &["metadata", "client_metadata", "sessionId"],
+    &["metadata", "clientMetadata", "session_id"],
+    &["metadata", "clientMetadata", "sessionId"],
+];
+
+const BODY_CONVERSATION_PATHS: &[&[&str]] = &[
+    &["client_metadata", "thread_id"],
+    &["client_metadata", "threadId"],
+    &["client_metadata", "thread-id"],
+    &["client_metadata", "conversation_id"],
+    &["client_metadata", "conversationId"],
+    &["client_metadata", "conversation-id"],
+    &["clientMetadata", "thread_id"],
+    &["clientMetadata", "threadId"],
+    &["clientMetadata", "conversation_id"],
+    &["clientMetadata", "conversationId"],
+    &["metadata", "thread_id"],
+    &["metadata", "threadId"],
+    &["metadata", "conversation_id"],
+    &["metadata", "conversationId"],
+    &["metadata", "client_metadata", "thread_id"],
+    &["metadata", "client_metadata", "threadId"],
+    &["metadata", "client_metadata", "conversation_id"],
+    &["metadata", "client_metadata", "conversationId"],
+    &["metadata", "clientMetadata", "thread_id"],
+    &["metadata", "clientMetadata", "threadId"],
+    &["metadata", "clientMetadata", "conversation_id"],
+    &["metadata", "clientMetadata", "conversationId"],
+];
+
+fn parse_codex_turn_metadata(headers: &HeaderMap) -> Result<Option<Value>, String> {
+    let Some(text) = header_text(headers, "x-codex-turn-metadata")? else {
+        return Ok(None);
+    };
+    let mut last_error = match serde_json::from_str::<Value>(&text) {
+        Ok(value) => return Ok(Some(value)),
+        Err(error) => error.to_string(),
+    };
+    if let Some(decoded) = percent_decode_header_value(&text)? {
+        match serde_json::from_str::<Value>(&decoded) {
+            Ok(value) => return Ok(Some(value)),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(format!(
+        "x-codex-turn-metadata is not valid JSON: {last_error}"
+    ))
+}
+
+fn percent_decode_header_value(value: &str) -> Result<Option<String>, String> {
+    if !value.as_bytes().contains(&b'%') {
+        return Ok(None);
+    }
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if index + 2 >= bytes.len() {
+            return Err("x-codex-turn-metadata has incomplete percent escape".to_string());
+        }
+        let high = decode_hex(bytes[index + 1])
+            .ok_or_else(|| "x-codex-turn-metadata has invalid percent escape".to_string())?;
+        let low = decode_hex(bytes[index + 2])
+            .ok_or_else(|| "x-codex-turn-metadata has invalid percent escape".to_string())?;
+        decoded.push((high << 4) | low);
+        index += 3;
+    }
+    String::from_utf8(decoded).map(Some).map_err(|error| {
+        format!("x-codex-turn-metadata percent-decoded value is not UTF-8: {error}")
+    })
+}
+
+fn decode_hex(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn first_header_text(headers: &HeaderMap, names: &[&str]) -> Result<Option<String>, String> {
+    for name in names {
+        if let Some(value) = header_text(headers, name)? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn read_first_scope_value(source: Option<&Value>, paths: &[&[&str]]) -> Option<String> {
+    for path in paths {
+        if let Some(value) = read_scope_value_at_path(source?, path) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn read_scope_value_at_path(source: &Value, path: &[&str]) -> Option<String> {
+    let mut current = source;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    let value = current.as_str()?.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 fn header_text(headers: &HeaderMap, name: &str) -> Result<Option<String>, String> {

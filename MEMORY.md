@@ -3531,6 +3531,11 @@
 - Live smoke: POST /v1/chat/completions with messages containing <**!asxs.gpt-5.5**> routed to asxs[crsa].gpt-5.5 and returned ASXS_OKASXS_OK.
 - Observation: /v1/responses provider-request dry-run on the same textual marker still selected cc.key1.gpt-5.5, so asxs credential verification should use the chat/completions live smoke path instead of that responses dry-run marker as proof.
 
+# 2026-07-17 V3 Responses WebSocket V2 Codex error events
+
+- Latest Codex commit `315195492c80fdade38e917c18f9584efd599304` treats Responses WebSocket V2 as provider-enabled via `supports_websockets`, sends `OpenAI-Beta: responses_websockets=2026-02-06`, sends Responses Lite through `x-openai-internal-codex-responses-lite: true`, and maps upstream `type:"error"` WebSocket events with `status` or `status_code` plus `error.code` or `error.type` into typed provider errors. RouteCodex V3 must preserve those fields; missing `code` is not proof of an unclassified provider failure if `error.type` exists.
+- V3 source truth: upstream provider WebSocket errors are handled only in `v3.responses_websocket_v2_transport_hardening` / `ProviderResponsesTransport`. On error, clear the provider-owned WebSocket connection and return a typed error. Do not retry over HTTP, reselect provider, rebuild continuation, or mutate the request. Client-owned retry may resend the same `previous_response_id` on a fresh WebSocket connection.
+
 # 2026-07-16: V3 resource relation edge lock gate
 - Source gate npm run verify:v3-resource-relation-edge-lock is wired into npm run verify:v3-architecture-docs.
 - The gate enforces: resources stay registry nodes; callable paths are scalar adjacent mainline edges; resource relationships appear only under edge resource_flow; every declared resource and function-map resource binding is carried by some edge resource_flow; duplicate edge ids, same-node edges, and multi-source/multi-target shortcuts fail.
@@ -3608,3 +3613,8 @@
 - Verified guard: `tests/server/runtime/http-server/router-direct-pipeline.spec.ts` locks asxs/openai-family direct `/v1/responses` to preserve the exact request object and key fields even when model capabilities include `no_reasoning_summary`.
 - Minimal 2026-07-17 asxs root cause: the single isolated invalid part was top-level legacy `reasoning_effort` on an OpenAI Responses direct payload. Direct upstream replay to asxs returned HTTP 200 with `reasoning.effort=medium` and no top-level `reasoning_effort`, then HTTP 502 when only top-level `reasoning_effort=medium` was added. RouteCodex must project route thinking to `reasoning.effort` for `providerProtocol=openai-responses`; it must not inject top-level `reasoning_effort` there.
 - Installed/live evidence after global install and managed 5520 aggregate restart: dry-run `model=asxs.gpt-5.5` selected `asxs.crsa.gpt-5.5` with `hasTopReasoningEffort=false`; live `/v1/responses` through 5520 using `model=asxs.gpt-5.5` returned HTTP 200 and `outputText=ok`.
+
+# 2026-07-17: V3 transparency for headers and continuation scope
+- V3 is a transparent server for client/provider protocol data. It must not invent protocol-visible headers, session IDs, thread IDs, or continuation identity. Client-provided headers and body fields remain protocol data plane; RouteCodex may read them for routing/continuation scope, but must not add replacement session headers or synthesize a client identity.
+- For Responses continuation, valid scope truth comes from transparent client input such as `session-id`/`thread-id`, `x-codex-turn-metadata`, or body `client_metadata.session_id` / `client_metadata.thread_id`. If a request can create or consume continuation state and no client scope exists, fail explicitly instead of using `request_id` as a fake session.
+- Internal request-scoped identifiers may be used only for non-continuation single-turn execution and must never enter provider/client normal payloads or headers.

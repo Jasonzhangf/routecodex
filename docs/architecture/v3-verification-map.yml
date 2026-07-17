@@ -1069,7 +1069,8 @@ features:
       - Provider WebSocket v2 owns handshake auth correlation cancellation terminal projection and connection-local continuation state
       - WebSocket provider or protocol errors enter Error01-06 without HTTP retry Relay local materialization or provider reselection
     required_blackbox:
-      - Server JSON two-turn controlled upstream with session-id thread-id and x-codex-turn-metadata
+      - Server JSON two-turn controlled upstream with transparent session-id/thread-id x-codex-turn-metadata and body client_metadata scope
+      - Missing client scope on continuation-capable Responses Relay requests fails before provider send instead of inventing session identity
       - Server SSE two-turn controlled upstream with one first-turn Router hit and zero continuation Router hits
       - controlled Responses WebSocket v2 JSON and SSE two-turn replay on one exact provider model auth transport pin
       - current 5555 same-entry real two-turn replay after all offline gates pass
@@ -1113,7 +1114,8 @@ features:
       - provider model auth alias and WebSocket URL form the connection identity
       - one owned guard permits only one in-flight response per connection
       - SSE emits the first provider event before terminal and never materializes the full response
-      - transport handles ping pong text binary malformed missing type failed incomplete error and close-before-terminal
+      - transport handles ping pong text binary malformed missing type failed incomplete error close-before-terminal and Codex-style status_code WebSocket error events
+      - Codex-style WebSocket error events preserve status/status_code and error.code/error.type while discarding the dirty connection so a client-owned retry can resend the same previous_response_id on a fresh connection
       - cancellation before connect before reused send and during read remains client_disconnect and discards any active connection
       - split UTF-8 WebSocket frames reassemble into one valid terminal event
       - provider errors stay typed and no HTTP retry fallback Hub business semantics or Server socket owner exists

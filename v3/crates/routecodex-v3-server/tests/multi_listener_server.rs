@@ -356,7 +356,64 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
 struct ProviderCapture {
     authorization: Option<String>,
     accept: Option<String>,
+    session_id: Option<String>,
+    thread_id: Option<String>,
+    x_session_id: Option<String>,
+    x_conversation_id: Option<String>,
+    x_codex_turn_metadata: Option<String>,
     body: Value,
+}
+
+impl ProviderCapture {
+    fn from_http(headers: &HeaderMap, body: Value) -> Self {
+        Self {
+            authorization: header_text(headers, "authorization"),
+            accept: header_text(headers, "accept"),
+            session_id: header_text(headers, "session-id"),
+            thread_id: header_text(headers, "thread-id"),
+            x_session_id: header_text(headers, "x-session-id"),
+            x_conversation_id: header_text(headers, "x-conversation-id"),
+            x_codex_turn_metadata: header_text(headers, "x-codex-turn-metadata"),
+            body,
+        }
+    }
+
+    fn from_websocket_handshake(request: &Request) -> Self {
+        Self {
+            authorization: request
+                .headers()
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            accept: None,
+            session_id: None,
+            thread_id: None,
+            x_session_id: None,
+            x_conversation_id: None,
+            x_codex_turn_metadata: None,
+            body: json!({"handshake": true}),
+        }
+    }
+
+    fn from_body(body: Value) -> Self {
+        Self {
+            authorization: None,
+            accept: None,
+            session_id: None,
+            thread_id: None,
+            x_session_id: None,
+            x_conversation_id: None,
+            x_codex_turn_metadata: None,
+            body,
+        }
+    }
+}
+
+fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
 }
 
 #[derive(Clone)]
@@ -371,17 +428,7 @@ async fn controlled_responses_upstream(
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            accept: headers
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            body: body.clone(),
-        })
+        .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
 
     if body.get("stream").and_then(Value::as_bool) == Some(true) {
@@ -408,17 +455,7 @@ async fn controlled_responses_relay_upstream(
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            accept: headers
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            body: body.clone(),
-        })
+        .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
 
     if body.get("stream").and_then(Value::as_bool) == Some(true) {
@@ -448,6 +485,50 @@ data: [DONE]
     }
 }
 
+async fn controlled_responses_relay_tool_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+
+    let has_tool_output = body
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("function_call_output")
+            })
+        });
+    let response = if has_tool_output {
+        json!({
+            "id":"resp_body_metadata_completed",
+            "status":"completed",
+            "output_text":"RCCV3_BODY_METADATA_TURN2_OK",
+            "output":[{"type":"output_text","text":"RCCV3_BODY_METADATA_TURN2_OK"}]
+        })
+    } else {
+        json!({
+            "id":"resp_body_metadata_requires_action",
+            "status":"requires_action",
+            "output":[{
+                "type":"function_call",
+                "call_id":"call_body_metadata",
+                "name":"lookup_weather",
+                "arguments":"{\"city\":\"Paris\"}"
+            }]
+        })
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&response).unwrap()))
+        .unwrap()
+}
+
 async fn start_controlled_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -459,6 +540,34 @@ async fn start_controlled_upstream() -> (
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_responses_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_responses_relay_tool_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(controlled_responses_relay_tool_upstream),
+        )
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -505,17 +614,7 @@ async fn controlled_anthropic_wire_upstream(
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            accept: headers
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            body,
-        })
+        .send(ProviderCapture::from_http(&headers, body))
         .unwrap();
 
     Response::builder()
@@ -570,17 +669,8 @@ async fn start_controlled_continuation_websocket() -> (
         let captures = captures_tx.clone();
         let mut socket =
             accept_hdr_async(stream, move |request: &Request, response: WsResponse| {
-                let authorization = request
-                    .headers()
-                    .get("authorization")
-                    .and_then(|value| value.to_str().ok())
-                    .map(ToOwned::to_owned);
                 captures
-                    .send(ProviderCapture {
-                        authorization,
-                        accept: None,
-                        body: json!({"handshake": true}),
-                    })
+                    .send(ProviderCapture::from_websocket_handshake(request))
                     .unwrap();
                 Ok(response)
             })
@@ -602,11 +692,7 @@ async fn start_controlled_continuation_websocket() -> (
             };
             let body: Value = serde_json::from_slice(&bytes).unwrap();
             captures_tx
-                .send(ProviderCapture {
-                    authorization: None,
-                    accept: None,
-                    body: body.clone(),
-                })
+                .send(ProviderCapture::from_body(body.clone()))
                 .unwrap();
             let response = if body.get("previous_response_id").and_then(Value::as_str)
                 == Some("resp_server_remote_1")
@@ -643,17 +729,8 @@ async fn start_incremental_controlled_continuation_websocket() -> (
         let captures = captures_tx.clone();
         let mut socket =
             accept_hdr_async(stream, move |request: &Request, response: WsResponse| {
-                let authorization = request
-                    .headers()
-                    .get("authorization")
-                    .and_then(|value| value.to_str().ok())
-                    .map(ToOwned::to_owned);
                 captures
-                    .send(ProviderCapture {
-                        authorization,
-                        accept: None,
-                        body: json!({"handshake": true}),
-                    })
+                    .send(ProviderCapture::from_websocket_handshake(request))
                     .unwrap();
                 Ok(response)
             })
@@ -691,13 +768,7 @@ async fn start_incremental_controlled_continuation_websocket() -> (
             }
         };
         let body: Value = serde_json::from_slice(&bytes).unwrap();
-        captures_tx
-            .send(ProviderCapture {
-                authorization: None,
-                accept: None,
-                body,
-            })
-            .unwrap();
+        captures_tx.send(ProviderCapture::from_body(body)).unwrap();
         socket
             .send(Message::Text(
                 serde_json::to_string(&json!({
@@ -1021,6 +1092,235 @@ async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
     assert_eq!(response["models"], response["data"]);
     handle.shutdown().await;
     shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_relay_local_continuation_uses_body_client_metadata_without_inventing_headers() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-body-metadata");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client_metadata = json!({
+        "session_id":"rccv3-body-session-test",
+        "thread_id":"rccv3-body-thread-test",
+        "turn_id":"turn-body-1"
+    });
+
+    let first = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"use lookup_weather",
+            "tools":[{"type":"function","name":"lookup_weather"}],
+            "client_metadata": client_metadata
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let first_body: Value = first.json().await.unwrap();
+    assert_eq!(first_body["status"], "requires_action");
+
+    let second = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":[{
+                "type":"function_call_output",
+                "call_id":"call_body_metadata",
+                "output":"weather=clear RCCV3_BODY_METADATA_TURN2_OK"
+            }],
+            "tools":[{"type":"function","name":"lookup_weather"}],
+            "client_metadata": {
+                "session_id":"rccv3-body-session-test",
+                "thread_id":"rccv3-body-thread-test",
+                "turn_id":"turn-body-2"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
+    let second_body: Value = second.json().await.unwrap();
+    assert_eq!(second_body["status"], "completed");
+    assert_eq!(second_body["output_text"], "RCCV3_BODY_METADATA_TURN2_OK");
+
+    let first_capture = captures.recv().await.unwrap();
+    let second_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+    assert_eq!(second_capture.body["model"], "wire-test");
+    assert_eq!(
+        second_capture.body["input"],
+        json!([
+            {
+                "type":"function_call",
+                "call_id":"call_body_metadata",
+                "name":"lookup_weather",
+                "arguments":"{\"city\":\"Paris\"}"
+            },
+            {
+                "type":"function_call_output",
+                "call_id":"call_body_metadata",
+                "output":"weather=clear RCCV3_BODY_METADATA_TURN2_OK"
+            }
+        ])
+    );
+    for body in [&first_capture.body, &second_capture.body] {
+        assert_eq!(
+            body["client_metadata"]["session_id"],
+            "rccv3-body-session-test"
+        );
+        assert_eq!(
+            body["client_metadata"]["thread_id"],
+            "rccv3-body-thread-test"
+        );
+        assert!(body.get("session_id").is_none(), "{body}");
+        assert!(body.get("thread_id").is_none(), "{body}");
+        assert!(body.get("routecodex_session_id").is_none(), "{body}");
+        assert!(body.get("continuation_owner").is_none(), "{body}");
+    }
+    for capture in [&first_capture, &second_capture] {
+        assert_eq!(capture.session_id, None);
+        assert_eq!(capture.thread_id, None);
+        assert_eq!(capture.x_session_id, None);
+        assert_eq!(capture.x_conversation_id, None);
+        assert_eq!(capture.x_codex_turn_metadata, None);
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_body_client_metadata_scope_mismatch_fails_before_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-body-mismatch");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    let first = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"use lookup_weather",
+            "tools":[{"type":"function","name":"lookup_weather"}],
+            "client_metadata": {
+                "session_id":"rccv3-body-session-a",
+                "thread_id":"rccv3-body-thread-a"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let first_body: Value = first.json().await.unwrap();
+    assert_eq!(first_body["status"], "requires_action");
+
+    let second = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":[{
+                "type":"function_call_output",
+                "call_id":"call_body_metadata",
+                "output":"wrong scope"
+            }],
+            "client_metadata": {
+                "session_id":"rccv3-body-session-b",
+                "thread_id":"rccv3-body-thread-b"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 500);
+    let error_chain = second
+        .headers()
+        .get("x-routecodex-v3-error-chain")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let second_body: Value = second.json().await.unwrap();
+    assert!(second_body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("scope mismatch"));
+    assert_eq!(error_chain.split(',').count(), 6);
+    let _first_capture = captures.recv().await.unwrap();
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "scope mismatch must fail before the second provider send"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_missing_client_scope_for_tool_turn_fails_before_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-missing-scope");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"use lookup_weather",
+            "tools":[{"type":"function","name":"lookup_weather"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("requires client-provided session_id and thread_id"));
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "missing continuation scope must fail before provider send"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]

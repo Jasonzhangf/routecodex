@@ -47,6 +47,7 @@ for (const [owner, text, phrases] of [
     'websocket_v2_sse_returns_first_frame_before_terminal_event',
     'websocket_v2_early_sse_drop_discards_connection_before_next_turn',
     'websocket_v2_provider_and_protocol_errors_discard_connection_before_reuse',
+    'websocket_v2_codex_error_event_discards_connection_and_allows_client_retry_with_previous_response_id',
     'websocket_v2_read_cancellation_discards_connection_before_reuse',
     'websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage',
     'websocket_v2_ping_pong_and_split_utf8_frames_preserve_one_terminal_event',
@@ -54,6 +55,8 @@ for (const [owner, text, phrases] of [
     'V3_WS_KEY_EARLY_DROP',
     'V3_WS_KEY_READ_CANCEL',
     'V3_WS_KEY_CONCURRENT',
+    'status_code',
+    'invalid_request_error',
   ]],
   [resourceMapPath, resourceMap, [
     'resource_id: v3.provider.responses_websocket_connection',
@@ -124,6 +127,16 @@ if (wsStart < 0 || wsJsonEnd <= wsStart || wsSseStart <= wsJsonEnd || wsEnd <= w
     /servertool|required_action|tool_call|local_materiali[sz]ation|restore_history/i,
   ]) {
     if (pattern.test(wsOwner)) failures.push(`${transportPath}: forbidden WebSocket owner pattern ${pattern}`);
+  }
+  for (const phrase of [
+    'fn websocket_error_status(server_event: &Value) -> Option<u16>',
+    '.or_else(|| server_event.get("status_code"))',
+    'fn websocket_error_code(error: &Value) -> Option<String>',
+    '.or_else(|| error.get("type"))',
+  ]) {
+    if (!wsOwner.includes(phrase)) {
+      failures.push(`${transportPath}: missing Codex WebSocket error parsing phrase ${phrase}`);
+    }
   }
 }
 
