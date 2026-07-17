@@ -1211,6 +1211,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/nodes.rs
       - v3/crates/routecodex-v3-runtime/src/foundation.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/diagnostics.rs
     resource_bindings:
       - v3.config.route_pool_match_declarations
       - v3.route.request_facts
@@ -1225,6 +1226,7 @@ features:
       - V3VirtualRouter::hit_opaque_target_plan_once
       - V3TargetInterpreter::expand_candidates
       - V3TargetInterpreter::select_available
+      - project_v3_virtual_router_status
     allowed_paths:
       - v3/crates/routecodex-v3-virtual-router
       - v3/crates/routecodex-v3-target

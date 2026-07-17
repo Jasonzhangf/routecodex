@@ -1,3 +1,4 @@
+pub mod diagnostics;
 pub mod foundation;
 pub mod hooks;
 pub mod hub_v1;
@@ -7,6 +8,7 @@ pub mod nodes;
 pub mod remote_continuation;
 mod shared;
 
+pub use diagnostics::project_v3_virtual_router_status;
 pub use foundation::{
     execute_v3_foundation_pending_runtime, execute_v3_p5_routing_runtime, project_v3_debug_failure,
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3P5Runtime,
