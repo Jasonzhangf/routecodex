@@ -12,8 +12,9 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
-    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
-    V3ProviderResponseBody, V3ResponsesProviderTarget,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
+    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
+    V3ProviderError, V3ProviderHealthStore, V3ProviderResponseBody, V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -21,15 +22,18 @@ use routecodex_v3_sse::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 const V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
     "provider SSE stream ended before response.completed";
 const V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE: &str =
     "provider SSE stream failed before response.completed";
+const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize = 3;
+const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 = 5_000;
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -70,6 +74,21 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ResponsesRelayRetryPolicy {
+    pub same_candidate_retries: usize,
+    pub retry_delay_ms: u64,
+}
+
+impl Default for V3ResponsesRelayRetryPolicy {
+    fn default() -> Self {
+        Self {
+            same_candidate_retries: V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT,
+            retry_delay_ms: V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeUsageSummary {
     pub input_tokens: Option<u64>,
@@ -108,6 +127,56 @@ pub struct V3RuntimeStreamObservation {
 pub struct V3RuntimeStreamObservationSnapshot {
     pub response_status: Option<String>,
     pub usage: Option<V3RuntimeUsageSummary>,
+}
+
+struct V3ResponsesRelayProviderFailure {
+    status: u16,
+    client_response: Value,
+    provider_id: String,
+    observability: Option<V3RuntimeObservability>,
+}
+
+struct V3ResponsesRelayExcludedAvailability<'excluded> {
+    base: V3ProviderAvailabilityRegistry,
+    excluded: &'excluded BTreeSet<String>,
+}
+
+struct V3ResponsesRelayProviderFailureContext<'ctx> {
+    manifest: &'ctx V3Config05ManifestPublished,
+    server_id: &'ctx str,
+    provider_semantic_body: &'ctx Value,
+    provider_health: &'ctx V3ProviderHealthStore,
+    retry_policy: &'ctx V3ResponsesRelayRetryPolicy,
+}
+
+struct V3ResponsesRelayProviderRetryState<'state> {
+    failed_candidates: &'state mut BTreeSet<String>,
+    same_candidate_retries: &'state mut BTreeMap<String, usize>,
+    retry_selected: &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_provider_failure: &'state mut Option<V3ResponsesRelayProviderFailure>,
+    trace: &'state mut Vec<&'static str>,
+}
+
+impl V3ProviderAvailabilityReader for V3ResponsesRelayExcludedAvailability<'_> {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        let mut projection = self
+            .base
+            .availability(provider_id, auth_alias, model_id, now_ms);
+        let key = v3_responses_relay_candidate_key_parts(provider_id, auth_alias, model_id);
+        if self.excluded.contains(&key) {
+            projection.available = false;
+            projection
+                .blocked_scopes
+                .push("request_local_provider_failure".to_string());
+        }
+        projection
+    }
 }
 
 impl V3RuntimeStreamObservation {
@@ -252,6 +321,8 @@ pub enum V3ResponsesRelayRuntimeError {
     Target(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
+    #[error("V3 Responses Relay provider health failed: {0}")]
+    ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
     #[error(transparent)]
@@ -287,12 +358,79 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_and_local
     .await
 }
 
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    provider_health: &V3ProviderHealthStore,
+    state: &V3ResponsesRelayLocalContinuationState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        &ReqwestResponsesTransport::default(),
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state,
+            scope,
+            now_epoch_ms,
+        }),
+        provider_health.clone(),
+        V3ResponsesRelayRetryPolicy::default(),
+    )
+    .await
+}
+
 pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_inner(manifest, input, transport, None).await
+    execute_v3_responses_relay_runtime_with_retry_policy(
+        manifest,
+        input,
+        transport,
+        V3ResponsesRelayRetryPolicy::default(),
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    retry_policy: V3ResponsesRelayRetryPolicy,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let provider_health = V3ProviderHealthStore::from_manifest(manifest);
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        None,
+        provider_health,
+        retry_policy,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
+    T: ResponsesTransport,
+>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    provider_health: &V3ProviderHealthStore,
+    retry_policy: V3ResponsesRelayRetryPolicy,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        None,
+        provider_health.clone(),
+        retry_policy,
+    )
+    .await
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: ResponsesTransport>(
@@ -303,6 +441,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let provider_health = V3ProviderHealthStore::from_manifest(manifest);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -312,6 +451,8 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             scope,
             now_epoch_ms,
         }),
+        provider_health,
+        V3ResponsesRelayRetryPolicy::default(),
     )
     .await
 }
@@ -327,6 +468,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
+    provider_health: V3ProviderHealthStore,
+    retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -410,113 +553,188 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let selected = resolve_target(
+    let provider_semantic_body = req05.previous.previous.previous.previous.payload.0.clone();
+    let mut failed_candidates = BTreeSet::new();
+    let mut pending_provider_failure: Option<V3ResponsesRelayProviderFailure> = None;
+    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut same_candidate_retries = BTreeMap::<String, usize>::new();
+    let mut provider_send_attempts = 0usize;
+    let failure_context = V3ResponsesRelayProviderFailureContext {
         manifest,
-        &input.server_id,
-        &req05.previous.previous.previous.previous.payload.0,
-    )?;
-    let selected_observability =
-        build_v3_relay_observability_from_selected(&selected, transport_intent);
-    let selected_target_provider_id = selected.candidate.provider_id.clone();
-    let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-        req05,
-        V3HubTargetResolution::Routed,
-        selected.candidate.clone(),
-    );
-    trace.push("V3HubReqTarget06Resolved");
-    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
-        req06,
-        V3HubProviderWireProtocol::Responses,
-    );
-    trace.push("V3HubReqOutbound07ProviderSemantic");
-    let target = provider_target(manifest, req07.selected_target())?;
-    let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
-    let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-    let provider_semantic = _req09
-        .previous
-        .previous
-        .previous
-        .previous
-        .previous
-        .previous
-        .previous
-        .previous
-        .payload
-        .0
-        .clone();
-    let wire =
-        build_v3_provider_12_responses_wire_payload(&input.request_id, target, provider_semantic)?;
-    trace.push("V3ProviderReqOutbound08WirePayload");
-    let transport_request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)?;
-    trace.push("V3ProviderReqOutbound09TransportRequest");
-    let provider_raw = match transport.send(transport_request).await {
-        Ok(raw) => raw,
-        Err(V3ProviderError::HttpStatus { response }) => {
-            return Ok(provider_error_output(
-                response.status,
-                &response.body,
-                &selected_target_provider_id,
-                trace,
-                Some(selected_observability),
-            ));
-        }
-        Err(error) => {
-            return Ok(provider_runtime_error_output(
-                error,
-                &selected_target_provider_id,
-                trace,
-                Some(selected_observability),
-            ));
-        }
+        server_id: &input.server_id,
+        provider_semantic_body: &provider_semantic_body,
+        provider_health: &provider_health,
+        retry_policy: &retry_policy,
     };
-    let provider_status = provider_raw.status();
-    let provider_id = provider_raw.provider_id().to_string();
-    match provider_raw.into_body() {
-        V3ProviderResponseBody::Json(bytes) => {
-            let provider_value: Value = serde_json::from_slice(&bytes)?;
-            let (action, finalized_provider_value) =
-                run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
-            commit_or_release_responses_local_continuation(
-                local.as_ref(),
-                &requested_local_ids,
-                &finalized_provider_value,
-                action,
-            )?;
-            let mut observability = selected_observability;
-            observability.provider_status = Some(provider_status);
-            observability.provider_id = Some(provider_id);
-            observability.transport = "json".to_string();
-            observability.response_status =
-                read_v3_runtime_response_status(&finalized_provider_value);
-            observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
-            Ok(V3ResponsesRelayRuntimeOutput {
-                status: 200,
-                client_body: V3ResponsesRelayClientBody::Json(finalized_provider_value),
-                node_trace: trace,
-                error_chain: None,
-                observability: Some(observability),
-                stream_observation: None,
-            })
+    loop {
+        let selected = if let Some(selected) = retry_selected.take() {
+            selected
+        } else {
+            match resolve_target(
+                manifest,
+                &input.server_id,
+                &provider_semantic_body,
+                &failed_candidates,
+                &provider_health,
+                v3_responses_relay_now_epoch_ms()?,
+            ) {
+                Ok(selected) => selected,
+                Err(error) => {
+                    if let Some(failure) = pending_provider_failure.take() {
+                        return Ok(provider_failure_output(failure, trace, 0));
+                    }
+                    return Err(error);
+                }
+            }
+        };
+        if pending_provider_failure.take().is_some() {
+            trace.push("V3TargetLocalReselected");
         }
-        V3ProviderResponseBody::Sse(stream) => {
-            push_streaming_response_trace(&mut trace);
-            let mut observability = selected_observability;
-            observability.provider_status = Some(provider_status);
-            observability.provider_id = Some(provider_id);
-            observability.transport = "sse".to_string();
-            observability.response_status = Some("streaming".to_string());
-            let stream_observation = V3RuntimeStreamObservation::default();
-            Ok(V3ResponsesRelayRuntimeOutput {
-                status: 200,
-                client_body: V3ResponsesRelayClientBody::Sse(project_sse_stream(
-                    stream,
-                    stream_observation.clone(),
-                )),
-                node_trace: trace,
-                error_chain: None,
-                observability: Some(observability),
-                stream_observation: Some(stream_observation),
-            })
+        provider_send_attempts = provider_send_attempts.saturating_add(1);
+        let mut selected_observability =
+            build_v3_relay_observability_from_selected(&selected, transport_intent);
+        selected_observability.attempts = Some(provider_send_attempts);
+        let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_auth_alias = selected.candidate.auth_alias.clone();
+        let selected_target_model_id = selected.candidate.model_id.clone();
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05.clone(),
+            V3HubTargetResolution::Routed,
+            selected.candidate.clone(),
+        );
+        trace.push("V3HubReqTarget06Resolved");
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            V3HubProviderWireProtocol::Responses,
+        );
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let target = provider_target(manifest, req07.selected_target())?;
+        let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
+        let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
+        let provider_semantic = _req09
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .payload
+            .0
+            .clone();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            &input.request_id,
+            target,
+            provider_semantic,
+        )?;
+        trace.push("V3ProviderReqOutbound08WirePayload");
+        let transport_request =
+            build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)?;
+        trace.push("V3ProviderReqOutbound09TransportRequest");
+        let provider_raw = match transport.send(transport_request).await {
+            Ok(raw) => raw,
+            Err(V3ProviderError::HttpStatus { response }) => {
+                let failure = provider_http_failure(
+                    response.status,
+                    &response.body,
+                    &selected_target_provider_id,
+                    Some(selected_observability),
+                );
+                handle_v3_responses_relay_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3ResponsesRelayProviderRetryState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        retry_selected: &mut retry_selected,
+                        pending_provider_failure: &mut pending_provider_failure,
+                        trace: &mut trace,
+                    },
+                )
+                .await?;
+                continue;
+            }
+            Err(error) => {
+                let failure = provider_runtime_failure(
+                    error,
+                    &selected_target_provider_id,
+                    Some(selected_observability),
+                );
+                handle_v3_responses_relay_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3ResponsesRelayProviderRetryState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        retry_selected: &mut retry_selected,
+                        pending_provider_failure: &mut pending_provider_failure,
+                        trace: &mut trace,
+                    },
+                )
+                .await?;
+                continue;
+            }
+        };
+        let provider_status = provider_raw.status();
+        let provider_id = provider_raw.provider_id().to_string();
+        provider_health
+            .record_provider_success(
+                &selected_target_provider_id,
+                Some(&selected_target_auth_alias),
+                Some(&selected_target_model_id),
+                v3_responses_relay_now_epoch_ms()?,
+            )
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string()))?;
+        match provider_raw.into_body() {
+            V3ProviderResponseBody::Json(bytes) => {
+                let provider_value: Value = serde_json::from_slice(&bytes)?;
+                let (action, finalized_provider_value) =
+                    run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+                commit_or_release_responses_local_continuation(
+                    local.as_ref(),
+                    &requested_local_ids,
+                    &finalized_provider_value,
+                    action,
+                )?;
+                let mut observability = selected_observability;
+                observability.provider_status = Some(provider_status);
+                observability.provider_id = Some(provider_id);
+                observability.transport = "json".to_string();
+                observability.response_status =
+                    read_v3_runtime_response_status(&finalized_provider_value);
+                observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
+                return Ok(V3ResponsesRelayRuntimeOutput {
+                    status: 200,
+                    client_body: V3ResponsesRelayClientBody::Json(finalized_provider_value),
+                    node_trace: trace,
+                    error_chain: None,
+                    observability: Some(observability),
+                    stream_observation: None,
+                });
+            }
+            V3ProviderResponseBody::Sse(stream) => {
+                push_streaming_response_trace(&mut trace);
+                let mut observability = selected_observability;
+                observability.provider_status = Some(provider_status);
+                observability.provider_id = Some(provider_id);
+                observability.transport = "sse".to_string();
+                observability.response_status = Some("streaming".to_string());
+                let stream_observation = V3RuntimeStreamObservation::default();
+                return Ok(V3ResponsesRelayRuntimeOutput {
+                    status: 200,
+                    client_body: V3ResponsesRelayClientBody::Sse(project_sse_stream(
+                        stream,
+                        stream_observation.clone(),
+                    )),
+                    node_trace: trace,
+                    error_chain: None,
+                    observability: Some(observability),
+                    stream_observation: Some(stream_observation),
+                });
+            }
         }
     }
 }
@@ -553,6 +771,67 @@ fn find_responses_tool_output_ids(
         }
     }
     Ok(ids)
+}
+
+async fn handle_v3_responses_relay_provider_failure(
+    context: &V3ResponsesRelayProviderFailureContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    failure: V3ResponsesRelayProviderFailure,
+    state: &mut V3ResponsesRelayProviderRetryState<'_>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let candidate_key = v3_responses_relay_candidate_key(&selected.candidate);
+    let reason = failure
+        .client_response
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            failure
+                .client_response
+                .pointer("/error/type")
+                .and_then(Value::as_str)
+        });
+    context
+        .provider_health
+        .record_provider_failure(
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            reason,
+            v3_responses_relay_now_epoch_ms()?,
+        )
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string()))?;
+    let mut excluded_with_failed = state.failed_candidates.clone();
+    excluded_with_failed.insert(candidate_key.clone());
+    let alternative_available = resolve_target(
+        context.manifest,
+        context.server_id,
+        context.provider_semantic_body,
+        &excluded_with_failed,
+        context.provider_health,
+        v3_responses_relay_now_epoch_ms()?,
+    )
+    .is_ok();
+    if alternative_available {
+        state.failed_candidates.insert(candidate_key);
+        *state.pending_provider_failure = Some(failure);
+        return Ok(());
+    }
+    let retries_done = state
+        .same_candidate_retries
+        .entry(candidate_key.clone())
+        .or_insert(0);
+    if *retries_done < context.retry_policy.same_candidate_retries {
+        *retries_done = retries_done.saturating_add(1);
+        state.trace.push("V3TargetLocalRetried");
+        if context.retry_policy.retry_delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(context.retry_policy.retry_delay_ms)).await;
+        }
+        *state.retry_selected = Some(selected);
+        return Ok(());
+    }
+    state.failed_candidates.insert(candidate_key);
+    *state.pending_provider_failure = Some(failure);
+    Ok(())
 }
 
 fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
@@ -733,6 +1012,7 @@ pub fn project_v3_responses_relay_runtime_failure(
         "none",
         Vec::new(),
         None,
+        0,
     )
 }
 
@@ -811,6 +1091,17 @@ fn v3_transport_intent_label(intent: V3HubTransportIntent) -> &'static str {
         V3HubTransportIntent::Json => "json",
         V3HubTransportIntent::Sse => "sse",
     }
+}
+
+fn v3_responses_relay_now_epoch_ms() -> Result<u64, V3ResponsesRelayRuntimeError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderHealth(format!(
+                "system time precedes Unix epoch: {error}"
+            ))
+        })
 }
 
 fn read_v3_runtime_response_status(value: &Value) -> Option<String> {
@@ -1022,6 +1313,9 @@ fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     body: &Value,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    provider_health: &V3ProviderHealthStore,
+    now_ms: u64,
 ) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3ResponsesRelayRuntimeError>
 {
     let facts = crate::build_v3_router_request_facts_for_entry(body, "responses");
@@ -1043,12 +1337,34 @@ fn resolve_target(
     target
         .select_available(
             expanded,
-            &routecodex_v3_provider_responses::V3ProviderAvailabilityRegistry::from_manifest(
-                manifest,
-            ),
-            0,
+            &V3ResponsesRelayExcludedAvailability {
+                base: V3ProviderAvailabilityRegistry::from_store(provider_health.clone()),
+                excluded: request_local_excluded_candidates,
+            },
+            now_ms,
         )
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("{error:?}")))
+}
+
+fn v3_responses_relay_candidate_key(candidate: &routecodex_v3_target::V3TargetCandidate) -> String {
+    v3_responses_relay_candidate_key_parts(
+        &candidate.provider_id,
+        Some(&candidate.auth_alias),
+        Some(&candidate.model_id),
+    )
+}
+
+fn v3_responses_relay_candidate_key_parts(
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> String {
+    format!(
+        "{}:{}:{}",
+        provider_id,
+        auth_alias.unwrap_or("-"),
+        model_id.unwrap_or("-")
+    )
 }
 
 fn provider_target(
@@ -1104,43 +1420,80 @@ fn server_routing_group(
         .ok_or_else(|| V3ResponsesRelayRuntimeError::Target("server missing".to_string()))
 }
 
-fn provider_error_output(
+fn provider_http_failure(
     status: u16,
     body: &[u8],
     provider_id: &str,
-    trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesRelayRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderReqOutbound09TransportRequest",
-        format!("provider_http_{status}"),
-        format!("provider returned HTTP {status}"),
-    );
+) -> V3ResponsesRelayProviderFailure {
     let body = serde_json::from_slice::<Value>(body)
         .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
-    error_output(source, status, body, provider_id, trace, observability)
+    V3ResponsesRelayProviderFailure {
+        status,
+        client_response: body,
+        provider_id: provider_id.to_string(),
+        observability,
+    }
 }
 
-fn provider_runtime_error_output(
+fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
-    trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    V3ResponsesRelayProviderFailure {
+        status: 502,
+        client_response: json!({"error":{"type":"provider_error","message":error.to_string()}}),
+        provider_id: provider_id.to_string(),
+        observability,
+    }
+}
+
+fn provider_failure_output(
+    failure: V3ResponsesRelayProviderFailure,
+    trace: Vec<&'static str>,
+    candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
+    let message = failure
+        .client_response
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("provider returned HTTP {}", failure.status));
+    let code = failure
+        .client_response
+        .pointer("/error/code")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            failure
+                .client_response
+                .pointer("/error/type")
+                .and_then(Value::as_str)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if failure.status == 502 {
+                "provider_transport_error".to_string()
+            } else {
+                format!("provider_http_{}", failure.status)
+            }
+        });
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
-        "provider_transport_error",
-        error.to_string(),
+        code,
+        message,
     );
     error_output(
         source,
-        502,
-        json!({"error":{"type":"provider_error","message":error.to_string()}}),
-        provider_id,
+        failure.status,
+        failure.client_response,
+        &failure.provider_id,
         trace,
-        observability,
+        failure.observability,
+        candidates_remaining,
     )
 }
 
@@ -1151,6 +1504,7 @@ fn error_output(
     provider_id: &str,
     mut trace: Vec<&'static str>,
     mut observability: Option<V3RuntimeObservability>,
+    candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
     let classified = build_v3_error_02_classified_from_v3_error_01(source);
     let local = build_v3_error_03_target_local_action_from_v3_error_02(
@@ -1158,9 +1512,10 @@ fn error_output(
         V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
-        0,
+        candidates_remaining,
     );
-    let exhausted = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, 0);
+    let exhausted =
+        build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, candidates_remaining);
     let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
     let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);

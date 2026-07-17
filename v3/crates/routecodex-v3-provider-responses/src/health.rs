@@ -35,6 +35,31 @@ pub struct V3ProviderConcurrencyState {
     pub limit: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct V3ProviderFailurePolicy {
+    pub failure_threshold: u32,
+    pub cooldown_ms: u64,
+}
+
+impl Default for V3ProviderFailurePolicy {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 3,
+            cooldown_ms: 15 * 60_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3ProviderFailureRecord {
+    pub scope_label: String,
+    pub provider_key: String,
+    pub state: String,
+    pub failure_count: u32,
+    pub cooldown_until_ms: Option<u64>,
+    pub reason: Option<String>,
+}
+
 pub trait V3ProviderAvailabilityReader {
     fn availability(
         &self,
@@ -82,6 +107,10 @@ impl V3ProviderAvailabilityRegistry {
             store: V3ProviderHealthStore::from_manifest(manifest),
         }
     }
+
+    pub fn from_store(store: V3ProviderHealthStore) -> Self {
+        Self { store }
+    }
 }
 
 impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
@@ -100,6 +129,9 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
 #[derive(Debug, Default)]
 struct V3ProviderHealthState {
     configured_disabled: BTreeSet<String>,
+    health_disabled: BTreeSet<String>,
+    failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
+    consecutive_failures: BTreeMap<String, V3ProviderConsecutiveFailure>,
     cooldowns: BTreeMap<String, V3ProviderCooldown>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
     concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
@@ -111,8 +143,15 @@ struct V3ProviderCooldown {
     until_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+struct V3ProviderConsecutiveFailure {
+    failure_count: u32,
+    last_failure_at_ms: u64,
+    reason: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum V3ProviderHealthError {
+pub enum V3ProviderHealthError {
     #[error("provider health state lock poisoned: {0}")]
     Poisoned(String),
 }
@@ -125,12 +164,159 @@ impl V3ProviderHealthStore {
             .filter(|provider| !provider.enabled)
             .map(|provider| provider.id.clone())
             .collect();
+        let mut health_disabled = BTreeSet::new();
+        let mut failure_policies = BTreeMap::new();
+        for provider in manifest.providers.values() {
+            match provider.health.as_ref() {
+                Some(health) if !health.enabled => {
+                    health_disabled.insert(provider.id.clone());
+                }
+                Some(health) => {
+                    failure_policies.insert(
+                        provider.id.clone(),
+                        V3ProviderFailurePolicy {
+                            failure_threshold: health.failure_threshold.max(1),
+                            cooldown_ms: health.cooldown_ms.max(1),
+                        },
+                    );
+                }
+                None => {
+                    failure_policies
+                        .insert(provider.id.clone(), V3ProviderFailurePolicy::default());
+                }
+            }
+        }
         Self {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 configured_disabled,
+                health_disabled,
+                failure_policies,
                 ..V3ProviderHealthState::default()
             })),
         }
+    }
+
+    pub fn record_provider_failure(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        reason: Option<&str>,
+        now_ms: u64,
+    ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
+        let scope_label = provider_key_scope_label(provider_id, auth_alias, model_id);
+        let provider_key = provider_key_label(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(V3ProviderFailureRecord {
+                scope_label,
+                provider_key,
+                state: "health_disabled".to_string(),
+                failure_count: 0,
+                cooldown_until_ms: None,
+                reason: reason.map(str::to_string),
+            });
+        }
+        if state
+            .cooldowns
+            .get(&scope_label)
+            .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until > now_ms))
+        {
+            let failure_count = state
+                .consecutive_failures
+                .get(&scope_label)
+                .map_or(0, |failure| failure.failure_count);
+            let cooldown_until_ms = state
+                .cooldowns
+                .get(&scope_label)
+                .and_then(|cooldown| cooldown.until_ms);
+            return Ok(V3ProviderFailureRecord {
+                scope_label,
+                provider_key,
+                state: "cooldown".to_string(),
+                failure_count,
+                cooldown_until_ms,
+                reason: reason.map(str::to_string),
+            });
+        }
+        if state
+            .cooldowns
+            .get(&scope_label)
+            .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until <= now_ms))
+        {
+            state.cooldowns.remove(&scope_label);
+            state.consecutive_failures.remove(&scope_label);
+        }
+        let policy = state
+            .failure_policies
+            .get(provider_id)
+            .copied()
+            .unwrap_or_default();
+        let failure = state
+            .consecutive_failures
+            .entry(scope_label.clone())
+            .or_insert(V3ProviderConsecutiveFailure {
+                failure_count: 0,
+                last_failure_at_ms: now_ms,
+                reason: None,
+            });
+        failure.failure_count = failure.failure_count.saturating_add(1);
+        failure.last_failure_at_ms = now_ms;
+        if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
+            failure.reason = Some(reason.to_string());
+        }
+        let failure_count = failure.failure_count;
+        let record_reason = failure.reason.clone();
+        let mut cooldown_until_ms = None;
+        let mut record_state = "healthy".to_string();
+        if failure_count >= policy.failure_threshold {
+            cooldown_until_ms = Some(now_ms.saturating_add(policy.cooldown_ms));
+            record_state = "cooldown".to_string();
+            state.cooldowns.insert(
+                scope_label.clone(),
+                V3ProviderCooldown {
+                    reason: record_reason
+                        .clone()
+                        .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
+                    until_ms: cooldown_until_ms,
+                },
+            );
+        }
+        Ok(V3ProviderFailureRecord {
+            scope_label,
+            provider_key,
+            state: record_state,
+            failure_count,
+            cooldown_until_ms,
+            reason: record_reason,
+        })
+    }
+
+    pub fn record_provider_success(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        let scope_label = provider_key_scope_label(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if state
+            .cooldowns
+            .get(&scope_label)
+            .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until > now_ms))
+        {
+            return Ok(());
+        }
+        state.cooldowns.remove(&scope_label);
+        state.consecutive_failures.remove(&scope_label);
+        Ok(())
     }
 
     pub(crate) fn apply_error_action(
@@ -323,7 +509,34 @@ fn availability_scope_keys(
     if let Some(model_id) = model_id {
         keys.push(format!("canonical_model:{provider_id}:{model_id}"));
     }
+    if auth_alias.is_some() || model_id.is_some() {
+        keys.push(provider_key_scope_label(provider_id, auth_alias, model_id));
+    }
     keys
+}
+
+fn provider_key_scope_label(
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> String {
+    format!(
+        "provider_key:{}",
+        provider_key_label(provider_id, auth_alias, model_id)
+    )
+}
+
+fn provider_key_label(
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> String {
+    format!(
+        "{}:{}:{}",
+        provider_id,
+        auth_alias.unwrap_or("-"),
+        model_id.unwrap_or("-")
+    )
 }
 
 fn scope_label(scope: &V3ErrorActionScope) -> String {

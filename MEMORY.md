@@ -3678,3 +3678,10 @@
 - If provider SSE EOF or provider stream error occurs before a semantic terminal, V3 must project a client-visible `response.failed` event and then close with `data: [DONE]`. Abrupt stream close causes Codex to report `Stream disconnected before completion: stream closed before response.completed`.
 - Console closeout must mirror the semantic terminal: success terminal prints ✅, failure terminal or no-terminal EOF prints ❌, and error observability must not additionally print a green completed line after 4xx/error.
 - Verified live baseline on 5555 after global install `0.90.3937`: real `/v1/responses` SSE through `orangeai/glm-5.2` returned HTTP 200 with `response.completed`, detailed usage (`in/out/cache/total`), and console `✅ responseStatus=completed`; controlled red/green tests cover EOF-without-terminal and provider-stream-error projection to `response.failed + [DONE]`.
+
+# 2026-07-17: V3 Responses Relay provider failures are shared-health governed
+
+- Responses Relay provider failure handling must use a server/aggregate-shared `V3ProviderHealthStore`; request-local exclusions alone cannot enforce cross-request cooldown and can cause repeated provider storms.
+- Selection rule: if excluding the failed providerKey leaves another candidate, reselect immediately with no 5s wait; if there is no alternate candidate, retry the same candidate three times, waiting 5s before each retry by default.
+- Cooldown rule: providerKey identity is `provider_id:auth_alias:model_id`. Three consecutive provider failures trip a default 15 minute process-local cooldown; success clears partial failures when no active cooldown exists; other auth keys/models must stay selectable.
+- Verified source baseline: clean staged-patch worktree passed Hub Relay runtime closeout 8/8, provider health contract 5/5, server provider reselect focused blackbox, and server cargo check. Full server package still has an unrelated boundary-test failure outside this provider retry/cooldown slice.

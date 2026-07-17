@@ -717,7 +717,7 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
     identity: [providerId, authAlias, modelId, reason, untilMs]
-    allowed_writers: [V3ProviderHealthStore::apply_error_action]
+    allowed_writers: [V3ProviderHealthStore::apply_error_action, V3ProviderHealthStore::record_provider_failure, V3ProviderHealthStore::record_provider_success]
     allowed_readers: [V3ProviderHealthStore::availability]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false

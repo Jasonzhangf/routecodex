@@ -24,7 +24,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     execute_v3_responses_relay_dry_run_runtime,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation,
+    execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_status,
@@ -32,8 +32,8 @@ use routecodex_v3_runtime::{
     V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
     V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ProviderHealthStore, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3RuntimeObservability,
     V3RuntimeStreamObservation, V3RuntimeUsageSummary,
@@ -69,6 +69,7 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
+    provider_health: Arc<V3ProviderHealthStore>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -405,6 +406,7 @@ pub async fn spawn_v3_server_aggregate(
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
+    let provider_health = Arc::new(V3ProviderHealthStore::from_manifest(&manifest));
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -427,6 +429,7 @@ pub async fn spawn_v3_server_aggregate(
             request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: responses_direct_continuation.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
+            provider_health: provider_health.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -870,13 +873,14 @@ async fn pending_endpoint(
         };
         let console_payload = payload.clone();
         let output =
-            match execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation(
+            match execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation(
                 &state.manifest,
                 V3ResponsesRelayRuntimeInput {
                     server_id: state.server.id.clone(),
                     request_id: request_id.clone(),
                     payload,
                 },
+                &state.provider_health,
                 &state.responses_relay_local_continuation,
                 continuation_scope,
                 now_epoch_ms,

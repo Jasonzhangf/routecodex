@@ -282,6 +282,8 @@ features:
       - build_v3_error_05_execution_decision_from_v3_error_04
       - build_v3_error_06_client_projected_from_v3_error_05
       - V3ProviderHealthStore::apply_error_action
+      - V3ProviderHealthStore::record_provider_failure
+      - V3ProviderHealthStore::record_provider_success
       - V3ProviderHealthStore::availability
     allowed_paths:
       - v3/crates/routecodex-v3-debug
