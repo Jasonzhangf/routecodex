@@ -1780,6 +1780,26 @@ features:
       - V3EntryProtocolBindingManifest
       - V3EntryProtocolExecutionMode
       - compile_entry_protocol_bindings
+    allowed_paths:
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
+      - docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-runtime/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - live config
+      - global install
+      - restart
     required_contract:
       - responses binds only /v1/responses and may use an explicitly declared direct or relay implemented runtime owner; V2 default projection now points at Responses Relay
       - anthropic binds only /v1/messages to relay implemented runtime owner
