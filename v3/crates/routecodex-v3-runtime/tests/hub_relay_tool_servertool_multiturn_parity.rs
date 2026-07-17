@@ -367,6 +367,11 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
     let resp04 = response_hooks.commit(resp03).unwrap();
     let projected = resp04.canonical_context_payload().unwrap().clone();
     assert_eq!(projected["output"][0]["name"], "exec_command");
+    assert_eq!(projected["output"][0]["call_id"], "call_stopless_reasoning");
+    assert!(projected["output"][0]["arguments"]
+        .as_str()
+        .unwrap()
+        .contains("routecodex hook run reasoningStop"));
 
     let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_blackbox"), scope())
         .with_local_context("ctx_stopless_blackbox", scope(), projected);
@@ -392,6 +397,144 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
         .as_str()
         .unwrap()
         .contains("stopreason"));
+    let serialized = serde_json::to_string(outcome.payload()).unwrap();
+    for forbidden in [
+        "function_call_output",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "exec_command",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "rewritten request leaked stopless CLI artifact: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_stopless_terminal_blackbox",
+                "status":"completed",
+                "output":[{
+                    "type":"output_text",
+                    "text":"{\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"done\"]}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.canonical_context_count(), 0);
+    assert_eq!(
+        resp04.finalized_payload()["output"][0]["text"],
+        "{\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"done\"]}"
+    );
+}
+
+#[test]
+fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_output() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_stopless_disabled_request_blackbox",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"missing stop schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    let projected = resp04.canonical_context_payload().unwrap().clone();
+
+    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_disabled_request"), scope())
+        .with_local_context("ctx_stopless_disabled_request", scope(), projected);
+    let outcome = request_hooks
+        .run(
+            raw_request(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"must remain a tool output\"}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(outcome.tool_output_count(), 1);
+    assert_eq!(
+        outcome.payload()["input"][0]["type"],
+        "function_call_output"
+    );
+    assert_eq!(
+        outcome.payload()["input"][0]["output"],
+        "{\"next_step\":\"must remain a tool output\"}"
+    );
+    assert!(outcome.payload().get("instructions").is_none());
+}
+
+#[test]
+fn stopless_hook_blackbox_malformed_cli_result_fails_before_next_turn_governance() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_stopless_malformed_blackbox",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"missing stop schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    let projected = resp04.canonical_context_payload().unwrap().clone();
+
+    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_malformed"), scope())
+        .with_local_context("ctx_stopless_malformed", scope(), projected);
+    assert!(matches!(
+        request_hooks.run(
+            raw_request(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"not json"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        ),
+        Err(V3HubRelayRequestError::MalformedStoplessCliOutput {
+            reason: "output must be JSON",
+            ..
+        })
+    ));
 }
 
 #[test]

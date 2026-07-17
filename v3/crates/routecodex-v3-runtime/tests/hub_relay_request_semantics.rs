@@ -337,15 +337,27 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
         .iter()
         .position(|e| *e == V3HubRelayRequestHookEvent::Req04LocalContextRestored)
         .unwrap();
+    let parsed = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04StoplessResultParsed)
+        .unwrap();
     let rewrite = events
         .iter()
         .position(|e| *e == V3HubRelayRequestHookEvent::Req04StoplessTextRewritten)
+        .unwrap();
+    let injected = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04StoplessToolInjected)
         .unwrap();
     let tool_governed = events
         .iter()
         .position(|e| *e == V3HubRelayRequestHookEvent::Req04ToolGoverned)
         .unwrap();
     assert!(restore < rewrite);
+    assert!(restore < parsed);
+    assert!(parsed < rewrite);
+    assert!(rewrite < injected);
+    assert!(injected < tool_governed);
     assert!(rewrite < tool_governed);
 }
 
@@ -369,5 +381,176 @@ fn stopless_request_hook_malformed_cli_output_is_fail_fast() {
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         ),
         Err(V3HubRelayRequestError::MalformedStoplessCliOutput { .. })
+    ));
+}
+
+#[test]
+fn stopless_request_hook_without_cli_output_injects_schema_and_preserves_input() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let payload = json!({
+        "input":[{"role":"user","content":"keep this user turn"}]
+    });
+    let governed = hooks
+        .run(
+            raw(payload.clone()),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(governed.payload()["input"], payload["input"]);
+    assert_eq!(governed.tool_output_count(), 0);
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("stopreason"));
+    assert!(governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessToolInjected));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessTextRewritten));
+}
+
+#[test]
+fn stopless_request_hook_existing_instruction_is_idempotent() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "instructions":"existing stopreason contract",
+                "input":[{"role":"user","content":"keep"}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let instructions = governed.payload()["instructions"].as_str().unwrap();
+    assert_eq!(instructions, "existing stopreason contract");
+    assert_eq!(instructions.matches("stopreason").count(), 1);
+}
+
+#[test]
+fn stopless_request_hook_is_disabled_without_stopless_profile() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_disabled"), scope())
+        .with_local_context(
+            "rcc_stopless_disabled",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"must not be rewritten\"}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(governed.tool_output_count(), 1);
+    assert_eq!(
+        governed.payload()["input"][0]["type"],
+        "function_call_output"
+    );
+    assert_eq!(
+        governed.payload()["input"][0]["output"],
+        "{\"next_step\":\"must not be rewritten\"}"
+    );
+    assert!(governed.payload().get("instructions").is_none());
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessTextRewritten));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessToolInjected));
+}
+
+#[test]
+fn stopless_request_hook_missing_next_step_uses_default_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_default"), scope())
+        .with_local_context(
+            "rcc_stopless_default",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(
+        governed.payload()["input"],
+        json!([{"role":"user","content":"Continue from the previous stopless hook result."}])
+    );
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_output_string_is_required() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_bad_output"), scope())
+        .with_local_context(
+            "rcc_stopless_bad_output",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    assert!(matches!(
+        hooks.run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        ),
+        Err(V3HubRelayRequestError::MalformedStoplessCliOutput {
+            reason: "output string is required",
+            ..
+        })
     ));
 }

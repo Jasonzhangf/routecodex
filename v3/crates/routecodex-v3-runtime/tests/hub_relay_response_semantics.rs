@@ -141,6 +141,124 @@ fn stopless_terminal_schema_does_not_project_cli() {
 }
 
 #[test]
+fn stopless_response_hook_disabled_keeps_completed_text_terminal() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_disabled",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"no stop schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+    assert_eq!(
+        resp04.finalized_payload()["output"][0]["text"],
+        "no stop schema"
+    );
+}
+
+#[test]
+fn stopless_response_hook_ignores_non_completed_status() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_existing_action",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_existing",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"existing command\"}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["output"][0]["call_id"], "call_existing");
+    assert_eq!(
+        payload["output"][0]["arguments"],
+        "{\"cmd\":\"existing command\"}"
+    );
+}
+
+#[test]
+fn stopless_response_hook_stopreason_two_projects_cli_for_next_turn() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_continue",
+                "status":"completed",
+                "output":[{
+                    "type":"output_text",
+                    "text":"{\"stopreason\":2,\"next_step\":\"continue the task\"}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
+}
+
+#[test]
+fn stopless_response_hook_empty_output_does_not_project_cli() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_empty",
+                "status":"completed",
+                "output":[]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+}
+
+#[test]
 fn malformed_tool_call_fails_inside_response_chat_process() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
