@@ -374,6 +374,41 @@ describe('router-direct-pipeline', () => {
       expect(openaiHandle.instance.processIncoming).not.toHaveBeenCalled();
     });
 
+    it('does not add legacy reasoning_effort to OpenAI Responses direct requests', async () => {
+      const responsesHandle = createMockProviderHandle('openai-responses');
+      const requestPayload = {
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+        reasoning: { context: 'all_turns', summary: 'detailed' },
+      };
+
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: requestPayload,
+        requestPayload,
+        target: {
+          providerKey: 'asxs.crsa.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: responsesHandle.runtimeKey,
+          modelId: 'gpt-5.5',
+          routeThinking: 'medium',
+        },
+        routingDecision: { routeName: 'default', pool: ['asxs.crsa.gpt-5.5'] },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === responsesHandle.runtimeKey ? responsesHandle : undefined,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (responsesHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, any>;
+      expect(sentPayload).not.toHaveProperty('reasoning_effort');
+      expect(sentPayload.reasoning).toEqual({
+        context: 'all_turns',
+        effort: 'medium',
+        summary: 'detailed',
+      });
+      expect(requestPayload).not.toHaveProperty('reasoning_effort');
+    });
+
     it('applies configured historical tool image cleanup in direct hook only', async () => {
       const responsesHandle = createMockProviderHandle('openai-responses');
       const requestPayload = {
@@ -801,6 +836,76 @@ describe('router-direct-pipeline', () => {
       expect(sentPayload.model).toBe('gpt-5.3-codex-spark');
       expect(sentPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
       expect(requestPayload.reasoning).toEqual({ effort: 'high', summary: 'detailed' });
+    });
+
+    it('preserves GPT direct request fields instead of compatibility-cleaning provider payloads', async () => {
+      const handle = {
+        ...createMockProviderHandle('openai-responses'),
+        providerId: 'asxs',
+        providerFamily: 'openai',
+        runtime: {
+          modelCapabilities: {
+            'gpt-5.5': ['text', 'tools', 'web_search', 'multimodal', 'no_reasoning_summary'],
+          },
+        } as any,
+      } as ProviderHandle;
+      const historicalReasoning = {
+        type: 'reasoning',
+        id: 'rs_keep',
+        summary: [{ type: 'summary_text', text: 'must stay' }],
+        encrypted_content: 'opaque',
+      };
+      const toolDefinition = {
+        type: 'function',
+        name: 'exec_command',
+        parameters: {
+          type: 'object',
+          properties: { cmd: { type: 'string' } },
+          required: ['cmd'],
+        },
+      };
+      const requestPayload = {
+        model: 'gpt-5.5',
+        instructions: 'system instruction must stay',
+        client_metadata: { session_id: 'sess_keep', route: 'direct' },
+        prompt_cache_key: 'cache-key-keep',
+        include: ['reasoning.encrypted_content'],
+        tools: [toolDefinition],
+        input: [
+          historicalReasoning,
+          { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'raw' }] },
+        ],
+        reasoning: { effort: 'high', summary: 'detailed' },
+      };
+      const input = {
+        portConfig: createRouterPortConfig(),
+        providerPayload: { model: 'gpt-5.5' },
+        requestPayload,
+        target: {
+          providerKey: 'asxs.crsa.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: handle.runtimeKey,
+          modelId: 'gpt-5.5',
+        },
+        routingDecision: { routeName: 'thinking' },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: () => handle,
+      };
+
+      const result = await executeRouterDirectPipeline(input);
+
+      expect(result.used).toBe(true);
+      const sentPayload = (handle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sentPayload).toBe(requestPayload);
+      expect(sentPayload).toMatchObject({
+        instructions: 'system instruction must stay',
+        client_metadata: { session_id: 'sess_keep', route: 'direct' },
+        prompt_cache_key: 'cache-key-keep',
+        include: ['reasoning.encrypted_content'],
+        reasoning: { effort: 'high', summary: 'detailed' },
+      });
+      expect((sentPayload.input as unknown[])[0]).toBe(historicalReasoning);
+      expect((sentPayload.tools as unknown[])[0]).toBe(toolDefinition);
     });
 
     it('restores original client model on direct response after request model override', async () => {

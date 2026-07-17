@@ -16,6 +16,13 @@ fn trimmed(value: Option<&Value>) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
+fn is_openai_responses_protocol(value: Option<&Value>) -> bool {
+    matches!(
+        trimmed(value).map(|value| value.to_ascii_lowercase()),
+        Some(value) if value == "openai-responses"
+    )
+}
+
 fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let root = input.as_object();
     let mut payload = root
@@ -33,6 +40,9 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let projection = build_direct_req_04_projection_plan(&resolved);
     let inbound_model = trimmed(payload.get("model")).map(str::to_string);
     let original_client_model = resolved.original_client_model.clone();
+    let openai_responses_protocol = is_openai_responses_protocol(
+        root.and_then(|row| row.get("providerProtocol")),
+    );
     let mut payload_changed = false;
     if let DirectFieldProjection::Set(target) = &projection.model {
         if inbound_model.as_deref() != Some(target.as_str()) {
@@ -48,7 +58,9 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
             .cloned()
             .unwrap_or_default();
         reasoning.insert("effort".to_string(), Value::String(level.clone()));
-        payload.insert("reasoning_effort".to_string(), Value::String(level.clone()));
+        if !openai_responses_protocol {
+            payload.insert("reasoning_effort".to_string(), Value::String(level.clone()));
+        }
         payload.insert("reasoning".to_string(), Value::Object(reasoning));
     }
     if resolved.direct_history_tool_image_cleanup
@@ -396,6 +408,25 @@ mod tests {
         assert_eq!(output["originalClientModel"], "deepseek-v4-pro");
         assert_eq!(output["payload"]["reasoning_effort"], "xhigh");
         assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn request_plan_does_not_add_legacy_reasoning_effort_for_openai_responses_direct() {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "payload": {"model":"gpt-5.5", "reasoning":{"summary":"detailed"}},
+            "targetModelId":"gpt-5.5",
+            "routeThinking":"medium"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {"model":"gpt-5.5", "reasoning":{"summary":"detailed"}},
+            "resolvedSemantics": resolved,
+            "providerProtocol": "openai-responses"
+        }))
+        .expect("responses request plan");
+        assert!(output["payload"].get("reasoning_effort").is_none());
+        assert_eq!(output["payload"]["reasoning"]["effort"], "medium");
+        assert_eq!(output["payload"]["reasoning"]["summary"], "detailed");
     }
 
     #[test]

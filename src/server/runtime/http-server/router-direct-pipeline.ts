@@ -11,7 +11,8 @@
  *   inbound model, override payload.model → targetModelId. Original client model
  *   is written to metadata center for observation.
  * - Request thinking effort override: if route params specify a thinking level,
- *   override reasoning_effort and reasoning.effort.
+ *   override reasoning.effort; legacy reasoning_effort is only emitted for
+ *   non-Responses protocols that still use that wire field.
  * - Response model restore: rewrite provider wire model back to original client
  *   model on JSON body and SSE frames so the client sees a transparent proxy.
  * - Response SSE headers: ensure client-facing stream headers are present.
@@ -219,6 +220,7 @@ export async function executeRouterDirectPipeline(
   const hookResult = planDirectRouteRequestHooksNative({
     payload: input.requestPayload,
     resolvedSemantics: resolvedDirectSemantics,
+    providerProtocol,
   });
   if (!hookResult.payloadChanged) {
     hookResult.payload = input.requestPayload;
