@@ -423,10 +423,296 @@ describe('http routes invalid json handling', () => {
         const ids = readModelsPayload(body).map((item: any) => item.id).sort();
         expect(ids).toContain('demo-v4-pro');
         expect(ids).toContain('demo-v4-flash');
+        expect(ids).not.toContain('gpt-5.5');
+        expect(ids).not.toContain('gpt-5.6-sol');
+        expect(ids).not.toContain('gpt-5.6-terra');
+        expect(ids).not.toContain('gpt-5.6-luna');
         expect(ids).not.toContain('DF.demo-v4-pro');
         expect(ids).not.toContain('DF.demo-v4-flash');
         expect(ids).not.toContain('DeepSeek-V4-Pro');
         expect(ids).not.toContain('DeepSeek-V4-Flash');
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the current port routing models to decide which built-in Codex capabilities are visible', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-port-codex-family-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const providerDir = path.join(providerRoot, 'cc');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "cc"',
+        '',
+        '[provider]',
+        'id = "cc"',
+        'enabled = true',
+        'type = "responses"',
+        'baseURL = "https://api.example.com/v1"',
+        '',
+        '[provider.auth]',
+        'type = "apikey"',
+        'entries = [',
+        '  { alias = "key1", apiKey = "test" }',
+        ']',
+        '',
+        '[provider.models."gpt-5.5"]',
+        'supportsStreaming = true',
+        '',
+        '[provider.models."gpt-5.6-sol"]',
+        'supportsStreaming = true'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 5520, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {},
+      getPortConfigs: () => [{ port: 5520, routingPolicyGroup: 'gateway_priority_5520' }],
+      getUserConfig: () => ({
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [{ targets: ['cc.key1.gpt-5.5'] }]
+              }
+            }
+          }
+        }
+      })
+    } as any);
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const data = readModelsPayload(await response.json());
+        const ids = data.map((item: any) => item.id).sort();
+        expect(ids).toContain('gpt-5.5');
+        expect(ids).not.toContain('gpt-5.6-sol');
+        expect(ids).not.toContain('gpt-5.6-terra');
+        expect(ids).not.toContain('gpt-5.6-luna');
+        const gpt55 = data.find((item: any) => item.id === 'gpt-5.5');
+        expectGpt55CodexContract(gpt55);
+        expect(gpt55.use_responses_lite).toBeUndefined();
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps gpt-5.6 lite metadata visible when the current port routes to a gpt-5.6 model', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-port-codex-56-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const providerDir = path.join(providerRoot, 'cc-sol');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(providerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(providerDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "cc-sol"',
+        '',
+        '[provider]',
+        'id = "cc-sol"',
+        'enabled = true',
+        'type = "responses"',
+        'baseURL = "https://api.example.com/v1"',
+        '',
+        '[provider.auth]',
+        'type = "apikey"',
+        'entries = [',
+        '  { alias = "key1", apiKey = "test" }',
+        ']',
+        '',
+        '[provider.models."gpt-5.6-sol"]',
+        'supportsStreaming = true'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 5520, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {},
+      getPortConfigs: () => [{ port: 5520, routingPolicyGroup: 'gateway_priority_5520' }],
+      getUserConfig: () => ({
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [{ targets: ['cc-sol.key1.gpt-5.6-sol'] }]
+              }
+            }
+          }
+        }
+      })
+    } as any);
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const data = readModelsPayload(await response.json());
+        const ids = data.map((item: any) => item.id).sort();
+        expect(ids).toContain('gpt-5.6-sol');
+        expect(ids).not.toContain('gpt-5.5');
+        expect(ids).not.toContain('gpt-5.6-terra');
+        expect(ids).not.toContain('gpt-5.6-luna');
+        const sol = data.find((item: any) => item.id === 'gpt-5.6-sol');
+        expectGpt56CodexContract(sol, {
+          description: 'Latest frontier agentic coding model.',
+          defaultReasoningLevel: 'low',
+          includesUltra: true
+        });
+      });
+    } finally {
+      if (restoreRccHome === undefined) {
+        delete process.env.RCC_HOME;
+      } else {
+        process.env.RCC_HOME = restoreRccHome;
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('uses compiled virtual router status as the live route-surface truth when available', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-runtime-status-'));
+    const providerRoot = path.join(tmp, 'provider');
+    const ccDir = path.join(providerRoot, 'cc');
+    const solDir = path.join(providerRoot, 'cc-sol');
+    const restoreRccHome = process.env.RCC_HOME;
+    process.env.RCC_HOME = tmp;
+    await fs.mkdir(ccDir, { recursive: true });
+    await fs.mkdir(solDir, { recursive: true });
+    await fs.writeFile(
+      path.join(ccDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "cc"',
+        '',
+        '[provider]',
+        'id = "cc"',
+        'enabled = true',
+        'type = "responses"',
+        'baseURL = "https://api.example.com/v1"',
+        '',
+        '[provider.models."gpt-5.5"]',
+        'supportsStreaming = true'
+      ].join('\n'),
+      'utf8'
+    );
+    await fs.writeFile(
+      path.join(solDir, 'config.v2.toml'),
+      [
+        'version = "2.0.0"',
+        'providerId = "cc-sol"',
+        '',
+        '[provider]',
+        'id = "cc-sol"',
+        'enabled = true',
+        'type = "responses"',
+        'baseURL = "https://api.example.com/v1"',
+        '',
+        '[provider.models."gpt-5.6-sol"]',
+        'supportsStreaming = true'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const app = express();
+    registerDefaultMiddleware(app, { server: { port: 5520, host: '127.0.0.1' } } as any);
+    registerHttpRoutes({
+      app,
+      config: { server: { port: 5520, host: '127.0.0.1' } } as any,
+      buildHandlerContext: () => ({}) as any,
+      getPipelineReady: () => true,
+      handleError: async () => {},
+      getPortConfigs: () => [{ port: 5520, routingPolicyGroup: 'gateway_priority_5520' }],
+      getUserConfig: () => ({
+        virtualrouter: {
+          routingPolicyGroups: {
+            gateway_priority_5520: {
+              routing: {
+                default: [{ targets: ['cc.key1.gpt-5.6-terra'] }]
+              }
+            }
+          }
+        }
+      }),
+      getHubPipeline: () => ({
+        virtualRouter: {
+          getStatus: () => ({
+            routes: {
+              'gateway_priority_5520:default': {
+                pools: [
+                  {
+                    resolvedForwarders: [
+                      {
+                        modelId: 'gpt-5.5',
+                        targetProviderKeys: ['cc.key1.gpt-5.5']
+                      }
+                    ]
+                  }
+                ]
+              },
+              'gateway_priority_5520:thinking': {
+                pools: [
+                  {
+                    resolvedForwarders: [
+                      {
+                        modelId: 'gpt-5.6-sol',
+                        targetProviderKeys: ['cc-sol.key1.gpt-5.6-sol']
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          })
+        }
+      })
+    } as any);
+
+    try {
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/v1/models`);
+        expect(response.status).toBe(200);
+        const data = readModelsPayload(await response.json());
+        const ids = data.map((item: any) => item.id).sort();
+        expect(ids).toEqual(['gpt-5.5', 'gpt-5.6-sol']);
+        expectGpt55CodexContract(data.find((item: any) => item.id === 'gpt-5.5'));
+        expectGpt56CodexContract(data.find((item: any) => item.id === 'gpt-5.6-sol'), {
+          description: 'Latest frontier agentic coding model.',
+          defaultReasoningLevel: 'low',
+          includesUltra: true
+        });
       });
     } finally {
       if (restoreRccHome === undefined) {

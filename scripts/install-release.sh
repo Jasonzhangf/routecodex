@@ -134,6 +134,22 @@ prepare_isolated_build_root() {
     fi
   }
 
+  copy_v3_source() {
+    local relative="v3"
+    local source_path="$SOURCE_ROOT/$relative"
+    local target_path="$INSTALL_BUILD_ROOT/$relative"
+    if [ ! -d "$source_path" ]; then
+      return
+    fi
+    mkdir -p "$target_path"
+    (cd "$source_path" && COPYFILE_DISABLE=1 tar \
+      --exclude './target' \
+      --exclude './node_modules' \
+      --exclude './coverage' \
+      --exclude './test-results' \
+      -cf - .) | (cd "$target_path" && tar -xf -)
+  }
+
   copy_agent_collab_contract() {
     copy_isolated_path ".agent-collab/PROTOCOL.md"
     copy_isolated_path ".agent-collab/schema"
@@ -143,9 +159,10 @@ prepare_isolated_build_root() {
   for item in \
     package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
     .gitignore AGENTS.md \
-    src scripts config configsamples docs tests webui vendor v3; do
+    src scripts config configsamples docs tests webui vendor; do
     copy_isolated_path "$item"
   done
+  copy_v3_source
   copy_isolated_path ".agents/skills/rcc-dev-skills"
   copy_agent_collab_contract
   copy_isolated_path "samples/mock-provider"

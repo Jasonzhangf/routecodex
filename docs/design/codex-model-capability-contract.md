@@ -40,9 +40,31 @@ Required descriptive fields:
 - `supported_in_api = true`
 - `visibility = list`
 
-## Built-in `gpt-5.6-*` catalog contract
+## Built-in catalog visibility contract
 
-Bare `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are Codex catalog entries and must be listed even when provider config only exposes provider-prefixed aliases.
+Bare Codex catalog entries are scoped by the current listener when `/v1/models` can resolve a
+`routingPolicyGroup`.
+
+- If the current port routes only to `gpt-5.5`, `/v1/models` must expose the bare `gpt-5.5`
+  capability contract and must not expose `gpt-5.6-*` capability fields.
+- If the current port routes to `gpt-5.6-sol`, `/v1/models` must expose the bare
+  `gpt-5.6-sol` lite contract.
+- If no port routing context is available, RouteCodex keeps the legacy full built-in catalog
+  as a broad model discovery surface.
+
+This visibility rule is a client capability switch. It prevents Codex from enabling
+`gpt-5.6` Responses Lite / WebSocket-era behavior when the configured route surface is
+actually `gpt-5.5`.
+
+Authority selection is explicit, not a fallback chain:
+
+- Installed/live servers use the compiled Virtual Router runtime status as the route-surface truth.
+- Source-config projection is only for construction/test contexts where no live HubPipeline runtime
+  status exists.
+- If runtime status exists but is empty or malformed, `/v1/models` must not recover by reading
+  source config as a second truth.
+
+## Built-in `gpt-5.6-*` metadata contract
 
 Shared stable fields:
 - `apply_patch_tool_type = freeform`
@@ -102,3 +124,9 @@ Mandatory gate:
 
 Required test:
 - `tests/server/http-server/routes.invalid-json.spec.ts`
+
+Required positive/negative cases:
+- port routes only `gpt-5.5` -> no `gpt-5.6-*`, no `use_responses_lite`
+- port routes `gpt-5.6-sol` -> `gpt-5.6-sol` remains visible with `use_responses_lite = true`
+- compiled runtime status conflicts with source config -> compiled runtime status wins and source
+  config models are not exposed

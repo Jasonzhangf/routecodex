@@ -33,7 +33,12 @@ function logRoutesNonBlockingError(stage: string, error: unknown, details?: Reco
 
 function readVirtualRouterRuntimeStatus(hubPipeline: unknown): unknown | null {
   const handle = readHubPipelineNativeHandle(hubPipeline);
-  return handle ? getHubPipelineVirtualRouterStatusNative(handle) : null;
+  if (handle) {
+    return getHubPipelineVirtualRouterStatusNative(handle);
+  }
+  const virtualRouter = isRecord(hubPipeline) && isRecord(hubPipeline.virtualRouter) ? hubPipeline.virtualRouter : null;
+  const getStatus = virtualRouter && typeof virtualRouter.getStatus === 'function' ? virtualRouter.getStatus : null;
+  return getStatus ? getStatus.call(virtualRouter) : null;
 }
 
 function readVirtualRouterRuntimeDryRun(
@@ -315,8 +320,10 @@ function buildCodexModelMetadata(
   return item;
 }
 
-function buildBuiltinCodexModelMetadata(): ModelListItem[] {
-  return ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'].map((modelId) =>
+const BUILTIN_CODEX_MODEL_IDS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const;
+
+function buildBuiltinCodexModelMetadata(allowedModelIds?: ReadonlySet<string>): ModelListItem[] {
+  return BUILTIN_CODEX_MODEL_IDS.filter((modelId) => !allowedModelIds || allowedModelIds.has(modelId)).map((modelId) =>
     buildCodexModelMetadata('openai', modelId, modelId, {}, {})
   );
 }
@@ -471,12 +478,75 @@ function collectPortVisibleModelRefs(args: {
   return out;
 }
 
+function collectPortVisibleModelRefsFromRuntimeStatus(status: unknown): Array<{ providerId: string; modelId: string }> {
+  const routesNode = isRecord(status) && isRecord(status.routes) ? status.routes : null;
+  const out: Array<{ providerId: string; modelId: string }> = [];
+  const seen = new Set<string>();
+
+  const pushRef = (providerId: string, modelId: string) => {
+    const pid = providerId.trim();
+    const mid = modelId.trim();
+    if (!pid || !mid) {
+      return;
+    }
+    const key = `${pid}::${mid}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push({ providerId: pid, modelId: mid });
+  };
+
+  if (!routesNode) {
+    return out;
+  }
+
+  for (const routeNode of Object.values(routesNode)) {
+    if (!isRecord(routeNode) || !Array.isArray(routeNode.pools)) {
+      continue;
+    }
+    for (const poolNode of routeNode.pools) {
+      if (!isRecord(poolNode) || !Array.isArray(poolNode.resolvedForwarders)) {
+        continue;
+      }
+      for (const forwarderNode of poolNode.resolvedForwarders) {
+        if (!isRecord(forwarderNode)) {
+          continue;
+        }
+        const modelId = readString(forwarderNode.modelId);
+        const targetProviderKeys = readStringArray(forwarderNode.targetProviderKeys);
+        if (!modelId) {
+          continue;
+        }
+        for (const providerKey of targetProviderKeys) {
+          const providerId = providerKey.includes('.') ? providerKey.split('.')[0] : '';
+          pushRef(providerId, modelId);
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+function collectPortVisibleModelRefsFromRouteSurface(args: {
+  userConfig: Record<string, unknown>;
+  routingPolicyGroup: string;
+  runtimeStatus?: unknown;
+}): Array<{ providerId: string; modelId: string }> {
+  if (args.runtimeStatus !== undefined && args.runtimeStatus !== null) {
+    return collectPortVisibleModelRefsFromRuntimeStatus(args.runtimeStatus);
+  }
+  return collectPortVisibleModelRefs(args);
+}
+
 async function collectPortScopedModelItems(args: {
   userConfig: Record<string, unknown>;
   routingPolicyGroup: string;
+  runtimeStatus?: unknown;
 }): Promise<ModelListItem[]> {
   const providerConfigs = await loadProviderConfigsV2();
-  const refs = collectPortVisibleModelRefs(args);
+  const refs = collectPortVisibleModelRefsFromRouteSurface(args);
   const items: ModelListItem[] = [];
   for (const ref of refs) {
     const cfg = providerConfigs[ref.providerId];
@@ -492,6 +562,21 @@ async function collectPortScopedModelItems(args: {
     items.push(buildCodexModelMetadata(ref.providerId, ref.modelId, aliasId, providerNode, modelNode));
   }
   return items;
+}
+
+function collectPortScopedBuiltinModelIds(args: {
+  userConfig: Record<string, unknown>;
+  routingPolicyGroup: string;
+  runtimeStatus?: unknown;
+}): Set<string> {
+  const ids = new Set<string>();
+  const refs = collectPortVisibleModelRefsFromRouteSurface(args);
+  for (const ref of refs) {
+    if ((BUILTIN_CODEX_MODEL_IDS as readonly string[]).includes(ref.modelId)) {
+      ids.add(ref.modelId);
+    }
+  }
+  return ids;
 }
 
 export function registerHttpRoutes(options: RouteOptions): void {
@@ -611,10 +696,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
     try {
       const items: ModelListItem[] = [];
       const seen = new Set<string>();
-      for (const builtinModel of buildBuiltinCodexModelMetadata()) {
-        seen.add(builtinModel.id);
-        items.push(builtinModel);
-      }
       const localPort = typeof req.socket?.localPort === 'number' ? req.socket.localPort : undefined;
       const portConfigs = typeof options.getPortConfigs === 'function' ? options.getPortConfigs() : [];
       const localMatchedPort = typeof localPort === 'number' && Array.isArray(portConfigs)
@@ -634,10 +715,25 @@ export function registerHttpRoutes(options: RouteOptions): void {
         : (isPlainRecord(optionUserConfig)
             ? optionUserConfig
             : {});
+      const runtimeStatus = routingPolicyGroup && typeof options.getHubPipeline === 'function'
+        ? readVirtualRouterRuntimeStatus(options.getHubPipeline(routingPolicyGroup))
+        : null;
+      const builtinModelIds = routingPolicyGroup
+        ? collectPortScopedBuiltinModelIds({
+            userConfig,
+            routingPolicyGroup,
+            runtimeStatus
+          })
+        : undefined;
+      for (const builtinModel of buildBuiltinCodexModelMetadata(builtinModelIds)) {
+        seen.add(builtinModel.id);
+        items.push(builtinModel);
+      }
       const configuredItems = routingPolicyGroup
         ? await collectPortScopedModelItems({
             userConfig,
-            routingPolicyGroup
+            routingPolicyGroup,
+            runtimeStatus
           })
         : await collectConfiguredModelItems();
       for (const item of configuredItems) {
