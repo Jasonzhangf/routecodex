@@ -285,7 +285,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(
         sse_observability.finish_reason.as_deref(),
         Some("tool_calls"),
-        "Responses Relay SSE with materialized local tool calls must keep tool_calls observability"
+        "Responses Relay SSE with local tool calls must keep tool_calls observability"
     );
     assert_eq!(sse_observability.provider_status, Some(200));
     let stream_observation = sse_output
