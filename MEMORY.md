@@ -3665,3 +3665,9 @@
 - `apply_patch` streamed through Anthropic provider compat is client-visible as Responses `custom_tool_call` with raw `input`; do not leak the patch through `function_call.arguments`. A tool-use stop projects `requires_action`.
 - Verified installed/live baseline: RouteCodex `0.90.3937`; 5555 normal SSE completed; apply_patch provider dry-run produced `MiniMax-M3` with one message; online freeform apply_patch replay exited 0 with exact raw patch and no arguments leak. Source baseline: V3 SSE 7 tests, provider-responses 28 tests, V3 fmt/clippy, function-map/mainline/Relay-closeout gates all pass.
 - Known separate lifecycle gap: `routecodex restart --port 5555` can report no managed server while V3 health/models and its listener remain live. Do not bypass this with broad/manual process killing; fix the managed lifecycle owner separately.
+
+# 2026-07-17: V3 SSE closeout must distinguish terminal-close from pre-terminal drop
+
+- In server-side SSE console closeout, Body drop alone is not proof of client disconnect. Codex/client may stop reading after receiving terminal `response.completed`, `response.done`, `response.failed`, `response.incomplete`, or `[DONE]`; this must be logged as completed/terminal, not `499 client_disconnect`.
+- `V3SseConsoleCloseoutStream` must observe outbound SSE frames before classifying Drop. Only drop before any terminal frame is a pre-terminal disconnect. Drop after a terminal frame is normal terminal-close.
+- Regression proof: `relay_sse_closeout_treats_drop_after_terminal_frame_as_completed` keeps the provider stream pending after a terminal frame and then drops the body; expected closeout is `Completed`, not `Dropped`.

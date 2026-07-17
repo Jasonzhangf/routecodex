@@ -2923,12 +2923,54 @@ fn wrap_v3_relay_sse_console_stream(
 struct V3SseConsoleCloseoutStream {
     stream: V3ResponsesRelayClientStream,
     closeout: Option<Box<dyn FnOnce(V3SseConsoleStreamTerminal) + Send>>,
+    decoder: SseIncrementalDecoder,
+    observed_terminal_frame: bool,
 }
 
 impl V3SseConsoleCloseoutStream {
     fn emit_terminal(&mut self, terminal: V3SseConsoleStreamTerminal) {
         if let Some(closeout) = self.closeout.take() {
             closeout(terminal);
+        }
+    }
+
+    fn observe_chunk_terminal(&mut self, chunk: &[u8]) {
+        let Ok(frames) = self
+            .decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        else {
+            return;
+        };
+        for frame in frames {
+            let mut event_type: Option<&str> = None;
+            let mut data = String::new();
+            for field in frame.frame().fields() {
+                let SseField::Named { name, value } = field else {
+                    continue;
+                };
+                match name.as_str() {
+                    "event" => event_type = Some(value.as_str()),
+                    "data" => {
+                        if !data.is_empty() {
+                            data.push('\n');
+                        }
+                        data.push_str(value);
+                    }
+                    _ => {}
+                }
+            }
+            if matches!(
+                event_type,
+                Some(
+                    "response.completed"
+                        | "response.done"
+                        | "response.failed"
+                        | "response.incomplete"
+                )
+            ) || data.trim() == "[DONE]"
+            {
+                self.observed_terminal_frame = true;
+            }
         }
     }
 }
@@ -2944,7 +2986,10 @@ impl futures_util::Stream for V3SseConsoleCloseoutStream {
     ) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
         match this.stream.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Some(Ok(chunk))) => {
+                this.observe_chunk_terminal(&chunk);
+                Poll::Ready(Some(Ok(chunk)))
+            }
             Poll::Ready(Some(Err(error))) => {
                 this.emit_terminal(V3SseConsoleStreamTerminal::Failed(error.clone()));
                 Poll::Ready(Some(Err(error)))
@@ -2960,7 +3005,12 @@ impl futures_util::Stream for V3SseConsoleCloseoutStream {
 
 impl Drop for V3SseConsoleCloseoutStream {
     fn drop(&mut self) {
-        self.emit_terminal(V3SseConsoleStreamTerminal::Dropped);
+        let terminal = if self.observed_terminal_frame {
+            V3SseConsoleStreamTerminal::Completed
+        } else {
+            V3SseConsoleStreamTerminal::Dropped
+        };
+        self.emit_terminal(terminal);
     }
 }
 
@@ -2971,6 +3021,8 @@ fn wrap_v3_relay_sse_closeout_stream(
     Box::pin(V3SseConsoleCloseoutStream {
         stream,
         closeout: Some(Box::new(closeout)),
+        decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+        observed_terminal_frame: false,
     })
 }
 
@@ -3760,6 +3812,30 @@ mod tests {
         assert_eq!(
             *events.lock().unwrap(),
             vec![V3SseConsoleStreamTerminal::Dropped]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_treats_drop_after_terminal_frame_as_completed() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let provider = futures_util::stream::iter(vec![Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec(),
+        )])
+        .chain(futures_util::stream::pending::<Result<Vec<u8>, String>>());
+        let mut stream = wrap_v3_relay_sse_closeout_stream(Box::pin(provider), move |terminal| {
+            recorded.lock().unwrap().push(terminal)
+        });
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert!(std::str::from_utf8(&chunk)
+            .unwrap()
+            .contains("response.completed"));
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Completed]
         );
     }
 }
