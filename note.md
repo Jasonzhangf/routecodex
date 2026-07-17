@@ -31380,3 +31380,17 @@ Pure Rust NAPI candidates:
 - Focused V3 tests passed: response stopless 8, request stopless 8, Responses local continuation integration 8, continuation store 11, servertool multiturn parity 15. Runtime/server cargo check, normalization/relay architecture gates, and red fixtures passed.
 - Managed global install/restart passed for V3 5555. Live probe `/tmp/stopless-5555-live-probe-final5.json` completed two continuation rounds: `requires_action -> requires_action -> completed`, with no 400/500/502, no invalid CLI JSON, and no duplicate local continuation commit.
 - Remaining observability caveat: debug status/log capture did not retain the full foreground console completion line, so the live probe proves semantic completion and absence of the prior error, while the exact console rendering of `finishReason=tool_calls` is covered by source tests and runtime inference code.
+
+# 2026-07-18T16:48+08:00 prior failed payload live replay
+- The exact `561168-157` / `usage=in:151842 out:730` request body was not persisted in either canonical `~/.rcc/codex-samples/.../ports/5555/` or `/Volumes/extension/.rcc/codex-samples/.../ports/5555/`; only the console line survives, so that requestId cannot be claimed as byte-for-byte replayed.
+- Recovered the complete 531059-byte `requestBody` from the prior V3 diagnostic package `error-openai-responses-router-gpt-5.5-20260717T234917871-560906-7040.json` (`CLIENT_DISCONNECTED`, `/v1/responses`, `stream=true`, 166 input items, 14 tools) and replayed it without semantic trimming to the globally installed V3 server on port 5555.
+- Live replay request `openai-responses-router-gpt-5.5-20260718T004804962-561355-344` returned HTTP 200 in 19.48s through `pool=tools -> orangeai:key1:glm-5.2`, transport SSE.
+- Client stream contained `response.created -> response.output_item.done(function_call) -> response.completed -> [DONE]`; no premature EOF or `CLIENT_RESPONSE_CLOSED`.
+- Foreground console recorded `responseStatus=completed finishReason=tool_calls` and usage `in:106415 out:152 total=106567`, proving the previously failing full diagnostic payload now executes through terminal SSE closeout and no longer reports `finishReason=unreported`.
+
+# 2026-07-18T17:45+08:00 V3 apply_patch guidance and provider compat
+- V2/V3 comparison narrowed the missing behavior to two owners: Responses Relay request guidance at Req04 and Anthropic custom-tool schema compatibility in the provider transport. Existing V3 response projection, output feedback normalization, SSE projection, and continuation apply_patch handling were retained.
+- Req04 now injects one idempotent `[Codex Tool Guidance]` block only when the current Responses request explicitly declares `apply_patch`; requests without that tool are unchanged. The hook runs after local continuation restore and before provider outbound, never in normalization/SSE/server/store/MetadataCenter.
+- Anthropic compat now gives schema-less custom `apply_patch` a required `patch` string schema with `additionalProperties=true`; unrelated schema-less custom tools retain a generic object schema.
+- Focused positive/reverse tests, V3 relay/module/fmt/clippy/provider tests, function/verification-map gates, and `git diff --check` passed.
+- Global 0.90.3937 install completed; managed V3 5555 restart and `/health` passed. Live apply_patch replay against `http://127.0.0.1:5555/v1/responses` preserved the exact raw patch, returned two custom-tool inputs, and reported zero function-arguments or JSON-wrapper leaks.

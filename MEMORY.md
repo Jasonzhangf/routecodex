@@ -3706,3 +3706,10 @@
 - For `stopreason=2`, the response hook must pass the parsed stop schema as CLI status/control input instead of downgrading to `{}`; otherwise the next provider turn receives a generic `继续。` prompt and can one-round stop silently.
 - Finish reason inference is observability-only: when the provider omits a finish reason, finalized `LocalContext` may display `tool_calls`, but the inferred value cannot trigger hook/schema decisions.
 - Verified focused tests (8 response, 8 request, 8 Responses continuation, 11 store, 15 servertool parity), V3 architecture/red gates, global install, managed V3 5555 restart, and live three-state probe. Live result was `requires_action -> requires_action -> completed` with no duplicate commit or provider/client error.
+
+# 2026-07-18: V3 apply_patch guidance and Anthropic custom-tool compat
+
+- V3 apply_patch request guidance belongs to the Req04 Chat Process hook, after local continuation restore and before provider outbound. It must inject at most one `[Codex Tool Guidance]` block only when the current Responses request declares `apply_patch`; requests without that tool must remain unchanged.
+- Provider-specific apply_patch schema compatibility belongs in provider transport/compat, not normalization, SSE, server handler, store transport, MetadataCenter, or direct request cleanup.
+- Anthropic schema-less custom `apply_patch` maps to a required `patch` string schema with `additionalProperties=true`; unrelated schema-less custom tools use a generic object schema and must not inherit apply_patch schema.
+- Verified with focused positive/reverse Req04 tests, Anthropic provider compat tests, V3 relay/module/fmt/clippy/provider gates, function/verification-map gates, global install 0.90.3937, managed V3 5555 restart, `/health`, and live apply_patch replay on `http://127.0.0.1:5555/v1/responses` preserving the exact raw patch with zero function-arguments or JSON-wrapper leaks.

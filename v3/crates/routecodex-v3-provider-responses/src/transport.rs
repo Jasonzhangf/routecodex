@@ -1184,7 +1184,7 @@ fn build_anthropic_tools(tools: Option<&Value>) -> Option<Value> {
             Some("custom") => Some(json!({
                 "name": tool.get("name").and_then(Value::as_str).unwrap_or("tool"),
                 "description": tool.get("description").and_then(Value::as_str).unwrap_or(""),
-                "input_schema": anthropic_custom_tool_input_schema(tool)
+                "input_schema": anthropic_custom_tool_input_schema(tool.get("name").and_then(Value::as_str), tool)
             })),
             Some("web_search_preview") => Some(json!({
                 "type": "web_search_20250305",
@@ -1202,21 +1202,30 @@ fn build_anthropic_tools(tools: Option<&Value>) -> Option<Value> {
     }
 }
 
-fn anthropic_custom_tool_input_schema(tool: &Value) -> Value {
-    tool.get("parameters")
-        .or_else(|| tool.get("input_schema"))
-        .cloned()
-        .unwrap_or_else(|| {
-            json!({
+fn anthropic_custom_tool_input_schema(name: Option<&str>, tool: &Value) -> Value {
+    if let Some(schema) = tool.get("parameters").or_else(|| tool.get("input_schema")) {
+        return schema.clone();
+    }
+    if name
+        .map(str::trim)
+        .is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"))
+    {
+        json!({
                 "type":"object",
                 "properties":{"patch":{
                     "type":"string",
                     "description":"Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
                 }},
                 "required":["patch"],
-                "additionalProperties":false
-            })
+                "additionalProperties":true
         })
+    } else {
+        json!({
+            "type":"object",
+            "properties":{},
+            "additionalProperties":true
+        })
+    }
 }
 
 fn build_anthropic_tool_choice(tool_choice: Option<&Value>) -> Option<Value> {
@@ -2205,13 +2214,40 @@ mod tests {
                     "description":"Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
                 }},
                 "required":["patch"],
-                "additionalProperties":false
+                "additionalProperties":true
             })
         );
         assert_eq!(
             request.body()["tool_choice"],
             json!({"type":"custom","name":"apply_patch"})
         );
+    }
+
+    #[test]
+    fn anthropic_custom_tools_without_schema_do_not_receive_apply_patch_schema() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-custom-schema",
+            minimax_anthropic_target(),
+            json!({
+                "model":"gpt-5.5",
+                "input":[{"role":"user","content":"Render a result"}],
+                "tools":[{"type":"custom","name":"custom.render","description":"Render a result"}],
+                "stream":false
+            }),
+        )
+        .unwrap();
+        let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+        assert_eq!(
+            request.body()["tools"][0]["input_schema"],
+            json!({
+                "type":"object",
+                "properties":{},
+                "additionalProperties":true
+            })
+        );
+        assert!(request.body()["tools"][0]["input_schema"]
+            .get("required")
+            .is_none());
     }
 
     #[test]

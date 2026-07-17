@@ -171,6 +171,67 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
 }
 
 #[test]
+fn apply_patch_guidance_is_injected_once_at_req04_for_responses_requests() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Patch a file"}],
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+                }]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+
+    let instructions = governed.payload()["instructions"].as_str().unwrap();
+    assert_eq!(instructions.matches("[Codex Tool Guidance]").count(), 1);
+    assert!(instructions.contains("apply_patch"));
+    assert!(instructions.contains("*** Begin Patch"));
+    assert!(instructions.contains("*** End Patch"));
+    assert!(instructions.contains("workspace-relative"));
+    assert!(instructions.contains("Do not use absolute paths"));
+    assert!(instructions.contains("Do not switch to exec_command or shell writes"));
+}
+
+#[test]
+fn apply_patch_guidance_is_idempotent_and_skips_requests_without_apply_patch_tool() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"client-responses",
+                "instructions":"Existing\n\n[Codex Tool Guidance]\nUse apply_patch.",
+                "input":[{"role":"user","content":"Patch a file"}],
+                "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    let instructions = governed.payload()["instructions"].as_str().unwrap();
+    assert_eq!(instructions.matches("[Codex Tool Guidance]").count(), 1);
+
+    let without_apply_patch = hooks
+        .run(
+            raw(json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Lookup"}],
+                "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert!(without_apply_patch.payload().get("instructions").is_none());
+}
+
+#[test]
 fn remote_binding_is_classified_without_local_restore() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("resp_remote"), scope())
