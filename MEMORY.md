@@ -3671,3 +3671,10 @@
 - In server-side SSE console closeout, Body drop alone is not proof of client disconnect. Codex/client may stop reading after receiving terminal `response.completed`, `response.done`, `response.failed`, `response.incomplete`, or `[DONE]`; this must be logged as completed/terminal, not `499 client_disconnect`.
 - `V3SseConsoleCloseoutStream` must observe outbound SSE frames before classifying Drop. Only drop before any terminal frame is a pre-terminal disconnect. Drop after a terminal frame is normal terminal-close.
 - Regression proof: `relay_sse_closeout_treats_drop_after_terminal_frame_as_completed` keeps the provider stream pending after a terminal frame and then drops the body; expected closeout is `Completed`, not `Dropped`.
+
+# 2026-07-17: V3 Responses Relay SSE requires a semantic terminal, not bare EOF
+
+- For `/v1/responses` Relay SSE, `[DONE]` and transport EOF are transport markers only. Success requires a semantic terminal event such as `response.completed` or `response.done`; failure terminals are `response.failed`, `response.incomplete`, or `response.error`.
+- If provider SSE EOF or provider stream error occurs before a semantic terminal, V3 must project a client-visible `response.failed` event and then close with `data: [DONE]`. Abrupt stream close causes Codex to report `Stream disconnected before completion: stream closed before response.completed`.
+- Console closeout must mirror the semantic terminal: success terminal prints ✅, failure terminal or no-terminal EOF prints ❌, and error observability must not additionally print a green completed line after 4xx/error.
+- Verified live baseline on 5555 after global install `0.90.3937`: real `/v1/responses` SSE through `orangeai/glm-5.2` returned HTTP 200 with `response.completed`, detailed usage (`in/out/cache/total`), and console `✅ responseStatus=completed`; controlled red/green tests cover EOF-without-terminal and provider-stream-error projection to `response.failed + [DONE]`.

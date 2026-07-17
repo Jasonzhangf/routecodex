@@ -1778,9 +1778,30 @@ fn emit_v3_observability_console_lines(
     emit_v3_request_route_console_line(context, observability);
     if include_usage {
         let elapsed = started_at.elapsed();
-        emit_v3_request_complete_console_line(context, status, node_trace, observability, elapsed);
+        if should_emit_v3_request_complete_console_line(status, observability) {
+            emit_v3_request_complete_console_line(
+                context,
+                status,
+                node_trace,
+                observability,
+                elapsed,
+            );
+        }
         emit_v3_usage_console_line(context, node_trace, observability, elapsed);
     }
+}
+
+fn should_emit_v3_request_complete_console_line(
+    status: u16,
+    observability: &V3RuntimeObservability,
+) -> bool {
+    if status >= 400 {
+        return false;
+    }
+    !matches!(
+        observability.response_status.as_deref(),
+        Some("error" | "failed" | "incomplete")
+    )
 }
 
 fn format_v3_console_upstream_status_suffix(
@@ -1806,6 +1827,10 @@ struct V3SseConsoleFinalizer {
 
 const V3_SSE_CLIENT_DISCONNECTED_MESSAGE: &str =
     "client disconnected before provider SSE stream completed";
+const V3_SSE_PROVIDER_ENDED_WITHOUT_TERMINAL_MESSAGE: &str =
+    "provider SSE stream ended before response.completed";
+const V3_SSE_PROVIDER_FAILED_WITHOUT_COMPLETION_MESSAGE: &str =
+    "provider SSE stream failed before response.completed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum V3SseConsoleStreamTerminal {
@@ -2924,7 +2949,7 @@ struct V3SseConsoleCloseoutStream {
     stream: V3ResponsesRelayClientStream,
     closeout: Option<Box<dyn FnOnce(V3SseConsoleStreamTerminal) + Send>>,
     decoder: SseIncrementalDecoder,
-    observed_terminal_frame: bool,
+    observed_terminal_frame: Option<V3SseConsoleStreamTerminal>,
 }
 
 impl V3SseConsoleCloseoutStream {
@@ -2942,14 +2967,14 @@ impl V3SseConsoleCloseoutStream {
             return;
         };
         for frame in frames {
-            let mut event_type: Option<&str> = None;
+            let mut event_type: Option<String> = None;
             let mut data = String::new();
             for field in frame.frame().fields() {
                 let SseField::Named { name, value } = field else {
                     continue;
                 };
                 match name.as_str() {
-                    "event" => event_type = Some(value.as_str()),
+                    "event" => event_type = Some(value.to_string()),
                     "data" => {
                         if !data.is_empty() {
                             data.push('\n');
@@ -2959,20 +2984,59 @@ impl V3SseConsoleCloseoutStream {
                     _ => {}
                 }
             }
-            if matches!(
-                event_type,
-                Some(
-                    "response.completed"
-                        | "response.done"
-                        | "response.failed"
-                        | "response.incomplete"
-                )
-            ) || data.trim() == "[DONE]"
-            {
-                self.observed_terminal_frame = true;
+            let Some(terminal) = v3_sse_console_terminal_from_frame(event_type.as_deref(), &data)
+            else {
+                continue;
+            };
+            if !matches!(
+                self.observed_terminal_frame,
+                Some(V3SseConsoleStreamTerminal::Failed(_))
+            ) {
+                self.observed_terminal_frame = Some(terminal);
             }
         }
     }
+}
+
+fn v3_sse_console_terminal_from_frame(
+    event_type: Option<&str>,
+    data: &str,
+) -> Option<V3SseConsoleStreamTerminal> {
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let parsed = serde_json::from_str::<Value>(data).ok();
+    let semantic_event_type = event_type.or_else(|| {
+        parsed
+            .as_ref()
+            .and_then(|value| value.get("type"))
+            .and_then(Value::as_str)
+    });
+    match semantic_event_type {
+        Some("response.completed" | "response.done") => Some(V3SseConsoleStreamTerminal::Completed),
+        Some("response.failed" | "response.incomplete" | "response.error") => {
+            Some(V3SseConsoleStreamTerminal::Failed(
+                parsed
+                    .as_ref()
+                    .and_then(read_v3_sse_console_failure_message)
+                    .unwrap_or_else(|| {
+                        V3_SSE_PROVIDER_FAILED_WITHOUT_COMPLETION_MESSAGE.to_string()
+                    }),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn read_v3_sse_console_failure_message(event: &Value) -> Option<String> {
+    event
+        .pointer("/response/error/message")
+        .or_else(|| event.pointer("/error/message"))
+        .or_else(|| event.pointer("/response/incomplete_details/reason"))
+        .and_then(Value::as_str)
+        .filter(|message| !message.trim().is_empty())
+        .map(str::to_string)
 }
 
 impl Unpin for V3SseConsoleCloseoutStream {}
@@ -2995,7 +3059,12 @@ impl futures_util::Stream for V3SseConsoleCloseoutStream {
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(None) => {
-                this.emit_terminal(V3SseConsoleStreamTerminal::Completed);
+                let terminal = this.observed_terminal_frame.clone().unwrap_or_else(|| {
+                    V3SseConsoleStreamTerminal::Failed(
+                        V3_SSE_PROVIDER_ENDED_WITHOUT_TERMINAL_MESSAGE.to_string(),
+                    )
+                });
+                this.emit_terminal(terminal);
                 Poll::Ready(None)
             }
             Poll::Pending => Poll::Pending,
@@ -3005,11 +3074,10 @@ impl futures_util::Stream for V3SseConsoleCloseoutStream {
 
 impl Drop for V3SseConsoleCloseoutStream {
     fn drop(&mut self) {
-        let terminal = if self.observed_terminal_frame {
-            V3SseConsoleStreamTerminal::Completed
-        } else {
-            V3SseConsoleStreamTerminal::Dropped
-        };
+        let terminal = self
+            .observed_terminal_frame
+            .clone()
+            .unwrap_or(V3SseConsoleStreamTerminal::Dropped);
         self.emit_terminal(terminal);
     }
 }
@@ -3022,7 +3090,7 @@ fn wrap_v3_relay_sse_closeout_stream(
         stream,
         closeout: Some(Box::new(closeout)),
         decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-        observed_terminal_frame: false,
+        observed_terminal_frame: None,
     })
 }
 
@@ -3747,20 +3815,42 @@ mod tests {
         assert_eq!(format_v3_request_id_token("GPT-5.5 / SOL:β"), "GPT-5.5SOL");
     }
 
+    #[test]
+    fn error_observability_does_not_emit_green_completed_line() {
+        let mut observability = V3RuntimeObservability {
+            response_status: Some("error".to_string()),
+            ..Default::default()
+        };
+        assert!(!should_emit_v3_request_complete_console_line(
+            429,
+            &observability
+        ));
+        assert!(!should_emit_v3_request_complete_console_line(
+            200,
+            &observability
+        ));
+
+        observability.response_status = Some("streaming".to_string());
+        assert!(should_emit_v3_request_complete_console_line(
+            200,
+            &observability
+        ));
+    }
+
     #[tokio::test]
     async fn relay_sse_closeout_emits_complete_once_on_terminal_end() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&events);
         let mut stream = wrap_v3_relay_sse_closeout_stream(
             Box::pin(futures_util::stream::iter(vec![Ok(
-                b"data: ok\n\n".to_vec()
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()
             )])),
             move |terminal| recorded.lock().unwrap().push(terminal),
         );
 
         assert_eq!(
             stream.next().await.unwrap().unwrap(),
-            b"data: ok\n\n".to_vec()
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()
         );
         assert!(stream.next().await.is_none());
         drop(stream);
@@ -3768,6 +3858,59 @@ mod tests {
         assert_eq!(
             *events.lock().unwrap(),
             vec![V3SseConsoleStreamTerminal::Completed]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_fails_when_provider_stream_ends_without_terminal() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let mut stream = wrap_v3_relay_sse_closeout_stream(
+            Box::pin(futures_util::stream::iter(vec![Ok(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"
+                    .to_vec(),
+            )])),
+            move |terminal| recorded.lock().unwrap().push(terminal),
+        );
+
+        assert_eq!(
+            stream.next().await.unwrap().unwrap(),
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec()
+        );
+        assert!(stream.next().await.is_none());
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Failed(
+                "provider SSE stream ended before response.completed".to_string()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_emits_failure_on_response_failed_terminal() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let mut stream = wrap_v3_relay_sse_closeout_stream(
+            Box::pin(futures_util::stream::iter(vec![Ok(
+                b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"upstream stream failed\"}}}\n\n".to_vec(),
+            )])),
+            move |terminal| recorded.lock().unwrap().push(terminal),
+        );
+
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert!(std::str::from_utf8(&chunk)
+            .unwrap()
+            .contains("response.failed"));
+        assert!(stream.next().await.is_none());
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Failed(
+                "upstream stream failed".to_string()
+            )]
         );
     }
 

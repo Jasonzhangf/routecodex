@@ -21,13 +21,33 @@ use routecodex_v3_sse::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
+const V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
+    "provider SSE stream ended before response.completed";
+const V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE: &str =
+    "provider SSE stream failed before response.completed";
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3RuntimeSseTerminal {
+    Completed,
+    Failed,
+}
+
+struct V3ObservedSseState {
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    decoder: SseIncrementalDecoder,
+    observation: V3RuntimeStreamObservation,
+    ready: VecDeque<Vec<u8>>,
+    terminal_seen: bool,
+    done: bool,
+}
 
 pub enum V3ResponsesRelayClientBody {
     Json(Value),
@@ -846,51 +866,61 @@ fn project_sse_stream(
 ) -> V3ResponsesRelayClientStream {
     use futures_util::{stream, StreamExt};
 
-    struct V3ObservedSseState {
-        provider: routecodex_v3_provider_responses::V3ProviderSseStream,
-        decoder: SseIncrementalDecoder,
-        observation: V3RuntimeStreamObservation,
-        done: bool,
-    }
-
     Box::pin(stream::unfold(
         V3ObservedSseState {
             provider,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
             observation,
+            ready: VecDeque::new(),
+            terminal_seen: false,
             done: false,
         },
         |mut state| async move {
-            if state.done {
-                return None;
-            }
-            match state.provider.next().await {
-                Some(Ok(chunk)) => {
-                    let result = observe_v3_runtime_sse_chunk(
+            loop {
+                if let Some(chunk) = state.ready.pop_front() {
+                    return Some((Ok(chunk), state));
+                }
+                if state.done {
+                    return None;
+                }
+                match state.provider.next().await {
+                    Some(Ok(chunk)) => match observe_v3_runtime_sse_chunk(
                         &chunk,
                         &mut state.decoder,
                         &state.observation,
-                    )
-                    .map(|()| chunk);
-                    if result.is_err() {
-                        state.done = true;
+                    ) {
+                        Ok(Some(_terminal)) => {
+                            state.terminal_seen = true;
+                            return Some((Ok(chunk), state));
+                        }
+                        Ok(None) => return Some((Ok(chunk), state)),
+                        Err(error) => {
+                            enqueue_v3_runtime_sse_failed_terminal(&mut state, &error);
+                        }
+                    },
+                    Some(Err(error)) => {
+                        if state.terminal_seen {
+                            return None;
+                        }
+                        enqueue_v3_runtime_sse_failed_terminal(&mut state, &error.to_string());
                     }
-                    Some((result, state))
-                }
-                Some(Err(error)) => {
-                    state.done = true;
-                    Some((Err(error.to_string()), state))
-                }
-                None => {
-                    state.done = true;
-                    match std::mem::replace(
-                        &mut state.decoder,
-                        SseIncrementalDecoder::new(SseTransportLimits::default()),
-                    )
-                    .finish()
-                    {
-                        Ok(()) => None,
-                        Err(error) => Some((Err(error.to_string()), state)),
+                    None => {
+                        let finish = std::mem::replace(
+                            &mut state.decoder,
+                            SseIncrementalDecoder::new(SseTransportLimits::default()),
+                        )
+                        .finish();
+                        match finish {
+                            Ok(()) if state.terminal_seen => return None,
+                            Ok(()) => enqueue_v3_runtime_sse_failed_terminal(
+                                &mut state,
+                                V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE,
+                            ),
+                            Err(error) => enqueue_v3_runtime_sse_failed_terminal(
+                                &mut state,
+                                &error.to_string(),
+                            ),
+                        }
                     }
                 }
             }
@@ -898,27 +928,72 @@ fn project_sse_stream(
     ))
 }
 
+fn enqueue_v3_runtime_sse_failed_terminal(state: &mut V3ObservedSseState, message: &str) {
+    let event = build_v3_runtime_sse_failed_event(message);
+    let _ = state.observation.record_event(&event);
+    state
+        .ready
+        .push_back(build_v3_runtime_sse_json_frame("response.failed", &event));
+    state.ready.push_back(b"data: [DONE]\n\n".to_vec());
+    state.terminal_seen = true;
+    state.done = true;
+}
+
+fn build_v3_runtime_sse_failed_event(message: &str) -> Value {
+    json!({
+        "type": "response.failed",
+        "response": {
+            "id": "resp_failed",
+            "object": "response",
+            "status": "failed",
+            "model": "",
+            "output": [],
+            "error": {
+                "code": "provider_response_sse_stream",
+                "message": message,
+                "type": "provider_error"
+            }
+        }
+    })
+}
+
+fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
+    let data = serde_json::to_string(payload)
+        .unwrap_or_else(|_| {
+            format!(
+                "{{\"type\":\"response.failed\",\"response\":{{\"status\":\"failed\",\"error\":{{\"code\":\"provider_response_sse_stream\",\"message\":\"{}\",\"type\":\"provider_error\"}}}}}}",
+                V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE
+            )
+        });
+    format!("event: {event}\ndata: {data}\n\n").into_bytes()
+}
+
 fn observe_v3_runtime_sse_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     observation: &V3RuntimeStreamObservation,
-) -> Result<(), String> {
+) -> Result<Option<V3RuntimeSseTerminal>, String> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| error.to_string())?;
+    let mut terminal = None;
     for frame in frames {
+        let mut event_type: Option<String> = None;
         let mut data = String::new();
         for field in frame.frame().fields() {
             let SseField::Named { name, value } = field else {
                 continue;
             };
-            if name != "data" {
-                continue;
+            match name.as_str() {
+                "event" => event_type = Some(value.to_string()),
+                "data" => {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(value);
+                }
+                _ => {}
             }
-            if !data.is_empty() {
-                data.push('\n');
-            }
-            data.push_str(value);
         }
         let data = data.trim();
         if data.is_empty() || data == "[DONE]" {
@@ -927,8 +1002,20 @@ fn observe_v3_runtime_sse_chunk(
         let event: Value = serde_json::from_str(data)
             .map_err(|error| format!("V3 Responses Relay SSE event is malformed: {error}"))?;
         observation.record_event(&event)?;
+        let semantic_event_type = event_type
+            .as_deref()
+            .or_else(|| event.get("type").and_then(Value::as_str));
+        match semantic_event_type {
+            Some("response.completed" | "response.done") => {
+                terminal = Some(V3RuntimeSseTerminal::Completed)
+            }
+            Some("response.failed" | "response.incomplete" | "response.error") => {
+                terminal = Some(V3RuntimeSseTerminal::Failed)
+            }
+            _ => {}
+        }
     }
-    Ok(())
+    Ok(terminal)
 }
 
 fn resolve_target(
@@ -1099,6 +1186,7 @@ fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::{stream, StreamExt};
     use serde_json::json;
 
     #[test]
@@ -1118,5 +1206,86 @@ mod tests {
         .expect("usage summary");
         assert_eq!(summary.input_tokens, Some(59_842));
         assert_eq!(summary.cached_tokens, Some(41_984));
+    }
+
+    async fn collect_projected_sse(
+        stream: V3ResponsesRelayClientStream,
+    ) -> Vec<Result<String, String>> {
+        stream
+            .map(|item| {
+                item.and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))
+            })
+            .collect()
+            .await
+    }
+
+    #[tokio::test]
+    async fn projected_sse_eof_without_terminal_emits_response_failed_then_done() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+        )]));
+        let projected =
+            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
+
+        assert_eq!(projected.len(), 3);
+        assert!(projected[0]
+            .as_ref()
+            .unwrap()
+            .contains("response.output_text.delta"));
+        assert!(projected[1].as_ref().unwrap().contains("response.failed"));
+        assert!(projected[1]
+            .as_ref()
+            .unwrap()
+            .contains("provider SSE stream ended before response.completed"));
+        assert_eq!(projected[2].as_ref().unwrap(), "data: [DONE]\n\n");
+        assert_eq!(
+            observation.snapshot().unwrap().response_status.as_deref(),
+            Some("failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn projected_sse_provider_error_emits_response_failed_without_stream_err() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Err(V3ProviderError::ResponseBody {
+            request_id: "req".to_string(),
+            provider_id: "upstream".to_string(),
+            reason: "read failed".to_string(),
+        })]));
+        let projected =
+            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
+
+        assert_eq!(projected.len(), 2);
+        assert!(projected.iter().all(Result::is_ok));
+        assert!(projected[0].as_ref().unwrap().contains("response.failed"));
+        assert!(projected[0].as_ref().unwrap().contains("read failed"));
+        assert_eq!(projected[1].as_ref().unwrap(), "data: [DONE]\n\n");
+        assert_eq!(
+            observation.snapshot().unwrap().response_status.as_deref(),
+            Some("failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn projected_sse_completed_terminal_closes_without_synthetic_failure() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n".to_vec(),
+        )]));
+        let projected =
+            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
+
+        assert_eq!(projected.len(), 1);
+        assert!(projected[0]
+            .as_ref()
+            .unwrap()
+            .contains("response.completed"));
+        let snapshot = observation.snapshot().unwrap();
+        assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+        assert_eq!(
+            snapshot.usage.as_ref().and_then(|usage| usage.total_tokens),
+            Some(3)
+        );
     }
 }
