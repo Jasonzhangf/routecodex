@@ -24,8 +24,8 @@ requireAll(source, sourcePath, [
   'V3GeminiCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::Gemini', 'V3HubProviderWireProtocol::Gemini',
-  'validate_contents', 'validate_response', 'reject_side_channel_fields',
-  'InvalidFunctionResponseIdentity', 'MalformedProviderError', 'CandidatesNotArray',
+  'validate_content_shapes', 'validate_response', 'reject_side_channel_fields',
+  'ContentsNotArray', 'MalformedProviderError', 'CandidatesNotArray',
   'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
   'resource_handle', 'continuation_owner',
 ]);
@@ -34,9 +34,10 @@ forbidAll(source, sourcePath, [
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /V3HubEntryProtocol::(?:Responses|Anthropic|OpenAiChat)/, /fallback/i, /materializ/i,
   /metadata_center[\s\S]{0,120}payload\s*:/, /value\.clone\s*\(/,
+  /InvalidFunctionResponseIdentity/, /\bBTreeSet\b/, /\bfunctionResponse\b/,
 ]);
 requireAll(tests, 'focused Gemini codec tests', [
-  'functionResponse', 'orphan', 'finishReason', 'usageMetadata', 'V3HubTransportIntent::Sse',
+  'functionResponse', 'not_normalization', 'finishReason', 'usageMetadata', 'V3HubTransportIntent::Sse',
   'MalformedProviderError', 'SideChannelLeaked', 'ProviderProtocolNotGemini',
 ]);
 for (const path of [

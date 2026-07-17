@@ -451,17 +451,11 @@ fn build_openai_chat_json_governance_response(
             .into_iter()
             .flatten()
         {
-            let call_id = call
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or(V3OpenAiChatCodecError::InvalidToolCallIdentity)?;
-            let name = call
-                .pointer("/function/name")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or(V3OpenAiChatCodecError::InvalidToolCallIdentity)?;
-            output.push(json!({"type":"function_call","call_id":call_id,"name":name}));
+            output.push(json!({
+                "type": "function_call",
+                "call_id": call.get("id").cloned().unwrap_or(Value::Null),
+                "name": call.pointer("/function/name").cloned().unwrap_or(Value::Null)
+            }));
         }
     }
     let status = if output.is_empty() {

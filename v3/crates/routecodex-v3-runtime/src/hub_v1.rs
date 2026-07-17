@@ -2,11 +2,13 @@ use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
     V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{collections::BTreeSet, sync::Arc};
 
 mod relay_request;
 pub use relay_request::*;
+mod servertool_hooks;
+pub use servertool_hooks::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
@@ -453,6 +455,16 @@ impl V3HubRespContinuation04Committed {
             })
             .unwrap_or_default()
     }
+
+    pub fn canonical_context_payload(&self) -> Option<&Value> {
+        self.canonical_context
+            .as_ref()
+            .map(|context| context.payload.as_ref())
+    }
+
+    pub fn finalized_payload(&self) -> &Value {
+        self.previous.previous.previous.payload.0.as_ref()
+    }
 }
 
 impl V3ServerRespOutbound06ClientFrame {
@@ -473,6 +485,7 @@ impl V3ServerRespOutbound06ClientFrame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
+    stopless_reasoning_stop: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -486,11 +499,21 @@ impl V3HubRelayResponseHookProfile {
                 .into_iter()
                 .map(|name| name.as_ref().to_owned())
                 .collect(),
+            stopless_reasoning_stop: false,
         }
     }
 
     pub fn empty() -> Self {
         Self::new(std::iter::empty::<&'static str>())
+    }
+
+    pub fn with_stopless_reasoning_stop(mut self) -> Self {
+        self.stopless_reasoning_stop = true;
+        self
+    }
+
+    pub fn stopless_reasoning_stop_enabled(&self) -> bool {
+        self.stopless_reasoning_stop
     }
 }
 
@@ -510,6 +533,8 @@ pub enum V3HubRelayResponseError {
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
+    #[error("stopless response hook projection failed: {reason}")]
+    StoplessProjectionFailed { reason: &'static str },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -577,6 +602,8 @@ fn govern_v3_hub_relay_response(
     input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
+    let input = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
+    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);
     let object = input
         .previous
         .payload
@@ -589,6 +616,7 @@ fn govern_v3_hub_relay_response(
         None => &[],
     };
     let mut tool_calls = Vec::new();
+    let mut seen_call_ids = BTreeSet::new();
     for (index, item) in output.iter().enumerate() {
         let Some(item) = item.as_object() else {
             continue;
@@ -606,6 +634,12 @@ fn govern_v3_hub_relay_response(
                 index,
                 reason: "missing call_id/id",
             })?;
+        if !seen_call_ids.insert(call_id.to_owned()) {
+            return Err(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "duplicate call_id/id",
+            });
+        }
         let name = item
             .get("name")
             .and_then(Value::as_str)
@@ -661,11 +695,11 @@ fn govern_v3_hub_relay_response(
 }
 
 pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3HubRelayToolKind {
-    if raw_kind == "custom_tool_call" {
-        return V3HubRelayToolKind::Custom;
-    }
     if name == "apply_patch" {
         return V3HubRelayToolKind::ApplyPatch;
+    }
+    if raw_kind == "custom_tool_call" {
+        return V3HubRelayToolKind::Custom;
     }
     if name.strip_prefix("servertool.").is_some() || name.strip_prefix("servertool__").is_some() {
         return V3HubRelayToolKind::Servertool;
@@ -677,6 +711,122 @@ pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3H
         return V3HubRelayToolKind::Native;
     }
     V3HubRelayToolKind::Function
+}
+
+fn project_v3_apply_patch_freeform_calls_at_resp03(
+    mut input: V3HubRespInbound02Normalized,
+) -> V3HubRespInbound02Normalized {
+    let mut next = input.previous.payload.0.as_ref().clone();
+    let mut changed = false;
+    if let Some(output) = next
+        .as_object_mut()
+        .and_then(|object| object.get_mut("output"))
+        .and_then(Value::as_array_mut)
+    {
+        for item in output {
+            let Some(row) = item.as_object_mut() else {
+                continue;
+            };
+            changed |= project_v3_apply_patch_freeform_output_item_at_resp03(row);
+        }
+    }
+    if changed {
+        input.previous.payload.0 = Arc::new(next);
+    }
+    input
+}
+
+fn project_v3_apply_patch_freeform_output_item_at_resp03(row: &mut Map<String, Value>) -> bool {
+    let item_type = row
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    if !matches!(
+        item_type.as_str(),
+        "function_call" | "custom_tool_call" | "tool_call"
+    ) {
+        return false;
+    }
+    if read_v3_apply_patch_tool_name(row).as_deref() != Some("apply_patch") {
+        return false;
+    }
+    if item_type == "custom_tool_call" {
+        if let Some(Value::String(input)) = row.get_mut("input") {
+            let normalized = normalize_v3_apply_patch_freeform_input_for_client(input);
+            if normalized != *input {
+                *input = normalized;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    let input = row
+        .get("arguments")
+        .or_else(|| row.get("input"))
+        .or_else(|| row.get("args"))
+        .map(normalize_v3_apply_patch_freeform_value_for_client)
+        .unwrap_or_default();
+    if let Some(call_id) = row
+        .get("call_id")
+        .or_else(|| row.get("id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+    {
+        row.insert("call_id".to_string(), Value::String(call_id));
+    }
+    row.insert(
+        "type".to_string(),
+        Value::String("custom_tool_call".to_string()),
+    );
+    row.insert("name".to_string(), Value::String("apply_patch".to_string()));
+    row.insert("input".to_string(), Value::String(input));
+    row.remove("arguments");
+    row.remove("args");
+    row.remove("function");
+    true
+}
+
+fn read_v3_apply_patch_tool_name(row: &Map<String, Value>) -> Option<String> {
+    row.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            row.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn normalize_v3_apply_patch_freeform_value_for_client(value: &Value) -> String {
+    match value {
+        Value::String(raw) => normalize_v3_apply_patch_freeform_input_for_client(raw),
+        Value::Object(record) => record
+            .get("patch")
+            .or_else(|| record.get("input"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| value.to_string()),
+        _ => value.to_string(),
+    }
+}
+
+fn normalize_v3_apply_patch_freeform_input_for_client(arguments_text: &str) -> String {
+    let parsed = arguments_text.parse::<Value>().ok();
+    let Some(Value::Object(record)) = parsed else {
+        return arguments_text.to_string();
+    };
+    record
+        .get("patch")
+        .or_else(|| record.get("input"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| arguments_text.to_string())
 }
 
 pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {

@@ -1,0 +1,44 @@
+lifecycle_id: v3.servertool_hook_skeleton_lifecycle
+owner_feature_id: v3.servertool_hook_skeleton_lifecycle
+summary: V3 servertool hook skeleton first slice. Stopless is the first built-in hook and runs only inside Chat Process: response hook before continuation commit, request hook after continuation/context restore and before request tool governance.
+entrypoint:
+  node_id: V3HubReqChatProcess04Governed
+return_path:
+  node_id: V3HubRespChatProcess03Governed
+call_map_chain_id: v3.servertool_hook_skeleton_lifecycle
+node_ids:
+  - V3HubReqContinuation03Classified
+  - V3HubReqChatProcess04Governed
+  - V3ServertoolReqHook01ResultParsed
+  - V3ServertoolReqHook02TextRewritten
+  - V3ServertoolReqHook03ToolInjected
+  - V3HubRespChatProcess03Governed
+  - V3ServertoolRespHook01Intercepted
+  - V3ServertoolRespHook02SchemaValidated
+  - V3ServertoolRespHook03HookResponseInjected
+  - V3HubRespContinuation04Committed
+edges:
+  - { step_id: v3-servertool-stopless-req-01, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-req-02, from_node: V3HubReqChatProcess04Governed, to_node: V3ServertoolReqHook01ResultParsed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-req-03, from_node: V3ServertoolReqHook01ResultParsed, to_node: V3ServertoolReqHook02TextRewritten, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-req-04, from_node: V3ServertoolReqHook02TextRewritten, to_node: V3ServertoolReqHook03ToolInjected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-resp-01, from_node: V3HubRespChatProcess03Governed, to_node: V3ServertoolRespHook01Intercepted, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-resp-02, from_node: V3ServertoolRespHook01Intercepted, to_node: V3ServertoolRespHook02SchemaValidated, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-resp-03, from_node: V3ServertoolRespHook02SchemaValidated, to_node: V3ServertoolRespHook03HookResponseInjected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-resp-04, from_node: V3ServertoolRespHook03HookResponseInjected, to_node: V3HubRespContinuation04Committed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+verification_gates:
+  - npm run verify:v3-normalization-payload-logic-boundary
+  - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+normalization_boundary:
+  req_inbound_logic: forbidden
+  resp_inbound_logic: forbidden
+  req_outbound_logic: forbidden
+  resp_outbound_logic: forbidden
+completion_boundary:
+  controlled_runtime: true
+  live_cutover: false
+  servertool_followup_reenter: false
+  global_install_restart: false

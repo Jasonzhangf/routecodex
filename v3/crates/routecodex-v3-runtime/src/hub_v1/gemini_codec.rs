@@ -1,6 +1,5 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3GeminiCodecStage {
@@ -57,8 +56,6 @@ pub enum V3GeminiCodecError {
     ContentsNotArray,
     #[error("Gemini content parts must be an array")]
     PartsNotArray,
-    #[error("Gemini functionResponse identity is missing or orphaned")]
-    InvalidFunctionResponseIdentity,
     #[error("Gemini response candidates must be an array")]
     CandidatesNotArray,
     #[error("Gemini provider error requires error.message")]
@@ -142,36 +139,15 @@ fn validate_request(payload: &Value) -> Result<(), V3GeminiCodecError> {
         .get("contents")
         .and_then(Value::as_array)
         .ok_or(V3GeminiCodecError::ContentsNotArray)?;
-    validate_contents(contents)
+    validate_content_shapes(contents)
 }
 
-fn validate_contents(contents: &[Value]) -> Result<(), V3GeminiCodecError> {
-    let mut declared_function_calls = BTreeSet::new();
+fn validate_content_shapes(contents: &[Value]) -> Result<(), V3GeminiCodecError> {
     for content in contents {
-        let parts = content
+        content
             .get("parts")
             .and_then(Value::as_array)
             .ok_or(V3GeminiCodecError::PartsNotArray)?;
-        for part in parts {
-            if let Some(function_call) = part.get("functionCall") {
-                let name = function_call
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3GeminiCodecError::InvalidFunctionResponseIdentity)?;
-                declared_function_calls.insert(name.to_owned());
-            }
-            if let Some(function_response) = part.get("functionResponse") {
-                let name = function_response
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .filter(|name| !name.is_empty())
-                    .ok_or(V3GeminiCodecError::InvalidFunctionResponseIdentity)?;
-                if !declared_function_calls.contains(name) {
-                    return Err(V3GeminiCodecError::InvalidFunctionResponseIdentity);
-                }
-            }
-        }
     }
     Ok(())
 }

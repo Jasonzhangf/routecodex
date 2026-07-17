@@ -97,7 +97,7 @@ ServerReqInbound01ClientRaw
   -> HubReqChatProcess03Governed
   -> VrRoute04SelectedTarget
   -> HubReqOutbound05ProviderSemantic
-  -> ProviderReqOutbound06WirePayload
+  -> ProviderReqCompat06ProviderCompat
   -> ProviderReqOutbound07TransportRequest
 ```
 
@@ -110,8 +110,8 @@ ServerReqInbound01ClientRaw
 | `HubReqChatProcess03Governed` | `HubReqInbound02Standardized` | governed Hub request | 工具治理、tool result 顺序、servertool/MCP/apply_patch 规则 | 协议转换、路由选择 |
 | `VrRoute04SelectedTarget` | `HubReqChatProcess03Governed` | selected target/decision | 路由分类、quota/health、provider target 选择 | payload 修补、工具治理 |
 | `HubReqOutbound05ProviderSemantic` | `VrRoute04SelectedTarget` + governed request | provider-neutral outbound semantic | Hub 出站语义定型，隔离 metadata/debug/error | provider-specific auth/transport |
-| `ProviderReqOutbound06WirePayload` | `HubReqOutbound05ProviderSemantic` | provider wire body | Hub 语义到 provider protocol 编码 | metadata/debug/error 泄漏 |
-| `ProviderReqOutbound07TransportRequest` | `ProviderReqOutbound06WirePayload` | HTTP/SDK transport request | auth/header/timeout/transport | Hub 工具治理 |
+| `ProviderReqCompat06ProviderCompat` | `HubReqOutbound05ProviderSemantic` | provider-compatible standard provider protocol | 标准 provider 协议到 provider 实现微调；family-specific 字段映射；compat profile 应用 | 重新做协议映射、重做工具治理、fallback/silent repair、改 model 选路 |
+| `ProviderReqOutbound07TransportRequest` | `ProviderReqCompat06ProviderCompat` | HTTP/SDK transport request | auth/header/timeout/transport | Hub 工具治理 |
 
 请求链清洗标准：每一跳只能减少歧义、增加显式类型，不得靠删除真实 payload 语义提速；内部观测数据只能进入 `Meta*` / `Snapshot*` carrier。
 
@@ -146,11 +146,12 @@ ServerReqInbound01ClientRaw
 - Responses compat 约束：`responses:crs` 的字段删改与通用 `instructions -> input`、tool normalization 必须由 Rust `req_outbound_stage3_compat` 完成；TS 只允许桥接 `runReqOutboundStage3CompatJson`。
 - 禁止：生成 provider SDK options；禁止 metadata/debug/error 进入出站语义。
 
-### 3.6 ProviderReqOutbound06WirePayload
+### 3.6 ProviderReqCompat06ProviderCompat
 
-- 作用：把 Hub 出站语义编码为具体 provider wire body。
+- 作用：把标准 provider 协议微调为具体 provider 实现可接受的兼容形态。
 - owning module：provider runtime request builder。
-- 禁止：从 raw body / metadata.context 补 provider payload。
+- 允许：family-specific 字段修补/映射，compat profile 应用。
+- 禁止：重新做协议映射、重提 tool governance、fallback/silent repair、改 model 选路。
 
 ### 3.7 ProviderReqOutbound07TransportRequest
 
@@ -196,10 +197,12 @@ ConfigDirect01AuthoringPolicy
 
 ```text
 ProviderRespInbound01Raw
-  -> HubRespInbound02Parsed
-  -> HubRespChatProcess03Governed
-  -> HubRespOutbound04ClientSemantic
-  -> ServerRespOutbound05ClientFrame
+  -> ProviderRespCompat02ProviderCompat
+  -> HubRespInbound03Parsed
+  -> HubRespChatProcess04Governed
+  -> HubRespContinuation05Committed
+  -> HubRespOutbound06ClientSemantic
+  -> ServerRespOutbound07ClientFrame
 ```
 
 ### 4.0 响应清洗连接矩阵
@@ -207,10 +210,12 @@ ProviderRespInbound01Raw
 | 节点 | 输入 | 输出 | 唯一清洗/构建职责 | 禁止连接 |
 |---|---|---|---|---|
 | `ProviderRespInbound01Raw` | provider HTTP/SSE/raw JSON | raw provider response | 只捕获模型/provider 原始响应事实 | 直接写 client |
-| `HubRespInbound02Parsed` | `ProviderRespInbound01Raw` | parsed Hub response | provider raw -> Hub canonical response | 吞解析错误 |
-| `HubRespChatProcess03Governed` | `HubRespInbound02Parsed` | governed Hub response | 响应侧工具治理、文本工具收割、servertool followup 判定 | 修请求侧历史污染 |
-| `HubRespOutbound04ClientSemantic` | `HubRespChatProcess03Governed` | client protocol semantic | Hub 响应投影到客户端入口协议；`/v1/chat/completions` 必须是 Chat Completion shape，`/v1/responses` 必须是 Responses shape | provider 特例、吞上游错误、手工包装 Responses |
-| `ServerRespOutbound05ClientFrame` | `HubRespOutbound04ClientSemantic` | Express JSON/SSE frame | client frame 写出、headers、SSE framing | metadata/runtime state 注入 client body |
+| `ProviderRespCompat02ProviderCompat` | `ProviderRespInbound01Raw` | standard provider protocol response | provider-specific 到标准 provider 协议兼容；family-specific 异常归一到错误链；特殊字段剥离/归一 | tool governance、harvest/apply_patch/servertool/stopless、side-channel 注入、fallback 成成功 |
+| `HubRespInbound03Parsed` | `ProviderRespCompat02ProviderCompat` | parsed Hub response | provider raw -> Hub canonical response | 吞解析错误 |
+| `HubRespChatProcess04Governed` | `HubRespInbound03Parsed` | governed Hub response | 响应侧工具治理、文本工具收割、servertool followup 判定 | 修请求侧历史污染 |
+| `HubRespContinuation05Committed` | `HubRespChatProcess04Governed` | continuation truth | 响应侧 Chat Process 之后保存 continuation 真相；不可变区起点 | 请求恢复、payload repair、resp_outbound 中保存 |
+| `HubRespOutbound06ClientSemantic` | `HubRespContinuation05Committed` | client protocol semantic | Hub 响应投影到客户端入口协议；`/v1/chat/completions` 必须是 Chat Completion shape，`/v1/responses` 必须是 Responses shape | provider 特例、吞上游错误、手工包装 Responses |
+| `ServerRespOutbound07ClientFrame` | `HubRespOutbound06ClientSemantic` | Express JSON/SSE frame | client frame 写出、headers、SSE framing | metadata/runtime state 注入 client body |
 
 响应链清洗标准：provider raw 先解析为 Hub 规范，再治理，再按入口协议投影到 client；任何错误必须转入错误链，禁止在响应链中伪装成正常成功 payload。
 

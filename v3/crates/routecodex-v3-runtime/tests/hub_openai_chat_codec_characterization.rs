@@ -46,21 +46,38 @@ fn request_preserves_messages_multiple_tool_calls_and_matching_results() {
 }
 
 #[test]
-fn invalid_tool_identity_is_explicit_and_never_repaired() {
+fn request_tool_identity_pairing_is_not_normalization() {
     for request in [
         json!({"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"x","arguments":"{}"}}]}]}),
         json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]}),
         json!({"messages":[{"role":"tool","tool_call_id":"orphan","content":"x"}]}),
     ] {
-        assert!(matches!(
-            characterize_v3_openai_chat_client_input_to_hub_semantic(
-                request,
-                V3HubEntryProtocol::OpenAiChat,
-                V3HubTransportIntent::Json,
-            ),
-            Err(V3OpenAiChatCodecError::InvalidToolCallIdentity)
-        ));
+        let semantic = characterize_v3_openai_chat_client_input_to_hub_semantic(
+            request.clone(),
+            V3HubEntryProtocol::OpenAiChat,
+            V3HubTransportIntent::Json,
+        )
+        .unwrap();
+        assert_eq!(semantic.payload(), &request);
     }
+}
+
+#[test]
+fn response_tool_identity_pairing_is_not_inbound_normalization() {
+    let response = json!({
+        "id":"chatcmpl_dup","object":"chat.completion","model":"gpt-chat",
+        "choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[
+            {"id":"dup","type":"function","function":{"name":"lookup","arguments":"{}"}},
+            {"id":"dup","type":"function","function":{"name":"lookup2","arguments":"{}"}}
+        ]}}]
+    });
+    let semantic = characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
+        response.clone(),
+        V3HubProviderWireProtocol::OpenAiChat,
+        V3HubTransportIntent::Json,
+    )
+    .unwrap();
+    assert_eq!(semantic.payload(), &response);
 }
 
 #[test]

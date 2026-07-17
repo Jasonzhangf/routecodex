@@ -83,6 +83,64 @@ fn terminal_response_commits_no_continuation() {
 }
 
 #[test]
+fn stopless_response_hook_projects_cli_before_continuation_commit() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_missing_schema",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"I should stop without schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
+    assert!(payload["output"][0]["arguments"]
+        .as_str()
+        .unwrap()
+        .contains("routecodex hook run reasoningStop"));
+}
+
+#[test]
+fn stopless_terminal_schema_does_not_project_cli() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_terminal",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"ok\"]}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+}
+
+#[test]
 fn malformed_tool_call_fails_inside_response_chat_process() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
@@ -100,6 +158,30 @@ fn malformed_tool_call_fails_inside_response_chat_process() {
             &V3HubRelayResponseHookProfile::new(["servertool.exec"])
         ),
         Err(V3HubRelayResponseError::MalformedToolCall { .. })
+    ));
+}
+
+#[test]
+fn duplicate_response_tool_identity_fails_inside_response_chat_process() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "status": "requires_action",
+                "output": [
+                    {"type":"function_call","call_id":"dup","name":"lookup"},
+                    {"type":"function_call","call_id":"dup","name":"lookup_again"}
+                ]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    assert!(matches!(
+        hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty()),
+        Err(V3HubRelayResponseError::MalformedToolCall {
+            reason: "duplicate call_id/id",
+            ..
+        })
     ));
 }
 

@@ -1,4 +1,5 @@
 use super::{
+    apply_v3_stopless_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
@@ -6,7 +7,10 @@ use super::{
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
 };
 use serde_json::Value;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubRequestSemanticProtocol {
@@ -98,7 +102,10 @@ impl V3HubContinuationLookup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3HubServertoolRequestProfile {
     Disabled,
-    Enabled(Vec<&'static str>),
+    Enabled {
+        hook_ids: Vec<&'static str>,
+        stopless_reasoning_stop: bool,
+    },
     RequiredFailure(&'static str),
 }
 impl V3HubServertoolRequestProfile {
@@ -106,10 +113,28 @@ impl V3HubServertoolRequestProfile {
         Self::Disabled
     }
     pub fn enabled<const N: usize>(hook_ids: [&'static str; N]) -> Self {
-        Self::Enabled(hook_ids.into())
+        Self::Enabled {
+            hook_ids: hook_ids.into(),
+            stopless_reasoning_stop: false,
+        }
+    }
+    pub fn stopless_reasoning_stop() -> Self {
+        Self::Enabled {
+            hook_ids: vec!["stop_message_auto"],
+            stopless_reasoning_stop: true,
+        }
     }
     pub fn required_failure(hook_id: &'static str) -> Self {
         Self::RequiredFailure(hook_id)
+    }
+    pub fn stopless_reasoning_stop_enabled(&self) -> bool {
+        matches!(
+            self,
+            Self::Enabled {
+                stopless_reasoning_stop: true,
+                ..
+            }
+        )
     }
 }
 
@@ -130,8 +155,12 @@ pub enum V3HubRelayRequestHookEvent {
     Req04Entry,
     Req04LocalContextRestored,
     Req04ToolGoverned,
+    Req04ProtocolToolIdentityGoverned,
     Req04HistoryGoverned,
     Req04ServertoolGoverned,
+    Req04StoplessResultParsed,
+    Req04StoplessTextRewritten,
+    Req04StoplessToolInjected,
     ServertoolOptionalNoop,
     Req04Exit,
 }
@@ -162,6 +191,14 @@ pub enum V3HubRelayRequestError {
     ContinuationIdMissingAtRestore,
     #[error("unknown static servertool request hook: {hook_id}")]
     UnknownStaticHook { hook_id: &'static str },
+    #[error("malformed stopless CLI output at input index {index}: {reason}")]
+    MalformedStoplessCliOutput { index: usize, reason: &'static str },
+    #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
+    ProtocolToolIdentityInvalid {
+        protocol: &'static str,
+        index: usize,
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug)]
@@ -284,8 +321,20 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        let tool_output_count = govern_tool_outputs_at_req04(
+        if profile.stopless_reasoning_stop_enabled() {
+            apply_v3_stopless_request_hook_at_req04(
+                &mut classified.previous.previous.payload.0,
+                &mut events,
+            )?;
+        }
+        if govern_protocol_tool_identity_at_req04(
+            classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,
+        )? {
+            events.push(V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned);
+        }
+        let tool_output_count = govern_tool_outputs_at_req04(
+            &mut classified.previous.previous.payload.0,
             local_context.as_deref(),
         )?;
         govern_attachment_history_at_req04(
@@ -378,23 +427,143 @@ fn restore_local_context_at_req04(
     Ok(Some(Arc::clone(&local.canonical_context)))
 }
 
-fn govern_tool_outputs_at_req04(
+fn govern_protocol_tool_identity_at_req04(
+    entry_protocol: V3HubEntryProtocol,
     payload: &Value,
+) -> Result<bool, V3HubRelayRequestError> {
+    match entry_protocol {
+        V3HubEntryProtocol::OpenAiChat => {
+            let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+                return Ok(false);
+            };
+            govern_openai_chat_tool_identity_at_req04(messages)?;
+            Ok(true)
+        }
+        V3HubEntryProtocol::Gemini => {
+            let Some(contents) = payload.get("contents").and_then(Value::as_array) else {
+                return Ok(false);
+            };
+            govern_gemini_tool_identity_at_req04(contents)?;
+            Ok(true)
+        }
+        V3HubEntryProtocol::Responses | V3HubEntryProtocol::Anthropic => Ok(false),
+    }
+}
+
+fn govern_openai_chat_tool_identity_at_req04(
+    messages: &[Value],
+) -> Result<(), V3HubRelayRequestError> {
+    let mut declared = BTreeSet::new();
+    for (index, message) in messages.iter().enumerate() {
+        if let Some(calls) = message.get("tool_calls") {
+            let calls =
+                calls
+                    .as_array()
+                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "openai_chat",
+                        index,
+                        reason: "tool_calls must be an array",
+                    })?;
+            for call in calls {
+                let id = call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "openai_chat",
+                        index,
+                        reason: "tool_calls.id is required",
+                    })?;
+                if !declared.insert(id.to_owned()) {
+                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "openai_chat",
+                        index,
+                        reason: "duplicate tool_calls.id",
+                    });
+                }
+            }
+        }
+        if message.get("role").and_then(Value::as_str) == Some("tool") {
+            let id = message
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                    protocol: "openai_chat",
+                    index,
+                    reason: "tool_call_id is required",
+                })?;
+            if !declared.contains(id) {
+                return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                    protocol: "openai_chat",
+                    index,
+                    reason: "orphan tool_call_id",
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn govern_gemini_tool_identity_at_req04(contents: &[Value]) -> Result<(), V3HubRelayRequestError> {
+    let mut declared = BTreeSet::new();
+    for (index, content) in contents.iter().enumerate() {
+        let Some(parts) = content.get("parts").and_then(Value::as_array) else {
+            continue;
+        };
+        for part in parts {
+            if let Some(function_call) = part.get("functionCall") {
+                let name = function_call
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "gemini",
+                        index,
+                        reason: "functionCall.name is required",
+                    })?;
+                declared.insert(name.to_owned());
+            }
+            if let Some(function_response) = part.get("functionResponse") {
+                let name = function_response
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .ok_or(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "gemini",
+                        index,
+                        reason: "functionResponse.name is required",
+                    })?;
+                if !declared.contains(name) {
+                    return Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                        protocol: "gemini",
+                        index,
+                        reason: "orphan functionResponse.name",
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn govern_tool_outputs_at_req04(
+    payload: &mut Value,
     local_context: Option<&Value>,
 ) -> Result<usize, V3HubRelayRequestError> {
-    let Some(input) = payload.get("input").and_then(Value::as_array) else {
+    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
     let mut output_count = 0;
-    for (index, item) in input.iter().enumerate() {
+    for (index, item) in input.iter_mut().enumerate() {
         if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
             expected_outputs.insert(call_id, expected_kind);
             continue;
         }
         let actual_kind = match item.get("type").and_then(Value::as_str) {
-            Some("function_call_output") => V3HubRelayExpectedToolOutputKind::Function,
-            Some("custom_tool_call_output") => V3HubRelayExpectedToolOutputKind::Custom,
+            Some("function_call_output") => V3HubRelayActualToolOutputKind::Function,
+            Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
             _ => continue,
         };
         output_count += 1;
@@ -404,11 +573,14 @@ fn govern_tool_outputs_at_req04(
             .filter(|value| !value.is_empty())
             .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
         if let Some(expected_kind) = expected_outputs.get(call_id) {
-            if *expected_kind != actual_kind {
+            if !expected_kind.matches_actual(actual_kind) {
                 return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
                     index,
                     call_id: call_id.to_owned(),
                 });
+            }
+            if *expected_kind == V3HubRelayExpectedToolOutputKind::ApplyPatch {
+                normalize_apply_patch_tool_output_item_at_req04(item);
             }
         } else {
             return Err(V3HubRelayRequestError::OrphanToolOutput {
@@ -424,6 +596,28 @@ fn govern_tool_outputs_at_req04(
 enum V3HubRelayExpectedToolOutputKind {
     Function,
     Custom,
+    ApplyPatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3HubRelayActualToolOutputKind {
+    Function,
+    Custom,
+}
+
+impl V3HubRelayExpectedToolOutputKind {
+    fn matches_actual(self, actual: V3HubRelayActualToolOutputKind) -> bool {
+        matches!(
+            (self, actual),
+            (
+                V3HubRelayExpectedToolOutputKind::Function,
+                V3HubRelayActualToolOutputKind::Function
+            ) | (
+                V3HubRelayExpectedToolOutputKind::Custom,
+                V3HubRelayActualToolOutputKind::Custom
+            ) | (V3HubRelayExpectedToolOutputKind::ApplyPatch, _)
+        )
+    }
 }
 
 fn expected_tool_outputs(context: &Value) -> BTreeMap<String, V3HubRelayExpectedToolOutputKind> {
@@ -454,7 +648,96 @@ fn expected_tool_call_output_from_item(
         .or_else(|| item.get("id"))
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())?;
+    let expected_kind = if read_tool_call_name_at_req04(item)
+        .as_deref()
+        .is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"))
+    {
+        V3HubRelayExpectedToolOutputKind::ApplyPatch
+    } else {
+        expected_kind
+    };
     Some((call_id.to_owned(), expected_kind))
+}
+
+fn read_tool_call_name_at_req04(item: &Value) -> Option<String> {
+    item.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            item.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn normalize_apply_patch_tool_output_item_at_req04(item: &mut Value) {
+    let Some(row) = item.as_object_mut() else {
+        return;
+    };
+    for key in ["output", "content"] {
+        let Some(Value::String(raw)) = row.get_mut(key) else {
+            continue;
+        };
+        let normalized = normalize_apply_patch_output_text_at_req04(raw);
+        if normalized != *raw {
+            *raw = normalized;
+        }
+    }
+}
+
+fn normalize_apply_patch_output_text_at_req04(raw: &str) -> String {
+    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
+    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers. Keep using apply_patch for line edits instead of switching tools.";
+
+    let text = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = text.trim();
+    if trimmed.starts_with("APPLY_PATCH_ERROR:") {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+
+    if let Ok(Value::Object(row)) = trimmed.parse::<Value>() {
+        let status = row
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_uppercase();
+        if row.get("ok").and_then(Value::as_bool) == Some(true)
+            || status == "APPLY_PATCH_APPLIED"
+            || status == "APPLY_PATCH_RESULT"
+        {
+            return APPLY_PATCH_RESULT_TEXT.to_string();
+        }
+        if row.get("ok").and_then(Value::as_bool) == Some(false)
+            || status == "APPLY_PATCH_FAILED"
+            || status == "APPLY_PATCH_ERROR"
+        {
+            return APPLY_PATCH_ERROR_TEXT.to_string();
+        }
+    }
+
+    let lowered = text.to_ascii_lowercase();
+    if lowered.trim() == "aborted" {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+    if matches!(lowered.trim(), "done" | "done!") {
+        return APPLY_PATCH_RESULT_TEXT.to_string();
+    }
+    if !(lowered.contains("apply_patch") || lowered.contains("patch")) {
+        return raw.to_string();
+    }
+    if lowered.contains("verification failed")
+        || lowered.contains("invalid patch")
+        || lowered.contains("missing")
+        || lowered.contains("failed")
+        || lowered.contains("error")
+    {
+        return APPLY_PATCH_ERROR_TEXT.to_string();
+    }
+    raw.to_string()
 }
 
 fn govern_attachment_history_at_req04(
@@ -512,8 +795,15 @@ fn run_servertool_profile(
             events.push(V3HubRelayRequestHookEvent::ServertoolOptionalNoop);
             Ok(())
         }
-        V3HubServertoolRequestProfile::Enabled(ids) => {
-            for hook_id in ids {
+        V3HubServertoolRequestProfile::Enabled {
+            hook_ids,
+            stopless_reasoning_stop,
+        } => {
+            for hook_id in hook_ids {
+                if *stopless_reasoning_stop && *hook_id == "stop_message_auto" {
+                    events.push(V3HubRelayRequestHookEvent::Req04ServertoolGoverned);
+                    continue;
+                }
                 if *hook_id != "servertool.request" {
                     return Err(V3HubRelayRequestError::UnknownStaticHook { hook_id });
                 }

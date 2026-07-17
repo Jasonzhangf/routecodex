@@ -1,6 +1,5 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3OpenAiChatCodecStage {
@@ -56,8 +55,6 @@ pub enum V3OpenAiChatCodecError {
     MessagesNotArray,
     #[error("OpenAI Chat response choices must be an array")]
     ChoicesNotArray,
-    #[error("OpenAI Chat tool-call identity is missing, duplicated, or orphaned")]
-    InvalidToolCallIdentity,
     #[error("OpenAI Chat SSE event is malformed")]
     MalformedSseEvent,
     #[error("OpenAI Chat provider error requires error.message")]
@@ -140,42 +137,10 @@ fn trace(
 
 fn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {
     reject_side_channel_fields(payload)?;
-    let messages = payload
+    payload
         .get("messages")
         .and_then(Value::as_array)
         .ok_or(V3OpenAiChatCodecError::MessagesNotArray)?;
-    validate_message_tool_identity(messages)
-}
-
-fn validate_message_tool_identity(messages: &[Value]) -> Result<(), V3OpenAiChatCodecError> {
-    let mut declared = BTreeSet::new();
-    for message in messages {
-        if let Some(calls) = message.get("tool_calls") {
-            let calls = calls
-                .as_array()
-                .ok_or(V3OpenAiChatCodecError::InvalidToolCallIdentity)?;
-            for call in calls {
-                let id = call
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .filter(|id| !id.is_empty())
-                    .ok_or(V3OpenAiChatCodecError::InvalidToolCallIdentity)?;
-                if !declared.insert(id.to_owned()) {
-                    return Err(V3OpenAiChatCodecError::InvalidToolCallIdentity);
-                }
-            }
-        }
-        if message.get("role").and_then(Value::as_str) == Some("tool") {
-            let id = message
-                .get("tool_call_id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .ok_or(V3OpenAiChatCodecError::InvalidToolCallIdentity)?;
-            if !declared.contains(id) {
-                return Err(V3OpenAiChatCodecError::InvalidToolCallIdentity);
-            }
-        }
-    }
     Ok(())
 }
 
@@ -198,11 +163,10 @@ fn validate_json_response(payload: &Value) -> Result<(), V3OpenAiChatCodecError>
         .get("choices")
         .and_then(Value::as_array)
         .ok_or(V3OpenAiChatCodecError::ChoicesNotArray)?;
-    let messages: Vec<Value> = choices
-        .iter()
-        .filter_map(|choice| choice.get("message").cloned())
-        .collect();
-    validate_message_tool_identity(&messages)
+    for choice in choices {
+        require_object(choice)?;
+    }
+    Ok(())
 }
 
 fn validate_sse_event(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {

@@ -1,0 +1,76 @@
+lifecycle_id: v3.protocol_normalization_tool_governance_boundary
+owner_feature_id: v3.protocol_normalization_tool_governance_boundary
+summary: V3 protocol normalization allows adjacent protocol mapping and shape checks only; tool identity pairing and tool governance live in Chat Process govern nodes. Provider compat nodes are explicit skeleton contracts and must not re-run protocol mapping or tool governance.
+entrypoint:
+  node_id: ServerReqInbound01ClientRaw
+return_path:
+  node_id: ServerRespOutbound07ClientFrame
+call_map_chain_id: v3.protocol_normalization_tool_governance_boundary
+node_ids:
+  - ServerReqInbound01ClientRaw
+  - HubReqInbound02Standardized
+  - HubReqChatProcess03Governed
+  - VrRoute04SelectedTarget
+  - HubReqOutbound05ProviderSemantic
+  - ProviderReqCompat06ProviderCompat
+  - ProviderReqOutbound07TransportRequest
+  - ProviderRespInbound01Raw
+  - ProviderRespCompat02ProviderCompat
+  - HubRespInbound03Parsed
+  - HubRespChatProcess04Governed
+  - HubRespContinuation05Committed
+  - HubRespOutbound06ClientSemantic
+  - ServerRespOutbound07ClientFrame
+nodes:
+  - node_id: ProviderReqCompat06ProviderCompat
+    phase: request
+    responsibility: standard provider protocol to provider implementation compatibility micro-adjustment; family-specific field mapping; compatibility profile application.
+    forbidden:
+      tool_governance: forbidden
+      protocol_remap: forbidden
+      fallback_or_silent_repair: forbidden
+      route_or_model_selection: forbidden
+  - node_id: ProviderRespCompat02ProviderCompat
+    phase: response
+    responsibility: provider-specific response to standard provider protocol compatibility; family-specific error normalization to the error chain; special field stripping or normalization.
+    forbidden:
+      tool_governance: forbidden
+      harvest_apply_patch_servertool_stopless: forbidden
+      side_channel_injection: forbidden
+      fallback_or_silent_repair: forbidden
+edges:
+  - { step_id: v3-protocol-boundary-req-01, from_node: ServerReqInbound01ClientRaw, to_node: HubReqInbound02Standardized, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-02, from_node: HubReqInbound02Standardized, to_node: HubReqChatProcess03Governed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-03, from_node: HubReqChatProcess03Governed, to_node: VrRoute04SelectedTarget, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-04, from_node: VrRoute04SelectedTarget, to_node: HubReqOutbound05ProviderSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-05, from_node: HubReqOutbound05ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-06, from_node: ProviderReqCompat06ProviderCompat, to_node: ProviderReqOutbound07TransportRequest, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-01, from_node: ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-02, from_node: ProviderRespCompat02ProviderCompat, to_node: HubRespInbound03Parsed, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-03, from_node: HubRespInbound03Parsed, to_node: HubRespChatProcess04Governed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-04, from_node: HubRespChatProcess04Governed, to_node: HubRespContinuation05Committed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-05, from_node: HubRespContinuation05Committed, to_node: HubRespOutbound06ClientSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-06, from_node: HubRespOutbound06ClientSemantic, to_node: ServerRespOutbound07ClientFrame, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+normalization_contract:
+  allowed:
+    - protocol_mapping
+    - shape_validation
+    - field_presence_and_type_validation
+    - standard_protocol_projection
+  forbidden:
+    - tool_identity_pairing
+    - tool_identity_uniqueness
+    - orphan_tool_output_detection
+    - servertool_stopless_apply_patch_hook_governance
+    - continuation_save_restore_semantics
+    - fallback_or_silent_repair
+verification_gates:
+  - npm run verify:v3-normalization-payload-logic-boundary
+  - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_openai_chat_codec_characterization -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_gemini_codec_characterization -- --nocapture
+completion_boundary:
+  source_controlled: true
+  live_cutover: false
+  global_install_restart: false
+  compat_runtime_behavior: skeleton_contract_only

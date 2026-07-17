@@ -538,7 +538,7 @@ features:
     test_design: [docs/goals/v3-openai-chat-codec-characterization-test-design.md]
     required_contract:
       - native OpenAI Chat request and response payloads remain semantically unchanged
-      - missing duplicate and orphan tool-call identities fail explicitly without repair
+      - missing duplicate and orphan tool-call identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
       - SSE input is one already-framed event and is never byte-parsed or materialized
       - internal side-channel fields fail closed
       - no Hub hook Server runtime Provider transport continuation Relay or fallback is added
@@ -571,7 +571,7 @@ features:
     test_design: [docs/goals/v3-gemini-codec-characterization-test-design.md]
     required_contract:
       - native Gemini request and response payloads remain semantically unchanged
-      - missing or orphan functionResponse identities fail explicitly without repair
+      - missing or orphan functionResponse identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
       - SSE input is one already-framed candidate event and is never byte-parsed or materialized
       - internal side-channel fields fail closed
       - no Hub hook Server runtime Provider transport continuation Relay or fallback is added
@@ -1435,13 +1435,17 @@ features:
     required_unit:
       - protocol transport continuation matrix covers Responses Anthropic OpenAI Chat and Gemini entries over JSON SSE New Local and Remote continuation states
       - request governance matches function custom servertool apply_patch MCP and native tool outputs only to current or restored tool calls
+      - Req04 normalizes paired apply_patch execution failures to deterministic APPLY_PATCH_ERROR feedback and keeps the tool output in the next provider request
+      - Req04 accepts legacy function_call apply_patch contexts when the client returns custom_tool_call_output after freeform projection
       - orphan tool output missing call_id and wrong custom/function output kind fail fast inside Req04
       - attachment history placeholder releases only historical image/media payloads and preserves current request media payload
       - malformed attachment resource fails explicitly without handler/server/provider repair
       - response governance classifies function custom servertool apply_patch MCP and native calls before Resp04 commit
+      - Resp03 projects apply_patch function_call arguments into client-facing freeform custom_tool_call input before Resp04 commit
       - JSON and SSE use one response exit and SSE arbitrary chunks preserve delta order terminal tool order DONE/finish reason parity
       - provider/client payloads reject RouteCodex control metadata_center debug/resource/continuation leakage
       - Responses Relay JSON two-turn provider request preserves tools and pairs restored function_call with current function_call_output
+      - Responses Relay JSON two-turn apply_patch returns freeform custom_tool_call to client and sends normalized APPLY_PATCH_ERROR feedback to provider
       - wrong Responses Relay call_id fails before provider send without consuming the saved context
     required_gates:
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
@@ -1598,3 +1602,101 @@ features:
       source: "Complete when the verifier is green, all mutation fixtures are red, architecture docs invoke the gate, and the V3 maps parse and remain edge/resource consistent."
       runtime: "Architecture documentation and gate only; no runtime behavior, live provider compatibility, global install, restart, release, or production cutover is claimed."
       forbidden_claim: "Do not treat resource declarations as callable paths, collapse multiple paths into one multi-target edge, or claim live/runtime closure from this source gate."
+
+  - feature_id: v3.servertool_hook_skeleton_lifecycle
+    status: controlled_runtime_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_hook
+    owner_scope: "V3 servertool hook skeleton first slice with stopless as the first built-in hook. Tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+    design:
+      - .agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md
+      - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
+    contract:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_unit:
+      - response stopless hook projects client-visible exec_command before continuation commit
+      - terminal stop schema does not project CLI
+      - request stopless hook rewrites CLI result after continuation/context restore and before request tool governance
+      - malformed stopless CLI output fails fast
+      - blackbox response projection then next request rewrite keeps stopless inside Chat Process
+      - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
+    required_gates:
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - npm run verify:v3-relay-response-semantics
+      - npm run verify:v3-relay-request-semantics
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_boundary:
+      controlled_runtime: true
+      live_cutover: false
+      servertool_followup_reenter: false
+      global_install_restart: false
+
+  - feature_id: v3.protocol_normalization_tool_governance_boundary
+    status: source_controlled_runtime_boundary_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_protocol_boundary_and_chat_process_governance
+    owner_scope: "V3 protocol normalization maps protocols and validates shape only; tool identity pairing and uniqueness checks live in Chat Process govern nodes; provider compat nodes are skeleton contracts that forbid tool governance and fallback repair."
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+    design:
+      - docs/design/pipeline-type-topology-and-module-boundaries.md
+      - docs/architecture/wiki/v3-protocol-normalization-tool-governance-boundary.md
+      - docs/architecture/manifests/v3.protocol_normalization_tool_governance_boundary.mainline.yml
+    contract:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_unit:
+      - OpenAI Chat request codec preserves invalid tool identity shapes without pairing in normalization
+      - OpenAI Chat response codec preserves duplicate tool call identity without pairing in inbound normalization
+      - Gemini request codec preserves invalid functionResponse identity without pairing in normalization
+      - Req04 Chat Process rejects OpenAI Chat missing duplicate and orphan tool identity after normalization
+      - Req04 Chat Process rejects Gemini missing and orphan functionResponse identity after normalization
+      - Resp Chat Process rejects duplicate canonical tool call identity before continuation commit
+      - normalization boundary gate rejects tool governance in protocol normalize and provider compat nodes while allowing Anthropic protocol mapping
+    required_gates:
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - npm run verify:v3-openai-chat-codec-characterization
+      - npm run test:v3-openai-chat-codec-characterization-red-fixtures
+      - npm run verify:v3-gemini-codec-characterization
+      - npm run test:v3-gemini-codec-characterization-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_openai_chat_codec_characterization -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_gemini_codec_characterization -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - git diff --check
+    completion_boundary:
+      source_controlled: true
+      live_cutover: false
+      global_install_restart: false
+      compat_runtime_behavior: skeleton_contract_only

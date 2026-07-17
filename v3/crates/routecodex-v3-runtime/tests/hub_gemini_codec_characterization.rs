@@ -39,20 +39,19 @@ fn request_preserves_contents_tools_and_function_response_pairs() {
 }
 
 #[test]
-fn invalid_function_response_identity_is_explicit_and_never_repaired() {
+fn function_response_identity_pairing_is_not_normalization() {
     for request in [
         json!({"contents":[{"role":"user","parts":[{"functionResponse":{"response":{"x":1}}}]}]}),
         json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"","response":{"x":1}}}]}]}),
         json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"orphan","response":{"x":1}}}]}]}),
     ] {
-        assert!(matches!(
-            characterize_v3_gemini_client_input_to_hub_semantic(
-                request,
-                V3HubEntryProtocol::Gemini,
-                V3HubTransportIntent::Json,
-            ),
-            Err(V3GeminiCodecError::InvalidFunctionResponseIdentity)
-        ));
+        let semantic = characterize_v3_gemini_client_input_to_hub_semantic(
+            request.clone(),
+            V3HubEntryProtocol::Gemini,
+            V3HubTransportIntent::Json,
+        )
+        .unwrap();
+        assert_eq!(semantic.payload(), &request);
     }
 }
 

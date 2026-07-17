@@ -40,9 +40,8 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let projection = build_direct_req_04_projection_plan(&resolved);
     let inbound_model = trimmed(payload.get("model")).map(str::to_string);
     let original_client_model = resolved.original_client_model.clone();
-    let openai_responses_protocol = is_openai_responses_protocol(
-        root.and_then(|row| row.get("providerProtocol")),
-    );
+    let openai_responses_protocol =
+        is_openai_responses_protocol(root.and_then(|row| row.get("providerProtocol")));
     let mut payload_changed = false;
     if let DirectFieldProjection::Set(target) = &projection.model {
         if inbound_model.as_deref() != Some(target.as_str()) {

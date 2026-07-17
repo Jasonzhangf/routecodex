@@ -234,6 +234,167 @@ fn request_governance_matches_function_custom_servertool_and_internal_tool_outpu
 }
 
 #[test]
+fn apply_patch_response_is_projected_to_freeform_custom_tool_before_commit() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
+    let resp02 = hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_apply_patch",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_apply_patch_freeform",
+                    "name":"apply_patch",
+                    "arguments": serde_json::to_string(&json!({"patch": patch})).unwrap()
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(
+        resp03.tool_call_kinds(),
+        vec![V3HubRelayToolKind::ApplyPatch]
+    );
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["output"][0]["type"], "custom_tool_call");
+    assert_eq!(payload["output"][0]["name"], "apply_patch");
+    assert_eq!(payload["output"][0]["call_id"], "call_apply_patch_freeform");
+    assert_eq!(payload["output"][0]["input"], patch);
+    assert!(payload["output"][0].get("arguments").is_none());
+}
+
+#[test]
+fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("ctx_apply_patch"), scope()).with_local_context(
+        "ctx_apply_patch",
+        scope(),
+        json!({
+            "id": "resp_apply_patch",
+            "status": "requires_action",
+            "output": [{
+                "type": "custom_tool_call",
+                "call_id": "call_apply_patch_freeform",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
+            }]
+        }),
+    );
+    let outcome = hooks
+        .run(
+            raw_request(json!({
+                "input":[{
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_apply_patch_freeform",
+                    "output":"apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(outcome.tool_output_count(), 1);
+    let output = outcome.payload()["input"][0]["output"].as_str().unwrap();
+    assert!(output.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
+    assert!(output.contains("Retry with apply_patch only"));
+    assert!(output.contains("workspace-relative"));
+    assert!(!output.contains("/tmp/codex-patch-test"));
+}
+
+#[test]
+fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projection() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("ctx_apply_patch_legacy"), scope())
+        .with_local_context(
+            "ctx_apply_patch_legacy",
+            scope(),
+            json!({
+                "id": "resp_apply_patch_legacy",
+                "status": "requires_action",
+                "output": [{
+                    "type": "function_call",
+                    "call_id": "call_apply_patch_legacy",
+                    "name": "apply_patch",
+                    "arguments": "{}"
+                }]
+            }),
+        );
+    let outcome = hooks
+        .run(
+            raw_request(json!({
+                "input":[{
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_apply_patch_legacy",
+                    "output":"aborted"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(outcome.tool_output_count(), 1);
+    assert!(outcome.payload()["input"][0]["output"]
+        .as_str()
+        .unwrap()
+        .starts_with("APPLY_PATCH_ERROR:"));
+}
+
+#[test]
+fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_process() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_stopless_blackbox",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"stopping without schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    let projected = resp04.canonical_context_payload().unwrap().clone();
+    assert_eq!(projected["output"][0]["name"], "exec_command");
+
+    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_blackbox"), scope())
+        .with_local_context("ctx_stopless_blackbox", scope(), projected);
+    let outcome = request_hooks
+        .run(
+            raw_request(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"blackbox next request text\"}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(outcome.tool_output_count(), 0);
+    assert_eq!(
+        outcome.payload()["input"],
+        json!([{"role":"user","content":"blackbox next request text"}])
+    );
+    assert!(outcome.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("stopreason"));
+}
+
+#[test]
 fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("ctx_tool_parity"), scope()).with_local_context(

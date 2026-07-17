@@ -24,8 +24,8 @@ requireAll(source, sourcePath, [
   'V3OpenAiChatCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::OpenAiChat', 'V3HubProviderWireProtocol::OpenAiChat',
-  'validate_message_tool_identity', 'validate_sse_event', 'reject_side_channel_fields',
-  'InvalidToolCallIdentity', 'MalformedProviderError', 'MalformedSseEvent',
+  'MessagesNotArray', 'validate_sse_event', 'reject_side_channel_fields',
+  'MalformedProviderError', 'MalformedSseEvent',
   'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
   'resource_handle', 'continuation_owner',
 ]);
@@ -34,9 +34,10 @@ forbidAll(source, sourcePath, [
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /V3HubEntryProtocol::(?:Responses|Anthropic|Gemini)/, /fallback/i, /materializ/i,
   /metadata_center[\s\S]{0,120}payload\s*:/, /value\.clone\s*\(/,
+  /validate_message_tool_identity/, /InvalidToolCallIdentity/, /\bBTreeSet\b/,
 ]);
 requireAll(tests, 'focused OpenAI Chat codec tests', [
-  'multiple_tool_calls', 'orphan', 'finish_reason', 'V3HubTransportIntent::Sse',
+  'multiple_tool_calls', 'not_normalization', 'finish_reason', 'V3HubTransportIntent::Sse',
   'MalformedProviderError', 'SideChannelLeaked', 'ProviderProtocolNotOpenAiChat',
 ]);
 for (const path of [

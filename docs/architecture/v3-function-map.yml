@@ -1953,7 +1953,7 @@ features:
     status: controlled_runtime_parity_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_gate
-    owner_scope: "Controlled V3 Hub Relay tool/servertool multiturn parity matrix across Req04 tool/history governance, Resp03 tool harvest, Resp04 continuation commit, attachment history placeholder, JSON/SSE ordering, and one response exit."
+    owner_scope: "Controlled V3 Hub Relay tool/servertool multiturn parity matrix across Req04 tool/history governance, Req04 apply_patch feedback normalization, Resp03 tool harvest, Resp03 apply_patch freeform client projection, Resp04 continuation commit, attachment history placeholder, JSON/SSE ordering, and one response exit."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
@@ -1978,11 +1978,17 @@ features:
     entry_symbols:
       - V3HubRelayRequestHooks::run_with_attachment_history_policy
       - govern_tool_outputs_at_req04
+      - normalize_apply_patch_output_text_at_req04
       - govern_attachment_history_at_req04
       - V3HubRelayToolKind
+      - project_v3_apply_patch_freeform_calls_at_resp03
       - response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
+      - apply_patch_response_is_projected_to_freeform_custom_tool_before_commit
+      - apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
+      - apply_patch_legacy_function_call_accepts_custom_output_after_client_projection
       - responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
       - json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
+      - json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback
       - wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
       - verify-v3-relay-tool-servertool-multiturn-parity-closeout
     allowed_paths:
@@ -2214,3 +2220,167 @@ features:
       - npm run verify:v3-architecture-docs
       - git diff --check
     runtime_status: architecture_gate_only
+
+  - feature_id: v3.servertool_hook_skeleton_lifecycle
+    status: controlled_runtime_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_hook
+    owner_scope: "V3 servertool hook skeleton first slice: stopless response hook runs inside Resp03 before Resp04 continuation commit; stopless request hook runs inside Req04 after continuation/context restore and before request tool output governance. Req/Resp inbound/outbound normalization stages remain logic-free."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.hub.tool_governance_truth
+      - v3.hub.response_semantic
+      - v3.continuation.local_context_truth
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-servertool-stopless-req-01
+      - v3-servertool-stopless-req-02
+      - v3-servertool-stopless-req-03
+      - v3-servertool-stopless-req-04
+      - v3-servertool-stopless-resp-01
+      - v3-servertool-stopless-resp-02
+      - v3-servertool-stopless-resp-03
+      - v3-servertool-stopless-resp-04
+    entry_symbols:
+      - apply_v3_stopless_response_hook_at_resp03
+      - apply_v3_stopless_request_hook_at_req04
+      - V3HubServertoolRequestProfile::stopless_reasoning_stop
+      - V3HubRelayResponseHookProfile::with_stopless_reasoning_stop
+      - stopless_response_hook_projects_cli_before_continuation_commit
+      - stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governance
+      - stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_process
+      - verify-v3-normalization-payload-logic-boundary
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-virtual-router/src
+      - v3/crates/routecodex-v3-target/src
+      - src
+      - sharedmodule
+    required_gates:
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - npm run verify:v3-relay-response-semantics
+      - npm run verify:v3-relay-request-semantics
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    runtime_status: controlled_runtime_slice_only
+
+  - feature_id: v3.protocol_normalization_tool_governance_boundary
+    status: source_controlled_runtime_boundary_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_protocol_boundary_and_chat_process_governance
+    owner_scope: "V3 protocol normalization maps protocols and validates shape only; OpenAI Chat/Gemini tool identity pairing and uniqueness checks live in Req04 or Resp Chat Process governance; provider compat nodes are skeleton contracts that forbid tool governance and fallback repair."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+    resource_bindings:
+      - v3.request.normal_payload
+      - v3.request.provider_semantic
+      - v3.response.provider_raw
+      - v3.hub.response_semantic
+      - v3.hub.tool_governance_truth
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-protocol-boundary-req-01
+      - v3-protocol-boundary-req-02
+      - v3-protocol-boundary-req-03
+      - v3-protocol-boundary-req-04
+      - v3-protocol-boundary-resp-01
+      - v3-protocol-boundary-resp-02
+      - v3-protocol-boundary-compat-01
+      - v3-protocol-boundary-compat-02
+    entry_symbols:
+      - characterize_v3_openai_chat_client_input_to_hub_semantic
+      - characterize_v3_openai_chat_provider_raw_to_hub_response_semantic
+      - characterize_v3_gemini_client_input_to_hub_semantic
+      - govern_protocol_tool_identity_at_req04
+      - govern_v3_hub_relay_response
+      - verify-v3-normalization-payload-logic-boundary
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
+      - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
+      - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
+      - scripts/architecture/verify-v3-gemini-codec-characterization.mjs
+      - scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs
+      - docs/architecture/manifests/v3.protocol_normalization_tool_governance_boundary.mainline.yml
+      - docs/architecture/wiki/v3-protocol-normalization-tool-governance-boundary.md
+      - docs/architecture/wiki/html/v3-protocol-normalization-tool-governance-boundary.html
+      - docs/design/pipeline-type-topology-and-module-boundaries.md
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - package.json
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - v3/crates/routecodex-v3-virtual-router/src
+      - v3/crates/routecodex-v3-target/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+    required_gates:
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - npm run verify:v3-openai-chat-codec-characterization
+      - npm run test:v3-openai-chat-codec-characterization-red-fixtures
+      - npm run verify:v3-gemini-codec-characterization
+      - npm run test:v3-gemini-codec-characterization-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_openai_chat_codec_characterization -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_gemini_codec_characterization -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - git diff --check
+    runtime_status: source_controlled_no_live_cutover

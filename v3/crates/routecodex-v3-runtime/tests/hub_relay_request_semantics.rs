@@ -7,21 +7,27 @@ use routecodex_v3_runtime::{
 use serde_json::json;
 
 fn raw(payload: serde_json::Value) -> routecodex_v3_runtime::V3HubReqInbound01ClientRaw {
+    raw_for(payload, V3HubEntryProtocol::Responses)
+}
+
+fn raw_for(
+    payload: serde_json::Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> routecodex_v3_runtime::V3HubReqInbound01ClientRaw {
     build_v3_hub_req_inbound_01_client_raw(
         payload,
-        V3HubEntryProtocol::Responses,
+        entry_protocol,
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Json,
     )
 }
 
 fn scope() -> V3HubContinuationScope {
-    V3HubContinuationScope::new(
-        V3HubEntryProtocol::Responses,
-        "server-a",
-        "group-a",
-        "session-a",
-    )
+    scope_for(V3HubEntryProtocol::Responses)
+}
+
+fn scope_for(entry_protocol: V3HubEntryProtocol) -> V3HubContinuationScope {
+    V3HubContinuationScope::new(entry_protocol, "server-a", "group-a", "session-a")
 }
 
 #[test]
@@ -58,6 +64,110 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req04Exit,
         ]
     );
+}
+
+#[test]
+fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let valid = json!({
+        "messages":[
+            {"role":"user","content":"lookup"},
+            {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"call_1","content":"ok"}
+        ]
+    });
+    let governed = hooks
+        .run(
+            raw_for(valid, V3HubEntryProtocol::OpenAiChat),
+            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    let events = governed.hook_events();
+    let identity = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned)
+        .unwrap();
+    let tool_governed = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ToolGoverned)
+        .unwrap();
+    assert!(identity < tool_governed);
+
+    for invalid in [
+        json!({"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"x","arguments":"{}"}}]}]}),
+        json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]}),
+        json!({"messages":[{"role":"tool","tool_call_id":"orphan","content":"x"}]}),
+    ] {
+        assert!(matches!(
+            hooks.run(
+                raw_for(invalid, V3HubEntryProtocol::OpenAiChat),
+                &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
+                &V3HubServertoolRequestProfile::disabled(),
+            ),
+            Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                protocol: "openai_chat",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn gemini_function_response_identity_is_governed_at_req04_after_normalization() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let valid = json!({
+        "contents":[
+            {"role":"user","parts":[{"text":"lookup"}]},
+            {"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"city":"Tokyo"}}}]},
+            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"forecast":"sunny"}}}]}
+        ]
+    });
+    let governed = hooks
+        .run(
+            raw_for(valid, V3HubEntryProtocol::Gemini),
+            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::Gemini)),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert!(governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
+
+    for invalid in [
+        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"response":{"x":1}}}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"","response":{"x":1}}}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"orphan","response":{"x":1}}}]}]}),
+    ] {
+        assert!(matches!(
+            hooks.run(
+                raw_for(invalid, V3HubEntryProtocol::Gemini),
+                &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::Gemini)),
+                &V3HubServertoolRequestProfile::disabled(),
+            ),
+            Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
+                protocol: "gemini",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "messages":[{"role":"tool","tool_call_id":"shape_only","content":"preserve"}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
 }
 
 #[test]
@@ -188,5 +298,76 @@ fn malformed_tool_output_and_required_hook_failure_are_explicit() {
             &V3HubServertoolRequestProfile::required_failure("req04.required")
         ),
         Err(V3HubRelayRequestError::RequiredHookFailed { .. })
+    ));
+}
+
+#[test]
+fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governance() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless"), scope()).with_local_context(
+        "rcc_stopless",
+        scope(),
+        json!({
+            "status":"requires_action",
+            "output":[{"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{}"}]
+        }),
+    );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{\"next_step\":\"continue with exact next step\"}"}]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert!(governed.restored_local_context());
+    assert_eq!(governed.tool_output_count(), 0);
+    assert_eq!(governed.payload()["input"][0]["role"], "user");
+    assert_eq!(
+        governed.payload()["input"][0]["content"],
+        "continue with exact next step"
+    );
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("stopreason"));
+    let events = governed.hook_events();
+    let restore = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04LocalContextRestored)
+        .unwrap();
+    let rewrite = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04StoplessTextRewritten)
+        .unwrap();
+    let tool_governed = events
+        .iter()
+        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ToolGoverned)
+        .unwrap();
+    assert!(restore < rewrite);
+    assert!(rewrite < tool_governed);
+}
+
+#[test]
+fn stopless_request_hook_malformed_cli_output_is_fail_fast() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless"), scope()).with_local_context(
+        "rcc_stopless",
+        scope(),
+        json!({
+            "status":"requires_action",
+            "output":[{"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{}"}]
+        }),
+    );
+    assert!(matches!(
+        hooks.run(
+            raw(json!({
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"not json"}]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        ),
+        Err(V3HubRelayRequestError::MalformedStoplessCliOutput { .. })
     ));
 }

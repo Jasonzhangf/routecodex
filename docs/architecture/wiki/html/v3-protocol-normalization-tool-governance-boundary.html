@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>V3 Protocol Normalization Tool Governance Boundary</title></head>
+<body>
+<h1>V3 Protocol Normalization Tool Governance Boundary</h1>
+<p>Normalization maps adjacent protocols and validates shape only. Tool identity pairing and tool governance belong to Chat Process govern nodes.</p>
+<h2>Request chain</h2>
+<pre>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic -&gt; ProviderReqCompat06ProviderCompat -&gt; ProviderReqOutbound07TransportRequest</pre>
+<h2>Response chain</h2>
+<pre>ProviderRespInbound01Raw -&gt; ProviderRespCompat02ProviderCompat -&gt; HubRespInbound03Parsed -&gt; HubRespChatProcess04Governed -&gt; HubRespContinuation05Committed -&gt; HubRespOutbound06ClientSemantic -&gt; ServerRespOutbound07ClientFrame</pre>
+<h2>Compat skeleton</h2>
+<ul><li>ProviderReqCompat06ProviderCompat: no protocol remap, no tool governance, no fallback.</li><li>ProviderRespCompat02ProviderCompat: no harvest/apply_patch/servertool/stopless, no side-channel injection, no fallback-to-success.</li></ul>
+</body>
+</html>
