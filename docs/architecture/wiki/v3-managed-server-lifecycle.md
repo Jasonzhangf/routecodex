@@ -37,7 +37,10 @@ listener set, publishes the managed declaration, runs the server in the current 
 the real runtime stdout/stderr stay visible in the current terminal. It must not print invented
 `starting ...` lines or lifecycle status JSON and then exit.
 Foreground `start` forces V3 server console on even if the config has `debug.log_console=false`;
-startup emits `V3ServerStartup01ListenerSetPreflight`, and requests emit `V3Server03HttpRequestRaw`.
+startup prints the standard minimal human status line (`[RouteCodexV3] Server started on ...`),
+and requests print the old-production monitor line with V3 colorization. The structured
+`V3ServerStartup01ListenerSetPreflight` / `V3Server03HttpRequestRaw` node events remain debug/log
+truth, not the foreground monitor UX.
 `rccv3 start --snap` additionally forces V3 debug snapshots on for that run.
 
 `rccv3 server start|status|restart|stop` remains accepted as a hidden compatibility namespace.
@@ -67,8 +70,9 @@ Hidden `rccv3 server start` keeps the background managed-child behavior for scri
 - [x] Duplicate start matches old `rcc start`: it gracefully stops the exact live owner and starts a
       fresh managed child with the same instance ID.
 - [x] Top-level `rccv3 start` stays attached as a foreground monitor and streams real runtime
-      startup/request console/debug output such as `V3ServerStartup01ListenerSetPreflight` and
-      `V3Server03HttpRequestRaw`; status JSON is reserved for status/restart/stop.
+      startup/request console output such as `[RouteCodexV3] Server started on ...` and
+      colorized `▶ [/v1/responses] ... rawInputItems=... preparedInputItems=...`; status JSON is
+      reserved for status/restart/stop and raw debug JSON is kept out of the monitor surface.
 - [x] Top-level lifecycle commands without `-c` resolve `~/.rcc/config.v3.toml`; `--snap` forces
       debug snapshots on for the started V3 process.
 - [x] Restart is one aggregate operation, not a listener loop.

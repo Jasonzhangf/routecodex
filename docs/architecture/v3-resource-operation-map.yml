@@ -500,7 +500,7 @@ resources:
     owner_node: V3HubReqTarget06Resolved
     identity: [requestId, providerId, modelId, authHandleId]
     allowed_writers: [V3HubReqTarget06Resolved]
-    allowed_readers: [V3HubReqOutbound07ProviderSemantic, V3ProviderReqOutbound08WirePayload]
+    allowed_readers: [V3HubReqOutbound07ProviderSemantic, ProviderReqCompat06ProviderCompat, V3ProviderReqOutbound08WirePayload]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

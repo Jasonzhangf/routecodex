@@ -9,6 +9,7 @@
     "V3HubReqExecution05Planned",
     "V3HubReqTarget06Resolved",
     "V3HubReqOutbound07ProviderSemantic",
+    "ProviderReqCompat06ProviderCompat",
     "V3ProviderReqOutbound08WirePayload",
     "V3ProviderReqOutbound09TransportRequest",
     "V3Error01SourceRaised",

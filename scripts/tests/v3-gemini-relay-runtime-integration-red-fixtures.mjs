@@ -13,10 +13,10 @@ const virtualRouter = 'v3/crates/routecodex-v3-virtual-router/src/lib.rs';
 const cases = [
   ['missing Req06', runtime, '    trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
   ['transport skipped', runtime, 'transport.send(transport_request).await', 'Ok::<_, V3ProviderError>(unreachable!())', /transport\.send/],
-  ['fallback added', runtime, 'let mut trace = Vec::with_capacity(15);', 'let fallback = true; let mut trace = Vec::with_capacity(15);', /fallback/],
-  ['Responses Direct re-entry', runtime, 'let mut trace = Vec::with_capacity(15);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(15);', /ResponsesDirect/],
+  ['fallback added', runtime, 'let mut trace = Vec::with_capacity(17);', 'let fallback = true; let mut trace = Vec::with_capacity(17);', /fallback/],
+  ['Responses Direct re-entry', runtime, 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],
   ['dynamic hooks', runtime, 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /read_dir|dynamic/],
-  ['raw SSE materialization', runtime, 'sse_transport_core::SseIncrementalDecoder::new(', 'let sse_frames = Vec::new(); sse_transport_core::SseIncrementalDecoder::new(', /sse_frames/],
+  ['raw SSE materialization', runtime, 'routecodex_v3_sse::SseIncrementalDecoder::new(', 'let sse_frames = Vec::new(); routecodex_v3_sse::SseIncrementalDecoder::new(', /sse_frames/],
   ['Server Gemini semantic parse', server, 'fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<Body> {', 'fn gemini_relay_output_response(output: V3GeminiRelayRuntimeOutput) -> Response<Body> {\n    let _semantic_parse = "finishReason";', /finishReason/],
   ['binding regresses to pending', entryBindingManifest, '    execution_mode: relay\n    implementation_status: implemented\n    owner_feature_id: v3.gemini_relay_runtime_integration\n    runtime_owner_symbol: execute_v3_gemini_relay_runtime_with_default_transport\n    runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs', '    execution_mode: pending_not_implemented\n    implementation_status: pending_not_implemented\n    owner_feature_id: v3.entry_protocol_endpoint_binding\n    pending_owner: execute_v3_foundation_pending_runtime', /execution_mode: relay|execute_v3_gemini_relay_runtime_with_default_transport/],
   ['dynamic Gemini endpoint classification removed', virtualRouter, 'if endpoint.starts_with("/v1beta/models/") && endpoint.ends_with("/generateContent") {', 'if endpoint == "/v1beta/models" {', /starts_with\("\/v1beta\/models\/"\)|ends_with\("\/generateContent"\)/],

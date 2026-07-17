@@ -66,6 +66,7 @@ requireAll(text.request, files.request, [
   'V3HubAttachmentHistoryPolicy',
   'run_with_attachment_history_policy',
   'govern_tool_outputs_at_req04',
+  'fn normalize_apply_patch_output_text_at_req04',
   'govern_attachment_history_at_req04',
   'pub enum V3HubAttachmentHistoryPolicy',
   'OrphanToolOutput { index: usize, call_id: String }',
@@ -77,6 +78,8 @@ requireAll(text.request, files.request, [
 requireAll(text.response, files.response, [
   'pub enum V3HubRelayToolKind',
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
+  'fn project_v3_apply_patch_freeform_calls_at_resp03',
+  'normalize_v3_apply_patch_freeform_input_for_client',
   'tool_call_kinds',
   'canonical_tool_call_kinds',
   'SideChannelLeaked',
@@ -115,6 +118,9 @@ if (
 requireAll(text.tests, files.tests, [
   'protocol_transport_continuation_matrix_uses_one_chat_process_governance_path',
   'request_governance_matches_function_custom_servertool_and_internal_tool_outputs_to_restored_context',
+  'apply_patch_response_is_projected_to_freeform_custom_tool_before_commit',
+  'apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output',
+  'apply_patch_legacy_function_call_accepts_custom_output_after_client_projection',
   'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
   'attachment_history_placeholder_releases_only_historical_media_and_preserves_current_payload',
   'attachment_history_missing_resource_fails_without_trimming_current_request',
@@ -134,6 +140,7 @@ requireAll(text.tests, files.tests, [
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
+  'json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
   'assert_eq!(captures[1]["tools"], second_tools);',
   '"type":"function_call"',

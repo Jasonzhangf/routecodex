@@ -47,7 +47,8 @@ const responseExit = functionBody('response_exit_node');
 requireAll(normalize, 'Resp02 normalize', [
   'V3HubExecutionMode::Relay',
   'ProviderResponseNotObject',
-  'build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01',
+  'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
+  'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
 ]);
 forbidAll(normalize, 'Resp02 normalize', [
   /tool_calls/,

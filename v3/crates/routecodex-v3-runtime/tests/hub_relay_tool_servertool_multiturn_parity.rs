@@ -353,6 +353,7 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
             json!({
                 "id":"resp_stopless_blackbox",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{"type":"output_text","text":"stopping without schema"}]
             }),
             V3HubTransportIntent::Json,
@@ -419,6 +420,7 @@ fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
             json!({
                 "id":"resp_stopless_terminal_blackbox",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{
                     "type":"output_text",
                     "text":"{\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"done\"]}"
@@ -452,6 +454,7 @@ fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_outp
             json!({
                 "id":"resp_stopless_disabled_request_blackbox",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{"type":"output_text","text":"missing stop schema"}]
             }),
             V3HubTransportIntent::Json,
@@ -482,12 +485,13 @@ fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_outp
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
+    assert_eq!(outcome.payload()["input"][0]["type"], "function_call");
     assert_eq!(
-        outcome.payload()["input"][0]["type"],
+        outcome.payload()["input"][1]["type"],
         "function_call_output"
     );
     assert_eq!(
-        outcome.payload()["input"][0]["output"],
+        outcome.payload()["input"][1]["output"],
         "{\"next_step\":\"must remain a tool output\"}"
     );
     assert!(outcome.payload().get("instructions").is_none());
@@ -502,6 +506,7 @@ fn stopless_hook_blackbox_malformed_cli_result_fails_before_next_turn_governance
             json!({
                 "id":"resp_stopless_malformed_blackbox",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{"type":"output_text","text":"missing stop schema"}]
             }),
             V3HubTransportIntent::Json,

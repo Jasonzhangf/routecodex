@@ -60,8 +60,8 @@ const fixtures = [
   {
     name: 'RespInbound servertool hook',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
-    from: 'let normalized_kind = match input.transport_intent {',
-    to: 'let _servertool_hook = "servertool hook";\n    let normalized_kind = match input.transport_intent {',
+    from: 'let normalized_kind = match input.raw().transport_intent {',
+    to: 'let _servertool_hook = "servertool hook";\n    let normalized_kind = match input.raw().transport_intent {',
     diagnostic: /RespInbound02 entry normalization/,
   },
   {

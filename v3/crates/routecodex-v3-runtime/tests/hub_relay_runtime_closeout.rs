@@ -14,7 +14,8 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_health_and_retry_policy,
     execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayLocalContinuationScope,
     V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::{
@@ -25,7 +26,7 @@ use std::{
     },
 };
 
-const EXPECTED_RELAY_TRACE: [&str; 15] = [
+const EXPECTED_RELAY_TRACE: [&str; 17] = [
     "V3HubReqInbound01ClientRaw",
     "V3HubReqInbound02Normalized",
     "V3HubReqContinuation03Classified",
@@ -33,9 +34,11 @@ const EXPECTED_RELAY_TRACE: [&str; 15] = [
     "V3HubReqExecution05Planned",
     "V3HubReqTarget06Resolved",
     "V3HubReqOutbound07ProviderSemantic",
+    "ProviderReqCompat06ProviderCompat",
     "V3ProviderReqOutbound08WirePayload",
     "V3ProviderReqOutbound09TransportRequest",
     "V3ProviderRespInbound01Raw",
+    "ProviderRespCompat02ProviderCompat",
     "V3HubRespInbound02Normalized",
     "V3HubRespChatProcess03Governed",
     "V3HubRespContinuation04Committed",
@@ -272,7 +275,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(sse_observability.transport, "sse");
     assert_eq!(
         sse_observability.response_status.as_deref(),
-        Some("streaming")
+        Some("completed")
     );
     assert_eq!(sse_observability.provider_status, Some(200));
     let stream_observation = sse_output
@@ -592,7 +595,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
 #[tokio::test]
 async fn responses_relay_shared_health_cools_provider_key_after_three_cross_request_failures() {
     let manifest = responses_reselect_manifest();
-    let provider_health = V3ProviderHealthStore::from_manifest(&manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };

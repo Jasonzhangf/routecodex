@@ -7,7 +7,14 @@ const failures = [];
 function files(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
-    const stat = statSync(path);
+    if (path.includes('/target/') || path.endsWith('/target')) continue;
+    let stat;
+    try {
+      stat = statSync(path);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      throw error;
+    }
     if (stat.isDirectory()) files(path, out);
     else if (path.endsWith('.rs') || path.endsWith('Cargo.toml')) out.push(path);
   }
@@ -30,6 +37,8 @@ for (const path of all) {
   const isTest = path.includes('/tests/');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
+  const isProviderHealthRuntimeBoundary =
+    path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs');
   const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
   if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {
@@ -70,8 +79,13 @@ for (const path of all) {
   if (!isTest && !path.includes('routecodex-v3-runtime/src/') && /pub struct V3Server03HttpRequestRaw/.test(text)) {
     fail('duplicate V3 Server03 request node outside Runtime contract owner: ' + path);
   }
-  if (!isTest && !isProviderOwner && /V3ProviderHealthStore|\.apply_error_action\(|\.update_quota_state\(|\.update_concurrency_state\(/.test(text)) {
+  if (!isTest && !isProviderOwner
+      && /\.apply_error_action\(|\.update_quota_state\(|\.update_concurrency_state\(/.test(text)) {
     fail('Provider health mutation surface outside Provider owner: ' + path);
+  }
+  if (!isTest && !isProviderOwner && !isProviderHealthRuntimeBoundary
+      && /V3ProviderHealthStore/.test(text)) {
+    fail('Provider health store must remain opaque outside Provider and its Runtime boundary: ' + path);
   }
   if (!isTest && isProviderOwner
       && (/\b(?:cc|asxs)\b/.test(productionText)

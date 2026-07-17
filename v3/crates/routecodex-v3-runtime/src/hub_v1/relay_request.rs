@@ -3,8 +3,8 @@ use super::{
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
-    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
-    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
+    merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
+    V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
 };
 use serde_json::Value;
 use std::{
@@ -189,6 +189,8 @@ pub enum V3HubRelayRequestError {
     LocalContextMissingAtRestore { continuation_id: String },
     #[error("local continuation reached Req04 restore without a continuation id")]
     ContinuationIdMissingAtRestore,
+    #[error("restored local continuation context is invalid at Req04: {reason}")]
+    RestoredLocalContextInvalid { reason: String },
     #[error("unknown static servertool request hook: {hook_id}")]
     UnknownStaticHook { hook_id: &'static str },
     #[error("malformed stopless CLI output at input index {index}: {reason}")]
@@ -317,6 +319,17 @@ impl V3HubRelayRequestHooks {
         let local_context = restore_local_context_at_req04(ownership, lookup)?;
         if local_context.is_some() {
             events.push(V3HubRelayRequestHookEvent::Req04LocalContextRestored);
+        }
+        if let Some(context) = local_context.as_deref() {
+            merge_v3_relay_restored_local_context_at_req04(
+                &mut classified.previous.previous.payload.0,
+                context,
+            )
+            .map_err(
+                |error| V3HubRelayRequestError::RestoredLocalContextInvalid {
+                    reason: error.to_string(),
+                },
+            )?;
         }
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });

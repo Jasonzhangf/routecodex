@@ -653,9 +653,11 @@ features:
       - build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04
       - build_v3_hub_req_target_06_from_v3_hub_req_execution_05
       - build_v3_hub_req_outbound_07_from_v3_hub_req_target_06
-      - build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07
+      - build_provider_req_compat_06_from_v3_hub_req_outbound_07
+      - build_v3_provider_req_outbound_08_from_provider_req_compat_06
       - build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08
-      - build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01
+      - build_provider_resp_compat_02_from_v3_provider_resp_inbound_01
+      - build_v3_hub_resp_inbound_02_from_provider_resp_compat_02
       - build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02
       - build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03
       - build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
@@ -906,6 +908,7 @@ features:
       - v3-hub-relay-copy-probe-02
       - v3-hub-relay-copy-probe-03
       - v3-hub-relay-copy-probe-04
+      - v3-hub-relay-copy-probe-05
     entry_symbols:
       - relay_json_moves_one_business_payload_through_req04
       - relay_sse_keeps_one_canonical_payload_without_materializing_stream
@@ -1432,6 +1435,8 @@ features:
       - v3-anthropic-relay-13
       - v3-anthropic-relay-14
       - v3-anthropic-relay-15
+      - v3-anthropic-relay-16
+      - v3-anthropic-relay-17
     entry_symbols:
       - execute_v3_anthropic_messages_request
       - execute_v3_anthropic_relay_runtime
@@ -1619,6 +1624,8 @@ features:
       - v3-openai-chat-relay-13
       - v3-openai-chat-relay-14
       - v3-openai-chat-relay-15
+      - v3-openai-chat-relay-16
+      - v3-openai-chat-relay-17
     entry_symbols:
       - execute_v3_openai_chat_completions_request
       - execute_v3_openai_chat_relay_runtime_with_default_transport
@@ -1701,6 +1708,8 @@ features:
       - v3-gemini-relay-13
       - v3-gemini-relay-14
       - v3-gemini-relay-15
+      - v3-gemini-relay-16
+      - v3-gemini-relay-17
     entry_symbols:
       - execute_v3_gemini_generate_content_request
       - execute_v3_gemini_relay_runtime_with_default_transport
@@ -1872,6 +1881,8 @@ features:
       - v3-hub-relay-closeout-12
       - v3-hub-relay-closeout-13
       - v3-hub-relay-closeout-14
+      - v3-hub-relay-closeout-15
+      - v3-hub-relay-closeout-16
       - v3-responses-relay-server-01
       - v3-responses-relay-server-02
       - v3-responses-relay-server-03
@@ -1880,6 +1891,7 @@ features:
       - execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile
       - execute_v3_responses_relay_runtime_with_default_transport
       - execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation
+      - execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation
       - execute_v3_responses_relay_runtime
       - execute_v3_responses_relay_runtime_with_local_continuation
       - execute_v3_responses_relay_dry_run_runtime
@@ -2302,14 +2314,17 @@ features:
     status: source_controlled_runtime_boundary_verified
     change_risk: critical
     owner_kind: rust_project_v3_protocol_boundary_and_chat_process_governance
-    owner_scope: "V3 protocol normalization maps protocols and validates shape only; OpenAI Chat/Gemini tool identity pairing and uniqueness checks live in Req04 or Resp Chat Process governance; provider compat nodes are skeleton contracts that forbid tool governance and fallback repair."
+    owner_scope: "V3 protocol normalization maps protocols and validates shape only; OpenAI Chat/Gemini tool identity pairing and uniqueness checks live in Req04 or Resp Chat Process governance; provider compat nodes are typed runtime nodes that forbid tool governance and fallback repair."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/architecture/verify-v3-static-hook-registry.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
     resource_bindings:
       - v3.request.normal_payload
@@ -2334,18 +2349,23 @@ features:
       - characterize_v3_gemini_client_input_to_hub_semantic
       - govern_protocol_tool_identity_at_req04
       - govern_v3_hub_relay_response
+      - build_provider_req_compat_06_from_v3_hub_req_outbound_07
+      - build_provider_resp_compat_02_from_v3_provider_resp_inbound_01
       - verify-v3-normalization-payload-logic-boundary
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/architecture/verify-v3-static-hook-registry.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
       - scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs
       - scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs
@@ -2382,6 +2402,7 @@ features:
       - npm run verify:v3-architecture-docs
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:v3-static-hook-registry
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-rust-only
       - npm run verify:v3-cargo-fmt

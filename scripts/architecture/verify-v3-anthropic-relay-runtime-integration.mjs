@@ -24,9 +24,11 @@ const expectedManifestNodes = [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
   'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
-  'V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload',
+  'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
+  'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
-  'V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed',
+  'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
+  'V3HubRespChatProcess03Governed',
   'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
@@ -40,7 +42,7 @@ if (JSON.stringify(manifest.node_ids) !== JSON.stringify(expectedManifestNodes))
   failures.push(`${manifestPath}: fixed node order mismatch`);
 }
 const manifestEdges = Array.isArray(manifest.edges) ? manifest.edges : [];
-if (manifestEdges.length !== 15) failures.push(`${manifestPath}: expected 15 adjacent edges`);
+if (manifestEdges.length !== 17) failures.push(`${manifestPath}: expected 17 adjacent edges`);
 for (let index = 0; index < manifestEdges.length; index += 1) {
   const edge = manifestEdges[index];
   const expectedStep = `v3-anthropic-relay-${String(index + 1).padStart(2, '0')}`;
@@ -63,7 +65,8 @@ const adjacentBuilders = [
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
-  'build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07',
+  'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
+  'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
   'build_v3_provider_resp_inbound_01_raw',
   'hooks.normalize(resp01)',
@@ -77,9 +80,11 @@ for (const node of [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
   'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
-  'V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload',
+  'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
+  'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
-  'V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed',
+  'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
+  'V3HubRespChatProcess03Governed',
   'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ]) requireText(runtime, runtimePath, `trace.push("${node}")`);
@@ -89,7 +94,7 @@ for (const phrase of [
   'transport.send(transport_request).await',
   'V3_ERROR_CHAIN_NODE_IDS',
   'project_v3_responses_sse_as_anthropic_events',
-  'build_sse_transport_in_01_raw_chunk',
+  'build_v3_sse_transport_in_01_raw_chunk',
 ]) requireText(`${runtime}\n${codec}`, 'runtime/codec', phrase);
 for (const phrase of [
   'selected_target: routecodex_v3_target::V3TargetCandidate',
@@ -104,7 +109,9 @@ requireOrder(runtime, runtimePath, [
   'trace.push("V3HubReqTarget06Resolved")',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(',
   'trace.push("V3HubReqOutbound07ProviderSemantic")',
-  'build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(',
+  'build_provider_req_compat_06_from_v3_hub_req_outbound_07(',
+  'trace.push("ProviderReqCompat06ProviderCompat")',
+  'build_v3_provider_req_outbound_08_from_provider_req_compat_06(',
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(',
   'build_v3_provider_12_responses_wire_payload(',
   'trace.push("V3ProviderReqOutbound08WirePayload")',

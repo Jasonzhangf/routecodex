@@ -4,6 +4,6 @@ description: >
   Explicit debt manifest for topology nodes that are still declared in the
   topology SSOT but are not yet consumed by call-map / metadata manifest / wiki
   review surfaces. Any growth or silent drift must fail fast.
-declared_node_count: 33
-referenced_node_count: 33
+declared_node_count: 37
+referenced_node_count: 37
 allowed_unreferenced_nodes: []

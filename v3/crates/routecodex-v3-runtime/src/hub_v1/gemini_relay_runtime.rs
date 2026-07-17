@@ -97,7 +97,7 @@ pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3GeminiRelayRuntimeError::StaticRegistry(error.to_string()))?;
-    let mut trace = Vec::with_capacity(15);
+    let mut trace = Vec::with_capacity(17);
     let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -169,7 +169,9 @@ pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
     );
     trace.push("V3HubReqOutbound07ProviderSemantic");
     let target = provider_target(manifest, req07.selected_target())?;
-    let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
+    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+    trace.push("ProviderReqCompat06ProviderCompat");
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
     let provider_semantic = characterize_v3_gemini_hub_semantic_to_provider_wire(semantic)?
         .payload()
@@ -288,6 +290,7 @@ fn project_json_response(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
+    trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
     trace.push("V3HubRespChatProcess03Governed");
@@ -413,6 +416,7 @@ fn project_sse_response(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
+    trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
     trace.push("V3HubRespChatProcess03Governed");

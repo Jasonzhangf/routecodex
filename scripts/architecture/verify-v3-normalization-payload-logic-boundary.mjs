@@ -55,7 +55,7 @@ const boundaries = [
   },
   {
     owner: 'RespInbound02 entry normalization',
-    text: functionBody(hub, 'pub fn build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01'),
+    text: functionBody(hub, 'pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02'),
     required: ['previous: input', 'normalized_kind'],
   },
   {
@@ -64,8 +64,13 @@ const boundaries = [
     required: ['previous: input', 'provider_protocol'],
   },
   {
+    owner: 'ProviderReqCompat06 provider compat boundary',
+    text: functionBody(hub, 'pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07'),
+    required: ['previous: input', 'V3ProviderCompatProfileId::Passthrough'],
+  },
+  {
     owner: 'ProviderReqOutbound08 wire boundary',
-    text: functionBody(hub, 'pub fn build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07'),
+    text: functionBody(hub, 'pub fn build_v3_provider_req_outbound_08_from_provider_req_compat_06'),
     required: ['previous: input'],
   },
   {
@@ -76,7 +81,12 @@ const boundaries = [
   {
     owner: 'ProviderReqOutbound09 payload projection',
     text: functionBody(hub, 'fn into_provider_semantic_payload'),
-    required: ['payload', '.0'],
+    required: ['provider_semantic_payload', 'clone()'],
+  },
+  {
+    owner: 'ProviderRespCompat02 provider compat boundary',
+    text: functionBody(hub, 'pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01'),
+    required: ['previous: input', 'V3ProviderCompatProfileId::Passthrough'],
   },
   {
     owner: 'RespOutbound05 client semantic projection',
@@ -91,7 +101,10 @@ const boundaries = [
   {
     owner: 'Relay response normalize wrapper',
     text: functionBody(hub, 'fn normalize_v3_hub_relay_response'),
-    required: ['build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01'],
+    required: [
+      'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
+      'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
+    ],
   },
 ];
 

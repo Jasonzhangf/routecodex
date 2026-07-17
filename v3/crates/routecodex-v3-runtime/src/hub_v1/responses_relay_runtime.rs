@@ -22,7 +22,9 @@ use routecodex_v3_sse::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(test)]
+use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -38,12 +40,14 @@ const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 = 5_000;
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum V3RuntimeSseTerminal {
     Completed,
     Failed,
 }
 
+#[cfg(test)]
 struct V3ObservedSseState {
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     decoder: SseIncrementalDecoder,
@@ -112,6 +116,7 @@ pub struct V3RuntimeObservability {
     pub wire_model: Option<String>,
     pub provider_status: Option<u16>,
     pub response_status: Option<String>,
+    pub finish_reason: Option<String>,
     pub attempts: Option<usize>,
     pub unavailable_candidates: Vec<String>,
     pub target_path: Vec<String>,
@@ -126,6 +131,7 @@ pub struct V3RuntimeStreamObservation {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeStreamObservationSnapshot {
     pub response_status: Option<String>,
+    pub finish_reason: Option<String>,
     pub usage: Option<V3RuntimeUsageSummary>,
 }
 
@@ -147,6 +153,19 @@ struct V3ResponsesRelayProviderFailureContext<'ctx> {
     provider_semantic_body: &'ctx Value,
     provider_health: &'ctx V3ProviderHealthStore,
     retry_policy: &'ctx V3ResponsesRelayRetryPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub struct V3ResponsesRelayProviderHealthHandle {
+    store: V3ProviderHealthStore,
+}
+
+impl V3ResponsesRelayProviderHealthHandle {
+    pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        Self {
+            store: V3ProviderHealthStore::from_manifest(manifest),
+        }
+    }
 }
 
 struct V3ResponsesRelayProviderRetryState<'state> {
@@ -203,7 +222,9 @@ impl V3RuntimeStreamObservation {
             });
         let usage = extract_v3_runtime_usage_summary(semantic)
             .or_else(|| extract_v3_runtime_usage_summary(event));
-        if response_status.is_none() && usage.is_none() {
+        let finish_reason = read_v3_runtime_finish_reason(semantic)
+            .or_else(|| read_v3_runtime_finish_reason(event));
+        if response_status.is_none() && finish_reason.is_none() && usage.is_none() {
             return Ok(());
         }
         let mut snapshot = self
@@ -212,6 +233,9 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
         if response_status.is_some() {
             snapshot.response_status = response_status;
+        }
+        if finish_reason.is_some() {
+            snapshot.finish_reason = finish_reason;
         }
         if usage.is_some() {
             snapshot.usage = usage;
@@ -325,6 +349,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
+    #[error("V3 Responses Relay SSE provider body is malformed: {0}")]
+    ProviderSse(String),
     #[error(transparent)]
     LocalContinuation(#[from] V3LocalContinuationError),
     #[error("V3 Responses Relay local continuation scope routing group does not match server")]
@@ -361,7 +387,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_and_local
 pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ProviderHealthStore,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
     state: &V3ResponsesRelayLocalContinuationState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
@@ -375,7 +401,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_an
             scope,
             now_epoch_ms,
         }),
-        provider_health.clone(),
+        provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
     )
     .await
@@ -401,13 +427,13 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
     transport: &T,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ProviderHealthStore::from_manifest(manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
         None,
-        provider_health,
+        provider_health.store,
         retry_policy,
     )
     .await
@@ -419,7 +445,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
-    provider_health: &V3ProviderHealthStore,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_inner(
@@ -427,7 +453,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         input,
         transport,
         None,
-        provider_health.clone(),
+        provider_health.store.clone(),
         retry_policy,
     )
     .await
@@ -441,7 +467,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ProviderHealthStore::from_manifest(manifest);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -451,7 +477,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             scope,
             now_epoch_ms,
         }),
-        provider_health,
+        provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
     )
     .await
@@ -473,7 +499,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
-    let mut trace = Vec::with_capacity(15);
+    let mut trace = Vec::with_capacity(17);
     let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -495,7 +521,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let mut restored_context = None;
     let lookup =
         if let (Some(local), Some(context_id)) = (local.as_ref(), requested_local_ids.first()) {
             if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
@@ -528,26 +553,20 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
             drop(store);
-            restored_context = Some(context.clone());
             V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
                 .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
+    let request_hook_profile = responses_relay_request_hook_profile();
     let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
         req02,
         &lookup,
-        &V3HubServertoolRequestProfile::disabled(),
+        &request_hook_profile,
     )?;
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
-    let mut req04 = request_outcome.into_governed();
-    if let Some(context) = restored_context.as_ref() {
-        merge_v3_relay_restored_local_context_at_req04(
-            &mut req04.previous.previous.previous.payload.0,
-            context,
-        )?;
-    }
+    let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
@@ -609,20 +628,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         );
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target())?;
-        let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+        trace.push("ProviderReqCompat06ProviderCompat");
+        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-        let provider_semantic = _req09
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .payload
-            .0
-            .clone();
+        let provider_semantic = _req09.into_provider_semantic_payload();
         let wire = build_v3_provider_12_responses_wire_payload(
             &input.request_id,
             target,
@@ -705,6 +715,9 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.transport = "json".to_string();
                 observability.response_status =
                     read_v3_runtime_response_status(&finalized_provider_value);
+                observability.finish_reason =
+                    read_v3_runtime_finish_reason(&finalized_provider_value)
+                        .or_else(|| read_v3_runtime_finish_reason(&provider_value));
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
@@ -716,19 +729,51 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 });
             }
             V3ProviderResponseBody::Sse(stream) => {
-                push_streaming_response_trace(&mut trace);
+                let stream_observation = V3RuntimeStreamObservation::default();
+                let provider_value =
+                    collect_v3_responses_relay_sse_response(stream, &stream_observation).await?;
+                let (action, finalized_provider_value) =
+                    run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+                commit_or_release_responses_local_continuation(
+                    local.as_ref(),
+                    &requested_local_ids,
+                    &finalized_provider_value,
+                    action,
+                )?;
+                stream_observation
+                    .record_event(&json!({
+                        "type":"response.completed",
+                        "response": finalized_provider_value.clone()
+                    }))
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
                 observability.transport = "sse".to_string();
-                observability.response_status = Some("streaming".to_string());
-                let stream_observation = V3RuntimeStreamObservation::default();
+                observability.response_status =
+                    read_v3_runtime_response_status(&finalized_provider_value);
+                observability.finish_reason =
+                    read_v3_runtime_finish_reason(&finalized_provider_value)
+                        .or_else(|| read_v3_runtime_finish_reason(&provider_value))
+                        .or_else(|| {
+                            stream_observation
+                                .snapshot()
+                                .ok()
+                                .and_then(|snapshot| snapshot.finish_reason)
+                        });
+                observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
+                    .or_else(|| extract_v3_runtime_usage_summary(&provider_value))
+                    .or_else(|| {
+                        stream_observation
+                            .snapshot()
+                            .ok()
+                            .and_then(|snapshot| snapshot.usage)
+                    });
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
-                    client_body: V3ResponsesRelayClientBody::Sse(project_sse_stream(
-                        stream,
-                        stream_observation.clone(),
-                    )),
+                    client_body: V3ResponsesRelayClientBody::Sse(
+                        project_finalized_response_sse_stream(finalized_provider_value),
+                    ),
                     node_trace: trace,
                     error_chain: None,
                     observability: Some(observability),
@@ -1064,8 +1109,10 @@ fn run_json_response_hooks(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
+    trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
+    let response_hook_profile = responses_relay_response_hook_profile();
+    let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     let action = resp04.action();
@@ -1078,13 +1125,12 @@ fn run_json_response_hooks(
     Ok((action, finalized_payload))
 }
 
-fn push_streaming_response_trace(trace: &mut Vec<&'static str>) {
-    trace.push("V3ProviderRespInbound01Raw");
-    trace.push("V3HubRespInbound02Normalized");
-    trace.push("V3HubRespChatProcess03Governed");
-    trace.push("V3HubRespContinuation04Committed");
-    trace.push("V3HubRespOutbound05ClientSemantic");
-    trace.push("V3ServerRespOutbound06ClientFrame");
+fn responses_relay_request_hook_profile() -> V3HubServertoolRequestProfile {
+    V3HubServertoolRequestProfile::stopless_reasoning_stop()
+}
+
+fn responses_relay_response_hook_profile() -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop()
 }
 
 fn build_v3_relay_observability_from_selected(
@@ -1110,6 +1156,7 @@ fn build_v3_relay_observability_from_selected(
         wire_model: Some(selected.candidate.wire_model.clone()),
         provider_status: None,
         response_status: None,
+        finish_reason: None,
         attempts: Some(selected.attempts),
         unavailable_candidates: selected.unavailable_candidates.clone(),
         target_path: selected.candidate.path.clone(),
@@ -1140,6 +1187,35 @@ fn read_v3_runtime_response_status(value: &Value) -> Option<String> {
         .get("status")
         .and_then(Value::as_str)
         .filter(|status| !status.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
+    read_v3_runtime_string_path(value, &["finish_reason"])
+        .or_else(|| read_v3_runtime_string_path(value, &["finishReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["stop_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["stopReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["response", "finish_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["response", "finishReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["response", "stop_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["response", "stopReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["choices", "0", "finish_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["candidates", "0", "finishReason"]))
+}
+
+fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        if let Ok(index) = segment.parse::<usize>() {
+            current = current.get(index)?;
+        } else {
+            current = current.get(*segment)?;
+        }
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
 
@@ -1182,6 +1258,271 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
     })
 }
 
+async fn collect_v3_responses_relay_sse_response(
+    mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    use futures_util::StreamExt;
+
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut terminal_response: Option<Value> = None;
+    let mut output_items: Vec<Value> = Vec::new();
+    let mut output_text = String::new();
+    while let Some(chunk) = provider.next().await {
+        let chunk = chunk?;
+        let frames = decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        for frame in frames {
+            let Some((event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+                continue;
+            };
+            if data == "[DONE]" {
+                continue;
+            }
+            let event: Value = serde_json::from_str(&data).map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "V3 Responses Relay SSE event is malformed: {error}"
+                ))
+            })?;
+            observation
+                .record_event(&event)
+                .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+            collect_v3_runtime_sse_output_evidence(
+                event_type.as_deref(),
+                &event,
+                &mut output_items,
+                &mut output_text,
+            );
+            let semantic_event_type = event_type
+                .as_deref()
+                .or_else(|| event.get("type").and_then(Value::as_str));
+            match semantic_event_type {
+                Some("response.completed" | "response.done") => {
+                    let mut response = event
+                        .get("response")
+                        .cloned()
+                        .unwrap_or_else(|| event.clone());
+                    complete_v3_runtime_sse_materialized_response(
+                        &mut response,
+                        &output_items,
+                        &output_text,
+                    )?;
+                    terminal_response = Some(response);
+                }
+                Some("response.failed" | "response.incomplete" | "response.error") => {
+                    let message = event
+                        .pointer("/response/error/message")
+                        .or_else(|| event.pointer("/error/message"))
+                        .or_else(|| event.pointer("/response/incomplete_details/reason"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or(V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE);
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                        message.to_string(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    decoder
+        .finish()
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+    terminal_response.ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderSse(
+            V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
+        )
+    })
+}
+
+fn parse_v3_runtime_sse_frame_fields(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+) -> Result<Option<(Option<String>, String)>, V3ResponsesRelayRuntimeError> {
+    let mut event_type: Option<String> = None;
+    let mut data = String::new();
+    for field in frame.frame().fields() {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        match name.as_str() {
+            "event" => event_type = Some(value.to_string()),
+            "data" => {
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(value);
+            }
+            _ => {}
+        }
+    }
+    let data = data.trim();
+    if data.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((event_type, data.to_string())))
+}
+
+fn collect_v3_runtime_sse_output_evidence(
+    event_type: Option<&str>,
+    event: &Value,
+    output_items: &mut Vec<Value>,
+    output_text: &mut String,
+) {
+    let semantic_event_type = event_type.or_else(|| event.get("type").and_then(Value::as_str));
+    match semantic_event_type {
+        Some("response.output_item.added" | "response.output_item.done") => {
+            if let Some(item) = event.get("item").cloned() {
+                upsert_v3_runtime_sse_output_item(output_items, item);
+            }
+        }
+        Some("response.output_text.delta") => {
+            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                output_text.push_str(delta);
+            }
+        }
+        Some("response.output_text.done") => {
+            if let Some(text) = event.get("text").and_then(Value::as_str) {
+                output_text.clear();
+                output_text.push_str(text);
+            }
+        }
+        Some("response.function_call_arguments.delta") => {
+            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                append_v3_runtime_sse_function_arguments(output_items, event, delta);
+            }
+        }
+        Some("response.function_call_arguments.done") => {
+            if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
+                set_v3_runtime_sse_function_arguments(output_items, event, arguments);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn upsert_v3_runtime_sse_output_item(output_items: &mut Vec<Value>, item: Value) {
+    let call_id = item
+        .get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let Some(call_id) = call_id {
+        if let Some(existing) = output_items.iter_mut().find(|existing| {
+            existing
+                .get("call_id")
+                .or_else(|| existing.get("id"))
+                .and_then(Value::as_str)
+                == Some(call_id.as_str())
+        }) {
+            *existing = item;
+            return;
+        }
+    }
+    output_items.push(item);
+}
+
+fn append_v3_runtime_sse_function_arguments(
+    output_items: &mut [Value],
+    event: &Value,
+    delta: &str,
+) {
+    let Some(item) = find_v3_runtime_sse_function_item_mut(output_items, event) else {
+        return;
+    };
+    let current = item
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    item["arguments"] = Value::String(format!("{current}{delta}"));
+}
+
+fn set_v3_runtime_sse_function_arguments(
+    output_items: &mut [Value],
+    event: &Value,
+    arguments: &str,
+) {
+    if let Some(item) = find_v3_runtime_sse_function_item_mut(output_items, event) {
+        item["arguments"] = Value::String(arguments.to_string());
+    }
+}
+
+fn find_v3_runtime_sse_function_item_mut<'items>(
+    output_items: &'items mut [Value],
+    event: &Value,
+) -> Option<&'items mut Value> {
+    if let Some(output_index) = event.get("output_index").and_then(Value::as_u64) {
+        return output_items.get_mut(output_index as usize);
+    }
+    let call_id = event
+        .get("call_id")
+        .or_else(|| event.get("item_id"))
+        .and_then(Value::as_str);
+    if let Some(call_id) = call_id {
+        return output_items.iter_mut().find(|item| {
+            item.get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                == Some(call_id)
+        });
+    }
+    output_items.iter_mut().rev().find(|item| {
+        matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call" | "custom_tool_call" | "tool_call")
+        )
+    })
+}
+
+fn complete_v3_runtime_sse_materialized_response(
+    response: &mut Value,
+    output_items: &[Value],
+    output_text: &str,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let object = response.as_object_mut().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderSse(
+            "V3 Responses Relay SSE terminal response must be an object".to_string(),
+        )
+    })?;
+    object
+        .entry("status".to_string())
+        .or_insert_with(|| Value::String("completed".to_string()));
+    let output_is_empty = object
+        .get("output")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty);
+    if output_is_empty {
+        if !output_items.is_empty() {
+            object.insert("output".to_string(), Value::Array(output_items.to_vec()));
+        } else if !output_text.trim().is_empty() {
+            object.insert(
+                "output".to_string(),
+                json!([{"type":"output_text","text":output_text}]),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn project_finalized_response_sse_stream(response: Value) -> V3ResponsesRelayClientStream {
+    use futures_util::stream;
+
+    let event_name = match response.get("status").and_then(Value::as_str) {
+        Some("failed" | "incomplete") => "response.failed",
+        _ => "response.completed",
+    };
+    let payload = json!({
+        "type": event_name,
+        "response": response,
+    });
+    Box::pin(stream::iter([
+        Ok(build_v3_runtime_sse_json_frame(event_name, &payload)),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]))
+}
+
+#[cfg(test)]
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: V3RuntimeStreamObservation,
@@ -1250,6 +1591,7 @@ fn project_sse_stream(
     ))
 }
 
+#[cfg(test)]
 fn enqueue_v3_runtime_sse_failed_terminal(state: &mut V3ObservedSseState, message: &str) {
     let event = build_v3_runtime_sse_failed_event(message);
     let _ = state.observation.record_event(&event);
@@ -1261,6 +1603,7 @@ fn enqueue_v3_runtime_sse_failed_terminal(state: &mut V3ObservedSseState, messag
     state.done = true;
 }
 
+#[cfg(test)]
 fn build_v3_runtime_sse_failed_event(message: &str) -> Value {
     json!({
         "type": "response.failed",
@@ -1290,6 +1633,7 @@ fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
 }
 
+#[cfg(test)]
 fn observe_v3_runtime_sse_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
@@ -1422,7 +1766,7 @@ fn provider_target(
         _ => {
             return Err(V3ResponsesRelayRuntimeError::Target(
                 "selected auth handle is invalid".to_string(),
-            ))
+            ));
         }
     };
     Ok(V3ResponsesProviderTarget {

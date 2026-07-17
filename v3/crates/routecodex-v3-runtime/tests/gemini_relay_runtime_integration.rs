@@ -104,9 +104,15 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     assert_eq!(captured, payload);
     assert!(captured.get("metadata_center").is_none());
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 15);
+    assert_eq!(output.node_trace.len(), 17);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert_eq!(output.node_trace[14], "V3ServerRespOutbound06ClientFrame");
+    assert!(output
+        .node_trace
+        .contains(&"ProviderReqCompat06ProviderCompat"));
+    assert!(output
+        .node_trace
+        .contains(&"ProviderRespCompat02ProviderCompat"));
+    assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     let client_response = match output.client_body {
         V3GeminiRelayClientBody::Json(value) => value,
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON client body"),

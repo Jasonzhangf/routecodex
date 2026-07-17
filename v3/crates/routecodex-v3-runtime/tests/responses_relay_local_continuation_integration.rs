@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
@@ -15,6 +16,10 @@ use std::{collections::VecDeque, sync::Mutex};
 struct SequentialJsonTransport {
     captures: Mutex<Vec<Value>>,
     responses: Mutex<VecDeque<Value>>,
+}
+
+struct StoplessSseTransport {
+    captures: Mutex<Vec<Value>>,
 }
 
 #[async_trait]
@@ -36,6 +41,214 @@ impl ResponsesTransport for SequentialJsonTransport {
             serde_json::to_vec(&response).unwrap(),
         ))
     }
+}
+
+#[async_trait]
+impl ResponsesTransport for StoplessSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures.lock().unwrap().push(request.body().clone());
+        let stream = futures_util::stream::iter([
+            Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"streamed stopless without schema\"}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stopless_sse\",\"object\":\"response\",\"status\":\"completed\",\"finish_reason\":\"stop\",\"output\":[]}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn json_runtime_enables_stopless_response_projection_and_next_request_rewrite() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_stopless_runtime_1",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"runtime missing stop schema"}]
+                }]
+            }),
+            json!({
+                "id":"resp_stopless_runtime_2",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"done {\"stopreason\":0}"}]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-runtime",
+        "conversation-stopless-runtime",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-runtime-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Trigger stopless"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        30_000,
+    )
+    .await
+    .unwrap();
+    let first_observability = first
+        .observability
+        .as_ref()
+        .expect("JSON stopless turn must expose observability");
+    assert_eq!(
+        first_observability.response_status.as_deref(),
+        Some("requires_action")
+    );
+    assert_eq!(first_observability.finish_reason.as_deref(), Some("stop"));
+    match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            assert_eq!(body["output"][0]["name"], "exec_command");
+            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-runtime-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"continue from stopless runtime\"}"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        31_000,
+    )
+    .await
+    .unwrap();
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless turn must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(
+        captures[1]["input"],
+        json!([{"role":"user","content":"continue from stopless runtime"}])
+    );
+    let provider_wire = serde_json::to_string(&captures[1]).unwrap();
+    assert!(provider_wire.contains("stopreason"));
+    for forbidden in [
+        "call_stopless_reasoning",
+        "function_call_output",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !provider_wire.contains(forbidden),
+            "provider payload leaked stopless artifact: {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context() {
+    let transport = StoplessSseTransport {
+        captures: Mutex::new(Vec::new()),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-sse",
+        "conversation-stopless-sse",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-sse-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"Trigger stopless over SSE",
+                "stream":true
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        32_000,
+    )
+    .await
+    .unwrap();
+
+    let output_observability = output
+        .observability
+        .as_ref()
+        .expect("SSE stopless turn must expose observability");
+    assert_eq!(
+        output_observability.response_status.as_deref(),
+        Some("requires_action")
+    );
+    assert_eq!(output_observability.finish_reason.as_deref(), Some("stop"));
+    let stream_observation = output
+        .stream_observation
+        .clone()
+        .expect("SSE stopless output must expose stream observability");
+    match output.client_body {
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("projected stopless SSE chunk"));
+            }
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("\"status\":\"requires_action\""));
+            assert!(text.contains("\"call_id\":\"call_stopless_reasoning\""));
+            assert!(text.contains("routecodex hook run reasoningStop"));
+            assert!(text.contains("[DONE]"));
+        }
+        V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+    let snapshot = stream_observation.snapshot().unwrap();
+    assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
 }
 
 #[tokio::test]

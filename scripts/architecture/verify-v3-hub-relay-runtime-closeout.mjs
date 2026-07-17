@@ -37,9 +37,11 @@ const expectedNodes = [
   'V3HubReqExecution05Planned',
   'V3HubReqTarget06Resolved',
   'V3HubReqOutbound07ProviderSemantic',
+  'ProviderReqCompat06ProviderCompat',
   'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest',
   'V3ProviderRespInbound01Raw',
+  'ProviderRespCompat02ProviderCompat',
   'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
   'V3HubRespContinuation04Committed',
@@ -62,7 +64,7 @@ if (manifest.entrypoint?.node_id !== expectedNodes[0]
   failures.push(`${manifestPath}: entry/return/call-map binding mismatch`);
 }
 if (!Array.isArray(manifest.edges) || manifest.edges.length !== expectedNodes.length - 1) {
-  failures.push(`${manifestPath}: expected 14 adjacent closeout edges`);
+  failures.push(`${manifestPath}: expected ${expectedNodes.length - 1} adjacent closeout edges`);
 } else {
   manifest.edges.forEach((edge, index) => {
     const expectedStep = `v3-hub-relay-closeout-${String(index + 1).padStart(2, '0')}`;
@@ -144,7 +146,7 @@ for (const phrase of [
   'V3ResponsesRelayLocalContinuationState',
   'V3ResponsesRelayLocalContinuationScope',
   'find_responses_tool_output_ids',
-  'merge_v3_relay_restored_local_context_at_req04',
+  'with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)',
   'commit_or_release_v3_relay_local_continuation_at_resp04',
   'execute_v3_responses_relay_runtime',
   'execute_v3_responses_relay_dry_run_runtime',
@@ -155,25 +157,24 @@ for (const phrase of [
   'build_v3_provider_12_responses_wire_payload',
   'build_v3_transport_13_responses_http_request_from_v3_provider_12',
   'run_json_response_hooks',
-  'push_streaming_response_trace',
-  'project_sse_stream',
+  'collect_v3_responses_relay_sse_response',
+  'project_finalized_response_sse_stream',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
-for (const node of expectedNodes.slice(9)) {
-  requireCount(responsesRuntime, responsesRuntimePath, node, 2);
+for (const node of expectedNodes.slice(10)) {
+  requireCount(responsesRuntime, responsesRuntimePath, node, 1);
 }
 forbid(responsesRuntime, responsesRuntimePath, [
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
-  /V3TargetLocalReselected/,
   /dynamic[_ -]?hook|libloading|read_dir/i,
-  /collect\s*::<\s*Vec|full_buffer|materiali[sz]e/i,
+  /collect\s*::<\s*Vec|full_buffer/i,
 ]);
 
 for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
-  'execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation',
   'responses_relay_local_continuation',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
@@ -213,7 +214,7 @@ for (const [path, text] of [
 ]) {
   requireText(text, path, 'v3.hub_relay_runtime_closeout');
   requireText(text, path, 'v3-hub-relay-closeout-01');
-  requireText(text, path, 'v3-hub-relay-closeout-14');
+  requireText(text, path, 'v3-hub-relay-closeout-16');
   requireText(text, path, 'Responses Relay source');
 }
 for (const phrase of [

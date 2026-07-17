@@ -51,6 +51,20 @@ const cases = [
     diagnostic: /classify_v3_hub_relay_tool_kind/,
   },
   {
+    name: 'apply_patch response freeform projection removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    marker: 'fn project_v3_apply_patch_freeform_calls_at_resp03',
+    mutation: 'project_v3_apply_patch_projection_removed',
+    diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
+  },
+  {
+    name: 'apply_patch request feedback normalization removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    marker: 'fn normalize_apply_patch_output_text_at_req04',
+    mutation: 'normalize_apply_patch_output_removed_at_req04',
+    diagnostic: /normalize_apply_patch_output_text_at_req04/,
+  },
+  {
     name: 'protocol transport continuation matrix removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
     marker: 'protocol_transport_continuation_matrix_uses_one_chat_process_governance_path',

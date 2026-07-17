@@ -64,8 +64,25 @@ requireText(cliManagedTests, 'top_level_lifecycle_without_config_uses_home_confi
 requireText(cliManagedTests, 'top_level_start_snap_forces_debug_snapshots', 'managed CLI snap override test');
 requireText(cliManagedTests, 'start_force_kills_explicit_listener_pid_after_graceful_timeout', 'managed CLI explicit PID takeover test');
 requireText(cliManagedTests, 'config log_console=false', 'managed CLI foreground console test');
-requireText(cliManagedTests, 'V3ServerStartup01ListenerSetPreflight', 'managed CLI startup console assertion');
-requireText(cliManagedTests, 'V3Server03HttpRequestRaw', 'managed CLI request console assertion');
+requireText(cliManagedTests, '[RouteCodexV3] Server started on ', 'managed CLI human startup console assertion');
+requireCount(cliManagedTests, '▶ [/v1/responses]', 2, 'managed CLI request monitor assertion');
+requireCount(cliManagedTests, '\\u{1b}[', 3, 'managed CLI request/error color assertion');
+requireText(cliManagedTests, 'rawInputItems=1', 'managed CLI request monitor raw input assertion');
+requireText(cliManagedTests, 'preparedInputItems=1', 'managed CLI request monitor prepared input assertion');
+requireText(cliManagedTests, 'vec![(1, 1), (2, 2)]', 'managed CLI total/daily request id assertion');
+requireText(cliManagedTests, 'send_path_not_found_request', 'managed CLI unknown path foreground error assertion');
+requireText(cliManagedTests, '/_routecodex/diagnostics/virtual-router/status', 'managed CLI VR diagnostics status assertion');
+requireText(cliManagedTests, 'vr_status["virtualRouter"]["routes"]["default"]["pools"][0]["poolId"]', 'managed CLI VR diagnostics pool assertion');
+requireText(cliManagedTests, 'openai-chat-router-unknown-', 'managed CLI unknown path production request id assertion');
+requireText(cliManagedTests, '!start_stderr.contains("❌ [unknown]")', 'managed CLI unknown path endpoint assertion');
+requireCount(cliManagedTests, '!start_stderr.contains("request pre-request failed")', 2, 'managed CLI no pre-request assertion');
+requireText(cliManagedTests, 'assert_ne!(\n        first_color, second_color', 'managed CLI different session color assertion');
+requireText(cliManagedTests, '🎯 [/v1/responses]', 'managed CLI route/provider hit assertion');
+requireText(cliManagedTests, '✅ [/v1/responses]', 'managed CLI completion monitor assertion');
+requireText(cliManagedTests, '[usage]', 'managed CLI usage monitor assertion');
+requireText(cliManagedTests, 'error=V3E', 'managed CLI compact error number assertion');
+requireText(cliManagedTests, '!start_stderr.contains("errorChain=")', 'managed CLI no foreground error chain assertion');
+requireText(cliManagedTests, '\\"node_id\\":\\"V3ServerStartup01ListenerSetPreflight\\"', 'managed CLI no raw debug JSON assertion');
 requireText(cliFoundationTests, 'top_level_start_help_exposes_snap_and_optional_config', 'CLI top-level start help test');
 requireText(cliManagedTests, 'fn stopped_instance_restarts_from_next_release_snapshot_executable()', 'managed CLI release rollover test');
 requireText(cliManagedTests, 'fn copy_release_binary(', 'managed CLI release rollover helper');
@@ -83,6 +100,16 @@ requireText(server, 'V3ServerStartup01ListenerSetPreflight', 'Server startup con
 requireText(server, 'V3Server03HttpRequestRaw', 'Server common request console event');
 requireText(server, '"V3ServerStartup01ListenerSetPreflight",\n                "listening"', 'Server startup console event recording');
 requireText(server, '"V3Server03HttpRequestRaw",\n        "received"', 'Server common request console event recording');
+requireText(server, 'emit_v3_startup_console_line', 'Server human startup console line');
+requireText(server, 'colorize_v3_request_console_line', 'Server color request console line');
+requireText(server, 'resolve_v3_log_session_color_key', 'Server old request-log color key resolver');
+requireText(server, 'next_v3_console_request_id', 'Server independent foreground request id resolver');
+requireText(server, 'emit_v3_request_route_console_line', 'Server route/provider hit console line');
+requireText(server, 'emit_v3_request_complete_console_line', 'Server completion console line');
+requireText(server, 'emit_v3_usage_console_line', 'Server usage console line');
+requireText(server, 'compact_v3_error_number', 'Server compact error number console line');
+requireText(server, 'get(virtual_router_status)', 'Server VR diagnostics status route');
+requireText(server, 'project_v3_virtual_router_status', 'Server delegates VR diagnostics projection');
 
 for (const id of [
   'v3.lifecycle.instance_declaration', 'v3.lifecycle.pid_cache',

@@ -41,23 +41,41 @@ impl V3HubReqInbound02Normalized {
 
 impl V3HubRespOutbound05ClientSemantic {
     pub fn payload(&self) -> &Value {
-        &self.previous.previous.previous.previous.payload.0
+        self.previous
+            .previous
+            .previous
+            .provider_raw()
+            .payload
+            .0
+            .as_ref()
     }
 
     pub fn entry_protocol(&self) -> V3HubEntryProtocol {
-        self.previous.previous.previous.previous.entry_protocol
+        self.previous
+            .previous
+            .previous
+            .provider_raw()
+            .entry_protocol
     }
 
     pub fn execution_mode(&self) -> V3HubExecutionMode {
-        self.previous.previous.previous.previous.execution
+        self.previous.previous.previous.provider_raw().execution
     }
 
     pub fn provider_wire_protocol(&self) -> V3HubProviderWireProtocol {
-        self.previous.previous.previous.previous.provider_protocol
+        self.previous
+            .previous
+            .previous
+            .provider_raw()
+            .provider_protocol
     }
 
     pub fn transport_intent(&self) -> V3HubTransportIntent {
-        self.previous.previous.previous.previous.transport_intent
+        self.previous
+            .previous
+            .previous
+            .provider_raw()
+            .transport_intent
     }
 
     pub fn node_id(&self) -> &'static str {
@@ -159,7 +177,7 @@ fn run_v3_anthropic_relay_req_inbound_hook(
 fn run_v3_anthropic_relay_client_projection_hook(
     committed: V3HubRespContinuation04Committed,
 ) -> Result<V3HubRespOutbound05ClientSemantic, V3AnthropicRelayProtocolHookError> {
-    let raw = &committed.previous.previous.previous;
+    let raw = committed.previous.previous.provider_raw();
     let entry_protocol = raw.entry_protocol;
     let execution = raw.execution;
     let provider_wire_protocol = raw.provider_protocol;

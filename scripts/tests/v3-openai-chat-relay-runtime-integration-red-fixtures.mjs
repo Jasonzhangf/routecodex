@@ -10,10 +10,10 @@ const runtime = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_ru
 const cases = [
   ['missing Req06', '    trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
   ['transport skipped', 'transport.send(transport_request).await', 'Ok::<_, V3ProviderError>(unreachable!())', /transport\.send/],
-  ['fallback added', 'let mut trace = Vec::with_capacity(15);', 'let fallback = true; let mut trace = Vec::with_capacity(15);', /fallback/],
-  ['Responses Direct re-entry', 'let mut trace = Vec::with_capacity(15);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(15);', /ResponsesDirect/],
+  ['fallback added', 'let mut trace = Vec::with_capacity(17);', 'let fallback = true; let mut trace = Vec::with_capacity(17);', /fallback/],
+  ['Responses Direct re-entry', 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],
   ['dynamic hooks', 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /read_dir|dynamic/],
-  ['raw SSE materialization', 'sse_transport_core::SseIncrementalDecoder::new(', 'let sse_frames = Vec::new(); sse_transport_core::SseIncrementalDecoder::new(', /sse_frames/],
+  ['raw SSE materialization', 'routecodex_v3_sse::SseIncrementalDecoder::new(', 'let sse_frames = Vec::new(); routecodex_v3_sse::SseIncrementalDecoder::new(', /sse_frames/],
   ['internal metadata leak', 'use std::collections::{BTreeMap, VecDeque};', 'const INTERNAL: &str = "metadata_center";\nuse std::collections::{BTreeMap, VecDeque};', /metadata_center/],
 ];
 const copied = [

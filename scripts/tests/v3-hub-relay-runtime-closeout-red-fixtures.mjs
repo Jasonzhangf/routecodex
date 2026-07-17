@@ -45,15 +45,15 @@ const cases = [
   {
     name: 'dynamic hook discovery appears',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    marker: 'let mut trace = Vec::with_capacity(15);',
-    mutation: 'let _dynamic_hook_scan = std::fs::read_dir(".");\n    let mut trace = Vec::with_capacity(15);',
+    marker: 'let mut trace = Vec::with_capacity(17);',
+    mutation: 'let _dynamic_hook_scan = std::fs::read_dir(".");\n    let mut trace = Vec::with_capacity(17);',
     diagnostic: /dynamic|read_dir|forbidden/,
   },
   {
     name: 'P6 direct shortcut appears',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    marker: 'let mut trace = Vec::with_capacity(15);',
-    mutation: 'let _shortcut = "ResponsesDirect11Policy";\n    let mut trace = Vec::with_capacity(15);',
+    marker: 'let mut trace = Vec::with_capacity(17);',
+    mutation: 'let _shortcut = "ResponsesDirect11Policy";\n    let mut trace = Vec::with_capacity(17);',
     diagnostic: /ResponsesDirect|forbidden/,
   },
   {
@@ -66,8 +66,8 @@ const cases = [
   {
     name: 'responses relay runtime reintroduces P6 direct policy',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'let mut trace = Vec::with_capacity(15);',
-    mutation: 'let _p6_shortcut = "V3ResponsesDirect11Policy";\n    let mut trace = Vec::with_capacity(15);',
+    marker: 'let mut trace = Vec::with_capacity(17);',
+    mutation: 'let _p6_shortcut = "V3ResponsesDirect11Policy";\n    let mut trace = Vec::with_capacity(17);',
     diagnostic: /ResponsesDirect|forbidden/,
   },
   {
@@ -75,14 +75,14 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker: 'trace.push("V3HubRespChatProcess03Governed");',
     mutation: 'trace.push("V3HubRespOutbound05ClientSemantic");',
-    diagnostic: /expected 2 occurrences of V3HubRespChatProcess03Governed/,
+    diagnostic: /missing V3HubRespChatProcess03Governed/,
   },
   {
     name: 'responses relay local continuation restore removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'merge_v3_relay_restored_local_context_at_req04',
+    marker: 'with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)',
     mutation: 'removed_relay_restore_at_req04',
-    diagnostic: /missing merge_v3_relay_restored_local_context_at_req04/,
+    diagnostic: /missing with_local_context\(context_id, local.scope.hub_scope\(&input.server_id\), context\)/,
   },
   {
     name: 'responses relay local continuation commit removed',

@@ -1,6 +1,6 @@
 lifecycle_id: v3.hub_relay.tool_servertool_multiturn_parity
 owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-summary: Controlled V3 Hub Relay tool/servertool multiturn parity closeout over Req04 tool/history governance, Resp03 tool harvest, Resp04 continuation commit, and Resp06 single response exit.
+summary: Controlled V3 Hub Relay tool/servertool multiturn parity closeout over Req04 tool/history governance, Req04 apply_patch feedback normalization, Resp03 tool harvest, Resp03 apply_patch freeform client projection, Resp04 continuation commit, and Resp06 single response exit.
 entrypoint:
   node_id: V3HubReqContinuation03Classified
 return_path:

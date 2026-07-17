@@ -9,10 +9,10 @@ const validate = readFileSync(validatePath, 'utf8');
 const hooks = readFileSync(hookPath, 'utf8');
 const failures = [];
 
-const nodeCount = (types.match(/Self::V3(?:Hub|Provider|Server)[A-Za-z0-9]+/g) ?? [])
+const nodeCount = (types.match(/Self::(?:V3(?:Hub|Provider|Server)|Provider)[A-Za-z0-9]+/g) ?? [])
   .filter((value, index, all) => all.indexOf(value) === index)
   .length;
-if (nodeCount !== 15) failures.push(`V3HubFixedNode::ALL must own exactly 15 fixed nodes, found ${nodeCount}`);
+if (nodeCount !== 17) failures.push(`V3HubFixedNode::ALL must own exactly 17 fixed nodes, found ${nodeCount}`);
 if (!hooks.includes('V3_HUB_V1_NODE_HOOK_COUNT: usize = V3HubFixedNode::ALL.len() * 2')) {
   failures.push('entry/exit hook count must derive from the closed fixed-node set');
 }

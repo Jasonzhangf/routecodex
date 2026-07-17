@@ -38,22 +38,26 @@ hooks = [
   { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 30, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 31, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 32, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },
 ]
 "#;
 
@@ -151,6 +155,10 @@ fn run_with_pid(binary: &str, state_root: &Path, config: &Path, command: &str) -
         .args(["server", command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -174,6 +182,10 @@ fn run_with_timeout(
         .arg("--timeout-ms")
         .arg(timeout_ms.to_string())
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .output()
         .unwrap()
@@ -184,6 +196,10 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .args([command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .output()
         .unwrap()
@@ -227,6 +243,11 @@ fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Chil
         .args(["start", "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("ROUTECODEX_FORCE_LOG_COLOR", "1")
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -245,6 +266,10 @@ fn spawn_top_level_start_with_args(
     command.args(extra_args);
     command
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -257,11 +282,19 @@ fn spawn_top_level_start_without_config(binary: &str, state_root: &Path, home: &
         .arg("start")
         .env("HOME", home)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap()
+}
+
+fn request_counter_file(state_root: &Path) -> PathBuf {
+    state_root.join("request-id-counter.json")
 }
 
 fn run_top_level_without_config(
@@ -279,8 +312,10 @@ fn run_top_level_without_config(
         .unwrap()
 }
 
-fn send_responses_dry_run_request(port: u16) {
-    let body = r#"{"model":"test","input":"console probe","stream":false}"#;
+fn send_responses_dry_run_request(port: u16, session_id: &str) {
+    let body = format!(
+        r#"{{"model":"test","input":"console probe","stream":false,"client_metadata":{{"session_id":"{session_id}","thread_id":"thread-{session_id}"}}}}"#
+    );
     let request = format!(
         "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nx-routecodex-dry-run: provider-request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -297,6 +332,67 @@ fn send_responses_dry_run_request(port: u16) {
         response.starts_with("HTTP/1.1 200"),
         "dry-run response must succeed, got:\n{response}"
     );
+}
+
+fn send_invalid_json_request(port: u16) {
+    let body = r#"{"model":"test","input":"broken""#;
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    assert!(
+        response.starts_with("HTTP/1.1 400"),
+        "invalid JSON response must fail visibly, got:\n{response}"
+    );
+}
+
+fn send_path_not_found_request(port: u16) {
+    let request = format!(
+        "GET /not-registered HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    assert!(
+        response.starts_with("HTTP/1.1 404"),
+        "unknown path response must fail visibly, got:\n{response}"
+    );
+}
+
+fn leading_ansi_color(line: &str) -> Option<String> {
+    if !line.starts_with("\u{1b}[") {
+        return None;
+    }
+    let end = line.find('m')?;
+    Some(line[..=end].to_string())
+}
+
+fn request_id_from_line(line: &str) -> Option<&str> {
+    let marker = " request ";
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let end = rest.find(' ')?;
+    Some(&rest[..end])
+}
+
+fn request_counter_suffix_from_line(line: &str) -> Option<(u64, u64)> {
+    let request_id = request_id_from_line(line)?;
+    let mut parts = request_id.rsplit('-');
+    let daily = parts.next()?.parse::<u64>().ok()?;
+    let total = parts.next()?.parse::<u64>().ok()?;
+    Some((total, daily))
 }
 
 fn http_get_json(port: u16, path: &str) -> Value {
@@ -511,7 +607,19 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     }
     let started = top_level_status_json(binary, &state_root, &config);
     assert_eq!(started["state"], "running");
-    send_responses_dry_run_request(ports[0]);
+    let vr_status = http_get_json(ports[0], "/_routecodex/diagnostics/virtual-router/status");
+    assert_eq!(vr_status["ok"], true);
+    assert_eq!(vr_status["serverId"], "a");
+    assert_eq!(vr_status["localPort"], ports[0]);
+    assert_eq!(vr_status["routingPolicyGroup"], "default");
+    assert_eq!(
+        vr_status["virtualRouter"]["routes"]["default"]["pools"][0]["poolId"],
+        "default"
+    );
+    send_responses_dry_run_request(ports[0], "console-alpha");
+    send_responses_dry_run_request(ports[0], "console-beta");
+    send_invalid_json_request(ports[0]);
+    send_path_not_found_request(ports[0]);
 
     let status = run_top_level(binary, &state_root, &config, "status");
     assert!(
@@ -549,18 +657,115 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         String::from_utf8_lossy(&start_output.stderr)
     );
     let start_stdout = String::from_utf8_lossy(&start_output.stdout);
+    let start_stderr = String::from_utf8_lossy(&start_output.stderr);
     assert!(
-        start_stdout.contains("V3ServerStartup01ListenerSetPreflight"),
-        "top-level start must stream server startup console even when config log_console=false, got:\n{start_stdout}"
+        start_stdout.contains("[RouteCodexV3] Server started on "),
+        "top-level start must stream standard human startup status even when config log_console=false, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("V3Server03HttpRequestRaw"),
-        "top-level start must stream server request console/debug output even when config log_console=false, got:\n{start_stdout}"
+        start_stdout.contains("▶ [/v1/responses]")
+            && start_stdout.contains("request ")
+            && start_stdout.contains(" started")
+            && start_stdout.contains("rawInputItems=1")
+            && start_stdout.contains("preparedInputItems=1")
+            && start_stdout.contains("\u{1b}["),
+        "top-level start must stream colorized old production request monitor output even when config log_console=false, got:\n{start_stdout}"
+    );
+    let started_lines = start_stdout
+        .lines()
+        .filter(|line| line.contains("▶ [/v1/responses]"))
+        .collect::<Vec<_>>();
+    assert!(
+        started_lines.len() >= 2,
+        "top-level start must show every request start, got:\n{start_stdout}"
+    );
+    let request_counters = started_lines
+        .iter()
+        .take(2)
+        .filter_map(|line| request_counter_suffix_from_line(line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        request_counters,
+        vec![(1, 1), (2, 2)],
+        "visible request ids must use production total/daily suffix counters, got:\n{start_stdout}"
+    );
+    for line in started_lines.iter().take(2) {
+        let request_id = request_id_from_line(line).unwrap();
+        assert!(
+            request_id.starts_with("openai-responses-router-test-")
+                && !request_id.contains("-req-"),
+            "request id must use production entry-provider-model timestamp shape, got {request_id}"
+        );
+        assert!(
+            request_id.contains('T'),
+            "request id must include production timestamp, got {request_id}"
+        );
+    }
+    let invalid_error_id = start_stderr
+        .lines()
+        .find(|line| line.contains("❌ [/v1/responses]"))
+        .and_then(request_id_from_line)
+        .expect("invalid JSON error line must include a request id");
+    assert!(
+        invalid_error_id.starts_with("openai-responses-router-unknown-")
+            && invalid_error_id.ends_with("-3-3"),
+        "pre-body errors must still allocate production-shaped total/daily request id, got stderr:\n{start_stderr}"
+    );
+    let unknown_path_error_id = start_stderr
+        .lines()
+        .find(|line| line.contains("❌ [/not-registered]"))
+        .and_then(request_id_from_line)
+        .expect("unknown path error line must include a request id");
+    assert!(
+        unknown_path_error_id.starts_with("openai-chat-router-unknown-")
+            && unknown_path_error_id.ends_with("-4-4")
+            && !start_stderr.contains("❌ [unknown]")
+            && !start_stderr.contains("request pre-request failed"),
+        "404 errors must use endpoint path and continuous production-shaped request id, got stderr:\n{start_stderr}"
+    );
+    let first_color = leading_ansi_color(started_lines[0]).expect("first session must be colored");
+    let second_color =
+        leading_ansi_color(started_lines[1]).expect("second session must be colored");
+    assert_ne!(
+        first_color, second_color,
+        "different client sessions must resolve to different foreground colors, got:\n{start_stdout}"
+    );
+    assert!(
+        start_stdout.contains("🎯 [/v1/responses]")
+            && start_stdout.contains("route=")
+            && start_stdout.contains("provider=")
+            && start_stdout.contains("providerKey=")
+            && start_stdout.contains("path="),
+        "foreground monitor must show route/provider hit object, got:\n{start_stdout}"
+    );
+    assert!(
+        start_stdout.contains("✅ [/v1/responses]")
+            && start_stdout.contains("status=200")
+            && !start_stdout.contains("providerStatus=200")
+            && start_stdout.contains("nodes=")
+            && start_stdout.contains("elapsedMs="),
+        "foreground monitor must show one normal status and pipeline cost without repeating providerStatus=200, got:\n{start_stdout}"
+    );
+    assert!(
+        start_stdout.contains("[usage]")
+            && start_stdout.contains("usage=")
+            && start_stdout.contains("pipeline="),
+        "foreground monitor must show usage and pipeline summary, got:\n{start_stdout}"
+    );
+    assert!(
+        start_stderr.contains("\u{1b}[31m")
+            && start_stderr.contains("❌ [/v1/responses]")
+            && start_stderr.contains("error=V3E")
+            && start_stderr.contains("subcode=")
+            && !start_stderr.contains("request pre-request failed")
+            && !start_stderr.contains("errorChain="),
+        "foreground errors must be red, compact, and use the continuous request id instead of pre-request, got stderr:\n{start_stderr}"
     );
     assert!(
         !start_stdout.contains("\"schema_version\":1,\"instance_id\"")
-            && !start_stdout.contains("starting a on"),
-        "top-level start must not print CLI status JSON or invented starting lines, got:\n{start_stdout}"
+            && !start_stdout.contains("starting a on")
+            && !start_stdout.contains("\"node_id\":\"V3ServerStartup01ListenerSetPreflight\""),
+        "top-level start must not print CLI status JSON, raw debug JSON, or invented starting lines, got:\n{start_stdout}"
     );
 }
 

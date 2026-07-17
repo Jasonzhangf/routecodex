@@ -1280,7 +1280,7 @@ async fn responses_relay_body_client_metadata_scope_mismatch_fails_before_provid
 }
 
 #[tokio::test]
-async fn responses_relay_missing_client_scope_for_tool_turn_fails_before_provider_send() {
+async fn responses_relay_missing_client_scope_for_tool_output_fails_before_provider_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -1300,7 +1300,29 @@ async fn responses_relay_missing_client_scope_for_tool_turn_fails_before_provide
         .json(&json!({
             "model":"client-test",
             "input":"use lookup_weather",
-            "tools":[{"type":"function","name":"lookup_weather"}]
+            "tools":[{"type":"function","name":"lookup_weather"}],
+            "client_metadata": {
+                "session_id":"rccv3-body-session-present",
+                "thread_id":"rccv3-body-thread-present"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "requires_action");
+    let _first_capture = captures.recv().await.unwrap();
+
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":[{
+                "type":"function_call_output",
+                "call_id":"call_body_metadata",
+                "output":"missing scope"
+            }]
         }))
         .send()
         .await
@@ -1317,6 +1339,69 @@ async fn responses_relay_missing_client_scope_for_tool_turn_fails_before_provide
             .is_err(),
         "missing continuation scope must fail before provider send"
     );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_full_history_tool_pair_without_client_scope_reaches_provider() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-full-history");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "previous_response_id":"1a3e546c-0a32-4667-933c-03f88aafc05c",
+            "input":[
+                {"role":"user","content":"use lookup_weather"},
+                {
+                    "type":"function_call",
+                    "call_id":"call_full_history",
+                    "name":"lookup_weather",
+                    "arguments":"{\"city\":\"Paris\"}"
+                },
+                {
+                    "type":"function_call_output",
+                    "call_id":"call_full_history",
+                    "output":"weather=clear"
+                }
+            ],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.body["input"][1]["call_id"], "call_full_history");
+    assert_eq!(capture.body["input"][2]["call_id"], "call_full_history");
+    assert!(
+        capture.body.get("client_metadata").is_none(),
+        "{:?}",
+        capture.body
+    );
+    assert_eq!(capture.session_id, None);
+    assert_eq!(capture.thread_id, None);
+    assert_eq!(capture.x_session_id, None);
+    assert_eq!(capture.x_conversation_id, None);
+    assert_eq!(capture.x_codex_turn_metadata, None);
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

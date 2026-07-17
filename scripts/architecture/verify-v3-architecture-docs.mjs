@@ -99,8 +99,9 @@ const hubV1PendingResourceIds = new Set([]);
 const hubV1AnchoredStepIds = new Set([
   'v3-hub-req-01', 'v3-hub-req-02', 'v3-hub-req-03', 'v3-hub-req-04',
   'v3-hub-req-05', 'v3-hub-req-06', 'v3-hub-req-07', 'v3-hub-req-08',
+  'v3-hub-req-09',
   'v3-hub-resp-01', 'v3-hub-resp-02', 'v3-hub-resp-03', 'v3-hub-resp-04',
-  'v3-hub-resp-05',
+  'v3-hub-resp-05', 'v3-hub-resp-06',
 ]);
 const hubV1EdgePairs = new Map([
   ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized']],
@@ -109,13 +110,15 @@ const hubV1EdgePairs = new Map([
   ['v3-hub-req-04', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned']],
   ['v3-hub-req-05', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved']],
   ['v3-hub-req-06', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic']],
-  ['v3-hub-req-07', ['V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload']],
-  ['v3-hub-req-08', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest']],
-  ['v3-hub-resp-01', ['V3ProviderRespInbound01Raw', 'V3HubRespInbound02Normalized']],
-  ['v3-hub-resp-02', ['V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed']],
-  ['v3-hub-resp-03', ['V3HubRespChatProcess03Governed', 'V3HubRespContinuation04Committed']],
-  ['v3-hub-resp-04', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic']],
-  ['v3-hub-resp-05', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
+  ['v3-hub-req-07', ['V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat']],
+  ['v3-hub-req-08', ['ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload']],
+  ['v3-hub-req-09', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest']],
+  ['v3-hub-resp-01', ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat']],
+  ['v3-hub-resp-02', ['ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized']],
+  ['v3-hub-resp-03', ['V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed']],
+  ['v3-hub-resp-04', ['V3HubRespChatProcess03Governed', 'V3HubRespContinuation04Committed']],
+  ['v3-hub-resp-05', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic']],
+  ['v3-hub-resp-06', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
 ]);
 const clientBodyProjectionResources = new Set([
   'v3.response.client_payload',

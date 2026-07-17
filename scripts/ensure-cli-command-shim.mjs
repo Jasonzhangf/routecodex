@@ -164,9 +164,25 @@ function writeShim(shimDir, binName, packageName, options = {}) {
   });
 
   fs.mkdirSync(shimDir, { recursive: true });
+  removeExistingShimPath(shimPath);
   fs.writeFileSync(shimPath, content);
   fs.chmodSync(shimPath, 0o755);
   return shimPath;
+}
+
+function removeExistingShimPath(shimPath) {
+  try {
+    const stat = fs.lstatSync(shimPath);
+    if (stat.isDirectory()) {
+      throw new Error(`refusing to replace directory CLI shim: ${shimPath}`);
+    }
+    fs.rmSync(shimPath, { force: true });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
 }
 
 function removeLegacyShim(shimDir, binName) {

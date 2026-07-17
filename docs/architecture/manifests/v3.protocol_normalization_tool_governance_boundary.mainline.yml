@@ -1,6 +1,6 @@
 lifecycle_id: v3.protocol_normalization_tool_governance_boundary
 owner_feature_id: v3.protocol_normalization_tool_governance_boundary
-summary: V3 protocol normalization allows adjacent protocol mapping and shape checks only; tool identity pairing and tool governance live in Chat Process govern nodes. Provider compat nodes are explicit skeleton contracts and must not re-run protocol mapping or tool governance.
+summary: V3 protocol normalization allows adjacent protocol mapping and shape checks only; tool identity pairing and tool governance live in Chat Process govern nodes. Provider compat nodes are explicit runtime nodes and must not re-run protocol mapping or tool governance.
 entrypoint:
   node_id: ServerReqInbound01ClientRaw
 return_path:
@@ -43,10 +43,10 @@ edges:
   - { step_id: v3-protocol-boundary-req-02, from_node: HubReqInbound02Standardized, to_node: HubReqChatProcess03Governed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-req-03, from_node: HubReqChatProcess03Governed, to_node: VrRoute04SelectedTarget, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-req-04, from_node: VrRoute04SelectedTarget, to_node: HubReqOutbound05ProviderSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-req-05, from_node: HubReqOutbound05ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-req-06, from_node: ProviderReqCompat06ProviderCompat, to_node: ProviderReqOutbound07TransportRequest, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-resp-01, from_node: ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-resp-02, from_node: ProviderRespCompat02ProviderCompat, to_node: HubRespInbound03Parsed, status: skeleton_contract_only, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-05, from_node: HubReqOutbound05ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-req-06, from_node: ProviderReqCompat06ProviderCompat, to_node: ProviderReqOutbound07TransportRequest, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-01, from_node: ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-02, from_node: ProviderRespCompat02ProviderCompat, to_node: HubRespInbound03Parsed, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-03, from_node: HubRespInbound03Parsed, to_node: HubRespChatProcess04Governed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-04, from_node: HubRespChatProcess04Governed, to_node: HubRespContinuation05Committed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-05, from_node: HubRespContinuation05Committed, to_node: HubRespOutbound06ClientSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
@@ -73,4 +73,4 @@ completion_boundary:
   source_controlled: true
   live_cutover: false
   global_install_restart: false
-  compat_runtime_behavior: skeleton_contract_only
+  compat_runtime_behavior: typed_runtime_nodes_anchored

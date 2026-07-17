@@ -17,9 +17,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         return Ok(input);
     }
     let object = input
-        .previous
-        .payload
-        .0
+        .provider_payload()
         .as_object()
         .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
     let status = object
@@ -27,6 +25,9 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         .and_then(Value::as_str)
         .unwrap_or_default();
     if status != "completed" {
+        return Ok(input);
+    }
+    if !response_has_stopless_stop_trigger(input.provider_payload().as_ref()) {
         return Ok(input);
     }
     let Some(text) = first_output_text(object.get("output")) else {
@@ -45,7 +46,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
             "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json status-control\"}"
         }]
     });
-    input.previous.payload.0 = Arc::new(projected);
+    *input.provider_payload_mut() = Arc::new(projected);
     Ok(input)
 }
 
@@ -80,13 +81,63 @@ pub fn apply_v3_stopless_request_hook_at_req04(
 }
 
 fn first_output_text(output: Option<&Value>) -> Option<&str> {
-    output?
+    output?.as_array()?.iter().find_map(output_item_text)
+}
+
+fn output_item_text(item: &Value) -> Option<&str> {
+    match item.get("type").and_then(Value::as_str) {
+        Some("output_text") => item.get("text").and_then(Value::as_str),
+        Some("message") => item
+            .get("text")
+            .and_then(Value::as_str)
+            .or_else(|| first_message_content_text(item.get("content"))),
+        _ => None,
+    }
+}
+
+fn first_message_content_text(content: Option<&Value>) -> Option<&str> {
+    content?
         .as_array()?
         .iter()
-        .find_map(|item| match item.get("type").and_then(Value::as_str) {
-            Some("output_text") | Some("message") => item.get("text").and_then(Value::as_str),
+        .find_map(|part| match part.get("type").and_then(Value::as_str) {
+            Some("output_text" | "text") => part.get("text").and_then(Value::as_str),
             _ => None,
         })
+}
+
+fn response_has_stopless_stop_trigger(response: &Value) -> bool {
+    [
+        &["finish_reason"][..],
+        &["finishReason"][..],
+        &["stop_reason"][..],
+        &["stopReason"][..],
+        &["response", "finish_reason"][..],
+        &["response", "finishReason"][..],
+        &["response", "stop_reason"][..],
+        &["response", "stopReason"][..],
+        &["choices", "0", "finish_reason"][..],
+        &["candidates", "0", "finishReason"][..],
+    ]
+    .iter()
+    .any(|path| {
+        response_string_path(response, path).is_some_and(|value| value.eq_ignore_ascii_case("stop"))
+    })
+}
+
+fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        if let Ok(index) = segment.parse::<usize>() {
+            current = current.get(index)?;
+        } else {
+            current = current.get(*segment)?;
+        }
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn stop_schema_is_terminal(text: &str) -> bool {

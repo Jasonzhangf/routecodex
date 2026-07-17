@@ -230,7 +230,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
-    let mut trace = Vec::with_capacity(15);
+    let mut trace = Vec::with_capacity(17);
     let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -328,7 +328,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     );
     trace.push("V3HubReqOutbound07ProviderSemantic");
     let target = provider_target(manifest, req07.selected_target())?;
-    let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
+    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+    trace.push("ProviderReqCompat06ProviderCompat");
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
     let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
     let provider_semantic = req09.into_provider_semantic_payload();
     let wire =
@@ -372,6 +374,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         trace.push("V3ProviderRespInbound01Raw");
         let hooks = compile_v3_hub_relay_response_hooks();
         let resp02 = hooks.normalize(resp01)?;
+        trace.push("ProviderRespCompat02ProviderCompat");
         trace.push("V3HubRespInbound02Normalized");
         let resp03 = hooks.govern(resp02, &response_hook_profile)?;
         trace.push("V3HubRespChatProcess03Governed");
@@ -382,7 +385,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         commit_or_release_local_continuation(
             local.as_ref(),
             &requested_local_ids,
-            &resp04.previous.previous.previous.payload.0,
+            resp04.finalized_payload(),
             resp04.action(),
         )?;
         let client_response = V3AnthropicRelaySseProjection::project_after_resp04(client_events);
@@ -414,6 +417,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
+    trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
@@ -424,12 +428,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     commit_or_release_local_continuation(
         local.as_ref(),
         &requested_local_ids,
-        &resp04.previous.previous.previous.payload.0,
+        resp04.finalized_payload(),
         resp04.action(),
     )?;
-    let client_response = project_v3_responses_json_as_anthropic_message(
-        &resp04.previous.previous.previous.payload.0,
-    )?;
+    let client_response =
+        project_v3_responses_json_as_anthropic_message(resp04.finalized_payload())?;
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);

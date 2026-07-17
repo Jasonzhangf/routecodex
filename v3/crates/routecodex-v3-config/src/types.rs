@@ -114,9 +114,11 @@ pub enum V3HubFixedNode {
     V3HubReqExecution05Planned,
     V3HubReqTarget06Resolved,
     V3HubReqOutbound07ProviderSemantic,
+    ProviderReqCompat06ProviderCompat,
     V3ProviderReqOutbound08WirePayload,
     V3ProviderReqOutbound09TransportRequest,
     V3ProviderRespInbound01Raw,
+    ProviderRespCompat02ProviderCompat,
     V3HubRespInbound02Normalized,
     V3HubRespChatProcess03Governed,
     V3HubRespContinuation04Committed,
@@ -125,7 +127,7 @@ pub enum V3HubFixedNode {
 }
 
 impl V3HubFixedNode {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 17] = [
         Self::V3HubReqInbound01ClientRaw,
         Self::V3HubReqInbound02Normalized,
         Self::V3HubReqContinuation03Classified,
@@ -133,9 +135,11 @@ impl V3HubFixedNode {
         Self::V3HubReqExecution05Planned,
         Self::V3HubReqTarget06Resolved,
         Self::V3HubReqOutbound07ProviderSemantic,
+        Self::ProviderReqCompat06ProviderCompat,
         Self::V3ProviderReqOutbound08WirePayload,
         Self::V3ProviderReqOutbound09TransportRequest,
         Self::V3ProviderRespInbound01Raw,
+        Self::ProviderRespCompat02ProviderCompat,
         Self::V3HubRespInbound02Normalized,
         Self::V3HubRespChatProcess03Governed,
         Self::V3HubRespContinuation04Committed,
@@ -152,11 +156,13 @@ impl V3HubFixedNode {
             Self::V3HubReqExecution05Planned => "V3HubReqExecution05Planned",
             Self::V3HubReqTarget06Resolved => "V3HubReqTarget06Resolved",
             Self::V3HubReqOutbound07ProviderSemantic => "V3HubReqOutbound07ProviderSemantic",
+            Self::ProviderReqCompat06ProviderCompat => "ProviderReqCompat06ProviderCompat",
             Self::V3ProviderReqOutbound08WirePayload => "V3ProviderReqOutbound08WirePayload",
             Self::V3ProviderReqOutbound09TransportRequest => {
                 "V3ProviderReqOutbound09TransportRequest"
             }
             Self::V3ProviderRespInbound01Raw => "V3ProviderRespInbound01Raw",
+            Self::ProviderRespCompat02ProviderCompat => "ProviderRespCompat02ProviderCompat",
             Self::V3HubRespInbound02Normalized => "V3HubRespInbound02Normalized",
             Self::V3HubRespChatProcess03Governed => "V3HubRespChatProcess03Governed",
             Self::V3HubRespContinuation04Committed => "V3HubRespContinuation04Committed",

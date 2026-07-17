@@ -19,10 +19,12 @@ flowchart TD
   R4 --> R5[V3HubReqExecution05Planned]
   R5 --> R6[V3HubReqTarget06Resolved]
   R6 --> R7[V3HubReqOutbound07ProviderSemantic]
-  R7 --> R8[V3ProviderReqOutbound08WirePayload]
+  R7 --> C6[ProviderReqCompat06ProviderCompat]
+  C6 --> R8[V3ProviderReqOutbound08WirePayload]
   R8 --> R9[V3ProviderReqOutbound09TransportRequest]
   R9 --> P1[V3ProviderRespInbound01Raw]
-  P1 --> S2[V3HubRespInbound02Normalized]
+  P1 --> PC2[ProviderRespCompat02ProviderCompat]
+  PC2 --> S2[V3HubRespInbound02Normalized]
   S2 --> S3[V3HubRespChatProcess03Governed]
   S3 --> S4[V3HubRespContinuation04Committed]
   S4 --> S5[V3HubRespOutbound05ClientSemantic]
@@ -115,9 +117,9 @@ Relay is borrow-first and move-at-boundary:
 
 - Feature: `v3.anthropic_relay_runtime_integration`.
 - Machine lifecycle: `v3.anthropic_relay.controlled_runtime`, with the same
-  `v3-anthropic-relay-01..15` edge IDs as the mainline call map.
+  `v3-anthropic-relay-01..17` edge IDs as the mainline call map.
 - Stable fixture digest: `74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e`.
-- Pre-change red state: `status=wiring_missing`, with the eight missing adjacent edges diagnosed.
+- Pre-change red state: `status=wiring_missing`, with the ten missing adjacent edges diagnosed.
 - Green controlled cases: `json_thinking_tool_use`, `sse_thinking_tool_use`, `provider_error`, and
   `side_channel_isolation`.
 - Every case requires exactly one captured `POST /v1/responses` request; provider error must enter
@@ -131,7 +133,7 @@ Relay is borrow-first and move-at-boundary:
 - A request: `v3-hub-relay-req-01..03` only; Req03 classifies, Req04 restores/governs; no Req05,
   Provider, Server, response, or dynamic-hook shortcut. Run request focused test/verifier/red fixture
   plus shared architecture gates.
-- B response: `v3-hub-relay-resp-01..03` only; Resp03 governs and Resp04 commits once; no Resp05,
+- B response: `v3-hub-relay-resp-01..04` only; Resp03 governs and Resp04 commits once; no Resp05,
   SSE, Server, store, second-exit, or post-save semantic repair. Run response focused
   test/verifier/red fixture plus shared architecture gates.
 - C resources/hooks: Config declares all fixed node entry/exit hooks and resource access; Manifest
@@ -148,9 +150,10 @@ Relay is borrow-first and move-at-boundary:
   the source gate rejects full-payload clones and JSON serialization roundtrips.
 - `v3-hub-relay-copy-probe-02` proves SSE keeps its transport intent, one shared canonical response
   payload, and the sole Server response exit; the gate rejects stream collection/materialization.
-- `v3-hub-relay-copy-probe-03` proves local context survives lookup release through Req04 and is
+- `v3-hub-relay-copy-probe-03` binds the response compat-to-normalized leg for the same SSE probe.
+- `v3-hub-relay-copy-probe-04` proves local context survives lookup release through Req04 and is
   released with the governed outcome.
-- `v3-hub-relay-copy-probe-04` proves servertool response governance commits one Resp04 canonical
+- `v3-hub-relay-copy-probe-05` proves servertool response governance commits one Resp04 canonical
   context and the following request restores before Req04 servertool governance.
 - These are test/source gates only. They do not establish live Relay, continuation persistence, or
   servertool runtime execution.
@@ -160,7 +163,7 @@ Relay is borrow-first and move-at-boundary:
 - Feature: `v3.hub_relay_runtime_closeout`.
 - Evidence marker: `v3-hub-relay-controlled-closeout-20260716`.
 - Machine lifecycle: `v3.hub_relay.runtime_closeout`, from `v3-hub-relay-closeout-01` through
-  `v3-hub-relay-closeout-14`, with adjacent edges over the fixed Req01-Req09 and Resp01-Resp06
+  `v3-hub-relay-closeout-16`, with adjacent edges over the fixed Req01-Req09 and Resp01-Resp06
   topology.
 - Controlled cases prove JSON and SSE both reach exactly one `V3ServerRespOutbound06ClientFrame`.
 - Responses Relay source server cases prove `/v1/responses` Relay enters the fixed topology before
@@ -189,13 +192,19 @@ Relay is borrow-first and move-at-boundary:
   and servertool request hook profile; Resp03 response Chat Process harvests tool calls and
   classifies servertool/apply_patch/MCP/native/custom/function tools before Resp04 continuation
   commit.
+- apply_patch boundary: Resp03 projects model-emitted `function_call apply_patch` arguments into
+  client-facing freeform `custom_tool_call.input`; Req04 pairs the returned tool output by
+  `call_id`, normalizes executor failure/success to `APPLY_PATCH_ERROR` / `APPLY_PATCH_RESULT`,
+  and keeps that result in the next provider request. This remains a Chat Process tool governance
+  hook block, not an apply_patch lifecycle, servertool lifecycle, handler repair, or SSE repair.
 - Positive matrix:
   - ordinary function/tool output;
   - Responses Relay JSON restores the saved function call before the current tool output and
     preserves the current request's `tools` declaration;
   - custom tool output;
   - servertool hook profile;
-  - apply_patch, MCP, and native tool families;
+  - apply_patch freeform client projection and normalized next-turn failure feedback;
+  - MCP and native tool families;
   - historical image/attachment placeholder with current-turn payload preserved;
   - JSON and SSE arbitrary chunk ordering through the one `V3ServerRespOutbound06ClientFrame` exit.
 - Negative matrix:
@@ -245,7 +254,7 @@ Live Relay remains pending for live Server cutover and real-provider production 
 - Feature: `v3.openai_chat_relay_runtime_integration`.
 - Review surface: [V3 OpenAI Chat Relay Controlled Runtime](v3-openai-chat-relay-controlled-runtime.md).
 - Machine lifecycle: `v3.openai_chat_relay.controlled_runtime`, with
-  `v3-openai-chat-relay-01..15` bound to real Rust caller/callee symbols.
+  `v3-openai-chat-relay-01..17` bound to real Rust caller/callee symbols.
 - `/v1/chat/completions` now enters the sole Hub v1 Req01–Req09 path, calls one controlled OpenAI
   Chat upstream, and returns through Resp01–Resp06.
 - Runtime owns incremental SSE validation/projection; Server only transports

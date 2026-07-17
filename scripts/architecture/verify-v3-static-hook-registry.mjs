@@ -21,9 +21,11 @@ const nodes = [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
   'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
-  'V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound08WirePayload',
+  'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
+  'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
-  'V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed',
+  'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
+  'V3HubRespChatProcess03Governed',
   'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
@@ -41,9 +43,11 @@ const builders = [
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
-  'build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07',
+  'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
+  'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
-  'build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01',
+  'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
+  'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
   'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02',
   'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
@@ -53,7 +57,7 @@ for (const builder of builders) {
   const count = (production.match(new RegExp(`pub fn ${builder}\\b`, 'g')) ?? []).length;
   if (count !== 1) failures.push(`adjacent builder ${builder} count=${count}, expected 1`);
 }
-const conversionBuilders = [...production.matchAll(/pub fn (build_v3_[a-z0-9_]+_from_v3_[a-z0-9_]+)\b/g)].map((match) => match[1]);
+const conversionBuilders = [...production.matchAll(/pub fn (build_(?:v3_)?[a-z0-9_]+_from_(?:v3_)?[a-z0-9_]+)\b/g)].map((match) => match[1]);
 for (const builder of conversionBuilders) if (!builders.includes(builder)) failures.push(`non-adjacent or duplicate builder ${builder}`);
 
 const axes = ['V3HubEntryProtocol', 'V3HubContinuationOwnership', 'V3HubExecutionMode', 'V3HubProviderWireProtocol'];

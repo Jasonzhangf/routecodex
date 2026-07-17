@@ -32,11 +32,12 @@ use routecodex_v3_runtime::{
     V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
     V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3ProviderHealthStore, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
-    V3ResponsesDirectContinuationState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3RuntimeObservability,
-    V3RuntimeStreamObservation, V3RuntimeUsageSummary,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayRuntimeOutput, V3RuntimeObservability, V3RuntimeStreamObservation,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -69,7 +70,7 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
-    provider_health: Arc<V3ProviderHealthStore>,
+    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -406,7 +407,9 @@ pub async fn spawn_v3_server_aggregate(
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
-    let provider_health = Arc::new(V3ProviderHealthStore::from_manifest(&manifest));
+    let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
+        &manifest,
+    ));
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -625,7 +628,7 @@ async fn pending_endpoint(
                         return foundation_output_response(project_v3_debug_failure(
                             "V3Server03HttpRequestRaw",
                             error,
-                        ))
+                        ));
                     }
                 };
             let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
@@ -660,7 +663,7 @@ async fn pending_endpoint(
             return foundation_output_response(project_v3_debug_failure(
                 "V3Server03HttpRequestRaw",
                 error,
-            ))
+            ));
         }
     };
     if let Err(error) = state.debug.record_node_event(
@@ -856,7 +859,7 @@ async fn pending_endpoint(
                     &path,
                     &request_id,
                     project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                )
+                );
             }
         };
         let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -868,7 +871,7 @@ async fn pending_endpoint(
                     V3DebugError::MalformedFixture(format!(
                         "system time precedes Unix epoch: {error}"
                     )),
-                ))
+                ));
             }
         };
         let console_payload = payload.clone();
@@ -1243,7 +1246,7 @@ async fn send_responses_websocket_frame(
                         "runtime_error",
                         format!("runtime byte frame is not valid JSON: {error}"),
                     )
-                    .await
+                    .await;
                 }
             };
             let event = json!({"type": "response.completed", "response": value});
@@ -1304,7 +1307,7 @@ async fn send_responses_websocket_sse_stream(
                     "runtime_stream_error",
                     format!("runtime SSE decode failed: {error}"),
                 )
-                .await
+                .await;
             }
         };
         for frame in frames {
@@ -1428,7 +1431,7 @@ async fn execute_responses_direct_server_frame(
             return build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
                 V3HttpBoundaryErrorKind::MalformedJson,
                 message,
-            ))
+            ));
         }
     };
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -1441,7 +1444,7 @@ async fn execute_responses_direct_server_frame(
                         "system time precedes Unix epoch: {error}"
                     )),
                 ),
-            )
+            );
         }
     };
     let output =
@@ -1470,7 +1473,7 @@ async fn execute_responses_direct_server_frame(
         Err(error) => {
             return build_v3_server_16_http_frame_from_v3_foundation_output(
                 project_v3_debug_failure("V3Debug01TraceContextStarted", error),
-            )
+            );
         }
     };
     if let Err(error) = state.debug.record_node_event(
@@ -1707,9 +1710,13 @@ fn emit_v3_request_complete_console_line(
         .response_status
         .as_deref()
         .unwrap_or("completed");
+    let finish_reason = observability
+        .finish_reason
+        .as_deref()
+        .unwrap_or("unreported");
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let line = format!(
-        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} elapsedMs={:.1} nodes={} transport={})",
+        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} finishReason={} elapsedMs={:.1} nodes={} transport={})",
         context.state.server.port,
         context.endpoint,
         console_timestamp_hhmmss(),
@@ -1717,6 +1724,7 @@ fn emit_v3_request_complete_console_line(
         status,
         format_v3_console_upstream_status_suffix(status, observability.provider_status),
         response_status,
+        finish_reason,
         elapsed_ms,
         node_trace.len(),
         observability.transport
@@ -1745,10 +1753,14 @@ fn emit_v3_usage_console_line(
     let provider = observability.provider_id.as_deref().unwrap_or("-");
     let model = format_v3_console_model_pair(observability);
     let usage = format_v3_console_usage_summary(observability.usage.as_ref());
+    let finish_reason = observability
+        .finish_reason
+        .as_deref()
+        .unwrap_or("unreported");
     let counts = v3_console_pipeline_counts(node_trace);
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let line = format!(
-        "[{}] [usage] req={} endpoint={} route={} provider={} model={} usage={} time=t:{:.1}ms pipeline=nodes:{} req:{} resp:{} provider:{} error:{}",
+        "[{}] [usage] req={} endpoint={} route={} provider={} model={} usage={} finishReason={} time=t:{:.1}ms pipeline=nodes:{} req:{} resp:{} provider:{} error:{}",
         context.state.server.port,
         context.request_id,
         context.endpoint,
@@ -1756,6 +1768,7 @@ fn emit_v3_usage_console_line(
         provider,
         model,
         usage,
+        finish_reason,
         elapsed_ms,
         node_trace.len(),
         counts.request,
@@ -1849,6 +1862,9 @@ impl V3SseConsoleFinalizer {
             Ok(snapshot) => {
                 if snapshot.response_status.is_some() {
                     self.observability.response_status = snapshot.response_status;
+                }
+                if snapshot.finish_reason.is_some() {
+                    self.observability.finish_reason = snapshot.finish_reason;
                 }
                 if snapshot.usage.is_some() {
                     self.observability.usage = snapshot.usage;
@@ -2009,6 +2025,11 @@ fn build_v3_foundation_console_observability(
                 .and_then(Value::as_str)
                 .map(str::to_string)
         });
+    let finish_reason = output
+        .body
+        .pointer("/dry_run/response_payload")
+        .and_then(read_v3_console_finish_reason)
+        .or_else(|| read_v3_console_finish_reason(&output.body));
     let usage = output
         .body
         .pointer("/dry_run/response_payload")
@@ -2032,11 +2053,41 @@ fn build_v3_foundation_console_observability(
         wire_model: model_id,
         provider_status: Some(output.status),
         response_status,
+        finish_reason,
         attempts: Some(1),
         unavailable_candidates: Vec::new(),
         target_path: vec!["dry_run:provider_request".to_string()],
         usage,
     }
+}
+
+fn read_v3_console_finish_reason(value: &Value) -> Option<String> {
+    read_v3_console_string_path(value, &["finish_reason"])
+        .or_else(|| read_v3_console_string_path(value, &["finishReason"]))
+        .or_else(|| read_v3_console_string_path(value, &["stop_reason"]))
+        .or_else(|| read_v3_console_string_path(value, &["stopReason"]))
+        .or_else(|| read_v3_console_string_path(value, &["response", "finish_reason"]))
+        .or_else(|| read_v3_console_string_path(value, &["response", "finishReason"]))
+        .or_else(|| read_v3_console_string_path(value, &["response", "stop_reason"]))
+        .or_else(|| read_v3_console_string_path(value, &["response", "stopReason"]))
+        .or_else(|| read_v3_console_string_path(value, &["choices", "0", "finish_reason"]))
+        .or_else(|| read_v3_console_string_path(value, &["candidates", "0", "finishReason"]))
+}
+
+fn read_v3_console_string_path(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        if let Ok(index) = segment.parse::<usize>() {
+            current = current.get(index)?;
+        } else {
+            current = current.get(*segment)?;
+        }
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn extract_v3_console_usage_summary(value: &Value) -> Option<V3RuntimeUsageSummary> {
@@ -2297,6 +2348,7 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "providerKey"
             | "providerStatus"
             | "responseStatus"
+            | "finishReason"
             | "route"
             | "routeName"
             | "pool"
@@ -3257,7 +3309,7 @@ async fn debug_dry_run(
                 "/_routecodex/debug/dry-run",
                 "pre-request",
                 projected,
-            )
+            );
         }
     };
     let fixture_id = match required_dry_run_string(&payload, "fixture_id") {
@@ -3266,7 +3318,7 @@ async fn debug_dry_run(
             return foundation_output_response(project_v3_debug_failure(
                 "V3DryRunFixtureRegistered",
                 error,
-            ))
+            ));
         }
     };
     let method = match required_dry_run_string(&payload, "method") {
@@ -3275,7 +3327,7 @@ async fn debug_dry_run(
             return foundation_output_response(project_v3_debug_failure(
                 "V3DryRunFixtureRegistered",
                 error,
-            ))
+            ));
         }
     };
     let path = match required_dry_run_string(&payload, "path") {
@@ -3284,7 +3336,7 @@ async fn debug_dry_run(
             return foundation_output_response(project_v3_debug_failure(
                 "V3DryRunFixtureRegistered",
                 error,
-            ))
+            ));
         }
     };
     let Some(request_payload) = payload.get("request_payload").cloned() else {
@@ -3348,7 +3400,7 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
         V3Server16Body::Sse(stream) => {
             return builder
                 .body(v3_client_sse_body(stream))
-                .expect("typed response")
+                .expect("typed response");
         }
     };
     builder.body(Body::from(body)).expect("typed response")
@@ -3373,7 +3425,7 @@ fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body
         V3Server16Body::Sse(stream) => {
             return builder
                 .body(v3_client_sse_body(stream))
-                .expect("typed response")
+                .expect("typed response");
         }
     };
     builder.body(Body::from(body)).expect("typed response")

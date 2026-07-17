@@ -90,6 +90,7 @@ fn stopless_response_hook_projects_cli_before_continuation_commit() {
             json!({
                 "id":"resp_stopless_missing_schema",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{"type":"output_text","text":"I should stop without schema"}]
             }),
             V3HubTransportIntent::Json,
@@ -123,6 +124,7 @@ fn stopless_terminal_schema_does_not_project_cli() {
             json!({
                 "id":"resp_stopless_terminal",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"ok\"]}"}]
             }),
             V3HubTransportIntent::Json,
@@ -164,6 +166,36 @@ fn stopless_response_hook_disabled_keeps_completed_text_terminal() {
     assert_eq!(
         resp04.finalized_payload()["output"][0]["text"],
         "no stop schema"
+    );
+}
+
+#[test]
+fn stopless_response_hook_requires_stop_finish_reason() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_no_finish_stop",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"ordinary completed text without stop schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+    assert_eq!(
+        resp04.finalized_payload()["output"][0]["text"],
+        "ordinary completed text without stop schema"
     );
 }
 
@@ -210,6 +242,7 @@ fn stopless_response_hook_stopreason_two_projects_cli_for_next_turn() {
             json!({
                 "id":"resp_stopless_continue",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[{
                     "type":"output_text",
                     "text":"{\"stopreason\":2,\"next_step\":\"continue the task\"}"
@@ -241,6 +274,7 @@ fn stopless_response_hook_empty_output_does_not_project_cli() {
             json!({
                 "id":"resp_stopless_empty",
                 "status":"completed",
+                "finish_reason":"stop",
                 "output":[]
             }),
             V3HubTransportIntent::Json,

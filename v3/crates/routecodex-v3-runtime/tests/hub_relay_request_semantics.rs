@@ -463,12 +463,13 @@ fn stopless_request_hook_is_disabled_without_stopless_profile() {
         )
         .unwrap();
     assert_eq!(governed.tool_output_count(), 1);
+    assert_eq!(governed.payload()["input"][0]["type"], "function_call");
     assert_eq!(
-        governed.payload()["input"][0]["type"],
+        governed.payload()["input"][1]["type"],
         "function_call_output"
     );
     assert_eq!(
-        governed.payload()["input"][0]["output"],
+        governed.payload()["input"][1]["output"],
         "{\"next_step\":\"must not be rewritten\"}"
     );
     assert!(governed.payload().get("instructions").is_none());

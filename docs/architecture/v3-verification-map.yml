@@ -31,7 +31,7 @@ features:
       - foreground start forces startup and common HTTP request console even when config log_console is false
     required_integration:
       - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
-      - foreground startup emits V3ServerStartup01ListenerSetPreflight and Relay/Direct requests emit V3Server03HttpRequestRaw
+      - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output
       - stable instance identity and changed PID/start nonce across restart
       - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path
       - all listeners close on one stop
@@ -377,6 +377,7 @@ features:
       - v3-hub-relay-copy-probe-02
       - v3-hub-relay-copy-probe-03
       - v3-hub-relay-copy-probe-04
+      - v3-hub-relay-copy-probe-05
     required_contract:
       - Relay JSON request payload moves through Req01-Req04 without a runtime full-payload clone or JSON roundtrip
       - Relay SSE response retains transport intent and one response exit without full stream materialization
@@ -1380,7 +1381,7 @@ features:
       - controlled JSON and SSE prove the same fixed Req01-Req09 and Resp01-Resp06 topology
       - Responses Relay JSON and SSE enter the same fixed topology and do not enter P6 Direct policy nodes
       - V2 default config projection binds /v1/responses to the Responses Relay runtime owner while explicit Direct remains a valid manual binding
-      - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-14 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
+      - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-16 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - local continuation two-turn restores saved context before current tool output and releases on terminal success
       - Responses Relay provider-facing JSON blackbox preserves tools and sends restored function_call immediately before current function_call_output
       - wrong Responses Relay call_id fails before provider send and preserves the saved continuation context
@@ -1651,13 +1652,16 @@ features:
     status: source_controlled_runtime_boundary_verified
     change_risk: critical
     owner_kind: rust_project_v3_protocol_boundary_and_chat_process_governance
-    owner_scope: "V3 protocol normalization maps protocols and validates shape only; tool identity pairing and uniqueness checks live in Chat Process govern nodes; provider compat nodes are skeleton contracts that forbid tool governance and fallback repair."
+    owner_scope: "V3 protocol normalization maps protocols and validates shape only; tool identity pairing and uniqueness checks live in Chat Process govern nodes; provider compat nodes are typed runtime nodes that forbid tool governance and fallback repair."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
+      - scripts/architecture/verify-v3-static-hook-registry.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
     design:
       - docs/design/pipeline-type-topology-and-module-boundaries.md
@@ -1675,6 +1679,7 @@ features:
       - Req04 Chat Process rejects Gemini missing and orphan functionResponse identity after normalization
       - Resp Chat Process rejects duplicate canonical tool call identity before continuation commit
       - normalization boundary gate rejects tool governance in protocol normalize and provider compat nodes while allowing Anthropic protocol mapping
+      - Hub v1 fixed hook registry contains ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat entry/exit hooks
     required_gates:
       - npm run verify:v3-normalization-payload-logic-boundary
       - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
@@ -1690,6 +1695,7 @@ features:
       - npm run verify:v3-architecture-docs
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-manifest-sync
+      - npm run verify:v3-static-hook-registry
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-rust-only
       - npm run verify:v3-cargo-fmt
@@ -1699,4 +1705,4 @@ features:
       source_controlled: true
       live_cutover: false
       global_install_restart: false
-      compat_runtime_behavior: skeleton_contract_only
+      compat_runtime_behavior: typed_runtime_nodes_anchored

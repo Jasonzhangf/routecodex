@@ -31,6 +31,9 @@ describe('V3 CLI distribution surface', () => {
     expect(shimScript).toContain("writeShim(shimDir, 'rccv3', 'routecodex'");
     expect(shimScript).toContain("path.join('dist', 'bin', 'rccv3')");
     expect(shimScript).toContain("removeLegacyShim(shimDir, 'routecodex-v3')");
+    expect(shimScript).toContain('removeExistingShimPath(shimPath)');
+    expect(shimScript).toContain('fs.lstatSync(shimPath)');
+    expect(shimScript).toContain('fs.rmSync(shimPath, { force: true })');
     expect(executableScript).toContain("path.join(process.cwd(), 'dist', 'bin', 'rccv3')");
     expect(executableScript).toContain("ensureGlobalBinTarget('rccv3')");
     expect(globalInstall).toContain('$NPM_PREFIX/bin/rccv3');

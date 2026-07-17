@@ -129,8 +129,19 @@ pub struct V3HubReqOutbound07ProviderSemantic {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct V3ProviderReqOutbound08WirePayload {
+pub struct ProviderReqCompat06ProviderCompat {
     previous: V3HubReqOutbound07ProviderSemantic,
+    profile: V3ProviderCompatProfileId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ProviderCompatProfileId {
+    Passthrough,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3ProviderReqOutbound08WirePayload {
+    previous: ProviderReqCompat06ProviderCompat,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,8 +161,14 @@ pub struct V3ProviderRespInbound01Raw {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct V3HubRespInbound02Normalized {
+pub struct ProviderRespCompat02ProviderCompat {
     previous: V3ProviderRespInbound01Raw,
+    profile: V3ProviderCompatProfileId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3HubRespInbound02Normalized {
+    previous: ProviderRespCompat02ProviderCompat,
     normalized_kind: V3HubResponseNormalizedKind,
 }
 
@@ -301,8 +318,17 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
     }
 }
 
-pub fn build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(
+pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     input: V3HubReqOutbound07ProviderSemantic,
+) -> ProviderReqCompat06ProviderCompat {
+    ProviderReqCompat06ProviderCompat {
+        previous: input,
+        profile: V3ProviderCompatProfileId::Passthrough,
+    }
+}
+
+pub fn build_v3_provider_req_outbound_08_from_provider_req_compat_06(
+    input: ProviderReqCompat06ProviderCompat,
 ) -> V3ProviderReqOutbound08WirePayload {
     V3ProviderReqOutbound08WirePayload { previous: input }
 }
@@ -317,12 +343,9 @@ impl V3HubReqOutbound07ProviderSemantic {
     fn selected_target(&self) -> &routecodex_v3_target::V3TargetCandidate {
         &self.previous.selected_target
     }
-}
 
-impl V3ProviderReqOutbound09TransportRequest {
-    fn into_provider_semantic_payload(self) -> Value {
-        self.previous
-            .previous
+    fn provider_semantic_payload(&self) -> &Value {
+        &self
             .previous
             .previous
             .previous
@@ -331,6 +354,83 @@ impl V3ProviderReqOutbound09TransportRequest {
             .previous
             .payload
             .0
+    }
+}
+
+impl ProviderReqCompat06ProviderCompat {
+    pub fn profile(&self) -> V3ProviderCompatProfileId {
+        self.profile
+    }
+
+    fn provider_semantic_payload(&self) -> &Value {
+        self.previous.provider_semantic_payload()
+    }
+}
+
+impl V3ProviderReqOutbound09TransportRequest {
+    fn into_provider_semantic_payload(self) -> Value {
+        self.previous.previous.provider_semantic_payload().clone()
+    }
+}
+
+impl V3ProviderCompatProfileId {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Passthrough => "compat:passthrough",
+        }
+    }
+}
+
+impl V3ProviderReqOutbound08WirePayload {
+    fn compat_profile(&self) -> V3ProviderCompatProfileId {
+        self.previous.profile()
+    }
+}
+
+impl V3ProviderReqOutbound09TransportRequest {
+    pub fn compat_profile_id(&self) -> &'static str {
+        self.previous.compat_profile().as_str()
+    }
+}
+
+pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(
+    input: V3ProviderRespInbound01Raw,
+) -> ProviderRespCompat02ProviderCompat {
+    ProviderRespCompat02ProviderCompat {
+        previous: input,
+        profile: V3ProviderCompatProfileId::Passthrough,
+    }
+}
+
+impl ProviderRespCompat02ProviderCompat {
+    pub fn profile(&self) -> V3ProviderCompatProfileId {
+        self.profile
+    }
+
+    fn raw(&self) -> &V3ProviderRespInbound01Raw {
+        &self.previous
+    }
+
+    fn raw_mut(&mut self) -> &mut V3ProviderRespInbound01Raw {
+        &mut self.previous
+    }
+}
+
+impl V3HubRespInbound02Normalized {
+    pub fn provider_raw(&self) -> &V3ProviderRespInbound01Raw {
+        self.previous.raw()
+    }
+
+    fn provider_raw_mut(&mut self) -> &mut V3ProviderRespInbound01Raw {
+        self.previous.raw_mut()
+    }
+
+    fn provider_payload(&self) -> &Arc<Value> {
+        &self.provider_raw().payload.0
+    }
+
+    fn provider_payload_mut(&mut self) -> &mut Arc<Value> {
+        &mut self.provider_raw_mut().payload.0
     }
 }
 
@@ -354,10 +454,10 @@ pub fn build_v3_provider_resp_inbound_01_raw(
     }
 }
 
-pub fn build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(
-    input: V3ProviderRespInbound01Raw,
+pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(
+    input: ProviderRespCompat02ProviderCompat,
 ) -> V3HubRespInbound02Normalized {
-    let normalized_kind = match input.transport_intent {
+    let normalized_kind = match input.raw().transport_intent {
         V3HubTransportIntent::Json => V3HubResponseNormalizedKind::Json,
         V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse,
     };
@@ -439,7 +539,7 @@ impl V3HubRespContinuation04Committed {
 
     pub fn canonical_context_shares_finalized_payload(&self) -> bool {
         self.canonical_context.as_ref().is_some_and(|context| {
-            Arc::ptr_eq(&context.payload, &self.previous.previous.previous.payload.0)
+            Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())
         })
     }
 
@@ -463,7 +563,7 @@ impl V3HubRespContinuation04Committed {
     }
 
     pub fn finalized_payload(&self) -> &Value {
-        self.previous.previous.previous.payload.0.as_ref()
+        self.previous.previous.provider_payload().as_ref()
     }
 }
 
@@ -477,7 +577,7 @@ impl V3ServerRespOutbound06ClientFrame {
             .previous
             .previous
             .previous
-            .previous
+            .provider_raw()
             .transport_intent
     }
 }
@@ -595,7 +695,10 @@ fn normalize_v3_hub_relay_response(
     if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
         return Err(V3HubRelayResponseError::SideChannelLeaked { key });
     }
-    Ok(build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(input))
+    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input);
+    Ok(build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(
+        compat,
+    ))
 }
 
 fn govern_v3_hub_relay_response(
@@ -605,9 +708,7 @@ fn govern_v3_hub_relay_response(
     let input = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
     let input = project_v3_apply_patch_freeform_calls_at_resp03(input);
     let object = input
-        .previous
-        .payload
-        .0
+        .provider_payload()
         .as_object()
         .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
     let output = match object.get("output") {
@@ -716,7 +817,7 @@ pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3H
 fn project_v3_apply_patch_freeform_calls_at_resp03(
     mut input: V3HubRespInbound02Normalized,
 ) -> V3HubRespInbound02Normalized {
-    let mut next = input.previous.payload.0.as_ref().clone();
+    let mut next = input.provider_payload().as_ref().clone();
     let mut changed = false;
     if let Some(output) = next
         .as_object_mut()
@@ -731,7 +832,7 @@ fn project_v3_apply_patch_freeform_calls_at_resp03(
         }
     }
     if changed {
-        input.previous.payload.0 = Arc::new(next);
+        *input.provider_payload_mut() = Arc::new(next);
     }
     input
 }
@@ -860,7 +961,7 @@ fn commit_v3_hub_relay_response(
         V3HubResponseTerminality::NonTerminal => (
             V3HubContinuationCommit::LocalContext,
             Some(V3HubRelayCanonicalResponseContext {
-                payload: Arc::clone(&input.previous.previous.payload.0),
+                payload: Arc::clone(input.previous.provider_payload()),
                 terminality: input.terminality,
                 tool_calls: input.tool_calls.clone(),
                 servertool_action: input.servertool_action,
@@ -1025,7 +1126,8 @@ mod tests {
             req06,
             V3HubProviderWireProtocol::Responses,
         );
-        let req08 = build_v3_provider_req_outbound_08_from_v3_hub_req_outbound_07(req07);
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
 
         let resp01 = build_v3_provider_resp_inbound_01_raw(
@@ -1037,7 +1139,8 @@ mod tests {
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
         );
-        let resp02 = build_v3_hub_resp_inbound_02_from_v3_provider_resp_inbound_01(resp01);
+        let resp_compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01);
+        let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp_compat);
         let resp03 = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(resp02);
         let resp04 = build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
             resp03,

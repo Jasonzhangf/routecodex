@@ -423,19 +423,6 @@ impl V3ManagedLifecycle {
         }
         let listener = UnixListener::bind(&socket_path)?;
         fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
-        let handle = match spawn_v3_server_aggregate(manifest).await {
-            Ok(handle) => handle,
-            Err(error) => {
-                write_status(
-                    &instance_dir,
-                    &declaration.instance_id,
-                    V3ManagedRunState::Failed,
-                    Some(error.to_string()),
-                )?;
-                return Err(error.into());
-            }
-        };
-        let mut handle = Some(handle);
         write_json_atomic(
             &instance_dir.join("pid.cache"),
             &V3ManagedPidCache {
@@ -455,6 +442,22 @@ impl V3ManagedLifecycle {
                 start_nonce: start_nonce.clone(),
             },
         )?;
+        let handle = match spawn_v3_server_aggregate(manifest).await {
+            Ok(handle) => handle,
+            Err(error) => {
+                write_status(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    V3ManagedRunState::Failed,
+                    Some(error.to_string()),
+                )?;
+                let _ = fs::remove_file(instance_dir.join("pid.cache"));
+                let _ = fs::remove_file(instance_dir.join("control.json"));
+                let _ = fs::remove_file(&socket_path);
+                return Err(error.into());
+            }
+        };
+        let mut handle = Some(handle);
         write_status(
             &instance_dir,
             &declaration.instance_id,

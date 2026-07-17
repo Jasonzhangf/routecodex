@@ -3685,3 +3685,10 @@
 - Selection rule: if excluding the failed providerKey leaves another candidate, reselect immediately with no 5s wait; if there is no alternate candidate, retry the same candidate three times, waiting 5s before each retry by default.
 - Cooldown rule: providerKey identity is `provider_id:auth_alias:model_id`. Three consecutive provider failures trip a default 15 minute process-local cooldown; success clears partial failures when no active cooldown exists; other auth keys/models must stay selectable.
 - Verified source baseline: clean staged-patch worktree passed Hub Relay runtime closeout 8/8, provider health contract 5/5, server provider reselect focused blackbox, and server cargo check. Full server package still has an unrelated boundary-test failure outside this provider retry/cooldown slice.
+
+# 2026-07-17: V3 provider compat nodes are runtime-adjacent, not declaration-only
+
+- V3 provider compat now has typed runtime landing points on the two correct adjacent edges: `V3HubReqOutbound07ProviderSemantic -> ProviderReqCompat06ProviderCompat -> V3ProviderReqOutbound08WirePayload` and `V3ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized`.
+- The current profile is explicit `compat:passthrough`; this closes the runtime/map/hook landing point only. It does not claim V2 provider-specific profile loader parity or migration of the old 7 compat JSON profiles.
+- Compat boundary: provider-family micro-adjustments may live here later, but tool governance, apply_patch/servertool/stopless lifecycle, tool identity pairing, route/model selection, fallback, silent repair, and MetadataCenter/side-channel injection must remain outside these compat nodes.
+- Verified source baseline: V3 static hook/resource/normalization/module/architecture/function-map/mainline gates, V3 fmt/clippy, controlled Relay runtime integration tests, continuation/config/managed lifecycle tests, build:v3-cli, and red fixtures passed. No global install, restart, or live 5555 replay is claimed for this source slice.

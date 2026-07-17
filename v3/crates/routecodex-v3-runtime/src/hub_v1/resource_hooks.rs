@@ -172,6 +172,14 @@ static V3_HUB_V1_STATIC_NODE_HOOKS: [V3HubStaticHookSpec; V3_HUB_V1_NODE_HOOK_CO
         V3HubHookPhase::Exit,
     ),
     static_hook(
+        V3HubFixedNode::ProviderReqCompat06ProviderCompat,
+        V3HubHookPhase::Entry,
+    ),
+    static_hook(
+        V3HubFixedNode::ProviderReqCompat06ProviderCompat,
+        V3HubHookPhase::Exit,
+    ),
+    static_hook(
         V3HubFixedNode::V3ProviderReqOutbound08WirePayload,
         V3HubHookPhase::Entry,
     ),
@@ -193,6 +201,14 @@ static V3_HUB_V1_STATIC_NODE_HOOKS: [V3HubStaticHookSpec; V3_HUB_V1_NODE_HOOK_CO
     ),
     static_hook(
         V3HubFixedNode::V3ProviderRespInbound01Raw,
+        V3HubHookPhase::Exit,
+    ),
+    static_hook(
+        V3HubFixedNode::ProviderRespCompat02ProviderCompat,
+        V3HubHookPhase::Entry,
+    ),
+    static_hook(
+        V3HubFixedNode::ProviderRespCompat02ProviderCompat,
         V3HubHookPhase::Exit,
     ),
     static_hook(

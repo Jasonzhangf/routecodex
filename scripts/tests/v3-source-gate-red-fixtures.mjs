@@ -14,6 +14,12 @@ const fixtures = [
     diagnostic: /provider transport outside provider crate/,
   },
   {
+    name: 'server imports provider health store',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutation: '\nuse routecodex_v3_provider_responses::V3ProviderHealthStore;\n',
+    diagnostic: /Provider health store must remain opaque outside Provider and its Runtime boundary/,
+  },
+  {
     name: 'duplicate request node owner',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
     mutation: '\npub struct V3Server03HttpRequestRaw;\n',

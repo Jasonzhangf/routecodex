@@ -14,7 +14,7 @@ const fixtures = [
   ['second response exit', '"V3ServerRespOutbound06ClientFrame"', '"V3ServerRespOutbound06AlternateFrame"', /missing "V3ServerRespOutbound06ClientFrame"|single response exit/],
   ['Resp03 continuation save', 'let object = input', 'let canonical_context = Some(input.previous.payload.clone());\n    let object = input', /Resp03 Chat Process/],
   ['missing status fallback', '.ok_or(V3HubRelayResponseError::MissingStatus)?', '.unwrap_or("completed")', /Resp03 Chat Process/],
-  ['full response clone', 'payload: Arc::clone(&input.previous.previous.payload.0)', 'payload: input.previous.previous.payload.0.as_ref().clone().into()', /missing Arc::clone|exactly one Arc::clone/],
+  ['full response clone', 'payload: Arc::clone(input.previous.provider_payload())', 'payload: Arc::new(input.previous.provider_payload().as_ref().clone())', /missing Arc::clone|exactly one Arc::clone/],
 ];
 
 const failures = [];
